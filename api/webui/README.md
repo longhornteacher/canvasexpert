@@ -317,8 +317,7 @@ Microsoft Edge through Playwright; DOCX files are rendered through bundled Pando
 
 ### Assignment tab
 Pick an `<ASSIGNMENTFORGE_JSON>` file, then **Validate** / **Push assignment…**.
-Delivery: dates, grading category, module, SIS, publish, and an optional
-per-assignment scheduled Auto-Score job. Authored tiers use the course's
+Delivery: dates, grading category, module, SIS, and publish. Authored tiers use the course's
 teacher-selected Roster group set and create one group-visible Canvas assignment
 and gradebook column per tier. Rubric association is not part of this operation path.
 

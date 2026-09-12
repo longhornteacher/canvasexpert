@@ -21,10 +21,12 @@ Word version of anything you build.
 **Differentiate** the same work four ways (Support, Core, Accelerate, Extend) and push each tier to its own
 group. The tier names stay private to you; students see only a neutral tag you choose, or nothing at all.
 
-**PowerGrader** turns an assignment into a keyboard-driven scoring queue. Three ways to work it: score it
-yourself with nothing leaving the computer, generate a pseudonymized file to paste into the AI chat you
-already use, or have CanvasExpert send that same file and bring back draft scores. Every score and comment
-waits for your review before it posts, and you are the one who posts it.
+**Scoring Sessions** let a connected AI agent score a SAFE pseudonymized packet through one
+assignment-type-neutral MCP workflow. Canvas's rubric takes precedence; otherwise, the agent asks you
+to select a CanvasExpert rubric or provide scoring guidance. When missing-score policy or another
+scoring decision is needed, the agent asks before submitting validated results through guarded
+write handling. Canvas Live is the only place to review or edit posted work; there is no local
+scoring queue or hosted grader.
 
 **Gradebook tools** for one course at a time: set Canvas's own late policy, sweep late work by counting real
 school days instead of calendar days, honor per-student extra time, grant extensions, apply curves, and take

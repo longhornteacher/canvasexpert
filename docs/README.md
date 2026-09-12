@@ -25,8 +25,8 @@ Useful starting references for new debugging and refactor sessions:
   bell/teacher schedule relationships, Calendar UI/MCP edits, and dependent-feature gates.
 - `docs/reference/course-expert-module-map.md` - Work tools push/download route, script, and template ownership map.
 - `docs/reference/settings-module-map.md` - Settings route/script/config ownership map.
-- `docs/reference/powergrader-scoring-map.md` - PowerGrader scoring route/pipeline/template ownership and privacy-sensitive routing map.
-- `docs/reference/powergrader-module-map.md` - module ownership map, script load order, backend package routing, and current size snapshot.
+- `docs/reference/powergrader-scoring-map.md` - internal/private Scoring Session packet, privacy, and guarded-write implementation map (legacy filename).
+- `docs/reference/powergrader-module-map.md` - internal/private Scoring Session backend module map (legacy filename); no teacher-facing scoring UI remains.
 - `docs/reference/gradebook-module-map.md` - Gradebook route/script ownership and feature routing map.
 - `docs/reference/roster-module-map.md` - Roster route/script ownership and current hotspot map.
 
