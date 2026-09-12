@@ -13,15 +13,12 @@ changes needed.
 # Re-export every public name from the sub-modules.
 # The `_io` private helpers are imported only by sibling sub-modules, not here.
 
-# --- canvas account, OpenRouter, workspace path, runtime env ---
+# --- canvas account, workspace path, runtime env ---
 from .canvas import (
     get_canvas_base, set_canvas_base,
     get_token, set_token, token_is_set,
     get_download_root, set_download_root,
     save_canvas_account,
-    get_openrouter_key, set_openrouter_key, has_openrouter_key,
-    get_openrouter_model, set_openrouter_model,
-    openrouter_model_presets, _openrouter_cost_tier,
     get_workspace_path, set_workspace_path, ensure_workspace_pinned, get_whisper_model_cache,
     resolve_env,
 )
@@ -110,14 +107,9 @@ from .sis_grade_bridge import (
 from . import _io
 
 # Re-export public constants from _io so consumers can still access config.SERVICE etc.
-DEFAULT_OPENROUTER_MODEL = _io.DEFAULT_OPENROUTER_MODEL
-OPENROUTER_MODEL_PRESETS = _io.OPENROUTER_MODEL_PRESETS
-OPENROUTER_PRESET_SCENARIO_INPUT_TOKENS = _io.OPENROUTER_PRESET_SCENARIO_INPUT_TOKENS
-OPENROUTER_PRESET_SCENARIO_OUTPUT_TOKENS = _io.OPENROUTER_PRESET_SCENARIO_OUTPUT_TOKENS
 CANVAS_BASE_DEFAULT = _io.CANVAS_BASE_DEFAULT
 DOWNLOAD_ROOT_DEFAULT = _io.DOWNLOAD_ROOT_DEFAULT
 CONFIG_PATH = _io.CONFIG_PATH
 SYNCED_KEYS = _io.SYNCED_KEYS
 SERVICE = _io.SERVICE
 TOKEN_KEY = _io.TOKEN_KEY
-OPENROUTER_KEY = _io.OPENROUTER_KEY

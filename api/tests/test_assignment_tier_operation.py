@@ -257,48 +257,35 @@ def test_safe_step_projections_are_allowlisted():
         assert all(value not in rendered for value in ("9001", "secret-digest", "private", '"course_id"'))
 
 
-def test_module_created_once_and_autoscore_per_tier(monkeypatch):
+def test_module_created_once_for_tier_assignments(monkeypatch):
     adapter = AssignmentAdapter(); resolved = _resolved()
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.resolve_assignment_groups", lambda *a, **k: resolved)
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.config.active_courses", lambda: [{"id": 42, "name": "Course"}])
     monkeypatch.setattr("api.operation_ledger.adapters.assignment._read_modules", lambda course_id: ([], None))
-    class Queue:
-        jobs = []
-        @staticmethod
-        def make_job_id(course_id, assignment_id): return f"{course_id}_{assignment_id}"
-        @classmethod
-        def upsert_job(cls, **kwargs):
-            cls.jobs.append(kwargs["assignment_id"])
-            return {"job_id": f"{kwargs['course_id']}_{kwargs['assignment_id']}"}
-    monkeypatch.setattr("api.operation_ledger.adapters.assignment._autoscore_queue", lambda: Queue)
     sends = []
     def send(method, path, body, timeout=30):
         sends.append(path)
         return {"id": 300 + len(sends)}, None
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.canvas_client._canvas_send", send)
     result = adapter.execute(
-        _payload(module_name="Unit", autoscore_schedule=True, due_at="2026-08-01T00:00:00Z"),
+        _payload(module_name="Unit"),
         {"course_id": "42", "steps": []}, {"group_snapshot": resolved["safe"]}, {}, Context(),
     )
     assert result["state"] == "applied"
     assert sum(path.endswith("/modules") for path in sends) == 1
     assert sum("/items" in path for path in sends) == 2
-    assert len(Queue.jobs) == 2
+    assert len([step for step in result["steps"] if step["step_key"].startswith("create_tier_assignment:")]) == 2
 
 
 def test_reconcile_verifies_all_tier_dependency_ids(monkeypatch):
     adapter = AssignmentAdapter()
-    payload = _payload(
-        module_name="Unit", autoscore_schedule=True,
-        due_at="2026-08-01T00:00:00Z",
-    )
+    payload = _payload(module_name="Unit")
     steps = [_completed_step("create_module", "500")]
     for index, (assignment_id, override_id, item_id) in enumerate(((101, 201, 301), (102, 202, 302))):
         steps.extend([
             _completed_step(f"create_tier_assignment:{index}", assignment_id),
             _completed_step(f"create_tier_override:{index}", override_id),
             _completed_step(f"attach_module:{index}", item_id, module_id="500"),
-            _completed_step(f"schedule_autoscore:{index}", f"42_{assignment_id}"),
         ])
     def get(path, params=None, timeout=20):
         tail = path.rsplit("/", 1)[-1]
@@ -307,22 +294,12 @@ def test_reconcile_verifies_all_tier_dependency_ids(monkeypatch):
             return {"id": tail, "type": "Assignment", "content_id": assignment_id}, None
         return {"id": tail, "html_url": "https://canvas.invalid/a"}, None
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.canvas_client.canvas_get", get)
-    class Queue:
-        @staticmethod
-        def make_job_id(course_id, assignment_id): return f"{course_id}_{assignment_id}"
-        @staticmethod
-        def load_queue():
-            return {"jobs": [
-                {"job_id": "42_101", "course_id": "42", "assignment_id": "101"},
-                {"job_id": "42_102", "course_id": "42", "assignment_id": "102"},
-            ]}
-    monkeypatch.setattr("api.operation_ledger.adapters.assignment._autoscore_queue", lambda: Queue)
     result = adapter.reconcile(payload, {"course_id": "42", "steps": steps}, {})
     assert result["state"] == "applied"
     assert [step["step_key"] for step in result["steps"]] == [
         "create_module", "create_tier_assignment:0", "create_tier_override:0",
-        "attach_module:0", "schedule_autoscore:0", "create_tier_assignment:1",
-        "create_tier_override:1", "attach_module:1", "schedule_autoscore:1",
+        "attach_module:0", "create_tier_assignment:1",
+        "create_tier_override:1", "attach_module:1",
     ]
     assert all(step["state"] == "applied" for step in result["steps"])
     rendered = json.dumps(result)

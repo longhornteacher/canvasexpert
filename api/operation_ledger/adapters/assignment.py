@@ -114,14 +114,6 @@ class AssignmentAdapter:
         if mod_name:
             payload["module_name"] = str(mod_name).strip()
 
-        # Scheduled autoscore opt-in
-        if _as_bool(prepare_request.get("autoscore_schedule")):
-            if not str(payload.get("due_at") or "").strip():
-                raise ValueError("due_at is required for scheduled Auto-Score")
-            payload["autoscore_schedule"] = True
-            if _as_bool(prepare_request.get("autoscore_auto_push")):
-                payload["autoscore_auto_push"] = True
-
         return payload
 
     def source_digest(self, payload: dict) -> str:
@@ -138,8 +130,6 @@ class AssignmentAdapter:
             "assignment_group_name": payload.get("assignment_group_name"),
             "printable_path": payload.get("printable_path"),
             "module_name": payload.get("module_name"),
-            "autoscore_schedule": payload.get("autoscore_schedule"),
-            "autoscore_auto_push": payload.get("autoscore_auto_push"),
             "tiers": payload.get("tiers"),
         }
         return models.sha256_dict(keys)
@@ -271,10 +261,6 @@ class AssignmentAdapter:
                 "type": "module",
                 "name": payload["module_name"],
             })
-        autoscore = {}
-        if payload.get("autoscore_schedule"):
-            autoscore["scheduled"] = True
-            autoscore["auto_push"] = bool(payload.get("autoscore_auto_push"))
         review = {
             "course_name": course_name,
             "assignment_name": payload.get("name"),
@@ -288,7 +274,6 @@ class AssignmentAdapter:
             "baseline_existing_id": existing.get("id") if existing else None,
             "baseline_existing_url": existing.get("html_url") if existing else None,
             "dependencies": dependencies,
-            "autoscore": autoscore,
         }
         if payload.get("tiers"):
             safe = baseline.get("group_snapshot") or {}
@@ -327,12 +312,6 @@ class AssignmentAdapter:
                 resolve_assignment_groups=resolve_assignment_groups,
                 group_resolution_error=GroupResolutionError,
                 find_assignment_group=_find_assignment_group,
-                autoscore_queue_factory=_autoscore_queue,
-                autoscore_settings=_autoscore_settings,
-                autoscore_push_policy=_autoscore_push_policy,
-                schedule_autoscore=_schedule_autoscore,
-                active_course_name=_active_course_name,
-                as_bool=_as_bool,
                 read_modules=_read_modules,
             )
         return assignment_whole.execute(
@@ -343,12 +322,6 @@ class AssignmentAdapter:
             upload_course_file=_upload_course_file,
             file_link_html=_file_link_html,
             find_assignment_group=_find_assignment_group,
-            autoscore_queue_factory=_autoscore_queue,
-            autoscore_settings=_autoscore_settings,
-            autoscore_push_policy=_autoscore_push_policy,
-            schedule_autoscore=_schedule_autoscore,
-            active_course_name=_active_course_name,
-            as_bool=_as_bool,
             read_modules=_read_modules,
         )
 
@@ -360,7 +333,6 @@ class AssignmentAdapter:
                 payload,
                 target,
                 ordered_steps=_ordered_steps,
-                autoscore_queue_factory=_autoscore_queue,
             )
         return assignment_whole.reconcile(
             payload,
@@ -407,7 +379,6 @@ def _validate_printable_pdf(pdf_path: str) -> tuple:
         allowed_roots=_allowed_printable_roots,
     )
 
-
 def _upload_course_file(course_id: str, pdf_path):
     assignment_whole.requests = requests
     return assignment_whole.upload_course_file(
@@ -453,14 +424,10 @@ def _ordered_steps(target: dict) -> list[dict]:
                 "create_tier_assignment": 0,
                 "create_tier_override": 1,
                 "attach_module": 2,
-                "schedule_autoscore": 3,
             }.get(prefix, 9)
             return (int(suffix) if suffix.isdigit() else 999999, rank)
         return sorted(existing.values(), key=tier_order)
-    order = (
-        "create_assignment", "create_module", "attach_module",
-        "schedule_autoscore",
-    )
+    order = ("create_assignment", "create_module", "attach_module")
     return [existing[key] for key in order if key in existing]
 
 
@@ -468,68 +435,3 @@ def _read_modules(course_id: str):
     return canvas_client.canvas_get_all(
         f"/api/v1/courses/{course_id}/modules", {"per_page": 100}
     )
-
-
-def _as_bool(value) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _autoscore_settings(payload: dict) -> dict:
-    return {
-        "mode": "assisted",
-        "model_id": str(payload.get("autoscore_model_id") or "").strip() or config.get_openrouter_model(),
-        "persona_id": str(payload.get("autoscore_persona_id") or "sage").strip() or "sage",
-        "response_kind": str(payload.get("autoscore_response_kind") or "scr").strip() or "scr",
-        "rubric_name": str(payload.get("autoscore_rubric_name") or "").strip(),
-        "watch_late": True if payload.get("autoscore_watch_late") is None else _as_bool(payload.get("autoscore_watch_late")),
-    }
-
-
-def _autoscore_push_policy(payload: dict) -> dict:
-    auto_push = _as_bool(payload.get("autoscore_auto_push"))
-    return {
-        "enabled": auto_push,
-        "allow_grade_push": True,
-        "allow_comment_push": True,
-        "policy_version": "2.0",
-    }
-
-
-def _schedule_autoscore(*, course_id: str, course_name: str, assignment_id: str, assignment_name: str, payload: dict, settings: dict, push_policy: dict, queue) -> dict:
-    due_at = str(payload.get("due_at") or "").strip()
-    if not due_at:
-        raise ValueError("due_at is required for scheduled Auto-Score")
-    return queue.upsert_job(
-        course_id=course_id,
-        course_name=course_name,
-        assignment_id=assignment_id,
-        assignment_name=assignment_name,
-        due_at=due_at,
-        source="push",
-        settings=settings,
-        assignment={
-            "name": assignment_name,
-            "due_at": due_at,
-            "submission_types": payload.get("submission_types", []),
-            "allowed_extensions": payload.get("allowed_extensions", []),
-        },
-        auto_push=_as_bool(payload.get("autoscore_auto_push")),
-        push_policy=push_policy,
-    )
-
-
-def _active_course_name(course_id: str) -> str:
-    for course in config.active_courses():
-        if str(course.get("id")) == str(course_id):
-            return str(course.get("name") or course.get("nickname") or course_id)
-    return str(course_id)
-
-
-def _autoscore_queue():
-    from api.powergrader import autoscore_queue
-
-    return autoscore_queue

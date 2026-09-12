@@ -19,7 +19,7 @@ def _explode_live(*_args, **_kwargs):
 def test_live_mcp_schema_matches_versioned_contract():
     from api.mcp_server import server
 
-    assert contract.TOOL_SCHEMA_VERSION == 43
+    assert contract.TOOL_SCHEMA_VERSION == 44
     expected = contract.load_contract()
     live = contract.live_contract(server.mcp)
     assert live == expected
@@ -121,14 +121,12 @@ def test_live_mcp_schema_matches_versioned_contract():
     # named session_id, so get_scoring_packet, stage_scores, and
     # preview_new_quiz_scores now take scoring_session_id instead. v41
     # remains the immutable 46-tool snapshot under the old name.
-    # v43 adds the ordinary-assignment PowerGrader score write pair,
-    # preview_assignment_scores and apply_assignment_scores, so an assistant
-    # can post staged scores and feedback from chat instead of the queue
-    # button alone. v42 remains the immutable 46-tool snapshot.
+    # v44 retires stage/preview/apply scoring tools and exposes the single
+    # assignment-type-neutral submit_scoring_results contract.
     assert len(contract.load_contract(40)["tools"]) == 44
     assert len(contract.load_contract(41)["tools"]) == 46
     assert len(contract.load_contract(42)["tools"]) == 46
-    assert len(live["tools"]) == 48
+    assert len(live["tools"]) == 44
     v22 = contract.load_contract(22)
     assert v22["schema_version"] == 22
     assert len(v22["tools"]) == 39
@@ -236,8 +234,6 @@ def test_http_and_mcp_share_use_cases_and_student_outputs_stay_green(tmp_path, m
     api_dir = str(Path(__file__).resolve().parents[1])
     if api_dir not in sys.path:
         sys.path.insert(0, api_dir)
-    from api.webui.routes import powergrader as powergrader_routes
-
     tools_source = Path(tools.__file__).read_text(encoding="utf-8")
     pseudonym_source = Path(pseudonym.__file__).read_text(encoding="utf-8")
     assert "webui.routes" not in tools_source
@@ -328,5 +324,3 @@ def test_http_and_mcp_share_use_cases_and_student_outputs_stay_green(tmp_path, m
             assert leak not in dumped
 
     assert "No local course catalog found" in tools.get_course_assignments("previous")["error"]
-    assert powergrader_routes._powergrader_assignment_context("previous", "700010")[1] == \
-        course_scope.current_course_error("previous", tools.config.active_courses())

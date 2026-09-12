@@ -38,16 +38,17 @@
         every student's extra-time accommodations. Grant extensions that actually
         move due dates. Curve with four models, preview-first. Every grade change is
         previewed before it happens and explained where it lands.</p>
-        <p><strong>PowerGrader.</strong> Review submissions in a keyboard-first queue,
-        use your own AI chat or an optional model for draft suggestions, and approve
-        grades and feedback before posting.</p>
+        <p><strong>Scoring Sessions.</strong> Ask your connected AI to start one for a
+        Current course and assignment. It works from a pseudonymized packet and sends
+        valid results to Canvas Live, where you can review or edit them. Canvas Expert
+        does not host a grading model.</p>
       </div>
       <div class="about-card ac-ai">
         <h3>AI helper files</h3>
         <p><strong>Bring your own AI.</strong> Whatever assistant your district gives
         you. Canvas Expert hands it paste-ready skill files
-        that teach it to author perfect Canvas content and score essays against your
-        rubrics. Your AI does the creative work; Canvas Expert does the clicking.</p>
+        that teach it to author Canvas content and use Scoring Sessions. Your AI
+        reads the SAFE packet; Canvas Expert keeps identities and Canvas writes local.</p>
       </div>
     </div>
   </div>
@@ -90,9 +91,9 @@
     <h2 class="ce-display">Built safe by design</h2>
     <p>Canvas Expert holds a key to your gradebook, so it's engineered like it matters:</p>
     <p>When an assistant connects over the local MCP server, it receives pseudonymized
-      reads and can use preview/apply pairs for teacher-owned local changes. With one
-      exception (a roster tool that reassigns a student's Canvas group membership, only
-      after you tell the assistant to do it), MCP never writes to Canvas.</p>
+      reads. An explicit Scoring Session request authorizes that session's valid results
+      to post to Canvas; identities, preflight and verification stay on this computer.
+      Other bounded writes require their own reviewed operation.</p>
     <ul class="security-list">
       <li><strong>Your token never touches a disk in plaintext.</strong> The Canvas
         access token lives in your operating system's credential store (Windows
@@ -112,7 +113,7 @@
       <li><strong>Accommodation data stays home.</strong> The extra-time roster
         (504s, accommodations) is stored locally and used only to compute school-day
         counts. It is never sent to Canvas or anywhere else.</li>
-      <li><strong>Grade changes are preview-first and transparent.</strong> Sweeps and
+      <li><strong>Other grade changes are preview-first and transparent.</strong> Sweeps and
         curves show you exactly what will change before anything is written, re-running
         a sweep is safe by design, and changes are explained where students and
         parents can see them.</li>

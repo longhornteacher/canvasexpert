@@ -31,6 +31,7 @@ no staleness refusal applies to it."""
 from __future__ import annotations
 
 import os
+import copy
 import hashlib
 import json
 import math
@@ -113,8 +114,7 @@ _MODULE_ITEM_COLUMNS = ("id", "type", "title", "position", "content_id")
 _PAGE_COLUMNS = ("id", "title", "body_text", "published", "front_page", "updated_at")
 _STAGED_CONTENT_COLUMNS = ("kind", "label")
 _SCORING_SESSION_COLUMNS = ("scoring_session_id", "assignment_name", "course_id", "created",
-                            "mode_label", "total", "scored", "approved",
-                            "assignment_id", "newer_session_exists", "staged_at")
+                            "student_count", "newer_session_exists")
 _PACKET_ITEM_COLUMNS = ("item_id", "prompt", "possible")
 _PACKET_STUDENT_COLUMNS = ("pseudonym", "item_id", "text")
 _ASSESSMENT_CONTEXT_COLUMNS = (
@@ -132,9 +132,9 @@ MAX_ASSESSMENT_GROUPING_RESULT_CHARS = 20000
 
 _NEXT_STEPS = {
     "get_scoring_packet": (
-        "Read total as response rows and students_total as people. Use next_offset for "
-        "the next page with include_context=false; after the final page, stage completed "
-        "scores with packet_digest."
+        "Read total as response rows and students_total as people. Keep the scoring "
+        "contract and rubric on page zero; use next_offset for later pages. After "
+        "reading every page, submit results with packet_digest."
     ),
     # One string covers both outcomes on purpose: the keys here are an exact
     # allowlist of tool names, and a held-only session still needs saying
@@ -142,13 +142,9 @@ _NEXT_STEPS = {
     # an empty assignment.
     "start_scoring_session": (
         "Call get_scoring_packet with scoring_session_id to retrieve the first scoring "
-        "page. If response_count is 0 and held is not, there is no page to "
-        "fetch: held rows are attachment-only, media-only, or empty and stay "
-        "local by design, so name the held students and tell the teacher this "
-        "assignment needs review in PowerGrader itself instead."
-    ),
-    "preview_assignment_scores": (
-        "Put each question to the teacher in your own words and get a real answer; do not pick one for them. Then call apply_assignment_scores with review_digest and an answers map. A skip_those answer drops those students from the write."
+        "page, including the contract and scoring basis. If response_count is 0 and "
+        "held is greater than zero, explain that held responses could not be "
+        "scored from text."
     ),
     "preview_sis_grade_bridge": (
         "Summarize the aggregate review and get teacher confirmation, then call "
@@ -163,10 +159,6 @@ _NEXT_STEPS = {
         "Summarize the change and get teacher confirmation, then call "
         "apply_roster_student_change with course_id, preview, preview_digest, and "
         "settings_digest as expected_settings_digest."
-    ),
-    "preview_new_quiz_scores": (
-        "Summarize the frozen review and get teacher confirmation, then call "
-        "apply_new_quiz_scores with operation_id and review_digest unchanged."
     ),
     "preview_content_push": (
         "Tell the teacher what the preview says this will create, then call "
@@ -1126,21 +1118,13 @@ _TOOL_GROUPS = {
         "preview_assignment_update",
         "apply_assignment_update",
     ),
-    "PowerGrader": (
+    "Scoring Sessions": (
         "start_scoring_session",
         "list_scoring_sessions",
         "get_scoring_packet",
-        "stage_scores",
-        "preview_new_quiz_scores",
-        "apply_new_quiz_scores",
-        # The ordinary-assignment twin of the New Quiz pair: staged scores
-        # reach Canvas from the conversation instead of only from the queue.
-        "preview_assignment_scores",
-        "apply_assignment_scores",
-        # The gradebook snapshot informs the scoring job; Appendix B's separate
-        # Gradebook tools surface has no direct MCP mutation surface.
-        "get_gradebook_snapshot",
+        "submit_scoring_results",
     ),
+    "Gradebook": ("get_gradebook_snapshot",),
     "SIS Grade Bridges": (
         "list_sis_grade_bridges",
         "preview_sis_grade_bridge",
@@ -2673,31 +2657,13 @@ def _scored_count(session: dict) -> int:
                if student.get("ai_score") is not None)
 
 
-def start_scoring_session(course_id: str, assignment_id: str) -> dict:
-    """Start a packet-mode PowerGrader scoring session for one assignment.
+def start_scoring_session(course_id: str, assignment_id: str, rubric_name: str = "",
+                          scoring_guidance: str = "") -> dict:
+    """Start one assignment-type-neutral Scoring Session for a Current course.
 
-    Always packet mode: builds the Safe AI Packet this chat can score.
-    Never opens an assisted session (that would run the teacher's own AI
-    key) and never turns on auto-post to Canvas. No file uploads, no
-    oral-reading passage. Course-gated to Current courses only.
-
-    Returns on success: scoring_session_id, assignment_name, student_count,
-    response_count (scorable rows across all students, the same count
-    get_scoring_packet totals), held (responses carrying no scorable text —
-    attachment-only, media-only, or empty), held_pseudonyms (the distinct
-    students behind those, omitted when the outbound scan cannot clear the
-    names), and new_quiz_item_finalization_supported (whether a New Quiz
-    per-item write lane exists for this assignment).
-    Pass scoring_session_id to get_scoring_packet to continue.
-
-    A response_count of 0 against a non-zero held is an assignment whose work
-    needs teacher review in PowerGrader, not an empty assignment: held work is
-    deliberately kept local rather than sent to a model, so the counts are
-    reported here instead of leaving the caller to infer an empty session.
-
-    Refuses cleanly when the course is not a Current course, the assignment
-    has no submissions, or the workspace is not configured. Creates a local
-    session file only; performs no Canvas write. Never raises.
+    An attached Canvas rubric wins. Otherwise the teacher must choose a local
+    rubric label or supply bounded conversational scoring guidance. This call
+    creates only private session artifacts and never writes to Canvas.
     """
     gate_error = _course_gate_check(course_id)
     if gate_error:
@@ -2711,8 +2677,8 @@ def start_scoring_session(course_id: str, assignment_id: str) -> dict:
         mode="packet",
         watch_late="false",
         auto_post="false",
-        rubric_name="",
-        persona_id="sage",
+        rubric_name=str(rubric_name or "").strip(),
+        persona_id="",
         feedback_pattern_id="",
         model_id="",
         response_kind="scr",
@@ -2722,34 +2688,47 @@ def start_scoring_session(course_id: str, assignment_id: str) -> dict:
         oral_reading_passage="",
         oral_reading_enabled="false",
         save_session=session_store.save_session,
+        scoring_session=True,
+        scoring_guidance=str(scoring_guidance or ""),
     )
     if not result["ok"]:
-        return {"ok": False, "error": result["payload"].get("error") or "Could not start a scoring session."}
+        payload = result["payload"]
+        if payload.get("code") == "needs_scoring_norms":
+            return {
+                "ok": False, "code": "needs_scoring_norms",
+                "error": "No usable Canvas rubric is attached. Ask the teacher to choose a rubric or provide scoring guidance.",
+                "rubric_labels": [str(label) for label in payload.get("rubric_labels") or []],
+            }
+        return {"ok": False, "code": payload.get("code") or "start_failed",
+                "error": payload.get("error") or "Could not start a Scoring Session."}
 
     session_id = result["session_id"]
     payload = result["payload"]
     session = session_store.load_session(session_id) or {}
 
-    response_count = payload.get("student_count", 0)
+    basis = session.get("scoring_basis")
+    if not isinstance(basis, dict) or not basis.get("source") or not basis.get("label"):
+        return {"ok": False, "code": "invalid_scoring_session",
+                "error": "A resolved scoring basis is required before a Scoring Session can be exposed."}
     held = 0
-    held_pseudonyms: list[str] = []
     bundle_path = _safe_bundle_path(session)
-    if bundle_path:
-        try:
-            with open(bundle_path, encoding="utf-8") as f:
-                safe_bundle = json.load(f)
-            page = sp.build_packet(
-                session=session, safe_bundle=safe_bundle,
-                offset=0, limit=1, include_context=False,
-            )
-            response_count = page.get("total", response_count)
-            # build_packet classifies the whole bundle before it slices the
-            # page, so the one-row limit above still yields session-wide
-            # held tallies rather than this page's share of them.
-            held = int(page.get("held") or 0)
-            held_pseudonyms = list(page.get("held_pseudonyms") or [])
-        except Exception:
-            pass
+    if not bundle_path:
+        return {"ok": False, "code": "packet_missing",
+                "error": "The SAFE scoring packet was not completed; no session was exposed."}
+    try:
+        with open(bundle_path, encoding="utf-8") as f:
+            safe_bundle = json.load(f)
+        page = sp.build_packet(
+            session=session, safe_bundle=safe_bundle,
+            offset=0, limit=1, include_context=False,
+        )
+        response_count = page.get("total", 0)
+        # build_packet classifies the whole bundle before it slices the
+        # page, so a one-row limit still yields session-wide held tallies.
+        held = int(page.get("held") or 0)
+    except Exception:
+        return {"ok": False, "code": "packet_unavailable",
+                "error": "The SAFE scoring packet could not be verified; no session was exposed."}
 
     summary = {
         "ok": True,
@@ -2758,66 +2737,26 @@ def start_scoring_session(course_id: str, assignment_id: str) -> dict:
         "student_count": payload.get("student_count", 0),
         "response_count": response_count,
         "held": held,
-        "new_quiz_item_finalization_supported": bool(
-            session.get("new_quiz_item_finalization_supported")),
+        "scoring_basis": basis,
     }
-
-    # Naming the held students is what makes a response_count of 0 actionable,
-    # but it puts pseudonyms into a summary that otherwise carries none, so the
-    # names take the same outbound scan every student-data read takes. A
-    # blocked or unavailable scan costs the names only: the session is already
-    # on disk, and dropping its session_id would strand it.
-    if held_pseudonyms:
-        vault, vault_error = _open_vault()
-        gated = {} if vault_error else _pseudonym_gate(
-            {"held_pseudonyms": held_pseudonyms}, vault)
-        if gated.get("ok"):
-            summary["held_pseudonyms"] = list(gated.get("held_pseudonyms") or [])
-
     return _with_next("start_scoring_session", summary)
 
 
 def list_scoring_sessions() -> dict:
-    """List PowerGrader sessions that have a SAFE bundle, newest first.
-
-    Returns {"ok": True, "sessions": {columns, rows}} where each row appends
-    assignment_id, newer_session_exists, and staged_at after the established
-    (scoring_session_id, assignment_name, course_id, created, mode_label, total,
-    scored, approved) columns.
-
-    ``total`` here counts *students* in the session (``len(students)``, straight
-    from the session summary). It is not get_scoring_packet's ``total``, which
-    counts scorable response rows, and the two legitimately disagree: an
-    attachment-only assignment lists 19 students here and totals 0 rows there.
-    The column name is load-bearing on the wire, so it stays; read it as the
-    session's roster size and take scorable volume from the packet.
-
-    ``newer_session_exists`` compares strictly newer visible sessions for the
-    same course and assignment; equal timestamps do not establish order.
-    Current courses only. Sessions whose bundle is missing
-    from disk are left out rather than offered and then refused by
-    get_scoring_packet. Session metadata only, so no safety gate is needed:
-    nothing here is drawn from a student record. Never raises.
-    """
+    """List identity-free Current-course Scoring Sessions as a resume aid."""
     rows = []
     visible = _visible_scoring_sessions()
     newer_flags = _newer_session_flags([summary for summary, _ in visible])
 
     for summary, session in visible:
         students = session.get("students") or []
-        marker = _staged_marker(session)
         rows.append([
             summary.get("session_id"),
             summary.get("assignment_name"),
             summary.get("course_id"),
             summary.get("created"),
-            summary.get("mode_label"),
-            summary.get("total", 0),
-            sum(1 for st in students if st.get("ai_score") is not None),
-            summary.get("approved", 0),
-            summary.get("assignment_id"),
+            len(students),
             newer_flags.get(str(summary.get("session_id") or ""), False),
-            marker.get("staged_at") or marker.get("ts"),
         ])
 
     return {
@@ -2828,10 +2767,10 @@ def list_scoring_sessions() -> dict:
 
 def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10,
                        include_context: bool = True) -> dict:
-    """Retrieve a page of student responses from a PowerGrader session's SAFE bundle.
+    """Retrieve one page of student responses from a Scoring Session's SAFE bundle.
 
     Parameters:
-    - scoring_session_id: PowerGrader session UUID
+    - scoring_session_id: private Scoring Session identifier
     - offset: starting row (default 0)
     - limit: rows to return (default 10)
     - include_context: if True, include contract text, rubric, shared materials
@@ -2847,7 +2786,7 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     differences separately from response paging.
 
     Returns a packet with:
-    - packet_digest: bundle identity, required by stage_scores
+    - packet_digest: bundle identity, required by submit_scoring_results
     - items: {columns, rows} table of prompts, deduplicated by item_id
     - students: {columns, rows} table of (pseudonym, item_id, text)
     - total: scorable rows in the whole session
@@ -2895,11 +2834,16 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     except Exception as e:
         return {"ok": False, "error": f"Could not load Safe AI Packet bundle: {e}"}
 
-    rubric_name = str(session.get("rubric_name") or "")
-    rubric_text = session.get("rubric_text") or context.load_rubric_text(rubric_name)
-    persona = session.get("persona") or config.get_persona(
-        str(session.get("persona_id") or "")
-    )
+    if offset <= 0 and not include_context:
+        return {"ok": False, "code": "scoring_context_required",
+                "error": "The first packet page must include its scoring contract and basis."}
+
+    basis = session.get("scoring_basis") or {}
+    rubric_name = str(basis.get("label") or session.get("rubric_name") or "")
+    rubric_text = (session.get("scoring_rubric_text")
+                   or session.get("rubric_text")
+                   or context.load_rubric_text(rubric_name))
+    persona = None
 
     try:
         packet = sp.build_packet(
@@ -2935,132 +2879,294 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     return result
 
 
-def stage_scores(scoring_session_id: str, results: list, expected_packet_digest: str) -> dict:
-    """Stage AI-generated scores into a PowerGrader session.
+def submit_scoring_results(scoring_session_id: str, results: list,
+                           expected_packet_digest: str, review_digest: str = "",
+                           answers: dict | None = None) -> dict:
+    """Validate SAFE results, ask only bounded risk questions, then write them.
 
-    Parameters:
-    - scoring_session_id: PowerGrader session UUID
-    - results: list of scoring dicts (each with pseudonym, item_id, score, feedback)
-    - expected_packet_digest: SHA-256 from a prior get_scoring_packet call
-      (prevents staging stale scores if the session has been re-run)
-
-    Returns:
-    - updated: count of students whose scores were merged
-    - unresolved: count of results with unknown pseudonyms or validation errors
-    - validation: verdict dict (ok, errors, warnings)
-    - packet_digest: unchanged, echoed back from expected_packet_digest
-
-    Scores land in the session's student records, awaiting teacher review
-    in the PowerGrader queue. Does NOT post to Canvas, even if auto_post
-    is enabled (teacher pushes manually via the queue).
-
-    Course-gated on the session's course_id. Refuses when:
-    - scoring_session_id is not found
-    - teacher's course is not a Current course
-    - expected_packet_digest does not match current bundle state (session re-run)
-
-    Partial staging works: if 6 of 28 students are scored, updates those 6,
-    leaves 22 untouched, returns warnings for unscored. Never raises.
+    The Canvas transport and identity lookup stay below this MCP boundary.
+    No result content or real identity is returned, including on failure.
     """
-    from datetime import datetime
+    from api import feedback_pipeline as fp
+    from api.powergrader import scoring_packet as sp, session_store
 
-    from api.powergrader import import_results, scoring_packet as sp, session_actions, session_store
+    session = session_store.load_session(scoring_session_id)
+    if not session:
+        return {"ok": False, "code": "session_not_found", "error": "Scoring Session not found."}
+    gate_error = _course_gate_check(str(session.get("course_id") or ""))
+    if gate_error:
+        return {"ok": False, "code": "course_unavailable", "error": gate_error}
+    if not session.get("scoring_basis"):
+        return {"ok": False, "code": "invalid_scoring_session", "error": "This is not a Scoring Session."}
+    bundle_path = _safe_bundle_path(session)
+    if not bundle_path:
+        return {"ok": False, "code": "packet_missing", "error": "The SAFE scoring packet is unavailable."}
+    try:
+        with open(bundle_path, encoding="utf-8") as handle:
+            safe_bundle = json.load(handle)
+    except Exception:
+        return {"ok": False, "code": "packet_unavailable", "error": "The SAFE scoring packet could not be read."}
+    packet_digest = sp.packet_digest(scoring_session_id, safe_bundle)
+    if str(expected_packet_digest or "") != packet_digest:
+        return {"ok": False, "code": "stale_packet", "error": "The scoring packet changed. Retrieve the current packet before submitting."}
 
-    # The MCP-visible name is scoring_session_id; below this boundary the
-    # session-store concept stays session_id (locked decision 3).
-    session_id = scoring_session_id
+    vault, vault_error = _open_vault()
+    if vault_error:
+        return {"ok": False, "code": "identity_unavailable", "error": "The private identity vault is unavailable."}
+    verdict = fp.validate_results(results, safe_bundle, vault)
+    if not verdict.get("ok"):
+        return {"ok": False, "code": "invalid_results",
+                "error": "Results must match the supplied pseudonyms and item ids and contain valid feedback.",
+                "validation": {"errors": len(verdict.get("errors") or []),
+                               "warnings": len(verdict.get("warnings") or [])}}
+    try:
+        rows = fp.reidentify(results, vault)
+    except Exception:
+        return {"ok": False, "code": "invalid_results", "error": "Results could not be safely matched to this session."}
+    for index, row in enumerate(rows):
+        row["pseudonym"] = str((results[index] or {}).get("pseudonym") or "")
+    if any(not row.get("resolved") for row in rows):
+        return {"ok": False, "code": "invalid_results", "error": "Every result must match a supplied pseudonym."}
 
-    # Same lock the web UI's import-results route takes, so a teacher working
-    # the queue and an assistant staging over MCP cannot interleave a
-    # read-modify-write on the same session file.
-    with session_store.session_lock(session_id):
-        session = session_store.load_session(session_id)
-        if not session:
-            return {"ok": False, "error": "Session not found."}
+    names = {}
+    every_pseudonym = []
+    for entry in vault.entries():
+        label = str(entry.get("pseudonym") or "").strip()
+        if label:
+            names[str(entry.get("canvas_id"))] = label
+            every_pseudonym.append(label)
+    by_uid = fp.merge_rows_by_uid(rows)
+    item_by_uid = fp.item_rows_by_uid(rows)
+    candidate = copy.deepcopy(session)
+    students_by_uid = {str(st.get("user_id")): st for st in candidate.get("students") or []}
+    for user_id, row in by_uid.items():
+        student = students_by_uid.get(str(user_id))
+        if student:
+            student["ai_score"] = row.get("score")
+            student["ai_feedback"] = row.get("feedback") or ""
+            student["ai_item_results"] = item_by_uid.get(str(user_id), [])
 
-        gate_err = _course_gate_check(str(session.get("course_id") or ""))
-        if gate_err:
-            return {"ok": False, "error": gate_err}
+    # Ordinary assignment risk planning reuses the exact freeze/drift lane used
+    # by Canvas Expert's guarded scorer. Its internal user ids are translated
+    # before any question can cross MCP.
+    if not session.get("new_quiz_item_finalization_supported"):
+        from api.powergrader import scoring_apply
+        plan = scoring_apply.build_plan(candidate, pseudonyms=every_pseudonym)
+        if not plan.get("ok"):
+            return {"ok": False, "code": str(plan.get("code") or "canvas_preflight_failed"),
+                    "error": "Canvas could not safely prepare this scoring submission."}
+        if not plan.get("candidate_ids"):
+            return {"ok": False, "code": "no_valid_results", "error": "No scored results are ready to post."}
+        if plan.get("questions"):
+            safe = _scoring_apply_safe(plan, names)
+            if not review_digest:
+                candidate_ids = set(plan["candidate_ids"])
+                held_count = sum(1 for st in candidate.get("students") or []
+                                 if str(st.get("user_id") or "") not in candidate_ids
+                                 and not st.get("posted"))
+                response = {"ok": True, "status": "needs_teacher_input",
+                    "review_digest": plan["digest"], "questions": safe["questions"],
+                    "counts": {"ready": len(plan["candidate_ids"]),
+                               "held": held_count}}
+                return pseudonym.gate(response, vault)
+            if str(review_digest) != str(plan.get("digest")):
+                return {"ok": False, "code": "review_changed", "error": "The scoring review changed. Submit the current review again."}
+        elif review_digest:
+            return {"ok": False, "code": "review_changed", "error": "No teacher questions remain for this review."}
 
-        bundle_path = _safe_bundle_path(session)
-        if not bundle_path:
-            return {"ok": False, "error": "Safe AI Packet student response bundle is missing."}
+        resolved = scoring_apply.resolve_answers(plan, answers)
+        if not resolved.get("ok"):
+            return {"ok": False, "code": resolved.get("code") or "invalid_answer",
+                    "error": "Answer every listed scoring question with one of its offered options."}
+        # Preserve the scoring_apply caller-held lock contract across both the
+        # staged-result update and the complete plan/freeze/push sequence.
+        # session_store uses an RLock and re-entrant interprocess lock, so the
+        # guarded helpers can safely acquire the same session lock again.
+        with session_store.session_lock(scoring_session_id):
+            current = session_store.load_session(scoring_session_id)
+            if not current:
+                return {"ok": False, "code": "session_not_found", "error": "Scoring Session not found."}
+            current_by_uid = {str(st.get("user_id")): st for st in current.get("students") or []}
+            for uid, staged in students_by_uid.items():
+                target = current_by_uid.get(uid)
+                if target and uid in by_uid:
+                    target["ai_score"] = staged.get("ai_score")
+                    target["ai_feedback"] = staged.get("ai_feedback")
+                    target["ai_item_results"] = staged.get("ai_item_results") or []
+            session_store.save_session(current)
+            payload, _status = scoring_apply.apply_plan(
+                scoring_session_id, expected_digest=plan["digest"], answers=answers,
+                load_session=session_store.load_session, save_session=session_store.save_session,
+                pseudonyms=every_pseudonym,
+            )
+        held_user_ids = {str(st.get("user_id") or "") for st in session.get("students") or []
+                         if str(st.get("user_id") or "") not in set(plan.get("candidate_ids") or [])}
+        held_user_ids.update(str(uid) for uid in resolved.get("skipped") or [])
+        return _scoring_apply_result(payload, names, vault, held_user_ids=held_user_ids)
 
-        try:
-            with open(bundle_path, encoding="utf-8") as f:
-                safe_bundle = json.load(f)
-        except Exception as e:
-            return {"ok": False, "error": f"Could not load Safe AI Packet bundle: {e}"}
+    # New Quizzes retain their item-preserving finalize lane. These conversational
+    # questions are built from the exact SAFE results; the lane still enforces
+    # complete-result preflight, version drift, idempotency and verification.
+    nq_questions = _new_quiz_scoring_questions(candidate, rows, safe_bundle, names, every_pseudonym, vault)
+    nq_digest = _canonical_digest({"packet_digest": packet_digest, "results": results,
+                                   "questions": nq_questions})
+    if nq_questions:
+        public_questions = _new_quiz_public_questions(nq_questions, names)
+        if not review_digest:
+            return pseudonym.gate({"ok": True, "status": "needs_teacher_input",
+                "review_digest": nq_digest, "questions": public_questions}, vault)
+        if str(review_digest) != nq_digest:
+            return {"ok": False, "code": "review_changed", "error": "The scoring review changed. Submit the current review again."}
+        answer_result = _resolve_scoring_answers(nq_questions, answers)
+        if not answer_result.get("ok"):
+            return {"ok": False, "code": answer_result.get("code") or "invalid_answer",
+                    "error": "Answer every listed scoring question with one of its offered options."}
+        if answer_result.get("stop"):
+            return {"ok": True, "status": "held", "counts": {"finalized": 0, "already_applied": 0, "held": len(nq_questions), "failed": 0}, "results": []}
+        excluded = answer_result.get("skip_pseudonyms") or set()
+        rows = [row for row in rows if row.get("pseudonym") not in excluded]
+        by_uid = fp.merge_rows_by_uid(rows)
+        item_by_uid = fp.item_rows_by_uid(rows)
 
-        if sp.packet_digest(session.get("session_id"), safe_bundle) != expected_packet_digest:
-            return {
-                "ok": False,
-                "error": "Packet digest mismatch: the session has been re-run. "
-                         "Retrieve the packet again with get_scoring_packet.",
-            }
+    with session_store.session_lock(scoring_session_id):
+        current = session_store.load_session(scoring_session_id)
+        if not current:
+            return {"ok": False, "code": "session_not_found", "error": "Scoring Session not found."}
+        current_by_uid = {str(st.get("user_id")): st for st in current.get("students") or []}
+        for uid in by_uid:
+            target = current_by_uid.get(str(uid))
+            if target:
+                target["ai_item_results"] = item_by_uid.get(str(uid), [])
+        session_store.save_session(current)
+    preview = _prepare_new_quiz_finalization(scoring_session_id)
+    if not preview.get("ok"):
+        return pseudonym.gate({"ok": False, "code": "new_quiz_preflight_failed",
+            "error": "Canvas could not safely prepare New Quiz item finalization.",
+            "counts": {"finalized": 0, "already_applied": 0,
+                       "held": max(0, len(session.get("students") or []) - len(by_uid)), "failed": 1}}, vault)
+    applied = _finalize_new_quiz_results(preview["operation_id"], preview["review_digest"])
+    applied.pop("operation_id", None)
+    applied.pop("next", None)
+    applied_counts = applied.get("counts") or {}
+    held_count = max(0, len(session.get("students") or []) - len(by_uid))
+    final_counts = {"finalized": int(applied_counts.get("finalized") or 0),
+                    "already_applied": int(applied_counts.get("already_applied") or 0),
+                    "held": held_count,
+                    "failed": int(applied_counts.get("failed") or 0)}
+    return pseudonym.gate({"ok": bool(applied.get("ok")), "counts": final_counts,
+        "results": applied.get("results") or []}, vault)
 
-        try:
-            results_text = json.dumps(results)
-        except Exception as e:
-            return {"ok": False, "error": f"Could not serialize results: {e}"}
 
-        # Any push review the teacher already previewed was computed against
-        # the scores about to be replaced. Drop it first, exactly as the
-        # import-results route does, so a stale review cannot be pushed.
-        session_actions.invalidate_pending_review(session)
-        session_store.save_session(session)
-
-        payload, _status_code = import_results.import_results_into_session(
-            session_id=session_id,
-            results_text=results_text,
-            batch_id="",
-            load_session=session_store.load_session,
-            save_session=session_store.save_session,
-            vault_factory=_vault_factory,
-        )
-
-        # Deliberately no autopush trigger here, unlike the route: a score the
-        # teacher has not seen never reaches Canvas.
-        if payload.get("ok"):
-            session = session_store.load_session(session_id)
-            if session:
-                staged_at = datetime.now().isoformat(timespec="seconds")
-                session["assistant_staged"] = {
-                    "staged_at": staged_at,
-                    "updated": payload.get("updated", 0),
-                }
-                session_store.save_session(session)
-
-    # Rebuilt field by field rather than passed through: the import payload
-    # carries updated_user_ids, which are real Canvas ids.
-    result = {
-        "ok": payload.get("ok", False),
-        "updated": payload.get("updated", 0),
-        "unresolved": payload.get("unresolved", 0),
-        "validation": payload.get("validation", {}),
-        "packet_digest": expected_packet_digest,
-    }
-
+def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()) -> dict:
+    """Project ordinary assignment writes to aggregate, pseudonym-only outcomes."""
+    counts = {"finalized": 0, "already_applied": 0, "held": 0, "failed": 0}
+    outcomes = []
+    for item in payload.get("results") or []:
+        status = str(item.get("status") or "failed")
+        public_status = "finalized" if status == "pushed" else status
+        if public_status not in counts:
+            public_status = "failed"
+        counts[public_status] += 1
+        outcomes.append({"pseudonym": names.get(str(item.get("user_id"))) or "(unknown student)",
+                         "status": public_status,
+                         **({"code": str(item.get("code") or "failed")} if public_status == "failed" else {})})
+    held_ids = {str(uid) for uid in held_user_ids}
+    counts["held"] = len(held_ids)
+    outcomes.extend({"pseudonym": names.get(uid) or "(unknown student)", "status": "held"}
+                    for uid in sorted(held_ids))
+    result = {"ok": bool(payload.get("ok")), "counts": counts, "results": outcomes}
     if not result["ok"]:
-        result["error"] = payload.get("error", "Import failed")
-    elif session:
-        marker = _staged_marker(session)
-        result["staged_at"] = marker.get("staged_at") or marker.get("ts")
-        result["scored"] = _scored_count(session)
+        result["code"] = str(payload.get("code") or "write_failed")
+        result["error"] = "One or more results could not be safely finalized. Review Canvas before retrying."
+    return pseudonym.gate(result, vault)
 
-    return result
+
+def _new_quiz_scoring_questions(session: dict, rows: list[dict], bundle: dict,
+                                names: dict, pseudonyms: list[str], vault) -> list[dict]:
+    """Derive New Quiz questions without returning Canvas identifiers."""
+    from api.powergrader import scoring_apply
+
+    by_id = {(str(st.get("pseudonym") or ""), str(response.get("item_id") or "")): response
+             for st in (bundle.get("students") or [])
+             for response in (st.get("responses") or [])}
+    reverse = {label: uid for uid, label in names.items()}
+    expected_keys = set(by_id)
+    received_keys = {(str(row.get("pseudonym") or ""), str(row.get("item_id") or "")) for row in rows}
+    above, missing, tainted, overwrites = set(), set(), set(), set()
+    for row in rows:
+        pseudonym_value = str(row.get("pseudonym") or "")
+        response = by_id.get((pseudonym_value, str(row.get("item_id") or "")), {})
+        identity = vault.reverse(pseudonym_value) or {}
+        uid = str(identity.get("canvas_id") or "")
+        score = row.get("score")
+        if score is None:
+            missing.add(uid)
+        elif isinstance(score, (int, float)) and isinstance(response.get("possible"), (int, float)) and score > response["possible"]:
+            above.add(uid)
+        if any(name and name in str(row.get("feedback") or "") for name in pseudonyms):
+            tainted.add(uid)
+        for student in session.get("students") or []:
+            if str(student.get("user_id") or "") != uid:
+                continue
+            if any(str(item.get("item_id") or "") == str(row.get("item_id") or "")
+                   and item.get("earned_score") is not None for item in student.get("new_quiz_items") or []):
+                overwrites.add(uid)
+    sessions = {str(st.get("user_id")): st for st in session.get("students") or []}
+    held = {reverse.get(pseudonym_value, "") for pseudonym_value, _item_id
+            in expected_keys - received_keys if reverse.get(pseudonym_value)}
+    held.update(set(sessions) - {reverse.get(str(row.get("pseudonym") or ""), "") for row in rows})
+    questions = []
+    for kind, ids in (("score_above_possible", above), ("overwrites_existing_score", overwrites),
+                      ("missing_score", missing), ("pseudonym_in_feedback", tainted),
+                      ("held_not_scored", held)):
+        if ids:
+            options = list(scoring_apply.QUESTION_OPTIONS[kind])
+            detail = kind.replace("_", " ")
+            if kind == "missing_score":
+                # New Quiz item finalization has no comment-only path. Keep
+                # feedback-only rows held unless the teacher explicitly skips
+                # them; never advertise the ordinary-assignment comment lane.
+                options = ["skip_those"]
+                detail = (
+                    "These New Quiz items have feedback but no score. "
+                    "Comment-only posting is unavailable; skip to hold the "
+                    "affected student's result."
+                )
+            questions.append({"id": kind, "kind": kind, "user_ids": sorted(ids),
+                              "pseudonyms": sorted(names.get(uid, "(unknown student)") for uid in ids),
+                              "detail": detail, "options": options})
+    return questions
+
+
+def _new_quiz_public_questions(questions: list[dict], names: dict) -> list[dict]:
+    return [{"id": q["id"], "detail": q["detail"],
+             "students": sorted(names.get(uid, "(unknown student)") for uid in q["user_ids"]),
+             "answer_with": q["options"]} for q in questions]
+
+
+def _resolve_scoring_answers(questions: list[dict], answers: dict | None) -> dict:
+    answers = {str(key): str(value) for key, value in (answers or {}).items()}
+    if any(question["id"] not in answers for question in questions):
+        return {"ok": False, "code": "unanswered_questions"}
+    for question in questions:
+        if answers[question["id"]] not in question["options"]:
+            return {"ok": False, "code": "invalid_answer"}
+        if answers[question["id"]] == "stop":
+            return {"ok": True, "stop": True}
+    return {"ok": True, "skip_pseudonyms": {
+        pseudonym for question in questions
+        if answers[question["id"]] == "skip_those"
+        for pseudonym in question.get("pseudonyms") or []}}
 
 
 # ---------------------------------------------------------------------------
-# New Quiz item-finalization write pair (schema v35).
+# Private New Quiz item-finalization machinery used by submit_scoring_results.
 #
-# Mirrors the SIS grade-bridge preview/apply shape (docs/handoffs/
-# newquiz-chat-scoring.md, D3): preview freezes a review and returns only
-# aggregate counts plus opaque coordinates; apply accepts nothing but those
-# coordinates and replays the frozen review. The write itself reuses
+# The helper freezes per-student reviews; finalization replays only those
+# private coordinates. The write itself reuses
 # session_actions.review_new_quiz_finalization / finalize_new_quiz /
-# converge_new_quiz_after_finalize unchanged (D4) -- the same guarded,
-# drift-checked, receipt-backed lane the interactive PowerGrader queue uses.
+# converge_new_quiz_after_finalize unchanged -- the same guarded,
+# drift-checked, receipt-backed lane.
 # Frozen review tokens are stashed on the session itself, keyed by a
 # generated operation_id, never in the Operation Ledger (D10): the session
 # is already the locked unit of state here, and nothing else needs a ledger
@@ -3070,12 +3176,11 @@ def stage_scores(scoring_session_id: str, results: list, expected_packet_digest:
 
 def _new_quiz_scored_decisions(student: dict) -> list[dict]:
     """Item decisions for review_new_quiz_finalization/finalize_new_quiz,
-    built from whatever stage_scores already merged onto this student
+    built from the exact SAFE result rows submitted for this student
     (student["ai_item_results"], each {item_id, score, feedback}). Only
     items carrying a score are included, so a session that only scores the
     essay items on a mixed New Quiz never touches the auto-graded ones.
-    teacher_feedback stays empty: this chat path has no separate
-    teacher-authored note, only the score and feedback the assistant staged."""
+    teacher_feedback stays empty: the result carries agent-authored feedback."""
     decisions = []
     for item in student.get("ai_item_results") or []:
         if item.get("score") is None:
@@ -3128,7 +3233,7 @@ def _new_quiz_apply(session: dict, student: dict, decisions: list[dict], pending
 # an ambiguous or rejected write through the same frozen review token (it
 # invalidates the session's live pending_new_quiz_review specifically so a
 # second call cannot try the same POST again). Naively re-injecting our own
-# stashed copy of that token on every apply_new_quiz_scores call would defeat
+# stashed copy of that token on every finalize call would defeat
 # that protection, so a student whose finalize_new_quiz failure code names an
 # actual Canvas write attempt is dropped from OUR stash too -- replaying the
 # same operation_id can no longer reach that student's write again. A refusal
@@ -3142,14 +3247,8 @@ def _new_quiz_notify_write_through(session: dict, pushed) -> None:
     """Best-effort write-through mirror refresh after one verified New Quiz
     finalize.
 
-    Duplicates the small helper of the same name in the PowerGrader HTTP
-    route module (api/webui/routes/powergrader.py) on purpose rather than
-    importing it: that module is the HTTP route layer (form parsing,
-    uploads, the assisted auto-post trigger) and stays out of bounds for
-    this server. mirror_service itself is already an accepted api.webui
-    import in this module -- see _enqueue_sync/_wait_for_plan above -- so
-    notify_course_changed is reached the same way, not through a new import
-    path.
+    Request the existing narrow mirror refresh after a verified write. The
+    MCP boundary never receives the live Canvas response.
     """
     try:
         course_id = (session or {}).get("course_id")
@@ -3159,15 +3258,15 @@ def _new_quiz_notify_write_through(session: dict, pushed) -> None:
         operational_log.emit("mirror.notify_course_changed", "failed", error_class=type(exc))
 
 
-def preview_new_quiz_scores(scoring_session_id: str) -> dict:
-    """Freeze a New Quiz item-finalization review for every student in this
-    session who carries a staged item score (from stage_scores), stashing
-    the frozen review tokens on the session under a new operation_id. Makes
-    no Canvas write.
+def _prepare_new_quiz_finalization(scoring_session_id: str) -> dict:
+    """Privately preflight submitted New Quiz item scores for finalization.
+
+    Frozen review tokens are stashed on the session under a new operation_id.
+    This is an internal helper and is not exposed as a tool.
 
     Returns on success: operation_id and review_digest (both opaque; pass
-    both, unchanged, to apply_new_quiz_scores), and counts: students (with a
-    staged score), items (distinct item_id across them), ready (froze
+    both, unchanged, to _finalize_new_quiz_results), and counts: students
+    (with a submitted item score), items (distinct item_id across them), ready (froze
     cleanly), refused, and already_finalized (already landed in an earlier
     finalize). warnings names a refused student only by pseudonym and
     reason, never a real name or Canvas/SIS id.
@@ -3203,7 +3302,7 @@ def preview_new_quiz_scores(scoring_session_id: str) -> dict:
     if not candidates:
         return {
             "ok": False,
-            "error": "No staged item scores are ready to preview. Stage scores first with stage_scores.",
+            "error": "No submitted item scores are ready for finalization.",
         }
 
     vault, vault_err = _open_vault()
@@ -3282,20 +3381,19 @@ def preview_new_quiz_scores(scoring_session_id: str) -> dict:
     }
     if refused_reasons:
         result["refused_reasons"] = refused_reasons
-    return pseudonym.gate(_with_next("preview_new_quiz_scores", result), vault)
+    return pseudonym.gate(result, vault)
 
 
-def apply_new_quiz_scores(operation_id: str, review_digest: str) -> dict:
-    """Apply exactly the New Quiz item scores preview_new_quiz_scores froze.
+def _finalize_new_quiz_results(operation_id: str, review_digest: str) -> dict:
+    """Apply the exact private New Quiz item-finalization review.
 
-    Takes only the opaque operation_id/review_digest pair preview_new_quiz_scores
-    returned; there is no scoring_session_id, course_id, or student parameter, so
+    Takes only the opaque operation_id/review_digest pair prepared internally;
+    there is no scoring_session_id, course_id, or student parameter, so
     nothing here can reach any session, course, or student beyond the one
     already frozen.
 
     Replays each stashed per-student review token through finalize_new_quiz
-    (the same guarded, drift-checked, receipt-backed item-finalization lane
-    the interactive PowerGrader queue uses -- D4, no second write path), then
+    (the same guarded, drift-checked, receipt-backed item-finalization lane), then
     converges the gradebook write-through and New Quiz response-snapshot
     invalidation after each freshly verified finalize. A concluded or
     otherwise restricted enrollment can still refuse one student (Canvas 403
@@ -3308,27 +3406,27 @@ def apply_new_quiz_scores(operation_id: str, review_digest: str) -> dict:
     finalized; that student reports status "already_applied" and Canvas is
     not written again. A student whose review token has since expired
     reports status "failed" with code "review_expired" rather than crashing
-    or silently skipping; run preview_new_quiz_scores again for that student.
+    or silently skipping; create a fresh Scoring Session before retrying that student.
     A student whose write came back ambiguous or rejected is likewise never
     retried through this same operation_id (finalize_new_quiz's own rule);
-    run preview_new_quiz_scores again for that student too.
+    create a fresh Scoring Session before retrying that student too.
 
     Returns operation_id, counts (finalized, already_applied, failed), and a
     results list keyed only by pseudonym, never a real name or Canvas/SIS id.
 
     Refuses cleanly, with no Canvas call, when operation_id is not one
-    preview_new_quiz_scores minted, or review_digest does not match the
+    private review was minted, or review_digest does not match the
     frozen review. Never raises.
     """
     from api.powergrader import session_actions, session_store
 
     session_id, _sep, suffix = str(operation_id or "").partition("::")
     if not session_id or not suffix:
-        return {"ok": False, "error": "Operation not found. Run preview_new_quiz_scores again."}
+        return {"ok": False, "error": "The private finalization review is unavailable."}
 
     session = session_store.load_session(session_id)
     if not session:
-        return {"ok": False, "error": "Operation not found. Run preview_new_quiz_scores again."}
+        return {"ok": False, "error": "The private finalization review is unavailable."}
 
     gate_err = _course_gate_check(str(session.get("course_id") or ""))
     if gate_err:
@@ -3336,9 +3434,9 @@ def apply_new_quiz_scores(operation_id: str, review_digest: str) -> dict:
 
     stash = (session.get("new_quiz_scoring_operations") or {}).get(operation_id)
     if not stash:
-        return {"ok": False, "error": "Operation not found. Run preview_new_quiz_scores again."}
+        return {"ok": False, "error": "The private finalization review is unavailable."}
     if str(review_digest or "") != stash.get("review_digest"):
-        return {"ok": False, "error": "review_digest does not match. Run preview_new_quiz_scores again."}
+        return {"ok": False, "error": "The private finalization review does not match."}
 
     vault, vault_err = _open_vault()
     if vault_err:
@@ -3403,51 +3501,6 @@ def apply_new_quiz_scores(operation_id: str, review_digest: str) -> dict:
     return pseudonym.gate(result, vault)
 
 
-_SCORING_APPLY_UNRESOLVED = (
-    "Some pseudonyms are not in this session: {names}. Call get_scoring_packet "
-    "for the current roster of stand-in names."
-)
-
-
-def _scoring_apply_session(scoring_session_id: str):
-    """Load a session for the chat-side push, or return a refusal.
-
-    Returns (session, vault, error_dict). New Quiz sessions are refused rather
-    than handled: their scores belong to the quiz engine, and they have their
-    own teacher-reviewed item-finalization lane.
-    """
-    from api.powergrader import session_actions, session_store
-
-    session = session_store.load_session(scoring_session_id)
-    if not session:
-        return None, None, {"ok": False, "error": "Session not found."}
-
-    gate_err = _course_gate_check(str(session.get("course_id") or ""))
-    if gate_err:
-        return None, None, {"ok": False, "error": gate_err}
-
-    if session_actions._writeback_mode(session) != "full":
-        return None, None, {
-            "ok": False,
-            "error": ("This is a New Quiz session: its scores belong to the quiz "
-                      "engine, not the assignment total. Use preview_new_quiz_scores "
-                      "and apply_new_quiz_scores instead."),
-        }
-    return session, _vault_factory(), None
-
-
-def _scoring_apply_names(vault) -> tuple[dict, list]:
-    """(user_id -> pseudonym, every pseudonym in the vault)."""
-    by_id, every = {}, []
-    for entry in vault.entries():
-        name = str(entry.get("pseudonym") or "").strip()
-        if not name:
-            continue
-        by_id[str(entry.get("canvas_id"))] = name
-        every.append(name)
-    return by_id, every
-
-
 def _scoring_apply_safe(plan: dict, names: dict) -> dict:
     """Re-express a user_id-keyed plan in pseudonyms only.
 
@@ -3470,83 +3523,3 @@ def _scoring_apply_safe(plan: dict, names: dict) -> dict:
         ],
         "notes": plan["notes"],
     }
-
-
-def preview_assignment_scores(scoring_session_id: str) -> dict:
-    """Freeze what staged AI scores would post to Canvas for one session, and
-    ask anything that needs a decision first.
-
-    Reads Canvas to capture the current score baseline; writes nothing, here or
-    locally. The reply carries the stand-in names whose work would post, a
-    review_digest, and a `questions` list.
-
-    Every question blocks apply_assignment_scores until answered, and the
-    answer changes what lands -- a score above what the item is worth, a score
-    Canvas already has, feedback staged with no score, feedback quoting a
-    stand-in name, and students who would receive nothing because their work
-    was held out of the AI packet. Answer each with one of its `answer_with`
-    values.
-
-    For ordinary assignments. A New Quiz session is refused and pointed at
-    preview_new_quiz_scores.
-    """
-    from api.powergrader import scoring_apply
-
-    session, vault, error = _scoring_apply_session(scoring_session_id)
-    if error:
-        return error
-
-    names, every_pseudonym = _scoring_apply_names(vault)
-    plan = scoring_apply.build_plan(
-        session, pseudonyms=every_pseudonym)
-    if not plan.get("ok"):
-        return {"ok": False, "error": plan.get("error") or "Could not build the push plan."}
-    if not plan["candidate_ids"]:
-        return {"ok": False,
-                "error": "No staged scores are waiting to post in this session."}
-
-    result = {"ok": True, "review_digest": plan["digest"], **_scoring_apply_safe(plan, names)}
-    return _with_next("preview_assignment_scores", pseudonym.gate(result, vault))
-
-
-def apply_assignment_scores(scoring_session_id: str, review_digest: str,
-                            answers: dict | None = None) -> dict:
-    """Post exactly what preview_assignment_scores froze.
-
-    `answers` maps each question id to one of the options that question
-    offered. Every question must be answered: this refuses with
-    unanswered_questions rather than guessing, and a `skip_those` answer really
-    does drop those students from the write.
-
-    Approves the covered rows locally, then goes through the same reviewed
-    transport the teacher's own queue button uses -- one frozen review, a drift
-    check against fresh Canvas state, per-student idempotency, and a push log.
-    Refuses as plan_changed when the staged scores or Canvas moved since the
-    preview.
-    """
-    from api.powergrader import scoring_apply, session_store
-
-    session, vault, error = _scoring_apply_session(scoring_session_id)
-    if error:
-        return error
-
-    names, every_pseudonym = _scoring_apply_names(vault)
-    with session_store.session_lock(scoring_session_id):
-        payload, _status = scoring_apply.apply_plan(
-            scoring_session_id,
-            expected_digest=review_digest,
-            answers=answers,
-            load_session=session_store.load_session,
-            save_session=session_store.save_session,
-            pseudonyms=every_pseudonym,
-        )
-
-    result = dict(payload)
-    # push_grades reports per-user_id; the boundary reports per stand-in name.
-    for key in ("results", "user_ids"):
-        result.pop(key, None)
-    if payload.get("ok"):
-        result["skipped"] = sorted(
-            names.get(str(uid)) or "(unknown student)" for uid in payload.get("skipped") or [])
-        _new_quiz_notify_write_through(session, payload.get("pushed"))
-    return pseudonym.gate(result, vault)

@@ -23,11 +23,11 @@ import hashlib
 import json
 import os
 import re
+import socket
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from api.powergrader.autoscore_claims import machine_id
 from api.storage_support import atomic_write_json, interprocess_lock
 
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +37,18 @@ _MIN_REGISTRY_WORDS = 256
 _WORD_RE = re.compile(r"^[A-Z][a-z]+$")
 
 SCHEMA_VERSION = 3
+
+
+def machine_id() -> str:
+    """Return the local machine label used to annotate private vault writes."""
+    override = str(os.environ.get("CANVAS_EXPERT_MACHINE_ID") or "").strip()
+    if override:
+        return override
+    for value in (os.environ.get("COMPUTERNAME"), os.environ.get("HOSTNAME"), socket.gethostname()):
+        label = str(value or "").strip()
+        if label:
+            return label
+    return "local-machine"
 
 
 class PseudonymCollisionError(ValueError):

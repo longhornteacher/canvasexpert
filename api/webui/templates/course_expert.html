@@ -379,35 +379,6 @@
           <label class="opt-check"><input type="checkbox" id="af-sis"> Sync to SIS</label>
           <label class="opt-check"><input type="checkbox" id="af-publish"> Publish immediately</label>
         </div>
-        <section class="scheduled-grading-block is-disabled" id="af-scheduled-grading" aria-labelledby="af-scheduled-grading-title">
-          <div class="scheduled-grading-head">
-            <div>
-              <h3 id="af-scheduled-grading-title">Scheduled grading</h3>
-              <p id="af-autoscore-hint">Requires a due date. Add one above to enable these per-assignment opt-ins.</p>
-            </div>
-            <span class="scheduled-grading-badge">Opt-in only</span>
-          </div>
-          <div class="scheduled-grading-options">
-            <label class="scheduled-grading-option">
-              <input type="checkbox" id="af-autoscore" disabled>
-              <span>
-                <strong>Schedule Auto-Score after due date</strong>
-                <small>After the due date, create draft AI suggestions and a teacher review queue.</small>
-              </span>
-            </label>
-            <label class="scheduled-grading-option scheduled-grading-option--nested">
-              <input type="checkbox" id="af-autoscore-push" disabled>
-              <span>
-                <strong>Automatically post eligible AI scores/feedback to Canvas</strong>
-                <small>Writes only eligible scores/comments that pass policy checks; review-needed cases stay out of auto-post.</small>
-              </span>
-            </label>
-          </div>
-          <p class="scheduled-grading-policy">
-            Teacher-controlled per-assignment opt-in only. Never global or default. Auto-post requires eligibility checks,
-            idempotency protection, and audit receipts.
-          </p>
-        </section>
         <div class="ce-actions">
           <button id="btn-af-validate">Validate</button>
           <button id="btn-af-push" class="primary">Push assignment…</button>

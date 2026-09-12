@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from api.webui.local_request_guard import csrf_token
 from api.webui.server import app
 from api.webui.routes import work
-from api.powergrader import autoscore_queue, session_store
 from api.work_registry import adapters
 from api.work_registry.models import material_version, stable_fingerprint
 from api.work_registry.providers import finding
@@ -25,26 +24,24 @@ def _current_course_scope(monkeypatch):
     monkeypatch.setattr(work.config, "active_courses", lambda: [{
         "id": "course-1", "name": "Fictional Course", "nickname": "Fictional Course",
     }])
-    monkeypatch.setattr(session_store, "list_session_summaries", lambda: [])
-    monkeypatch.setattr(autoscore_queue, "load_queue", lambda: {"version": 1, "jobs": []})
 
 
 def _job(origin="intentional", status="attention"):
-    source = {"type": "powergrader_session", "value": "session-1"}
+    source = {"type": "workspace_relative", "value": "Assignments/sample.txt"}
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return {
         "job_id": "job-route-1",
-        "fingerprint": stable_fingerprint("grade.powergrader", source, ["course-1"], "assignment-1"),
+        "fingerprint": stable_fingerprint("create.assignment", source, ["course-1"], "assignment-1"),
         "material_version": material_version({"status": status, "counts": {"total": 1, "pending": 1, "affected": 0}}),
         "origin": origin,
-        "kind": "grade.powergrader",
+        "kind": "create.assignment",
         "status": status,
-        "title": "PowerGrader work",
-        "description": "PowerGrader session",
+        "title": "Assignment draft",
+        "description": "Authored assignment",
         "course_ids": ["course-1"],
         "focused_course_id": "course-1",
         "assignment_id": "assignment-1",
-        "resumable_url": "/powergrader/session/session-1",
+        "resumable_url": "/course-expert",
         "source_ref": source,
         "counts": {"total": 1, "pending": 1, "affected": 0},
         "attention_reason": "Work needs attention" if status == "attention" else "",
@@ -54,116 +51,8 @@ def _job(origin="intentional", status="attention"):
     }
 
 
-def _scheduled_job(status="in_progress"):
-    job = _job(status=status)
-    source = {"type": "autoscore_job", "value": "scheduled-1"}
-    job.update({
-        "job_id": "job-scheduled-1",
-        "fingerprint": stable_fingerprint(
-            "grade.powergrader.scheduled", source, ["course-1"], "assignment-2"
-        ),
-        "kind": "grade.powergrader.scheduled",
-        "title": "Scheduled work",
-        "assignment_id": "assignment-2",
-        "resumable_url": "/powergrader",
-        "source_ref": source,
-    })
-    return job
-
-
 def _client():
     return TestClient(app, base_url="http://127.0.0.1:8765")
-
-
-def _session_summary(
-    session_id, *, course_id="course-a", assignment_id="assignment-a",
-    created="2026-07-01T12:00:00+00:00", total=2, approved=0, posted=0,
-):
-    return {
-        "session_id": session_id,
-        "course_id": course_id,
-        "assignment_id": assignment_id,
-        "created": created,
-        "total": total,
-        "approved": approved,
-        "posted": posted,
-    }
-
-
-def test_powergrader_home_selection_prefers_useful_resume_targets(monkeypatch):
-    summaries = [
-        _session_summary("session-incomplete-old"),
-        _session_summary("session-incomplete-new", created="2026-07-02T12:00:00+00:00"),
-        _session_summary(
-            "session-attention-old", assignment_id="assignment-attention",
-            approved=1, created="2026-07-01T12:00:00+00:00",
-        ),
-        _session_summary(
-            "session-incomplete-newer", assignment_id="assignment-attention",
-            created="2026-07-03T12:00:00+00:00",
-        ),
-        _session_summary(
-            "session-most-unposted", assignment_id="assignment-count",
-            total=4, approved=3, posted=0,
-        ),
-        _session_summary(
-            "session-newer-less-unposted", assignment_id="assignment-count",
-            total=4, approved=2, posted=0, created="2026-07-04T12:00:00+00:00",
-        ),
-        _session_summary(
-            "session-tie-old", assignment_id="assignment-tie",
-            total=4, approved=3, posted=1,
-        ),
-        _session_summary(
-            "session-tie-new", assignment_id="assignment-tie",
-            total=4, approved=3, posted=1, created="2026-07-05T12:00:00+00:00",
-        ),
-    ]
-    monkeypatch.setattr(session_store, "list_session_summaries", lambda: summaries)
-
-    jobs = adapters._powergrader_jobs()
-    by_assignment = {job["assignment_id"]: job for job in jobs}
-
-    assert len(jobs) == 4
-    assert by_assignment["assignment-a"]["source_ref"]["value"] == "session-incomplete-new"
-    assert by_assignment["assignment-a"]["counts"] == {
-        "total": 2, "pending": 2, "affected": 0,
-    }
-    assert by_assignment["assignment-attention"]["source_ref"]["value"] == "session-attention-old"
-    assert by_assignment["assignment-attention"]["status"] == "attention"
-    assert by_assignment["assignment-count"]["source_ref"]["value"] == "session-most-unposted"
-    assert by_assignment["assignment-tie"]["source_ref"]["value"] == "session-tie-new"
-
-
-def test_powergrader_home_selection_keeps_completed_distinct_and_uncertain(monkeypatch):
-    summaries = [
-        _session_summary("session-complete-old", total=2, approved=2, posted=2),
-        _session_summary("unsafe session", approved=1, created="2026-07-09T12:00:00+00:00"),
-        _session_summary(
-            "session-complete-new", total=2, approved=2, posted=2,
-            created="2026-07-02T12:00:00+00:00",
-        ),
-        _session_summary("session-other-assignment", assignment_id="assignment-b"),
-        _session_summary("session-other-course", course_id="course-b"),
-        _session_summary("session-no-course-a", course_id=""),
-        _session_summary("session-no-course-b", course_id=""),
-        _session_summary("session-no-assignment-a", assignment_id=""),
-        _session_summary("session-no-assignment-b", assignment_id=""),
-    ]
-    monkeypatch.setattr(session_store, "list_session_summaries", lambda: summaries)
-
-    jobs = adapters._powergrader_jobs()
-    source_ids = [job["source_ref"]["value"] for job in jobs]
-
-    assert len(jobs) == 7
-    assert "session-complete-new" in source_ids
-    assert "session-complete-old" not in source_ids
-    assert next(job for job in jobs if job["source_ref"]["value"] == "session-complete-new")["status"] == "completed"
-    for independent in (
-        "session-other-assignment", "session-other-course", "session-no-course-a",
-        "session-no-course-b", "session-no-assignment-a", "session-no-assignment-b",
-    ):
-        assert independent in source_ids
 
 
 def test_launcher_rendered_csrf_authorizes_stubbed_scan():
@@ -250,15 +139,12 @@ def test_get_work_is_local_pii_free_and_rejects_unknown_section(monkeypatch):
     job = _job()
     monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [job])
     monkeypatch.setattr(work.adapters, "collect_start_sources", lambda: [{"kind": "create.assignment", "title": "Assignment source", "path": "Assignments/sample.txt"}])
-    monkeypatch.setattr(session_store, "list_session_summaries", lambda: [
-        {"session_id": "session-1", "assignment_name": "Fictional Reflection"},
-    ])
     response = _client().get("/api/work?section=attention")
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
     projected_job = next(item for item in payload["jobs"] if item["job_id"] == "job-route-1")
-    assert projected_job["title"] == "PowerGrader work"
+    assert projected_job["title"] == "Create work"
     assert set(projected_job) == set(_job())
     assert set(payload["presentations"]["job-route-1"]) == {
         "course_label", "title", "summary", "action_label",
@@ -268,48 +154,11 @@ def test_get_work_is_local_pii_free_and_rejects_unknown_section(monkeypatch):
     assert _client().get("/api/work?section=unknown").status_code == 400
 
 
-def test_powergrader_presentation_uses_local_summary_and_locked_counts(monkeypatch):
-    job = _job()
-    job["counts"] = {"total": 24, "pending": 22, "affected": 2}
-    monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [job])
-    monkeypatch.setattr(session_store, "list_session_summaries", lambda: [{
-        "session_id": "session-1",
-        "assignment_name": "Fictional Reflection",
-        "student_names": ["Private Learner Value"],
-        "grades": ["Private Grade Value"],
-        "comments": ["Private Comment Value"],
-        "feedback": "Private Feedback Value",
-    }])
-
-    payload = _client().get("/api/work?section=attention").json()
-    presentation = payload["presentations"]["job-route-1"]
-
-    assert presentation == {
-        "course_label": "Fictional Course",
-        "title": "Fictional Reflection",
-        "summary": "24 students · 22 awaiting review · 2 approved, not posted",
-        "action_label": "Review & post",
-    }
-    projected_job = next(item for item in payload["jobs"] if item["job_id"] == "job-route-1")
-    assert set(projected_job) == set(job)
-    serialized = json.dumps(payload)
-    for forbidden in (
-        "Private Learner Value", "Private Grade Value", "Private Comment Value",
-        "Private Feedback Value",
-    ):
-        assert forbidden not in serialized
-    raw = work._find_current("job-route-1")
-    assert raw is job
-    assert "presentation" not in raw
-    assert "course_label" not in raw
-
-
-def test_scheduled_and_detected_presentations_are_semantic_and_private(monkeypatch):
-    scheduled = _scheduled_job()
+def test_detected_grading_and_home_cards_use_current_surfaces(monkeypatch):
     debt = finding(
         kind="grade.debt", course_id="course-1", assignment_id="assignment-debt",
         counts={"total": 5, "pending": 3, "affected": 3},
-        now="2026-07-11T12:00:00+00:00", resumable_url="/powergrader",
+        now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
     )
     late = finding(
         kind="late.work", course_id="course-1", assignment_id="assignment-late",
@@ -324,39 +173,22 @@ def test_scheduled_and_detected_presentations_are_semantic_and_private(monkeypat
     follow_up = finding(
         kind="grade.followup", course_id="course-1", assignment_id="assignment-follow-up",
         counts={"total": 2, "pending": 2, "affected": 2},
-        now="2026-07-11T12:00:00+00:00", resumable_url="/powergrader",
+        now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
     )
     staff_check = finding(
         kind="grade.staff_check", course_id="course-1", assignment_id="assignment-staff-check",
         counts={"total": 1, "pending": 1, "affected": 1},
-        now="2026-07-11T12:00:00+00:00", resumable_url="/powergrader",
-    )
-    ready = finding(
-        kind="grade.powergrader_ready", course_id="course-1", assignment_id="assignment-ready",
-        counts={"total": 3, "pending": 3, "affected": 3},
-        now="2026-07-11T12:00:00+00:00", resumable_url="/powergrader",
+        now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
     )
     monkeypatch.setattr(
-        work.adapters, "collect_local_jobs", lambda: [scheduled, debt, late, roster, follow_up, staff_check, ready]
+        work.adapters, "collect_local_jobs", lambda: [debt, late, roster, follow_up, staff_check]
     )
-    monkeypatch.setattr(autoscore_queue, "load_queue", lambda: {
-        "version": 1,
-        "jobs": [{
-            "job_id": "scheduled-1",
-            "assignment_name": "Fictional Scheduled Essay",
-            "status": "session_ready",
-            "student_name": "Private Queue Learner",
-            "comment": "Private Queue Comment",
-            "grade": "Private Queue Grade",
-        }],
-    })
     # Detected findings are relabeled with the mirror-resolved assignment name.
     assignment_names = {
         "assignment-debt": "Debt Essay",
         "assignment-late": "Late Lab",
         "assignment-follow-up": "Follow-up Reflection",
         "assignment-staff-check": "Staff Check Task",
-        "assignment-ready": "Ready Journal",
     }
     monkeypatch.setattr(
         "api.mirror.queries.course_assignments",
@@ -367,18 +199,11 @@ def test_scheduled_and_detected_presentations_are_semantic_and_private(monkeypat
 
     payload = _client().get("/api/work?section=all").json()
     presentations = payload["presentations"]
-
-    assert presentations["job-scheduled-1"] == {
-        "course_label": "Fictional Course",
-        "title": "Fictional Scheduled Essay",
-        "summary": "Draft ready for review",
-        "action_label": "Open grading",
-    }
     by_kind = {job["kind"]: presentations[job["job_id"]] for job in payload["jobs"]}
     # The title is now the assignment name; the aggregate summary is unchanged.
     assert by_kind["grade.debt"]["title"] == "Debt Essay"
     assert by_kind["grade.debt"]["summary"] == "3 submissions awaiting grading"
-    assert by_kind["grade.debt"]["action_label"] == "Open PowerGrader"
+    assert by_kind["grade.debt"]["action_label"] == "Open Gradebook"
     assert by_kind["late.work"]["title"] == "Late Lab"
     assert by_kind["late.work"]["summary"] == "2 late submissions"
     assert by_kind["late.work"]["action_label"] == "Open Gradebook"
@@ -390,27 +215,16 @@ def test_scheduled_and_detected_presentations_are_semantic_and_private(monkeypat
         "course_label": "Fictional Course",
         "title": "Follow-up Reflection",
         "summary": "2 responses need a human check",
-        "action_label": "Open PowerGrader",
+        "action_label": "Open Gradebook",
     }
     assert by_kind["grade.staff_check"] == {
         "course_label": "Fictional Course",
         "title": "Staff Check Task",
         "summary": "1 response needs a staff response check",
-        "action_label": "Open PowerGrader",
-    }
-    assert by_kind["grade.powergrader_ready"] == {
-        "course_label": "Fictional Course",
-        "title": "Ready Journal",
-        "summary": "3 ungraded text entries ready for review",
-        "action_label": "Open PowerGrader",
+        "action_label": "Open Gradebook",
     }
     serialized = json.dumps(payload)
-    for forbidden in ("Private Queue Learner", "Private Queue Comment", "Private Queue Grade"):
-        assert forbidden not in serialized
-    assert work._scheduled_summary("scheduled") == "Waiting to run"
-    assert work._scheduled_summary("needs_attention") == "Needs attention"
-    assert work._scheduled_summary("auto_pushed") == "Completed"
-    assert work._scheduled_summary("claimed") == "In progress"
+    assert "/powergrader" not in serialized
 
 
 def test_work_projection_keeps_global_and_current_jobs_but_hides_previous(monkeypatch):
@@ -472,11 +286,8 @@ def test_complete_only_intentional_and_no_canvas_calls(monkeypatch, tmp_path):
 
     intentional = _job(origin="intentional", status="in_progress")
     monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [intentional])
-    monkeypatch.setattr(session_store, "list_session_summaries", lambda: [{
-        "session_id": "session-1", "assignment_name": "Fictional Stored Title",
-    }])
     preview = client.get("/api/work?section=all").json()
-    assert preview["presentations"]["job-route-1"]["title"] == "Fictional Stored Title"
+    assert preview["presentations"]["job-route-1"]["title"] == "Create work"
     response = client.post("/api/work/job-route-1/complete", json={"material_version": intentional["material_version"]}, headers=headers)
     assert response.status_code == 200
     assert response.json()["job"]["status"] == "completed"
@@ -544,63 +355,18 @@ def test_scan_is_guarded_merges_findings_and_get_stays_local(monkeypatch, tmp_pa
     assert get_response.json()["presentations"][get_response.json()["jobs"][0]["job_id"]]["title"] == "Scanned Assignment"
 
 
-def test_blank_powergrader_and_nameless_scheduled_are_hidden(monkeypatch):
-    empty_session = _job(status="in_progress")
-    empty_session["counts"] = {"total": 0, "pending": 0, "affected": 0}
-
-    named_session = _job(status="in_progress")
-    named_session.update({
-        "job_id": "job-named-session",
-        "source_ref": {"type": "powergrader_session", "value": "session-named"},
-    })
-    named_session["counts"] = {"total": 3, "pending": 3, "affected": 0}
-
-    named_scheduled = _scheduled_job()
-    named_scheduled.update({
-        "job_id": "job-sched-named",
-        "source_ref": {"type": "autoscore_job", "value": "sched-named"},
-    })
-    nameless_scheduled = _scheduled_job()
-    nameless_scheduled.update({
-        "job_id": "job-sched-nameless",
-        "source_ref": {"type": "autoscore_job", "value": "sched-nameless"},
-    })
-
-    monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [
-        empty_session, named_session, named_scheduled, nameless_scheduled,
-    ])
-    monkeypatch.setattr(session_store, "list_session_summaries", lambda: [
-        {"session_id": "session-named", "assignment_name": "Real Assignment"},
-    ])
-    monkeypatch.setattr(autoscore_queue, "load_queue", lambda: {
-        "version": 1,
-        "jobs": [
-            {"job_id": "sched-named", "assignment_name": "Scheduled Essay", "status": "session_ready"},
-            {"job_id": "sched-nameless", "assignment_name": "", "status": "claimed"},
-        ],
-    })
-
-    payload = _client().get("/api/work?section=all").json()
-    ids = {job["job_id"] for job in payload["jobs"]}
-
-    assert ids == {"job-named-session", "job-sched-named"}
-    assert set(payload["presentations"]) == ids
-    assert payload["presentations"]["job-named-session"]["title"] == "Real Assignment"
-    assert payload["presentations"]["job-sched-named"]["title"] == "Scheduled Essay"
-
-
-def test_detected_grading_cards_relabel_with_assignment_name(monkeypatch):
+def test_retired_scoring_work_is_hidden_and_current_grading_uses_gradebook(monkeypatch):
     debt = finding(
         kind="grade.debt", course_id="course-1", assignment_id="assignment-debt",
         counts={"total": 5, "pending": 3, "affected": 3},
-        now="2026-07-11T12:00:00+00:00", resumable_url="/powergrader",
+        now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
     )
-    ready = finding(
+    retired = finding(
         kind="grade.powergrader_ready", course_id="course-1", assignment_id="assignment-ready",
         counts={"total": 3, "pending": 3, "affected": 3},
         now="2026-07-11T12:00:00+00:00", resumable_url="/powergrader",
     )
-    monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [debt, ready])
+    monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [debt, retired])
     monkeypatch.setattr(
         "api.mirror.queries.course_assignments",
         lambda course_id, **kwargs: (
@@ -616,5 +382,5 @@ def test_detected_grading_cards_relabel_with_assignment_name(monkeypatch):
 
     assert by_kind["grade.debt"]["title"] == "Chapter 5 Essay"
     assert by_kind["grade.debt"]["summary"] == "3 submissions awaiting grading"
-    assert by_kind["grade.powergrader_ready"]["title"] == "Reflection Journal"
-    assert by_kind["grade.powergrader_ready"]["summary"] == "3 ungraded text entries ready for review"
+    assert set(by_kind) == {"grade.debt"}
+    assert payload["jobs"][0]["resumable_url"] == "/gradebook"

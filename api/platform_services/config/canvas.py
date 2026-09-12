@@ -1,6 +1,6 @@
-"""Canvas account, OpenRouter, and workspace path configuration.
+"""Canvas account and workspace path configuration.
 
-Machine-local config (base URL, token, OpenRouter key, model, workspace path).
+Machine-local config (base URL, token, workspace path).
 Uses lazy module-reference so monkeypatches to config._io propagate correctly.
 """
 from . import _io as _io_code
@@ -61,63 +61,6 @@ def save_canvas_account(base_url: str, token: str | None = None):
 
 
 # --------------------------------------------------------------------------
-# OpenRouter (feedback tools LLM) — key in keyring, model machine-local
-# --------------------------------------------------------------------------
-
-def get_openrouter_key() -> str | None:
-    return keyring.get_password(_io_code.SERVICE, _io_code.OPENROUTER_KEY)
-
-
-def set_openrouter_key(key: str):
-    keyring.set_password(_io_code.SERVICE, _io_code.OPENROUTER_KEY, key)
-
-
-def has_openrouter_key() -> bool:
-    k = get_openrouter_key()
-    return bool(k and not k.startswith("PASTE"))
-
-
-def get_openrouter_model() -> str:
-    model = (_io_code._machine_load().get("openrouter_model") or "").strip()
-    if not model or model == "openrouter/auto":
-        return _io_code.DEFAULT_OPENROUTER_MODEL
-    return model
-
-
-def set_openrouter_model(model: str):
-    _io_code._modify_machine(
-        lambda state: state.__setitem__("openrouter_model", (model or "").strip()) or state
-    )
-
-
-def openrouter_model_presets() -> list[dict]:
-    presets = []
-    for p in _io_code.OPENROUTER_MODEL_PRESETS:
-        item = dict(p)
-        inp = item.get("input_per_mtok")
-        out = item.get("output_per_mtok")
-        if inp is not None and out is not None:
-            item["scenario_cost"] = (
-                inp * _io_code.OPENROUTER_PRESET_SCENARIO_INPUT_TOKENS
-                + out * _io_code.OPENROUTER_PRESET_SCENARIO_OUTPUT_TOKENS
-            ) / 1_000_000
-        item.setdefault("cost_tier", _openrouter_cost_tier(item.get("scenario_cost")))
-        presets.append(item)
-    return presets
-
-
-def _openrouter_cost_tier(scenario_cost) -> str:
-    try:
-        cost = float(scenario_cost)
-    except (TypeError, ValueError):
-        return "$?"
-    if cost < 0.10:
-        return "$"
-    if cost < 0.50:
-        return "$$"
-    return "$$$"
-
-
 # --------------------------------------------------------------------------
 # Workspace path (machine-local override)
 # --------------------------------------------------------------------------

@@ -101,9 +101,9 @@ def test_settings_transactions_preserve_interleaved_nested_updates(tmp_path, mon
             }
 
 
-def test_session_and_queue_transactions_preserve_interleaved_updates(tmp_path, monkeypatch):
+def test_session_transactions_preserve_interleaved_updates(tmp_path, monkeypatch):
     from api import storage_support
-    from api.powergrader import autoscore_queue, session_store
+    from api.powergrader import session_store
     from api.platform_services import workspace
 
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
@@ -129,28 +129,8 @@ def test_session_and_queue_transactions_preserve_interleaved_updates(tmp_path, m
     session = session_store.load_session(session_id)
     assert session["marker_a"] == "A" and session["marker_b"] == "B"
 
-    queue_barrier = threading.Barrier(2)
-
-    def queue_writer(job_id):
-        queue_barrier.wait()
-        with autoscore_queue.queue_transaction() as queue:
-            queue.setdefault("jobs", []).append({"job_id": job_id})
-
-    threads = [
-        threading.Thread(target=queue_writer, args=("job-a",)),
-        threading.Thread(target=queue_writer, args=("job-b",)),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(10)
-    queue = autoscore_queue.load_queue()
-    assert {job["job_id"] for job in queue["jobs"]} >= {"job-a", "job-b"}
-
     session_path = Path(session_store.session_path(session_id))
     session_bytes = session_path.read_bytes()
-    queue_path = Path(autoscore_queue.queue_path())
-    queue_bytes = queue_path.read_bytes()
 
     def fail_replace(*_args, **_kwargs):
         raise OSError("sentinel replace failure")
@@ -160,9 +140,4 @@ def test_session_and_queue_transactions_preserve_interleaved_updates(tmp_path, m
         session_store.save_session({"session_id": session_id, "broken": True})
     except OSError:
         pass
-    try:
-        autoscore_queue.save_queue({"version": 1, "jobs": [{"job_id": "broken"}]})
-    except OSError:
-        pass
     assert session_path.read_bytes() == session_bytes
-    assert queue_path.read_bytes() == queue_bytes

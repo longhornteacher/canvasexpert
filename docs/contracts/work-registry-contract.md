@@ -6,8 +6,8 @@ is governed by `docs/contracts/operation-ledger-contract.md`.
 ## Purpose
 
 The Work Registry gives CanvasExpert one durable, cross-course index of work without
-making that index the source of truth for PowerGrader sessions, scheduled jobs, Canvas
-objects, student records, or authored Forge files.
+making that index the source of truth for Canvas objects, student records, or authored
+Forge files. Scoring Sessions are not Home/Work jobs.
 
 The UI has three operating states:
 
@@ -57,7 +57,7 @@ Each job has exactly this public index shape:
   "fingerprint": "kind/course/assignment/condition stable key",
   "material_version": "changes when underlying facts materially change",
   "origin": "intentional | detected | system",
-  "kind": "namespaced kind such as create.assignment or grade.powergrader",
+  "kind": "namespaced kind such as create.assignment or grade.debt",
   "status": "draft | ready | in_progress | attention | ignored | completed | failed",
   "title": "PII-free display title",
   "description": "PII-free short display phrase for the kind, or empty",
@@ -66,7 +66,7 @@ Each job has exactly this public index shape:
   "assignment_id": "string or empty",
   "resumable_url": "local relative URL beginning with /",
   "source_ref": {
-    "type": "workspace_relative | powergrader_session | autoscore_job | canvas_finding | routine_state | operation_receipt",
+    "type": "workspace_relative | canvas_finding | routine_state | operation_receipt",
     "value": "non-secret reference"
   },
   "counts": {
@@ -102,8 +102,8 @@ string fields:
 }
 ```
 
-This sidecar is computed on demand from Current-course configuration, PowerGrader session
-summaries, scheduled autoscore metadata, and the already-public job counts. It is never
+This sidecar is computed on demand from Current-course configuration and the already-public
+job counts. It is never
 merged into a job or persisted. It may include a teacher-authored assignment title and
 aggregate student/submission counts, but never student names or IDs, grades, comments,
 submission content, feedback, roster notes, or per-student state. Missing local authorities
@@ -114,9 +114,7 @@ Canvas.
 
 The registry never copies authoritative subsystem payloads:
 
-- PowerGrader session truth remains in
-  `api/powergrader/session_store.py` and `<workspace>/PowerGrader/*_session.json`.
-- Scheduled scoring truth remains in `api/powergrader/autoscore_queue.py`.
+- Scoring Session truth remains private in the session store and is not projected into Work.
 - Routine enablement and due state remain machine-local in `config/routines.py`.
 - Forge source truth remains in the workspace library or staged temp file.
 - Canvas assignment/submission truth remains in Canvas and bounded discovery caches.
@@ -126,12 +124,9 @@ Adapters project summaries into jobs and hydrate details only after the job open
 transient Desk presentation sidecar is a display projection, not hydration and not an
 authority.
 
-Home projects saved PowerGrader work at the assignment level while PowerGrader keeps its
-full session-level history. When summary records have both a course ID and assignment ID,
-the adapter selects one resume target for that exact pair: the session with the greatest
-number of approved, unposted results (newest breaks ties), otherwise the newest incomplete
-session, otherwise the newest completed session. Counts and resume identity come from the
-selected session and are never summed. Summaries missing either identity remain separate.
+Home and Work contain no scoring-session resume cards or scheduled scoring jobs. Teachers
+resume by invoking the Scoring Session flow in their connected agent; Canvas Live remains
+the review/edit surface.
 
 ## Detected findings
 
@@ -141,14 +136,13 @@ freshness/error metadata, and may run in parallel with a maximum documented conc
 
 Initial providers, in order:
 
-1. Existing PowerGrader sessions and autoscore queue states.
-2. Enabled/due routines and failed/partial routine receipts.
-3. Cross-course grading debt: assignments with submitted work lacking teacher score,
+1. Enabled/due routines and failed/partial routine receipts.
+2. Cross-course grading debt: assignments with submitted work lacking teacher score,
    comment, or CanvasExpert session evidence.
-4. Aggregate late-work findings using school-day and extra-time math.
-5. Aggregate roster warning categories.
-6. Aggregate Home attention: evidence-backed student-response follow-up, uncertain staff
-   response checks, and ungraded text-entry PowerGrader suitability.
+3. Aggregate late-work findings using school-day and extra-time math.
+4. Aggregate roster warning categories.
+5. Aggregate Home attention: evidence-backed student-response follow-up and uncertain staff
+   response checks.
 
 Discovery persists counts and stable object IDs only. Student identities and submission
 text are retained only when a job opens in a PRIVATE workspace. An explicit discovery

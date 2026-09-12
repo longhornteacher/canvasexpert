@@ -26,7 +26,6 @@
     <div class="ce-rail-nav__group">
       <p class="ce-rail-nav__kicker">AI &amp; authoring</p>
       <div class="ce-rail-nav__links">
-        <a href="#openrouter-card" data-rail-link>AI assistance</a>
         <a href="#tier-tags-card" data-rail-link>Differentiation tags</a>
         <a href="#ai-ta-card" data-rail-link>AI Authoring</a>
       </div>
@@ -153,7 +152,7 @@
   <h2>Current courses</h2>
   <p class="ce-hint">
     Canvas Expert uses only these courses in Desk scans, normal course pickers, and
-    automatic PowerGrader work. Move a finished course to Previous to keep its local
+    scheduled routines. Move a finished course to Previous to keep its local
     history without including it in current work.
   </p>
 
@@ -233,93 +232,6 @@
     </label>
     <div id="course-list"></div>
   </div>
-</section>
-
-<section class="ce-panel ce-settings-panel" id="openrouter-card" data-default-model="{{ default_openrouter_model }}">
-  <h2>AI assistance <small class="lbl-hint">(OpenRouter)</small></h2>
-  <p class="ce-hint">
-    PowerGrader can use OpenRouter to co-score submissions and draft feedback.
-    The API key is stored in <strong>Windows Credential Manager</strong>; the selected
-    model is stored locally on this computer.
-  </p>
-
-  <div class="ce-actions ce-settings-link-row ce-settings-actions-wrap">
-    <a class="small-link" href="https://openrouter.ai/keys" target="_blank" rel="noopener">Open API keys ↗</a>
-    <a class="small-link" href="https://openrouter.ai/models" target="_blank" rel="noopener">Open models ↗</a>
-    <a class="small-link" href="https://openrouter.ai/settings/credits" target="_blank" rel="noopener">Add credits ↗</a>
-    <button type="button" id="btn-openrouter-help" class="small">What is this?</button>
-  </div>
-
-  <div id="openrouter-help" class="ce-notice ce-settings-help" hidden>
-    <p>
-      OpenRouter is a paid API gateway for AI models. Canvas Expert sends only the
-      pseudonymized grading bundle after its safety gate passes, then brings the score
-      and feedback suggestion back for you to review.
-    </p>
-    <ol>
-      <li>Create or sign in to an OpenRouter account.</li>
-      <li>Go to <strong>API Keys</strong>, create a key named <strong>CanvasExpert - {{ computer_name }}</strong>, and optionally set a small credit limit.</li>
-      <li>Add a small amount of credits before using paid models.</li>
-      <li>Use <strong>DeepSeek V4 Pro</strong> (<code>{{ default_openrouter_model }}</code>) for routine grading.</li>
-      <li>Use the searchable model field below for exact OpenRouter model IDs, including latest aliases.</li>
-    </ol>
-  </div>
-
-  <form id="openrouter-form">
-    <label>
-      OpenRouter API key
-      {% if openrouter_is_set %}
-      <div class="token-row">
-        <span class="token-saved">●●●●●●●● saved in Windows Credential Manager</span>
-        <button type="button" id="btn-replace-openrouter-key" class="small">Replace</button>
-      </div>
-      <input type="password" name="api_key" id="openrouter-key-input" autocomplete="off"
-             placeholder="Paste new OpenRouter key to replace" class="ce-settings-initially-hidden">
-      {% else %}
-      <div class="ce-notice ce-settings-notice">
-        No OpenRouter key saved yet — create one at openrouter.ai/keys and paste it below.
-      </div>
-      <input type="password" name="api_key" id="openrouter-key-input" autocomplete="off"
-             placeholder="Paste your OpenRouter API key here">
-      {% endif %}
-    </label>
-
-    <label>
-      Model ID
-      <input type="text" name="model" id="openrouter-model-input"
-             value="{{ openrouter_model }}" placeholder="{{ default_openrouter_model }}"
-             list="openrouter-model-list" autocomplete="off">
-      <datalist id="openrouter-model-list">
-        {% for m in openrouter_model_presets %}
-        <option value="{{ m.id }}" label="{{ m.cost_tier }} · {{ m.label }} — input ${{ "%.3g"|format(m.input_per_mtok) }}/M; output ${{ "%.3g"|format(m.output_per_mtok) }}/M; 30 essays ~${{ "%.2f"|format(m.scenario_cost) }} — {{ m.note }}"></option>
-        {% endfor %}
-        <option value="openrouter/auto" label="Auto Router (advanced; variable cost)"></option>
-      </datalist>
-      <small class="lbl-hint">
-        Default: <code>{{ default_openrouter_model }}</code>. Avoid <code>openrouter/auto</code> for grading cost control.
-      </small>
-    </label>
-
-    <div class="ce-actions ce-settings-model-tools">
-      <button type="button" id="btn-openrouter-auto" class="small">Use DeepSeek V4 Pro</button>
-      <button type="button" id="btn-openrouter-load-models" class="small">Load current model IDs &amp; prices</button>
-      <button type="button" id="btn-openrouter-test" class="small">Test saved key</button>
-    </div>
-
-    <div id="openrouter-major-models" class="ce-settings-model-box" hidden>
-      <strong class="ce-settings-label">Current major models</strong>
-      <p class="ce-hint ce-settings-compact-hint">
-        Cost estimate assumes 30 1000-word essays with an attached rubric and feedback template.
-        It uses a rough 50k input tokens + 10k output tokens model; actual cost varies with essay length and feedback length.
-      </p>
-      <div id="openrouter-major-list"></div>
-    </div>
-
-    <div class="ce-actions">
-      <button type="submit" class="primary">Save OpenRouter settings</button>
-    </div>
-    <p id="openrouter-status" class="status"></p>
-  </form>
 </section>
 
 <section class="ce-panel ce-settings-panel" id="tier-tags-card">
@@ -478,7 +390,6 @@
 {% block workspace_scripts %}
 <script src="/static/settings.js?v={{ asset_v }}"></script>
 <script src="/static/settings/account.js?v={{ asset_v }}"></script>
-<script src="/static/settings/openrouter.js?v={{ asset_v }}"></script>
 <script src="/static/settings/courses.js?v={{ asset_v }}"></script>
 <script src="/static/settings/workspace.js?v={{ asset_v }}"></script>
 <script src="/static/settings/updates.js?v={{ asset_v }}"></script>

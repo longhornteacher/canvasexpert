@@ -635,6 +635,7 @@ _INTEGRITY_CONCLUSION_PATTERNS = tuple(
         r"\b(give|assign|award)\w* (them |the student )?a? ?zero\b",
         r"\bscore of zero\b",
         r"\b(report|refer|escalate) (this |them |the student )?to\b",
+        r"\b(?:academic[- ]integrity|integrity) referral\b",
         r"\bshould be investigated\b",
     )
 )

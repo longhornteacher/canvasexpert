@@ -65,7 +65,7 @@
 
 A writing assignment is either **tracked** or **not tracked**, and the submission shape *is* the intent — there is no `tracked` field:
 
-- **Tracked:** `{ "types": ["online_upload"], "allowed_extensions": ["docx"] }` — File Upload alone, `docx` alone. PowerGrader then reads the submitted document's own revision history (Writing Timeline) automatically. Any extra type or extension, `pdf` included, makes it not tracked.
+- **Tracked:** `{ "types": ["online_upload"], "allowed_extensions": ["docx"] }` — File Upload alone, `docx` alone. Canvas Expert may include the submitted document's own revision history (Writing Timeline) in the SAFE scoring packet. Any extra type or extension, `pdf` included, makes it not tracked.
 - **Not tracked:** the normal Canvas choices, e.g. `{ "types": ["online_text_entry"] }` for a quickwrite.
 
 **Ask the teacher which one they want; never infer it from the task.** A tracked assignment also needs a line in the `description` telling students they write in the Word document provided, submit that `.docx`, and that the document records when text is added and revised — announced, not secret. Students must write in a handout the teacher prepared with Track Changes on and locked, which is the teacher's own step today. Pull `get_product_guide(topic="writing_timeline")`, or ask for the "Writing Timeline (tracked assignments)" file, before advising on any of this.

@@ -13,7 +13,6 @@ from . import (
     finding,
     text,
 )
-from .powergrader import powergrader_evidence
 
 
 def _number(value, default=0) -> int:
@@ -57,7 +56,6 @@ def scan_course(course_id: str, *, now, reads: WorkCourseReads) -> list[dict]:
     assignments = reads.assignments()
     submissions = reads.submissions(include_comments=True)
     assignment_map = _normalize_assignment_map(assignments)
-    evidence = powergrader_evidence()
     aggregates: dict[str, dict] = defaultdict(lambda: {
         "total": 0,
         "pending": 0,
@@ -89,10 +87,6 @@ def scan_course(course_id: str, *, now, reads: WorkCourseReads) -> list[dict]:
         row["due_at"] = text(assignment.get("due_at"))
         user_id = text(submission.get("user_id"))
         touched = _teacher_touched(submission, user_id)
-        session_key = (str(course_id), assignment_id, user_id)
-        session_evidence = evidence.get(session_key)
-        if session_evidence and not _later_than_evidence(submission, session_evidence):
-            touched = True
         if not touched:
             row["pending"] += 1
             row["affected"] += 1
@@ -110,23 +104,9 @@ def scan_course(course_id: str, *, now, reads: WorkCourseReads) -> list[dict]:
             latest_submitted_at=row["latest_submitted_at"],
             latest_attempt_number=row["latest_attempt_number"],
             due_at=row["due_at"],
-            resumable_url="/powergrader",
+            resumable_url="/gradebook",
         ))
     return output
-
-
-def _later_than_evidence(submission: dict, evidence: dict) -> bool:
-    submitted_at = text(submission.get("submitted_at"))
-    evidence_at = text(evidence.get("at"))
-    if not submitted_at or not evidence_at:
-        return False
-    try:
-        from .powergrader import as_datetime
-        current = as_datetime(submitted_at)
-        prior = as_datetime(evidence_at)
-        return current is not None and prior is not None and current > prior
-    except Exception:
-        return False
 
 
 __all__ = ["scan_course"]

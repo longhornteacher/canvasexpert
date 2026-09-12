@@ -4,8 +4,7 @@
 **Implementation:** `api/webui/server.py` (FastAPI), `api/webui/templates/` (Jinja2),
 `api/webui/static/` (`push.js` + `push/*.js`, `course_expert/*.js`,
 `gradebook.js` + `gradebook/*.js`, `roster.js` + `roster/*.js`,
-`feedback/*.js`, `powergrader_setup.js` + `powergrader/*.js`,
-`powergrader_queue.js` + `powergrader/*.js`, `course_info.js`,
+`feedback/*.js`, `course_info.js`,
 `settings.js`, `ui/*.css`, and page-owned feature CSS).
 
 For backend overview, setup, files table, and confirmed Canvas API facts, see `api/README.md`.
@@ -52,7 +51,7 @@ Source tests never substitute for rendered verification.
 | `/students/reports` | **Student reports** — packet and portfolio tools under Students | `student_reports.html` + `course_expert/student_reports.js` + `course_expert/portfolio.js` |
 | `/gradebook` | **Gradebook tools** — single-course grade operations | `gradebook.js` + `gradebook/*.js` |
 | `/roster` | **Rosters** — student-level Canvas-group and local settings console | `roster.js`, `roster/*.js` |
-| `/powergrader` | **PowerGrader** — grade one assignment with three routes: Score myself, Prepare for my AI chat, or Draft-score with OpenRouter | `powergrader_setup.js` + `powergrader/setup_*.js`, `powergrader_queue.js` + `powergrader/queue_*.js` |
+| Scoring Sessions | MCP only; no Canvas Expert scoring page or browser assets. Review and edit posted results in Canvas Live. | `docs/reference/powergrader-scoring-map.md` |
 | `/ai-expert` | **AI helper files** — paste-ready LLM skill files | inline |
 | `/course` | Course Info detail page | `course_info.js` |
 | `/settings` | Settings | `settings.js` |
@@ -123,16 +122,13 @@ upload staging; `api/dataforge/` owns parsing, report generation, dashboard aggr
 history, downloads, and the read-only local-ID-to-CanvasMirror coverage report. It never
 refreshes Canvas, writes groups, or calls the AI provider.
 
-### PowerGrader module routing
+### Scoring Sessions
 
-PowerGrader is now intentionally split for low-token debugging.
-
-- Route owner: `api/webui/routes/powergrader.py`
-- Setup page modules: `powergrader_setup.js` (thin shim), `powergrader/setup_core.js`, `powergrader/setup_autoscore.js`
-- Queue page modules: `powergrader_queue.js` (thin shim), `powergrader/queue_core.js`, `powergrader/queue_review.js`, `powergrader/queue_privacy.js`, `powergrader/queue_late_catchup.js`, `powergrader/queue_import.js`
-- Backend workflow package: `api/powergrader/`
-
-For the full ownership map and current source-size report, see `docs/reference/powergrader-module-map.md`.
+Scoring Sessions are available through MCP only. The agent receives a SAFE
+pseudonymized packet and returns results through one assignment-type-neutral
+submit call. Canvas Expert privately selects the ordinary assignment or New Quiz
+write lane; Canvas Live is the only review/edit surface. See
+`docs/guides/scoring-sessions.md` and `docs/reference/powergrader-scoring-map.md`.
 
 ### Gradebook module routing
 
@@ -156,23 +152,12 @@ Roster has backend helper splits and browser feature files.
 
 For the full ownership map and current hotspot snapshot, see `docs/reference/roster-module-map.md`.
 
-### Feedback tools module routing — PowerGrader advanced import
+### Feedback and scoring engine
 
-`/feedback-expert` is a compatibility redirect to `/powergrader?advanced=import`.
-PowerGrader owns packet creation, OpenRouter drafting, CSV fallback review, session-bound
-result import, teacher review, and Canvas write safeguards. `feedback_*` remains the
-shared SAFE/PRIVATE, vault, contract, result-validation, persona, and pattern engine;
-the legacy direct-push presentation and routes are retired.
-
-- Compatibility redirect: `routes/pages.py::feedback_expert_page`
-- Active UI: `powergrader_setup.html`, `powergrader_queue.html`, and
-  `static/powergrader/setup_advanced.js` / `queue_import.js`
-- Shared library API: `routes/feedback_library.py`
-- Shared engines: `api/feedback_pipeline.py`, `api/feedback_artifacts.py`,
-  `api/feedback_contract.py`, `api/feedback_results.py`, `api/feedback_vault.py`,
-  `api/feedback_scrub.py`, `api/feedback_safety.py`
-
-For privacy-sensitive ownership, see `docs/reference/powergrader-scoring-map.md`.
+The shared feedback/SAFE components are used by the MCP Scoring Session contract;
+there is no HTTP scoring route, compatibility redirect, manual import, or hosted
+model. Canvas Live is the only review/edit surface. See
+`docs/reference/powergrader-scoring-map.md`.
 
 ---
 
@@ -185,7 +170,7 @@ store** (Windows Credential Manager) via `keyring` — never written to disk in 
 
 ### Current and Previous courses
 **Current courses** define Canvas Expert's operational scope: Desk scans, normal
-course pickers, and automatic PowerGrader work use only this set. Move finished
+course pickers and desk scans use only this set. Move finished
 courses to **Previous courses** to keep their local history while excluding them from
 current work; moving them back is reversible. **Add courses from Canvas** is the only
 surface that browses every live Canvas course. Nicknames set here are the display
@@ -217,9 +202,8 @@ Start links are ordinary navigation and leave course choices to their destinatio
 Continue and Attention show local work-registry items with a transient, non-persisted presentation sidecar:
 Current-course label, locally known assignment title, aggregate progress sentence, and
 specific action label. Exact registry jobs remain generic and PII-minimized; the sidecar
-never opens full PowerGrader sessions or scans Canvas. Multiple PowerGrader sessions for
-the same identified course and assignment produce one Home row, chosen according to the
-Work Registry contract, while PowerGrader retains its full session history. Ignore, Snooze, and Complete use
+does not open scoring sessions or scan Canvas. Scoring Sessions are not Home/Work jobs.
+Ignore, Snooze, and Complete use
 the guarded local mutation routes. Prepared is intentionally honest until prepared-operation
 projections are available, and currently reports that there are no prepared
 operations. Home reads `/api/work` and `/api/receipts`, does not call
@@ -390,7 +374,7 @@ packets for just this cohort, skipping courses whose data hasn't changed (dedupe
 into any packet.
 
 **New Quizzes status:** Enrollment-gated personal access tokens can retrieve constructed
-responses through the Student Analysis JSON report. PowerGrader's separate, teacher-reviewed
+responses through the Student Analysis JSON report. The private Scoring Session
 item-finalization lane uses Canvas's first-party, short-lived signed grader launch to write
 item scores and per-item grader feedback; it does not use the ordinary assignment-total
 `PUT`. Active/current instructor enrollment is the prerequisite, not PAT-versus-OAuth;
@@ -439,86 +423,12 @@ Read-only grade distribution view.
 
 ---
 
-## PowerGrader (`/powergrader`)
+## Scoring Sessions (MCP)
 
-Ordinary local media review is the default. The setup’s **Read-aloud analysis** checkbox
-is explicit and default-off; only when selected are the passage and local-model controls
-shown. Validated `downloaded` and `reused` recordings play through a per-record,
-session-scoped URL, including when another focused-evidence record is held.
-
-Keyboard-first grading queue for one Canvas assignment. A teacher starts one
-session, reviews submissions student by student, approves or edits feedback, and
-pushes approved grades/comments back to Canvas.
-
-The setup page uses a wide responsive workspace with:
-
-- **Side-by-side course/assignment selection** on desktop — Course takes about 35%
-  of the available width and Assignment takes about 65%, with course-wide search
-  and module filtering unchanged.
-- **Mode-aware fast versus AI configuration** — Score myself shows a compact
-  rubric-only panel; AI modes show a two-column AI setup/source material layout.
-- **Course-wide search** that scans all assignments regardless of the selected
-  module view, and module filtering that defaults to the last three modules.
-
-New Quizzes are selectable for written-response review in all three modes.
-Classic Quizzes remain unavailable. For session mechanics, the item-finalization
-lane, and current write-safety guarantees, see
-`docs/reference/new-quizzes-grading-transport.md` and
-`docs/reference/powergrader-module-map.md`.
-
-After a course is selected, the assignment picker groups work by Canvas course
-module and immediately shows the final three modules in course order. The Modules
-control can switch to any other module in the course. Assignment search always scans
-the whole course, including assignments and quizzes outside the selected module view.
-
-Modes:
-
-- **Score myself** — fetches submitted work and opens the queue with no AI packet
-  or API call.
-- **Score with AI chat** — writes reviewed pseudonymized artifacts under `For AI/`
-  and private originals/state under the canonical workspace, and creates
-  chat-friendly batch folders. Each batch folder has exactly three numbered
-  upload files: assignment information, rubric and TA personality, and that
-  batch's pseudonymized student work. Teachers start a fresh AI chat per batch,
-  attach those three files, then paste each JSON response back into the
-  matching batch panel in the same PowerGrader session.
-- **Auto-score with AI** — sends only the SAFE pseudonymized packet to the
-  configured OpenRouter model after price checks, then loads AI suggestions into
-  the same review queue.
-
-Batches ship as loose files, never a ZIP: confirmed 2026-08-06, Microsoft 365
-Copilot cannot read a ZIP as an attachment (it can only produce one), per
-Microsoft's own file-formats-supported page. Since CanvasExpert stays
-vendor-neutral and cannot assume which chat a teacher has, loose files are the
-one artifact every chat can open. The flat packet still builds a ZIP alongside
-its folder as an internal artifact, but nothing in the product offers it as
-something to attach to an AI chat; the folder's loose files are. Batch imports
-validate `pseudonym` and `item_id`
-against the selected batch before updating AI suggestions, so a response from one
-batch cannot silently update another batch. Late batches are additive, use a
-distinct batch prefix and visible **Late** label, and own the SAFE bundle used to validate
-their later import.
-
-AI suggestions remain drafts until the teacher reviews, edits, approves, and pushes unless
-the teacher explicitly enables one of two narrow automatic-post paths:
-
-- A scheduled Auto-Score job may opt one job/assignment into scheduled auto-push.
-- A newly created assisted or packet PowerGrader session may opt only that session into
-  **Automatically post eligible AI results to Canvas**. The checkbox is default-off and
-  non-sticky. Score myself, Classic Quiz, and New Quiz sessions cannot enable it.
-
-Both paths require fresh Canvas state, supported points-based individual assignment metadata,
-unchanged submission identity, no existing Canvas work, valid in-range AI output, idempotency,
-and a writable receipt directory. Missing, changed, excused, unsupported, or otherwise
-uncertain rows stay in the review queue. Packet late generation itself never posts; a valid
-batch import is its only automatic-post trigger. The queue keeps the latest trigger summary
-and marks successful rows **Auto-posted**. Canvas Expert v1 does not reopen those rows; use
-Canvas SpeedGrader to change an automatically posted grade.
-
-Safety wording is practical rather than absolute: pseudonymized files use synthetic
-names and remove obvious identifiers before upload, but visible content can still
-identify a student. Teachers should review every file before sending it to an
-external chat tool.
+Canvas Expert has no local scoring queue, result-import panel, or hosted grader. The
+connected agent scores only a SAFE pseudonymized packet and submits results through
+one public tool. Canvas Live is the only review/edit surface. See
+`docs/guides/scoring-sessions.md` and `docs/reference/powergrader-scoring-map.md`.
 
 ---
 
@@ -533,10 +443,8 @@ skill files, served from the Library/AI Authoring folder (`/api/ai-ta/file?name=
   "Forge one with your LLM" copy buttons.
 - **MagicSchool Toolkit** — setup recipes for building dedicated MagicSchool tools.
 
-**Rebuild library** regenerates the files from the contracts. The per-rubric "Score
-with ..." skill files are retired (no vault, no way back into a PowerGrader
-session; the Safe AI Packet flow covers AI-assisted scoring properly); rebuilding
-also sweeps out any unedited copy an earlier rebuild left behind.
+**Rebuild library** regenerates the files from the contracts and removes retired
+scoring skill files.
 
 ---
 
@@ -551,7 +459,8 @@ modules, assignments, Canvas quick-links, download folder path.
 
 Quiz pushes delegate to the existing CLI scripts as subprocesses with credentials
 injected via environment variables (`QF_PUSH_SETTINGS` carries assignment settings as
-JSON) and stream progress over SSE. Assignment evidence refreshes are focused PowerGrader reads.
+JSON) and stream progress over SSE. Assignment evidence refreshes are focused reads
+used by the private Scoring Session packet builder.
 Assignment / page / rubric / quick-assignment creation plus gradebook and
 course-info reads are direct Canvas REST calls through split Web UI routes
 (`/api/gradebook`, `/api/course-detail`). The push logic itself

@@ -39,7 +39,6 @@ ALLOWED_DIRECT_HTTP = {
     "api/platform_services/canvas_client.py",    # shared platform Canvas client (_canvas_send/canvas_get)
     "api/canvas.py",                     # shared transport for standalone sandbox scripts
     # External / diagnostic / sandbox owners
-    "api/openrouter_client.py",          # external OpenRouter AI transport (not Canvas)
     "api/webui/self_update.py",          # pinned GitHub self-update transport (not Canvas); see the self-update brief's D5
     "api/diagnose_newquizzes.py",        # standalone auth-probe CLI
     # Specialized New Quiz / PowerGrader native transports (documented owners)

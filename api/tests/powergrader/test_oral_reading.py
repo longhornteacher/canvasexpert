@@ -124,24 +124,3 @@ def test_session_projection_never_exposes_private_events_or_cache_data():
     attachment = view["students"][0]["attachments"][0]
     assert attachment["oral_reading"]["transcript"] == "one two"
     assert "oral_reading_private" not in attachment
-
-
-def test_queue_renders_complete_needs_review_and_unavailable_media_states_locally():
-    script = r'''
-const fs=require("fs"), vm=require("vm");
-class Node { constructor(){this.children=[];this.textContent="";this.className="";this.controls=false;this.preload="";this.src="";this.listeners={};}
- appendChild(n){this.children.push(n);return n;} addEventListener(k,v){this.listeners[k]=v;} play(){} pause(){} removeAttribute(){} load(){} }
-const pane=new Node(); global.window={CE_POWERGRADER_QUEUE:{getSessionId:()=>"synthetic"}};
-global.document={getElementById:id=>id==="pg-submission-pane"?pane:null,createElement:()=>new Node()};
-vm.runInThisContext(fs.readFileSync(process.argv[1],"utf8"));
-window.CE_POWERGRADER_QUEUE.renderMediaRecordings({attachments:[
- {media_recording:true,download_status:"downloaded",extraction_status:"validated",stream_key:"one",oral_reading:{status:"complete",passage:"one two",transcript:"one two",metrics:{accuracy:1,wcpm:2},difference_candidates:[]}},
- {media_recording:true,download_status:"reused",extraction_status:"validated",stream_key:"two",oral_reading:{status:"needs_review",uncertainty:["low_confidence"],difference_candidates:[]}},
- ...["downloaded","reused","failed","pending",""].flatMap(status=>["validated","held",""] .map(extraction_status=>({media_recording:true,download_status:status,extraction_status})))
-]});
-function text(n){return n.textContent+ n.children.map(text).join(" ");} const output=text(pane);
- if(!output.includes("teacher review, not a score")||!output.includes("low_confidence")||!output.includes("Recording held")||pane.children.length!==17||pane.children.filter(n=>n.children.some(c=>c.controls)).length!==4||pane.children.filter(n=>text(n).includes("Recording held")).length!==13) process.exit(2);
-'''
-    result = subprocess.run(["node", "-e", script, str(ROOT / "webui/static/powergrader/queue_media_recording.js")],
-                            capture_output=True, text=True, check=False)
-    assert result.returncode == 0, result.stderr or result.stdout

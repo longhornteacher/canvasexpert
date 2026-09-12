@@ -60,7 +60,6 @@ from .routes.routines import router as _routines_router, _load_custom_routines, 
 from .routes.roster import router as _roster_router
 from .routes.roster_assessment_groups import router as _roster_assessment_groups_router
 from .routes.settings import router as _settings_router
-from .routes.powergrader import router as _powergrader_router
 from .routes.readiness import router as _readiness_router
 from .routes.receipts import router as _receipts_router
 from .routes.connections import router as _connections_router
@@ -189,7 +188,6 @@ app.include_router(_routines_router)
 app.include_router(_roster_router)
 app.include_router(_roster_assessment_groups_router)
 app.include_router(_settings_router)
-app.include_router(_powergrader_router)
 app.include_router(_readiness_router)
 app.include_router(_receipts_router)
 app.include_router(_connections_router)

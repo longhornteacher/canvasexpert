@@ -53,7 +53,7 @@ def _fake_session(session_id, course_id, *, new_quiz_supported=False, bundle_pat
         "session_id": session_id,
         "course_id": course_id,
         "mode": "packet",
-        "new_quiz_item_finalization_supported": new_quiz_supported,
+        "scoring_basis": {"source": "canvas_rubric", "label": "Canvas rubric"},
         "privacy_artifacts": {},
         "students": [],
     }
@@ -116,15 +116,14 @@ def test_start_scoring_session_creates_packet_session_end_to_end(monkeypatch, tm
         # Every response carried text, so nothing is held and no pseudonym
         # rides along in the summary.
         "held": 0,
-        "new_quiz_item_finalization_supported": True,
+        "scoring_basis": {"source": "canvas_rubric", "label": "Canvas rubric"},
         "next": tools._NEXT_STEPS["start_scoring_session"],
     }
     assert captured["course_id"] == "111"
     assert captured["assignment_id"] == "700010"
 
 
-def test_start_scoring_session_falls_back_to_student_count_without_a_bundle(monkeypatch, _set_active_courses):
-    """No SAFE bundle on disk (e.g. every student was excluded) still returns ok."""
+def test_start_scoring_session_refuses_to_expose_a_session_without_a_safe_bundle(monkeypatch, _set_active_courses):
     _set_active_courses(["111"])
     monkeypatch.setattr(
         "api.powergrader.start_workflow.run_start_session",
@@ -135,11 +134,10 @@ def test_start_scoring_session_falls_back_to_student_count_without_a_bundle(monk
 
     result = tools.start_scoring_session("111", "700020")
 
-    assert result["ok"] is True
-    assert result["student_count"] == 5
-    assert result["response_count"] == 5
-    assert result["new_quiz_item_finalization_supported"] is False
-    assert result["next"] == tools._NEXT_STEPS["start_scoring_session"]
+    assert result == {
+        "ok": False, "code": "packet_missing",
+        "error": "The SAFE scoring packet was not completed; no session was exposed.",
+    }
 
 
 # --- example: held work is reported, not silently counted as nothing --------
@@ -183,10 +181,10 @@ def test_start_scoring_session_names_held_students_instead_of_reporting_an_empty
     assert result["scoring_session_id"] == "sess-held"
     assert result["response_count"] == 0
     assert result["held"] == 3
-    assert result["held_pseudonyms"] == ["Pikachu", "Eevee", "Snorlax"]
+    assert "held_pseudonyms" not in result
     # The one static hint has to carry the held branch too, so a held-only
     # session is never left reading as an empty assignment.
-    assert "held rows are attachment-only" in result["next"]
+    assert "held responses could not be scored from text" in result["next"]
 
 
 def test_start_scoring_session_keeps_the_standard_hint_when_some_work_is_scorable(
@@ -206,7 +204,7 @@ def test_start_scoring_session_keeps_the_standard_hint_when_some_work_is_scorabl
 
     assert result["response_count"] == 2
     assert result["held"] == 1
-    assert result["held_pseudonyms"] == ["Pikachu"]
+    assert "held_pseudonyms" not in result
     assert result["next"] == tools._NEXT_STEPS["start_scoring_session"]
 
 
@@ -265,7 +263,7 @@ def test_start_scoring_session_surfaces_run_start_session_refusals_verbatim(
 
     result = tools.start_scoring_session("111", "700010")
 
-    assert result == {"ok": False, "error": error_text}
+    assert result == {"ok": False, "code": "start_failed", "error": error_text}
 
 
 # --- law: this tool can never open an assisted session or enable auto_post --
@@ -305,7 +303,7 @@ def test_start_scoring_session_is_registered_and_wraps_the_tool(monkeypatch):
 
     monkeypatch.setattr(
         tools, "start_scoring_session",
-        lambda course_id, assignment_id: {
+        lambda course_id, assignment_id, rubric_name="", scoring_guidance="": {
             "ok": True, "course_id_seen": course_id, "assignment_id_seen": assignment_id,
         },
     )

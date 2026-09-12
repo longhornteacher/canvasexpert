@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from api.webui.server import app
-from api.webui.routes import pages, powergrader
+from api.webui.routes import pages
 from api.dataforge import paths as dataforge_paths
 
 
@@ -22,8 +22,6 @@ TEMPLATES = ROOT / "api" / "webui" / "templates"
 EXPECTED_PRESENTATION = {
     "/": ("dashboard.html", "workspace", "full", 0),
     "/course-expert": ("course_expert.html", "workspace", "three", 2),
-    "/powergrader": ("powergrader_setup.html", "workspace", "left-main", 1),
-    "/powergrader/session/{session_id}": ("powergrader_queue.html", "workspace", "full", 0),
     "/gradebook": ("gradebook.html", "workspace", "left-main", 1),
     "/roster": ("roster.html", "workspace", "left-main", 1),
     "/settings": ("settings.html", "workspace", "left-main", 1),
@@ -40,8 +38,6 @@ EXPECTED_PRESENTATION = {
 FEATURE_CSS = (
     "api/webui/static/pages/dashboard.css",
     "api/webui/static/pages/course_expert.css",
-    "api/webui/static/powergrader_setup.css",
-    "api/webui/static/powergrader_queue.css",
     "api/webui/static/pages/gradebook.css",
     "api/webui/static/roster_workbench.css",
     "api/webui/static/roster/assessment_groups.css",
@@ -78,9 +74,6 @@ def _configure_fictional(monkeypatch):
     monkeypatch.setattr(pages.config, "get_workspace_path", lambda: "")
     monkeypatch.setattr(pages.config, "active_courses", lambda: courses)
     monkeypatch.setattr(pages.config, "saved_courses", lambda: courses)
-    monkeypatch.setattr(pages.config, "has_openrouter_key", lambda: False)
-    monkeypatch.setattr(pages.config, "get_openrouter_model", lambda: "model/fictional")
-    monkeypatch.setattr(pages.config, "openrouter_model_presets", lambda: [])
     monkeypatch.setattr(pages.config, "get_download_root", lambda: "")
     monkeypatch.setattr(pages.school_calendar, "readiness", lambda **kw: {"status": "unconfigured", "problems": ["unconfigured"]})
     monkeypatch.setattr(pages.school_calendar, "read", lambda root=None: (None, ["unconfigured"]))
@@ -112,22 +105,10 @@ def _configure_fictional(monkeypatch):
         "custom_templates": [],
         "active_count": 1,
     })
-    monkeypatch.setattr(powergrader, "list_rubric_files", lambda: [])
-    monkeypatch.setattr(powergrader, "_load_session", lambda session_id: {
-        "session_id": session_id,
-        "assignment_name": "Fictional Reflection",
-        "course_id": "course-1",
-        "mode": "fast",
-        "students": [],
-    })
-    monkeypatch.setattr(powergrader.source_materials, "ensure_source_folder", lambda: "")
-    monkeypatch.setattr(powergrader.source_materials, "list_source_files", lambda: [])
-    monkeypatch.setattr(powergrader.workspace, "workspace_root", lambda: None)
-    monkeypatch.setattr(powergrader.workspace, "folder", lambda name: "")
 
 
 def test_registry_is_the_full_program_route_map():
-    assert len(EXPECTED_PRESENTATION) == 14
+    assert len(EXPECTED_PRESENTATION) == 12
 
 
 def test_all_live_templates_use_layouts_and_no_inline_styles():
@@ -191,8 +172,6 @@ def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_pat
     routes = {
         "/": "/",
         "/course-expert": "/course-expert",
-        "/powergrader": "/powergrader",
-        "/powergrader/session/{session_id}": "/powergrader/session/synthetic-session",
         "/gradebook": "/gradebook",
         "/roster": "/roster",
         "/settings": "/settings",
@@ -230,6 +209,9 @@ def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_pat
             assert href in text
         ids = re.findall(r'\bid="([^"]+)"', text)
         assert len(ids) == len(set(ids)), url
+
+    for url in ("/powergrader", "/feedback-expert", "/api/powergrader/session/synthetic/packet"):
+        assert client.get(url).status_code == 404
 
 
 def test_student_reports_redirect_is_preserved(monkeypatch):

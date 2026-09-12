@@ -1,7 +1,7 @@
 """Feedback tools contract and prompt helpers.
 
-These helpers define the teacher-facing scoring instructions and persona signoff
-behavior used by the feedback tools pipeline and PowerGrader packet builders.
+These helpers define the shared scoring instructions and feedback contract used
+by the feedback pipeline and SAFE Scoring Session packet builders.
 """
 import json
 import os
@@ -120,8 +120,8 @@ def build_contract_text(ai_ta_name: str = "your teaching assistant",
 
     When `rubric_text` is provided it is inlined below so the file is self-contained
     (prompt context lives in the bundle; the rubric travels here) - no separate
-    attach step. When omitted, the older "attach the rubric as Knowledge" wording
-    is used (the parked NQ / OpenRouter lanes supply the rubric separately).
+    attach step. When omitted, the contract keeps its general "attach the rubric
+    as Knowledge" wording; Scoring Sessions resolve their scoring basis privately.
     Extends the Essay Scorer skill: keyed batch output for automatic
     re-identification. Student-facing signoff is persona-controlled, not part of
     the scoring contract.

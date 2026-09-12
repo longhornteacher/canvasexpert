@@ -194,12 +194,6 @@
     if (!first.mode && first.post_to_sis) details.push("Sync to SIS: yes");
     if (!first.mode && first.published === true) warnings.push("The item will be published for students.");
     if (!first.mode && first.published === false) warnings.push("The item will be created unpublished.");
-    if (first.autoscore && first.autoscore.scheduled) {
-      warnings.push("Scheduled Auto-Score will create draft AI suggestions after the due date.");
-      if (first.autoscore.auto_push) {
-        warnings.push("Per-assignment auto-push is enabled only for policy-eligible cases.");
-      }
-    }
     if (first.tiered) {
       frozen.forEach(function (review) {
         (review.tiers || []).forEach(function (tier) {

@@ -227,12 +227,6 @@ def ai_expert_page(request: Request):
     })
 
 
-@router.get("/feedback-expert", response_class=RedirectResponse)
-def feedback_expert_page():
-    """Keep old bookmarks on the session-bound PowerGrader migration lane."""
-    return RedirectResponse("/powergrader?advanced=import", status_code=307)
-
-
 @router.get("/roster", response_class=HTMLResponse)
 def roster_page(request: Request):
     """Roster Console — unified student settings surface."""
@@ -357,10 +351,6 @@ def settings_page(request: Request):
         "nav_section":   "settings",
         "canvas_base":   config.get_canvas_base(),
         "token_is_set":  config.token_is_set(),
-        "openrouter_is_set": config.has_openrouter_key(),
-        "openrouter_model": config.get_openrouter_model(),
-        "default_openrouter_model": config.DEFAULT_OPENROUTER_MODEL,
-        "openrouter_model_presets": config.openrouter_model_presets(),
         "saved_courses": saved_courses,
         "current_courses": [course for course in saved_courses if course.get("active", True)],
         "previous_courses": [course for course in saved_courses if not course.get("active", True)],

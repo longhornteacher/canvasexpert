@@ -33,24 +33,17 @@ INSTRUCTION_BUDGET = 3000
 # exists: both descriptions were already trimmed to single sentences before
 # raising this, so the remaining cost is the two tools' own name/schema
 # structure, not wordy prose.
-# Raised once for the scoring_session_id rename
-# (docs/handoffs/scoring-session-id-rename.md): a remote bridge strips any
-# argument literally named session_id, so get_scoring_packet, stage_scores,
-# and preview_new_quiz_scores now take scoring_session_id instead -- 8 extra
-# characters per parameter/required-list occurrence, across three tools.
-# Raised once for preview_assignment_scores and apply_assignment_scores, the
-# ordinary-assignment PowerGrader score write pair.
+# The current unified scoring surface has one start, one packet, one submit,
+# and one optional identity-free list tool; no scoring preview/apply pair.
 LISTING_BUDGET = 17956
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
     "get_scoring_packet",
     "start_scoring_session",
-    "preview_assignment_scores",
     "preview_sis_grade_bridge",
     "preview_learning_objective",
     "preview_roster_student_change",
-    "preview_new_quiz_scores",
     "preview_content_push",
     "preview_differentiated_quiz_push",
     "preview_assignment_update",
@@ -66,29 +59,23 @@ def test_instruction_block_stays_within_budget():
     )
 
 
-def test_scoring_routes_through_powergrader_staging_by_default():
-    """Staging is the default landing place for AI-scored work.
-
-    Pushing to Canvas from the chat stays available, but the queue is where
-    scored work belongs unless the teacher asks otherwise, and stage_scores is
-    upstream of the New Quiz write either way.
-    """
+def test_chat_scoring_uses_one_assignment_type_neutral_submit_flow():
     instructions = server._SERVER_INSTRUCTIONS
 
-    assert "stage_scores" in instructions
-    assert "PowerGrader queue is where scored work belongs by default" in instructions
-    assert "staged scores never reach Canvas on their own" in instructions
-    assert "Staging is also the way in to the New Quiz write" in instructions
+    assert "start a Scoring Session" in instructions
+    assert "get_scoring_packet" in instructions
+    assert "submit_scoring_results" in instructions
+    assert "Valid results post to Canvas immediately" in instructions
+    assert "PowerGrader" not in instructions
+    assert "OpenRouter" not in instructions
 
 
 def test_chat_side_canvas_landing_is_still_offered():
     instructions = server._SERVER_INSTRUCTIONS
 
-    assert "preview_new_quiz_scores" in instructions
-    assert "apply_new_quiz_scores" in instructions
-    assert "wants a New Quiz landed from the chat, do it" in instructions
-    # The teacher's ask is the authorization, not a request for permission.
-    assert "asking again" in instructions
+    assert "submit_scoring_results" in instructions
+    assert "resubmit the same results" in instructions
+    assert "bounded scoring guidance" in instructions
 
 
 def test_write_rules_precede_the_discovery_hints():
@@ -96,7 +83,7 @@ def test_write_rules_precede_the_discovery_hints():
     rule that bounds how far one teacher request reaches."""
     instructions = server._SERVER_INSTRUCTIONS
 
-    assert (instructions.index("does not carry to another assignment")
+    assert (instructions.index("only its named target and course")
             < instructions.index("get_product_guide"))
 
 
@@ -173,12 +160,10 @@ def test_first_lines_disclose_preview_and_canvas_write_boundaries():
         "preview_roster_student_change",
     ):
         assert "without writing" in first_lines[name]
-    for name in ("preview_new_quiz_scores", "preview_sis_grade_bridge",
-                 "preview_content_push"):
+    for name in ("preview_sis_grade_bridge", "preview_content_push"):
         assert "persist" in first_lines[name].casefold()
         assert "local" in first_lines[name]
-    for name in ("apply_new_quiz_scores", "apply_sis_grade_bridge",
-                 "apply_content_push"):
+    for name in ("apply_sis_grade_bridge", "apply_content_push"):
         assert "Canvas" in first_lines[name]
     assert "Canvas membership" in first_lines["apply_roster_student_change"]
     assert "list_courses" in first_lines["list_courses"]
@@ -201,7 +186,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 48
+    assert len(listed) == 44
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -243,9 +228,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 48
-    assert len(_synthetic_mcp["calls"]) == 48
-    assert len(_synthetic_mcp["gated"]) == 48
+    assert len(results) == 44
+    assert len(_synthetic_mcp["calls"]) == 44
+    assert len(_synthetic_mcp["gated"]) == 44
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

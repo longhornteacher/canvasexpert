@@ -30,7 +30,6 @@ reports; this map intentionally does not maintain line-count snapshots.
 `settings.js` + feature files currently own:
 
 - Canvas base/token reveal, save, and connection test flow
-- OpenRouter key/model save, test, and current-model price loading
 - Canvas course browser plus Current/Previous and removal actions
 - download root, workspace folder open, and AI Authoring folder/rebuild actions
 - checking for, downloading, and applying an in-app update (teacher-initiated
@@ -44,7 +43,6 @@ Current split:
 
 - `settings.js` - shared status/helpers bootstrap
 - `settings/account.js` - Canvas token/base URL and connection testing
-- `settings/openrouter.js` - OpenRouter key/model/model-list UX
 - `settings/courses.js` - Canvas course browser and Current/Previous actions
 - `settings/workspace.js` - download root, workspace, AI Authoring file actions
 - `settings/updates.js` - update check/download/apply/cancel UX
@@ -54,7 +52,6 @@ Current split:
 `routes/settings.py` owns:
 
 - `/settings/canvas`
-- `/settings/openrouter`, `/settings/openrouter/test`, `/settings/openrouter/models`
 - `/settings/courses/bookmark`
 - `/settings/courses/{course_id}/remove`
 - `/settings/courses/{course_id}/set-active`
@@ -92,8 +89,6 @@ unless there is a strong reason.
 ## First Places To Look By Symptom
 
 - token/base URL problems: `settings/account.js`, `settings.js`, `routes/settings.py`, `config/canvas.py`
-- OpenRouter settings/model list: `settings/openrouter.js`, `settings.js`, `routes/settings.py`,
-  `config/canvas.py`, `api/openrouter_client.py`
 - Current/Previous course problems: `settings/courses.js`, `settings.js`, `routes/settings.py`,
   `config/courses.py`
 - calendar/schedule problems: see

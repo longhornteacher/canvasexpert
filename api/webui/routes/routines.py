@@ -12,28 +12,13 @@ from fastapi import APIRouter, Form
 from fastapi.responses import JSONResponse
 
 from api.platform_services import config
-from api.platform_services.canvas_client import _canvas_send
 from api import operational_log
 from api.webui import readiness
-from . import powergrader as pg_routes
-from api.powergrader import (
-    ai_workflow,
-    autopush_executor,
-    autoscore_queue,
-    canvas_fetch,
-    late_catchup,
-    privacy,
-    session_builder,
-    session_store,
-    student_attachments,
-    writing_timeline,
-)
 from .routines_builtin import (
     _run_routine_sweep, _run_routine_download, _run_routine_curve,
     _run_routine_grading_debt, _run_routine_student_reports,
 )
 
-from api.nq_report import html_to_text
 
 router = APIRouter(prefix="/api", tags=["routines"])
 
@@ -72,18 +57,6 @@ _ROUTINE_DEFS = {
         "default": {"enabled": False, "every_hours": 168,
                     "params": {}},
     },
-    "powergrader_scheduled_autoscore": {
-        "label": "Scheduled PowerGrader Auto-Score",
-        "writes": False,
-        "default": {"enabled": False, "every_hours": 1,
-                    "params": {"max_jobs": 10}},
-    },
-    "powergrader_late_catchup": {
-        "label": "PowerGrader late catch-up",
-        "writes": False,
-        "default": {"enabled": False, "every_hours": 12,
-                    "params": {"max_sessions": 10}},
-    },
 }
 
 _ROUTINES_LOCK = threading.Lock()
@@ -110,43 +83,6 @@ def _routine_due(state):
         return True
 
 
-# --------------------------------------------------------------------------
-# PowerGrader scheduled routine wrappers
-# --------------------------------------------------------------------------
-
-from .routines_powergrader import (
-    PowerGraderRoutineDeps,
-    _run_routine_powergrader_scheduled_autoscore as _run_routine_powergrader_scheduled_autoscore_impl,
-    _run_routine_powergrader_late_catchup as _run_routine_powergrader_late_catchup_impl,
-)
-
-
-def _powergrader_routine_deps():
-    return PowerGraderRoutineDeps(
-        config=config,
-        html_to_text=html_to_text,
-        canvas_send=_canvas_send,
-        pg_routes=pg_routes,
-        ai_workflow=ai_workflow,
-        autopush_executor=autopush_executor,
-        autoscore_queue=autoscore_queue,
-        canvas_fetch=canvas_fetch,
-        late_catchup=late_catchup,
-        privacy=privacy,
-        session_builder=session_builder,
-        session_store=session_store,
-        student_attachments=student_attachments,
-        writing_timeline=writing_timeline,
-    )
-
-
-def _run_routine_powergrader_scheduled_autoscore(params):
-    return _run_routine_powergrader_scheduled_autoscore_impl(params, _powergrader_routine_deps())
-
-
-def _run_routine_powergrader_late_catchup(params):
-    return _run_routine_powergrader_late_catchup_impl(params, _powergrader_routine_deps())
-
 def _routine(rid, label, writes=False, default=None):
     def deco(fn):
         if rid in _ROUTINE_DEFS:
@@ -162,8 +98,6 @@ _ROUTINE_RUNNERS = {
     "sweep": _run_routine_sweep, "download": _run_routine_download,
     "curve": _run_routine_curve, "grading_debt": _run_routine_grading_debt,
     "student_reports": _run_routine_student_reports,
-    "powergrader_scheduled_autoscore": _run_routine_powergrader_scheduled_autoscore,
-    "powergrader_late_catchup": _run_routine_powergrader_late_catchup,
 }
 
 

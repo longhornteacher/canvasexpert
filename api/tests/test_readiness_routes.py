@@ -8,7 +8,6 @@ from api.webui.routes.readiness import get_readiness, post_readiness_probe
 
 def test_unknown_snapshot_is_redacted_and_process_local(monkeypatch):
     readiness._reset_for_tests()
-    monkeypatch.setattr(readiness.config, "get_openrouter_model", lambda: "model/test")
     first = get_readiness()
     assert first["status"] == "unknown"
     assert first["components"]["canvas"]["status"] == "unknown"
@@ -18,7 +17,7 @@ def test_unknown_snapshot_is_redacted_and_process_local(monkeypatch):
 
 def test_probe_runs_once_until_forced(monkeypatch):
     readiness._reset_for_tests()
-    calls = {"canvas": 0, "openrouter": 0, "privacy": 0}
+    calls = {"canvas": 0, "privacy": 0}
 
     def component(name):
         def run():
@@ -27,15 +26,13 @@ def test_probe_runs_once_until_forced(monkeypatch):
         return run
 
     monkeypatch.setattr(readiness, "_probe_canvas", component("canvas"))
-    monkeypatch.setattr(readiness, "_probe_openrouter", component("openrouter"))
     monkeypatch.setattr(readiness, "_probe_privacy", component("privacy"))
-    monkeypatch.setattr(readiness.config, "get_openrouter_model", lambda: "model/test")
 
     first = post_readiness_probe()
     second = post_readiness_probe()
     forced = post_readiness_probe(force=True)
     assert first["status"] == second["status"] == forced["status"] == "ready"
-    assert calls == {"canvas": 2, "openrouter": 2, "privacy": 2}
+    assert calls == {"canvas": 2, "privacy": 2}
 
 
 def test_component_mapping_never_returns_provider_body():

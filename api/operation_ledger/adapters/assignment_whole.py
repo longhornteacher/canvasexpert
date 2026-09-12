@@ -34,12 +34,6 @@ def execute(
     upload_course_file,
     file_link_html,
     find_assignment_group,
-    autoscore_queue_factory,
-    autoscore_settings,
-    autoscore_push_policy,
-    schedule_autoscore,
-    active_course_name,
-    as_bool,
     read_modules,
 ) -> dict:
     course_id = target["course_id"]
@@ -90,54 +84,6 @@ def execute(
         )
         if result.get("state") != "applied":
             return result
-
-    if payload.get("autoscore_schedule") and assignment_id:
-        queue = autoscore_queue_factory()
-        settings = autoscore_settings(payload)
-        policy = autoscore_push_policy(payload)
-        job_id = queue.make_job_id(course_id, assignment_id)
-        schedule_digest = models.sha256_dict(
-            {
-                "assignment_id": assignment_id,
-                "due_at": payload.get("due_at"),
-                "settings": settings,
-                "auto_push": as_bool(payload.get("autoscore_auto_push")),
-                "push_policy": policy,
-            }
-        )
-        schedule_step = context.before_send("schedule_autoscore", schedule_digest)
-        replace_step(steps, schedule_step)
-        try:
-            job = schedule_autoscore(
-                course_id=course_id,
-                course_name=active_course_name(course_id),
-                assignment_id=assignment_id,
-                assignment_name=name,
-                payload=payload,
-                settings=settings,
-                push_policy=policy,
-                queue=queue,
-            )
-            returned_job_id = str(job.get("job_id") or job_id)
-            if returned_job_id != job_id:
-                raise ValueError("autoscore queue returned an unexpected job ID")
-            schedule_step["state"] = "applied"
-            schedule_step = context.checkpoint_step(schedule_step, returned_object_id=job_id)
-            replace_step(steps, schedule_step)
-        except Exception as exc:
-            schedule_step["state"] = "failed"
-            schedule_step["error_code"] = "autoscore_queue_failed"
-            schedule_step["private_diagnostic"] = type(exc).__name__
-            schedule_step = context.checkpoint_step(schedule_step)
-            replace_step(steps, schedule_step)
-            return build_result(
-                "partial",
-                steps=steps,
-                returned_object_id=assignment_id,
-                returned_object_url=assignment_url,
-                error_code="autoscore_queue_failed",
-                private_diagnostic=type(exc).__name__,
-            )
 
     return build_result(
         "applied",

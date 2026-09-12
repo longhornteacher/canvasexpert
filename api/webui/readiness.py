@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 
 from api.platform_services import config, workspace
 from api.platform_services.canvas_client import canvas_get
-from .routes.settings import _probe_openrouter_key
 
 
 _LOCK = threading.RLock()
@@ -44,16 +43,6 @@ def _probe_canvas() -> dict:
     if data is not None:
         return _component("ready")
     return _component("degraded", _code(error))
-
-
-def _probe_openrouter() -> dict:
-    key = config.get_openrouter_key()
-    if not key or not config.has_openrouter_key():
-        return _component("unconfigured", "unconfigured")
-    result = _probe_openrouter_key(key, timeout=5)
-    if result.get("valid"):
-        return _component("ready")
-    return _component("degraded", _code(result.get("error")))
 
 
 def _probe_privacy() -> dict:
@@ -103,7 +92,6 @@ def _public(components: dict, checked_at: str | None) -> dict:
         "ok": True,
         "status": _overall(components),
         "checked_at": checked_at,
-        "configured_model": config.get_openrouter_model(),
         "components": components,
     }
 
@@ -111,7 +99,7 @@ def _public(components: dict, checked_at: str | None) -> dict:
 def snapshot() -> dict:
     with _LOCK:
         if _LAST_PROBE is None:
-            unknown = {name: _component("unknown") for name in ("canvas", "openrouter", "privacy")}
+            unknown = {name: _component("unknown") for name in ("canvas", "privacy")}
             return _public(unknown, None)
         return _public(_LAST_PROBE["components"], _LAST_PROBE["checked_at"])
 
@@ -123,7 +111,6 @@ def probe(force: bool = False) -> dict:
             return snapshot()
         components = {
             "canvas": _probe_canvas(),
-            "openrouter": _probe_openrouter(),
             "privacy": _probe_privacy(),
         }
         _LAST_PROBE = {"checked_at": _now(), "components": components}

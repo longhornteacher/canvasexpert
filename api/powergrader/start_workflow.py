@@ -8,7 +8,6 @@ from api.platform_services import config, workspace
 from api.powergrader import (
     assignment_refresh,
     ai_workflow,
-    late_catchup,
     oral_reading,
     privacy,
     session_builder,
@@ -17,10 +16,8 @@ from api.powergrader import (
     writing_timeline,
 )
 from api.powergrader.helpers import (
-    build_late_watch_state,
     build_start_error_payload,
     build_start_success_payload,
-    normalize_mode,
 )
 
 
@@ -164,6 +161,8 @@ def run_start_session(
     oral_reading_passage: str,
     oral_reading_enabled: str,
     save_session,
+    scoring_session: bool = False,
+    scoring_guidance: str = "",
 ) -> dict:
     """Run the PowerGrader session-start orchestration for one assignment.
 
@@ -185,7 +184,10 @@ def run_start_session(
         return {"ok": False, "payload": {"ok": False, "error": "course_id and assignment_id are required."}}
     if not workspace.workspace_root():
         return {"ok": False, "payload": {"ok": False, "error": "No workspace configured — finish setup first."}}
-    mode = normalize_mode(mode)
+    if not scoring_session:
+        return {"ok": False, "payload": {"ok": False,
+            "error": "Only chat-first Scoring Sessions can start from this workflow."}}
+    mode = "packet"
     session_id = str(uuid.uuid4())
     course_name = config.course_display_name(course_id)
 
@@ -201,6 +203,38 @@ def run_start_session(
     assignment_description = html_to_text(adata.get("description") or "")
     points_possible = float(adata.get("points_possible") or 100)
     is_new_quiz = adata.get("is_quiz_lti_assignment") is True
+
+    rubric_text_override = None
+    scoring_basis = None
+    if scoring_session:
+        canvas_rubric = scoring_rubric_text(adata.get("rubric"))
+        if canvas_rubric:
+            rubric_name = "Canvas rubric"
+            rubric_text_override = canvas_rubric
+            scoring_basis = {"source": "canvas_rubric", "label": "Canvas rubric"}
+        elif rubric_name:
+            rubric_text_override = ai_workflow.context.load_rubric_text(rubric_name)
+            if not rubric_text_override.strip():
+                return {"ok": False, "payload": {"ok": False,
+                    "error": "The selected Canvas Expert rubric is unavailable. Choose a listed rubric or provide scoring guidance.",
+                    "code": "rubric_unavailable"}}
+            scoring_basis = {"source": "canvas_expert_rubric", "label": rubric_name}
+        elif scoring_guidance.strip():
+            rubric_text_override = scoring_guidance.strip()
+            rubric_name = "Teacher scoring guidance"
+            scoring_basis = {"source": "teacher_guidance", "label": "Teacher scoring guidance"}
+        else:
+            from api.webui.deps import list_rubric_files
+            labels = [str(item.get("label") or "") for item in list_rubric_files()
+                      if str(item.get("label") or "").strip()]
+            return {"ok": False, "payload": {"ok": False,
+                "code": "needs_scoring_norms",
+                "error": "No usable Canvas rubric is attached. Choose a Canvas Expert rubric or provide scoring guidance.",
+                "rubric_labels": labels}}
+        if len(str(rubric_text_override or "")) > 12000:
+            return {"ok": False, "payload": {"ok": False,
+                "error": "Scoring guidance is too long; provide at most 12,000 characters.",
+                "code": "scoring_guidance_too_long"}}
 
     submitted = [
         s for s in subs
@@ -237,28 +271,17 @@ def run_start_session(
             roster_submissions=subs,
         )
 
-    initial_missing_user_ids = late_catchup.initial_missing_user_ids(subs or [])
     submitted_user_ids = sorted({str(s.get("user_id", "")) for s in submitted if s.get("user_id")})
 
-    selected_model = (model_id or "").strip() or config.get_openrouter_model()
-    late_watch = build_late_watch_state(
-        mode=mode,
-        watch_late=watch_late,
-        has_openrouter_key=config.has_openrouter_key(),
-        initial_missing_user_ids=initial_missing_user_ids,
-        submitted_user_ids=submitted_user_ids,
-        response_kind=response_kind,
-        new_quiz_snapshot=is_new_quiz,
-    )
-    if media_submissions:
-        late_watch.update({
-            "supported": False,
-            "enabled": False,
-            "reason": "Late AI catch-up is unavailable for a session containing media recordings.",
-        })
-
+    late_watch = {
+        "enabled": False,
+        "supported": False,
+        "reason": "A Scoring Session is a snapshot; start a new session for later work.",
+        "known_user_ids": submitted_user_ids,
+        "scored_user_ids": [],
+        "generated_user_ids": [],
+    }
     # AI workflow
-    media_user_ids = {str(s.get("user_id")) for s in media_submissions}
     ai_result = ai_workflow.run_ai_workflow(
         mode=mode,
         submitted=submitted,
@@ -269,14 +292,11 @@ def run_start_session(
         assignment_id=assignment_id,
         session_id=session_id,
         rubric_name=rubric_name,
+        rubric_text_override=rubric_text_override,
         persona_id=persona_id,
-        feedback_pattern_id=feedback_pattern_id,
-        selected_model=selected_model,
-        response_kind=response_kind,
         source_text=source_text,
         source_files_json=source_files_json,
         source_uploads=source_uploads,
-        has_openrouter_key=config.has_openrouter_key(),
     )
     if not ai_result["ok"]:
         return {"ok": False, "payload": build_start_error_payload(
@@ -289,7 +309,6 @@ def run_start_session(
     privacy_artifacts = ai_result["privacy_artifacts"]
     ai_by_uid = ai_result["ai_by_uid"]
     ai_failures = dict(ai_result.get("ai_failures") or {})
-    late_watch["source_context"] = ai_result.get("source_context") or {}
 
     # Roster context
     roster_settings = config.get_roster_student_settings(course_id)
@@ -316,19 +335,15 @@ def run_start_session(
         course_id=course_id,
         assignment_id=assignment_id,
         mode=mode,
-        selected_model=selected_model,
+        selected_model="",
         privacy_steps=privacy_steps,
         write_privacy_audit_file=privacy.write_privacy_audit_file,
         privacy_step=privacy.privacy_step,
     )
 
-    # Derive auto_post: enabled only for assisted/packet, not New Quiz, not fast
-    auto_post_enabled = (
-        str(auto_post).lower() in {"1", "true", "yes", "on"}
-        and mode in ("assisted", "packet")
-        and not is_new_quiz
-        and not media_user_ids
-    )
+    # Canvas Live is the only review surface; this start path never enables
+    # unattended posting.
+    auto_post_enabled = False
 
     session = build_start_session(
         build_session=session_builder.build_session,
@@ -340,7 +355,7 @@ def run_start_session(
         mode=mode,
         rubric_name=rubric_name,
         persona_id=persona_id,
-        selected_model=selected_model,
+        selected_model="",
         assignment_description=assignment_description,
         response_kind=response_kind,
         privacy_steps=privacy_steps,
@@ -358,6 +373,9 @@ def run_start_session(
         oral_reading_passage=({"enabled": True, "passage": oral_passage, "digest": oral_reading.passage_digest(passage_tokens)} if oral_enabled else {"enabled": False}),
     )
     session["writing_timeline_tracked"] = writing_timeline_tracked
+    if scoring_session:
+        session["scoring_basis"] = scoring_basis
+        session["scoring_rubric_text"] = rubric_text_override
     save_session(session)
 
     payload = build_start_success_payload(
@@ -379,3 +397,28 @@ def run_start_session(
         "mode": mode,
         "auto_post_enabled": auto_post_enabled,
     }
+
+
+def scoring_rubric_text(value) -> str:
+    """Render a usable Canvas assignment rubric without exposing its raw shape."""
+    if not isinstance(value, list) or not value:
+        return ""
+    lines = []
+    for index, criterion in enumerate(value, 1):
+        if not isinstance(criterion, dict):
+            continue
+        description = str(criterion.get("description") or "").strip()
+        points = criterion.get("points")
+        if not description or not isinstance(points, (int, float)):
+            continue
+        lines.append(f"{index}. {description} ({points:g} points)")
+        ratings = criterion.get("ratings") or []
+        if isinstance(ratings, list):
+            for rating in ratings:
+                if not isinstance(rating, dict):
+                    continue
+                label = str(rating.get("description") or "").strip()
+                rating_points = rating.get("points")
+                if label and isinstance(rating_points, (int, float)):
+                    lines.append(f"   - {rating_points:g}: {label}")
+    return "\n".join(lines)

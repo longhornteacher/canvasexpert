@@ -1,7 +1,7 @@
 """Tests for the scoring packet MCP surface.
 
 Covers build_packet plus the three tools: list_scoring_sessions,
-get_scoring_packet, stage_scores.
+get_scoring_packet, submit_scoring_results.
 
 Everything is fabricated and confined to tmp_path: the vault, the session, and
 the SAFE bundle. Real names here are invented ("Real Student 1") and Canvas ids
@@ -11,11 +11,9 @@ tests need to name a pseudonym in a bundle and have it resolve back.
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import sys
-from datetime import datetime
 
 import pytest
 
@@ -73,9 +71,7 @@ def _fake_session(session_id: str, course_id: str, people: list[dict] | None = N
         "assignment_name": assignment_name,
         "assignment_id": "700010",
         "created": "2026-01-01T08:00:00",
-        "mode": mode,
-        "rubric_name": "Test Rubric",
-        "persona_id": "test-persona",
+        "scoring_basis": {"source": "canvas_expert_rubric", "label": "Test Rubric"},
         "students": [{"user_id": p["canvas_id"], "status": "pending"} for p in people],
         "privacy_artifacts": {},
     }
@@ -375,10 +371,7 @@ def _summary(session_id, course_id, **over):
         "course_id": course_id,
         "assignment_id": "700010",
         "created": "2026-01-01T00:00:00",
-        "mode": "fast",
-        "mode_label": "Score myself",
-        "total": 4,
-        "approved": 2,
+        "student_count": 4,
     }
     base.update(over)
     return base
@@ -426,41 +419,26 @@ def test_list_scoring_sessions_skips_sessions_without_a_bundle(monkeypatch, tmp_
     assert [row[0] for row in result["sessions"]["rows"]] == ["s1"]
 
 
-def test_list_scoring_sessions_counts_scored_students(monkeypatch, tmp_path):
-    """scored is read off the session's own students.
-
-    The summary dict has never carried a students key, so counting over it
-    reported 0 scored for every session no matter how much had been graded.
-    """
+def test_list_scoring_sessions_uses_compact_neutral_columns(monkeypatch, tmp_path):
     people = _seed_vault(monkeypatch, tmp_path, count=3)
     _set_active_courses(monkeypatch, ["111"])
 
     session = _fake_session("s1", "111", people)
     _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
-    session["students"][0]["ai_score"] = 8
-    session["students"][1]["ai_score"] = 0   # a zero is a score, not an absence
-    # third student left unscored
-
     _bind_session_store(monkeypatch, {"s1": session})
     monkeypatch.setattr("api.powergrader.session_store.list_session_summaries",
-                        lambda: [_summary("s1", "111", total=3, approved=1)])
+                        lambda: [_summary("s1", "111", student_count=3)])
 
     result = tools.list_scoring_sessions()
     row = result["sessions"]["rows"][0]
 
     assert list(result["sessions"]["columns"]) == [
         "scoring_session_id", "assignment_name", "course_id", "created",
-        "mode_label", "total", "scored", "approved",
-        "assignment_id", "newer_session_exists", "staged_at",
+        "student_count", "newer_session_exists",
     ]
     assert row[0] == "s1"
-    assert row[4] == "Score myself"
-    assert row[5] == 3   # total
-    assert row[6] == 2   # scored
-    assert row[7] == 1   # approved
-    assert row[8] == "700010"
-    assert row[9] is False
-    assert row[10] is None
+    assert row[4] == 3
+    assert row[5] is False
 
 
 def test_scoring_session_freshness_marks_older_runs_and_packets(monkeypatch, tmp_path):
@@ -481,10 +459,10 @@ def test_scoring_session_freshness_marks_older_runs_and_packets(monkeypatch, tmp
 
     result = tools.list_scoring_sessions()
     rows = {row[0]: row for row in result["sessions"]["rows"]}
-    assert rows["old"][9] is True
-    assert rows["new"][9] is False
+    assert rows["old"][5] is True
+    assert rows["new"][5] is False
 
-    packet = tools.get_scoring_packet("old")
+    packet = tools.get_scoring_packet("old", offset=1, include_context=False)
     assert packet["ok"] is True
     assert packet["newer_session_exists"] is True
 
@@ -545,7 +523,7 @@ def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):
     assert result["students_total"] == 3
     assert result["next"] == tools._NEXT_STEPS["get_scoring_packet"]
 
-    without_context = tools.get_scoring_packet("s1", include_context=False)
+    without_context = tools.get_scoring_packet("s1", offset=1, include_context=False)
     assert without_context["ok"] is True
     assert isinstance(without_context["next"], str)
     assert "contract" not in without_context
@@ -578,8 +556,8 @@ def test_get_scoring_packet_resolves_declared_rubric_and_persona(monkeypatch, tm
     assert result["ok"] is True
     assert result["rubric"] == {"name": "Test Rubric", "included": True}
     assert "3 pts: uses a loop" in result["contract"]
-    assert "Packet TA" in result["contract"]
-    assert "Drafted by Packet TA (AI), reviewed by your teacher." in result["contract"]
+    assert "your teaching assistant" in result["contract"]
+    assert "Drafted by Packet TA" not in result["contract"]
 
 
 def test_get_scoring_packet_reports_missing_declared_rubric(monkeypatch, tmp_path):
@@ -627,7 +605,7 @@ def test_get_scoring_packet_preserves_legacy_inline_context(monkeypatch, tmp_pat
     assert result["ok"] is True
     assert result["rubric"] == {"name": "Test Rubric", "included": True}
     assert "Legacy rubric text" in result["contract"]
-    assert "Legacy TA" in result["contract"]
+    assert "Legacy TA" not in result["contract"]
 
 
 def test_session_builder_keeps_rubric_read_time_only():
@@ -691,252 +669,3 @@ def test_get_scoring_packet_refuses_an_oversize_page(monkeypatch, tmp_path):
 
     assert result["ok"] is False
     assert "limit=3" in result["error"]
-
-
-# --- stage_scores -----------------------------------------------------------
-
-def _scored(person, item_id="item-1", score=8, feedback="Clear reasoning."):
-    return {"pseudonym": person["pseudonym"], "item_id": item_id,
-            "score": score, "feedback": feedback}
-
-
-def test_stage_scores_missing_session(monkeypatch, tmp_path):
-    _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-    _bind_session_store(monkeypatch, {})
-
-    result = tools.stage_scores("nonexistent", [], "dummy-digest")
-
-    assert result["ok"] is False
-    assert "Session not found" in result["error"]
-
-
-def test_stage_scores_non_current_course(monkeypatch, tmp_path):
-    people = _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-    _bind_session_store(monkeypatch, {"s1": _fake_session("s1", "222", people)})
-
-    result = tools.stage_scores("s1", [], "dummy-digest")
-
-    assert result["ok"] is False
-    assert "not a Current course" in result["error"]
-
-
-def test_stage_scores_stale_digest(monkeypatch, tmp_path):
-    people = _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
-    _bind_session_store(monkeypatch, {"s1": session})
-
-    result = tools.stage_scores("s1", [_scored(people[0])], "wrong-digest")
-
-    assert result["ok"] is False
-    assert "digest mismatch" in result["error"].lower()
-    assert session["students"][0].get("ai_score") is None
-
-
-def test_stage_scores_partial_staging(monkeypatch, tmp_path):
-    """Scoring some of the class updates those students and leaves the rest alone."""
-    people = _seed_vault(monkeypatch, tmp_path, count=3)
-    _set_active_courses(monkeypatch, ["111"])
-
-    bundle = _fake_safe_bundle(people, items=1)
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, bundle)
-    sessions = _bind_session_store(monkeypatch, {"s1": session})
-
-    digest = scoring_packet.packet_digest("s1", bundle)
-    result = tools.stage_scores(
-        "s1", [_scored(people[0], score=8), _scored(people[1], score=9)], digest)
-
-    assert result["ok"] is True
-    assert result["updated"] == 2
-    assert result["unresolved"] == 0
-
-    students = sessions["s1"]["students"]
-    assert students[0]["ai_score"] == 8
-    assert students[1]["ai_score"] == 9
-    assert students[2].get("ai_score") is None      # untouched
-    assert any("left unscored" in w for w in result["validation"]["warnings"])
-
-
-def test_stage_scores_reports_unresolved_pseudonyms(monkeypatch, tmp_path):
-    people = _seed_vault(monkeypatch, tmp_path, count=2)
-    _set_active_courses(monkeypatch, ["111"])
-
-    bundle = _fake_safe_bundle(people, items=1)
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, bundle)
-    _bind_session_store(monkeypatch, {"s1": session})
-
-    stranger = {"pseudonym": "Pikachu"}
-    result = tools.stage_scores("s1", [_scored(people[0]), _scored(stranger)],
-                                scoring_packet.packet_digest("s1", bundle))
-
-    assert result["ok"] is False
-    assert any("not in the vault" in e for e in result["validation"]["errors"])
-
-
-def test_stage_scores_never_returns_canvas_ids(monkeypatch, tmp_path):
-    """The import payload carries updated_user_ids; the tool must not pass it on."""
-    people = _seed_vault(monkeypatch, tmp_path, count=2)
-    _set_active_courses(monkeypatch, ["111"])
-
-    bundle = _fake_safe_bundle(people, items=1)
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, bundle)
-    _bind_session_store(monkeypatch, {"s1": session})
-
-    result = tools.stage_scores("s1", [_scored(people[0]), _scored(people[1])],
-                                scoring_packet.packet_digest("s1", bundle))
-
-    assert result["ok"] is True
-    assert "updated_user_ids" not in result
-    serialized = json.dumps(result)
-    for person in people:
-        assert person["canvas_id"] not in serialized
-        assert person["real_name"] not in serialized
-
-
-def test_stage_scores_invalidates_a_pending_push_review(monkeypatch, tmp_path):
-    """A review previewed against the old scores must not survive staging.
-
-    It was computed from the scores being replaced, so leaving it in place
-    would let the teacher push a review of numbers that no longer exist.
-    """
-    people = _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-
-    bundle = _fake_safe_bundle(people, items=1)
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, bundle)
-    session["pending_push_review"] = {"stale": True}
-    session["pending_new_quiz_review"] = {"stale": True}
-    sessions = _bind_session_store(monkeypatch, {"s1": session})
-
-    result = tools.stage_scores("s1", [_scored(people[0])],
-                                scoring_packet.packet_digest("s1", bundle))
-
-    assert result["ok"] is True
-    assert "pending_push_review" not in sessions["s1"]
-    assert "pending_new_quiz_review" not in sessions["s1"]
-
-
-def test_stage_scores_holds_the_session_lock(monkeypatch, tmp_path):
-    """Staging takes the same lock the web UI's import route takes.
-
-    Without it an assistant staging over MCP and a teacher working the queue
-    can interleave a read-modify-write and lose one of the two writes.
-    """
-    people = _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-
-    bundle = _fake_safe_bundle(people, items=1)
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, bundle)
-    sessions = _bind_session_store(monkeypatch, {"s1": session})
-
-    events = []
-
-    @contextlib.contextmanager
-    def recording_lock(session_id):
-        events.append(("acquire", session_id))
-        try:
-            yield
-        finally:
-            events.append(("release", session_id))
-
-    monkeypatch.setattr("api.powergrader.session_store.session_lock", recording_lock)
-    monkeypatch.setattr(
-        "api.powergrader.session_store.save_session",
-        lambda s: (events.append(("save", s["session_id"])),
-                   sessions.__setitem__(s["session_id"], s))[1],
-    )
-
-    result = tools.stage_scores("s1", [_scored(people[0])],
-                                scoring_packet.packet_digest("s1", bundle))
-
-    assert result["ok"] is True
-    assert events[0] == ("acquire", "s1")
-    assert events[-1] == ("release", "s1")
-    assert ("save", "s1") in events           # every write happened inside it
-
-    # import_results_into_session takes the lock again on its own, exactly as
-    # it does under the web UI route. The lock is reentrant, and the outer
-    # hold is what keeps the digest check and the import in one atomic span.
-    depth = 0
-    for kind, _ in events:
-        depth += {"acquire": 1, "release": -1}.get(kind, 0)
-        assert depth >= 1 or kind == "release"
-    assert depth == 0
-
-
-def test_stage_scores_does_not_push_to_canvas(monkeypatch, tmp_path):
-    """Auto-post stays off this path even when the session has it enabled."""
-    people = _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-
-    bundle = _fake_safe_bundle(people, items=1)
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, bundle)
-    session["auto_post"] = {"enabled": True}
-    sessions = _bind_session_store(monkeypatch, {"s1": session})
-
-    def _explode(*a, **kw):
-        raise AssertionError("stage_scores must never reach Canvas")
-
-    monkeypatch.setattr(
-        "api.powergrader.interactive_autopush.run_interactive_autopush", _explode)
-
-    result = tools.stage_scores("s1", [_scored(people[0])],
-                                scoring_packet.packet_digest("s1", bundle))
-
-    assert result["ok"] is True
-    assert sessions["s1"]["students"][0]["ai_score"] == 8
-    assert not sessions["s1"]["students"][0].get("posted")
-
-
-def test_stage_scores_records_arrival_marker(monkeypatch, tmp_path):
-    people = _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-
-    bundle = _fake_safe_bundle(people, items=1)
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, bundle)
-    sessions = _bind_session_store(monkeypatch, {"s1": session})
-
-    result = tools.stage_scores("s1", [_scored(people[0])],
-                                scoring_packet.packet_digest("s1", bundle))
-
-    assert result["ok"] is True
-    marker = sessions["s1"].get("assistant_staged")
-    assert marker is not None
-    assert marker["updated"] == 1
-    datetime.fromisoformat(marker["staged_at"])  # parses, so it is a real timestamp
-    assert result["staged_at"] == marker["staged_at"]
-    assert result["scored"] == 1
-
-
-def test_get_packet_then_stage_round_trip(monkeypatch, tmp_path):
-    """The digest handed out by get_scoring_packet is accepted by stage_scores."""
-    people = _seed_vault(monkeypatch, tmp_path, count=2)
-    _set_active_courses(monkeypatch, ["111"])
-
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
-    sessions = _bind_session_store(monkeypatch, {"s1": session})
-
-    packet = tools.get_scoring_packet("s1")
-    assert packet["ok"] is True
-
-    scored = [
-        {"pseudonym": row[0], "item_id": row[1], "score": 7, "feedback": "Solid."}
-        for row in packet["students"]["rows"]
-    ]
-    result = tools.stage_scores("s1", scored, packet["packet_digest"])
-
-    assert result["ok"] is True
-    assert result["updated"] == 2
-    assert all(st["ai_score"] == 7 for st in sessions["s1"]["students"])

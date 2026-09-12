@@ -37,7 +37,23 @@ from __future__ import annotations
 import json
 
 from . import session_actions
-from .autopush_policy import _effective_points_possible
+from decimal import Decimal, InvalidOperation
+
+
+def _effective_points_possible(job: dict, assignment: dict, ai_result: dict | None, student: dict):
+    """Resolve the assignment maximum from private scoring context."""
+    for source in (assignment, (job or {}).get("assignment") or {}, ai_result or {}, student):
+        if not isinstance(source, dict):
+            continue
+        for key in ("points_possible", "max_points", "max_score", "ai_max_score", "points_max"):
+            value = source.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                return Decimal(str(value))
+            except (InvalidOperation, ValueError):
+                continue
+    return None
 
 
 # Every question blocks the apply until answered. The first option in each

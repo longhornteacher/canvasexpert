@@ -30,8 +30,6 @@ class JobOrigin(str, Enum):
 
 class SourceType(str, Enum):
     WORKSPACE_RELATIVE = "workspace_relative"
-    POWERGRADER_SESSION = "powergrader_session"
-    AUTOSCORE_JOB = "autoscore_job"
     CANVAS_FINDING = "canvas_finding"
     ROUTINE_STATE = "routine_state"
     OPERATION_RECEIPT = "operation_receipt"
@@ -267,10 +265,6 @@ def material_version(job_facts: dict) -> str:
 
 
 def generic_title(kind: str) -> str:
-    if kind == "grade.powergrader":
-        return "PowerGrader work"
-    if kind == "grade.powergrader.scheduled":
-        return "Scheduled work"
     if kind == "operation_receipt":
         return "Operation receipt"
     if kind == "routine_state":
@@ -288,12 +282,6 @@ def generic_description(kind: str) -> str:
     that reason (feature-freeze-hardening-initiative.md D3). An unmapped kind
     returns "" so the rail falls back to showing nothing rather than a slug.
     """
-    if kind == "grade.powergrader":
-        return "PowerGrader session"
-    if kind == "grade.powergrader.scheduled":
-        return "Scheduled PowerGrader run"
-    if kind == "grade.powergrader_ready":
-        return "Ready to grade"
     if kind == "grade.debt":
         return "Grading debt"
     if kind == "late.work":

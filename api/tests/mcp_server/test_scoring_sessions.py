@@ -19,7 +19,8 @@ def test_newer_flags_compare_only_strictly_newer_visible_same_assignment_session
     session_id = _scoring_visibility_case(**candidate)
     listed = tools.list_scoring_sessions()
     row = next(row for row in _rows(listed["sessions"]) if row["scoring_session_id"] == session_id)
-    packet = tools.get_scoring_packet(session_id, include_context=False)
+    # Page zero must carry the resolved scoring contract; later pages may omit it.
+    packet = tools.get_scoring_packet(session_id, offset=1, include_context=False)
 
     assert packet["ok"] is True
     assert row["newer_session_exists"] is expected

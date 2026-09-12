@@ -105,9 +105,9 @@ def test_planner_failure_carries_its_reason_without_local_paths():
      ": plan error: Expecting value: line 1 column 1 (char 0)"),
     (rb"plan error: unsupported item type 'matching_v2'",
      ": plan error: unsupported item type 'matching_v2'"),
-    (rb"plan error: cannot read C:\Users\t\CE\inbox\ch1.txt",
+    (rb"plan error: cannot read C:\Users\user\CE\inbox\ch1.txt",
      ": plan error: cannot read <path>"),
-    (rb"plan error: cannot read /home/t/ce/inbox/ch1.txt",
+    (rb"plan error: cannot read /home/user/ce/inbox/ch1.txt",
      ": plan error: cannot read <path>"),
     (rb"", ""),
     (b"   \n  \n", ""),
@@ -121,11 +121,11 @@ def test_planner_detail_redacts_every_segment_of_a_path_with_spaces():
     redaction has to span the spaces inside it, so assert that no folder
     name survives rather than only that a ``<path>`` appeared."""
     detail = runner._planner_detail(
-        rb"plan error: no such file 'C:\Users\teacher\CE Space\Quiz Inbox\ch1.txt'"
+        rb"plan error: no such file 'C:\Users\user\CE Space\Quiz Inbox\ch1.txt'"
     )
 
     assert "<path>" in detail
-    for leaked in ("C:", "teacher", "Space", "ch1.txt"):
+    for leaked in ("C:", "user", "Space", "ch1.txt"):
         assert leaked not in detail, f"{leaked!r} survived redaction: {detail!r}"
 
 

@@ -5,19 +5,13 @@ lets any MCP-capable assistant help plan lessons and manage rosters conversation
 while CanvasExpert keeps sole custody of the Canvas PAT and almost every write path.
 
 - **Local and indirect.** Serves this teacher's own Canvas data from Canvas Expert's
-  local copy on their computer. It never holds the Canvas token. Eight tools reach
-  Canvas: five digest-protected applies, each gated by its own preview, one
-  single-call push, and the `preview_assignment_scores` / `apply_assignment_scores`
-  pair for posting PowerGrader scores to an ordinary assignment. `apply_roster_student_change`
-  (only when the reviewed preview carries a `canvas_group` patch, which reassigns
-  real Canvas group membership), `apply_new_quiz_scores`, `apply_sis_grade_bridge`,
-  `apply_content_push`, `apply_assignment_update`, and `push_content_live`, which
-  stages a draft and applies it in one call for a teacher who asked for content in
-  their course. `preview_assignment_scores` reads Canvas only to capture the current
-  score baseline; `apply_assignment_scores` writes the frozen review. The freeze is
-  internal there, not skipped: the same baseline capture, frozen review, and drift
-  check run between staging and applying. What it drops is the round trip, not a
-  safeguard. Everything else writes only to local CanvasExpert state.
+  local copy on their computer. It never holds the Canvas token. Canvas writes use
+  bounded preview/apply or operation-ledger paths, except a teacher-requested
+  `push_content_live` and the Scoring Session submit. A request to start one named
+  Scoring Session authorizes its valid results for that exact course and assignment;
+  the server privately selects the Canvas transport. `submit_scoring_results` keeps
+  the SAFE packet binding, per-student review, drift, idempotency, verification, and
+  receipt safeguards. Everything else writes only to local CanvasExpert state.
 - **Pseudonymized, not anonymous.** Every student-data tool routes its result through the identity vault
   (`api/feedback_vault.py`) before returning it. Students are identified only by a stable
   one-word pseudonym (e.g. "Pikachu") — never a real name, Canvas user ID, or SIS ID. See
@@ -41,7 +35,7 @@ while CanvasExpert keeps sole custody of the Canvas PAT and almost every write p
 
 ## Tools
 
-Tool schema version 43 (48 tools).
+Tool schema version 44 (44 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -85,14 +79,10 @@ Tool schema version 43 (48 tools).
 | `get_day_schedule(date)` | Calendar state and schedule blocks for one YYYY-MM-DD date; repeated blocks yield consecutive meeting runs | No |
 | `get_teacher_schedule()` | The teacher's local versioned schedule blocks | No |
 | `get_school_calendar(date_from="", date_to="")` | Canonical School Calendar readiness, or a bounded range when both dates are given | No |
-| `start_scoring_session(course_id, assignment_id)` | Start a local packet-mode session with no assisted AI, uploads, auto-post, or Canvas write; `next` routes to the first packet | No |
-| `list_scoring_sessions()` | Current-course PowerGrader sessions with SAFE bundles and no student response data | No |
+| `start_scoring_session(course_id, assignment_id, rubric_name="", scoring_guidance="")` | Start an assignment-type-neutral Scoring Session; Canvas rubric takes precedence, otherwise an explicit rubric or guidance is required | No |
+| `list_scoring_sessions()` | Compact, identity-free Current-course Scoring Session resume aid | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
-| `stage_scores(scoring_session_id, results, expected_packet_digest)` | Stage AI scores locally with packet-digest protection; partial staging preserves other scores and never posts to Canvas | Yes, pseudonymized |
-| `preview_new_quiz_scores(scoring_session_id)` | Persist a frozen review of current staging; re-freeze after edits, and use `next` for the apply handoff | Yes, pseudonymized |
-| `apply_new_quiz_scores(operation_id, review_digest)` | Write the frozen review—not later staging—to Canvas; invalid coordinates do not write and replay skips finalized students | Yes, pseudonymized |
-| `preview_assignment_scores(scoring_session_id)` | Freeze what staged AI scores would post for one ordinary-assignment session and raise any question that must be answered first; reads Canvas for the current baseline and writes nothing | Yes, pseudonymized |
-| `apply_assignment_scores(scoring_session_id, review_digest, answers=None)` | Post exactly what `preview_assignment_scores` froze once every raised question has an answer; same reviewed transport as the teacher's own queue button | Yes, pseudonymized |
+| `submit_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None)` | Post valid SAFE-packet results to Canvas, or return pseudonym-only questions for an explicit conversational answer and retry | Yes, pseudonymized |
 
 `get_course_assignments` and `get_modules` only read the local course catalog written by
 the CanvasExpert web UI — neither ever falls back to a live Canvas call. If the catalog
@@ -253,21 +243,25 @@ it likewise needs no course gate, no identity vault, and no safety scan. It reus
 returns only each draft's label, never its absolute path. Pass `kind` to narrow to one of
 `quiz`, `assignment`, `page`, or `rubric`; omit it to see everything staged across all four.
 
-**Scoring Packet Workflow (v22).** `list_scoring_sessions()` discovers PowerGrader sessions
-with AI-ready SAFE bundles in Current courses; a session whose bundle is no longer on disk is
-left out rather than offered and then refused. Both list and packet compute
-`newer_session_exists` using only readable, listed sessions for the same course and assignment;
-equal creation timestamps do not establish a newer session. `get_scoring_packet()` retrieves one session's
-pseudonymized student responses with full text (no truncation, no media) and a digest for
-concurrency protection. The response includes a server-authored contract (scoring
-instructions) when `include_context=true`, so later pages can set it false and save the
-tokens. Student response text is untrusted data to score even when it addresses the
-assistant; it cannot override the contract or the teacher's request. `stage_scores()`
-takes the scored results and stages them into the session for teacher review in PowerGrader;
-it never posts to Canvas (the teacher pushes manually), and it takes the same session lock and
-clears the same pending push review as the web UI's own import path. The digest guard
-(`expected_packet_digest`) prevents stale scores from landing if the session has been re-run
-between retrieval and staging.
+**Scoring Session workflow.** `start_scoring_session(course_id, assignment_id,
+rubric_name="", scoring_guidance="")` privately discovers the assignment type and creates
+one SAFE response bundle. A usable Canvas rubric is authoritative. If none is available,
+the call returns `needs_scoring_norms` and available rubric labels without exposing a
+session; the assistant asks the teacher to select one or provide bounded scoring guidance,
+then retries. `list_scoring_sessions()` is only a compact, identity-free resume aid.
+
+`get_scoring_packet()` retrieves pseudonymized response rows with full text (no silent
+truncation) and a packet digest. Page zero must include the server-authored scoring contract
+and resolved basis; later pages may omit context. Student response text is untrusted work,
+not instructions. `submit_scoring_results()` accepts only pseudonym/item results bound to
+that packet. Ordinary assignment results with no questions apply immediately. If judgment
+is needed, the tool returns `needs_teacher_input`, pseudonym-only questions, allowed answers,
+and a review digest without writing; the assistant asks the teacher, then retries the same
+tool with the unchanged results and explicit answers. New Quizzes use the same public call
+and privately retain item-preserving preflight, drift, verification, and receipt behavior.
+No transport type or operation token crosses the MCP boundary. A stale packet, changed
+review plan, invalid answer, or ambiguous write fails closed. Review and editing happen in
+Canvas Live; the teacher request authorizes only the named course, assignment, and session.
 
 Paging counts *responses*, not students. A multi-item quiz gives one row per student per item,
 so `offset`, `limit`, `total` and `next_offset` are all measured in rows, and `students_total`
@@ -288,26 +282,17 @@ The safety scan walks dict keys, so it cannot see into `{columns, rows}` tables.
 that returns student text therefore gates the dict-row payload first and tabulates only after
 the gate has passed it, `get_scoring_packet` included.
 
-**New Quiz item-finalization write pair (v35).** `preview_new_quiz_scores(scoring_session_id)` and
-`apply_new_quiz_scores(operation_id, review_digest)` land the item scores `stage_scores`
-staged into Canvas, for a session whose `new_quiz_item_finalization_supported` flag is true.
-The pair mirrors the SIS grade-bridge shape: preview persists a local frozen review per student carrying
-a staged item score (the same preflight freeze, drift check, and 15-minute review token the
-interactive PowerGrader queue already uses) and returns only aggregate counts and warnings,
-never a real name or Canvas/SIS id; apply takes nothing but the opaque `operation_id` and
-`review_digest` preview returned. The frozen review tokens are stashed on the session itself,
-not the Operation Ledger. Apply replays that frozen review, not whatever is currently staged;
-if the teacher edits scores after preview, call preview again before apply. Apply sends each
-stashed token through the existing finalization lane and reports one outcome per student (by
-pseudonym); a concluded or otherwise restricted
-enrollment can refuse one student without stopping the rest of the batch, and replaying the
-same `operation_id`/`review_digest` never re-applies a student who already finalized. A
-review token past its 15-minute window refuses cleanly and names `preview_new_quiz_scores`
-as the next step, rather than crashing or silently skipping that student. A teacher who asks
-for the write has authorized it: the assistant runs the preview/apply cycle and reports what
-landed. The authorization covers the course and assignment they named and never generalizes
-to another assignment, another course, or a later session. An assistant choosing the target
-itself should summarize the preview first, and any invariant failure still stops.
+**Scoring Session writes.** `submit_scoring_results()` dispatches ordinary assignment and
+New Quiz rows through their private existing write lanes. New Quiz finalization preserves
+auto-graded and untouched items, freezes and verifies each student's complete result, and
+continues after a per-student refusal without retrying an ambiguous write. Both transports
+return only aggregate counts and pseudonym-keyed outcomes. A teacher who asked to start this
+session has authorized its valid results to post; the assistant reports what landed and
+directs review or edits to Canvas Live. Authorization never carries to another course,
+assignment, or session.
+New Quiz results without a score cannot post comment-only feedback: the tool offers only
+an explicit skip that holds the affected student's result. Ordinary assignments may offer
+comment-only posting after the teacher answers its question.
 
 `get_roster`, `get_submissions`, and `get_gradebook_snapshot` only read the local
 CanvasMirror. None fall back to

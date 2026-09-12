@@ -3,8 +3,8 @@
 Covers eight reply shapes a teacher's AI chat might paste back, three of which
 already parsed correctly and five of which used to parse to zero rows while
 still reporting success downstream. None of these tests touch a session or the
-queue; api/tests/powergrader/test_import_results.py covers the fail-closed-on-zero
-behavior at that layer.
+Canvas; persistent-session safety is covered at the current Scoring Session
+write boundary.
 """
 import json
 
@@ -126,6 +126,6 @@ def test_single_list_key_with_non_result_elements_is_returned_but_fails_validati
 
 def test_note_object_alone_with_no_results_anywhere_parses_to_empty():
     """No array, no pseudonym-bearing object: nothing to salvage. This is the
-    shape import_results_into_session's fail-closed check exists to catch."""
+    shape the persistent storage privacy guard must reject."""
     parsed = feedback_results.parse_results(json.dumps({"note": "nothing else here"}))
     assert parsed == []

@@ -9,10 +9,10 @@ pushes content to live courses via the REST and New Quizzes APIs:
 - **Push Rubrics** (RubricForge JSON → live course rubrics with an optional student explainer page)
 - **Printable outputs** (QuizForge JSON → local DOCX + PDF files)
 - **Gradebook tools** — late policy sweep, student extensions, curves
-- **PowerGrader** — keyboard grading queue, Safe AI Packet export, Copilot batch
-  import, optional API scoring
+- **Scoring Sessions** — MCP-connected agent scores a SAFE packet and submits valid
+  results to Canvas Live through one assignment-type-neutral contract
 - **School Calendar:** school dates, day kinds, grading periods, bell schedules, and Teacher Schedule
-- **MCP server:** local pseudonymized reads and preview/apply tools for teacher-owned writes
+- **MCP server:** local pseudonymized reads, guarded writes, and Scoring Sessions
 - **Daily Writing:** longitudinal Writing Record and tracked-assignment Writing Timeline
 - **Download** — submission bundles by assignment or by student
 
@@ -105,13 +105,13 @@ OneDrive; conflict copies like `settings-<PC>.json` are ignored by the app. If
 OneDrive is absent, the app falls back to the local folders exactly as before.
 
 Read-aloud media evidence uses an optional local `faster-whisper` `small.en` model.
-Use PowerGrader’s explicit “Set up local speech model” control (about 500 MiB) before
-starting a media session; ordinary grading never downloads it. Weights stay in
+The application never downloads model weights during a Scoring Session; if the
+local model is unavailable, the affected media evidence remains held. Weights stay in
 `%LOCALAPPDATA%\CanvasExpert\speech-models` or the machine-local
 `CANVAS_EXPERT_WHISPER_MODEL_CACHE` override, never in the workspace or an AI packet.
 
 **Full feature reference** (Settings, Dashboard, Push Quiz/Assignment/Page/Module,
-Gradebook tools, Download Assignments, Course Info): **`api/webui/README.md`**.
+  Gradebook tools, Download Assignments, Course Info, Scoring Sessions): **`api/webui/README.md`**.
 
 Assistant-operated SIS grade bridges are documented in the
 [SIS Grade Bridges guide](../docs/guides/sis-grade-bridges.md). They are separate from the
@@ -174,7 +174,7 @@ Gradebook web UI and use the reviewed Operation Ledger preview/apply/recovery pa
 | `validate_qf.py` | QuizForge compliance checker |
 | `qf_ui.py` | Launches the local web UI (see "Web UI" above) |
 | `../engine/rendering/physical/` | Local printable DOCX/PDF render stack (Edge via Playwright for PDF, Pandoc for DOCX) |
-| `powergrader/` | PowerGrader backend helpers: Canvas fetch, privacy artifacts, Safe AI Packet ZIP, Copilot batch folders, import validation, session mutations, start-workflow assembly, autoscore claim/queue helpers, auto-push policy helpers |
+| `powergrader/` | Legacy-named private scoring engine: Canvas acquisition, SAFE bundle/session assembly, feedback contract, ordinary assignment and New Quiz write safeguards |
 | `mcp_server/` | Local MCP tool registry, contracts, pseudonymized reads, and teacher-owned write tools |
 | `mirror/` | CanvasMirror storage, freshness envelopes, sync coordinator, and disk-only query services |
 | `operation_ledger/` | High-risk operation checkpoints, claims, receipts, and recovery coordination |
@@ -261,12 +261,11 @@ ANTHROPIC_KEY=
   Regardless of the API, the **Student Analysis CSV downloads fine from the New Quizzes UI**
   (full responses included) — the always-available manual fallback, and the only option for
   courses where your enrollment has concluded.
-- **PowerGrader New Quiz sessions support manual grading and two write lanes.** They use the
-  Student Analysis JSON report for written responses. New Quiz sessions can post assignment-level
-  teacher feedback through a reviewed comment-only lane, and item scores + per-item grader
-  feedback through a gated item-finalization lane (two-phase review→finalize route pair with
-  preflight freeze, drift detection, idempotency, and post-write verification). Concluded
-  enrollment may return `403`. New Quiz late catch-up and scheduled scoring remain unimplemented.
+- **Scoring Sessions support New Quizzes through the same MCP flow as assignments.** The
+  private item-finalization lane preserves auto-graded and untouched values, preflights
+  the complete current result, checks drift/idempotency, verifies the write, and records a
+  minimized receipt. Concluded or restricted enrollment may return `403`. Canvas Live is
+  the only review/edit surface; Canvas Expert has no hosted grader or local scoring queue.
 - **Common Cartridge import is the zero-auth power path** (Settings → Import Course
   Content). Vanilla CC 1.x carries only the portable common subset, but a **Canvas-flavored
   export package** (CC + Canvas extensions: `canvas_export.txt`, `course_settings/*.xml`)

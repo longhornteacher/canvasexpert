@@ -1,12 +1,4 @@
-"""API error contract: unhandled exceptions on /api/ routes stay JSON.
-
-Regression for the PowerGrader "Unexpected token 'I', "Internal S"... is not
-valid JSON" report. That message is the browser's response.json() choking on
-the plain-text body "Internal Server Error" that Starlette's default 500
-handler returns. Every /api/ route is consumed by fetch() callers that parse
-the body as JSON, so an unhandled exception must come back as a structured
-JSON error, not plain text.
-"""
+"""API error contract: unhandled exceptions on /api/ routes stay JSON."""
 import asyncio
 
 from starlette.requests import Request
@@ -30,7 +22,7 @@ def _fake_request(path: str) -> Request:
 
 def test_api_path_unhandled_exception_returns_json():
     resp = asyncio.run(
-        server._api_errors_return_json(_fake_request("/api/powergrader/start"), RuntimeError("boom"))
+        server._api_errors_return_json(_fake_request("/api/work"), RuntimeError("boom"))
     )
     assert resp.status_code == 500
     assert resp.media_type == "application/json"
@@ -47,14 +39,14 @@ def test_non_api_path_keeps_plain_text():
 def test_api_route_that_raises_is_readable_json(monkeypatch):
     """End-to-end: a route that raises comes back as parseable JSON, so the
     frontend's response.json() succeeds and the generic error message is shown."""
-    from api.webui.routes import powergrader as pg_routes
+    from api.webui.routes import work as work_routes
 
     def _boom():
         raise RuntimeError("kaboom")
 
-    monkeypatch.setattr(pg_routes.session_store, "list_session_summaries", _boom)
+    monkeypatch.setattr(work_routes, "_all_jobs", _boom)
     client = TestClient(app, base_url="http://127.0.0.1:8765", raise_server_exceptions=False)
-    resp = client.get("/api/powergrader/sessions")
+    resp = client.get("/api/work?section=all")
     assert resp.status_code == 500
     body = resp.json()  # would raise if the body were plain text — the bug
     assert body["ok"] is False

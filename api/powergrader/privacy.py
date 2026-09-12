@@ -1,16 +1,13 @@
-"""Privacy pipeline helpers for PowerGrader.
+"""Privacy helpers for local Scoring Session artifacts.
 
-Functions for building privacy step records, writing privacy audit files,
-and writing OpenRouter debug files.
+Functions for building privacy step records and writing private audit files.
 """
 
 import json
 import os
-import traceback
 from datetime import datetime
 
 from api import feedback_pipeline as fp
-from api import openrouter_client as orc
 from api.platform_services import workspace
 
 
@@ -24,10 +21,10 @@ def privacy_step(step_id: str, label: str, status: str,
 def feedback_artifact_dirs(
     *, course_name: str = "", course_id: str = "",
     assignment_name: str = "", assignment_id: str = "",
-    mode: str = "assisted", run_timestamp: str | None = None,
+    mode: str = "scoring-session", run_timestamp: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Resolve the SAFE (``For AI/``) and PRIVATE (``Student Work/Grading Keys/``)
-    homes for one PowerGrader run.
+    homes for one Scoring Session.
 
     The *reserve* value accounts for the deepest PowerGrader child layout
     (packet folder, batch folder, batch file name) so the root SAFE and PRIVATE
@@ -82,64 +79,6 @@ def write_privacy_audit_file(
                 "privacy_steps": privacy_steps,
                 "privacy_artifacts": privacy_artifacts,
             }, f, indent=2, ensure_ascii=False)
-        return path
-    except Exception:
-        return None
-
-
-def write_openrouter_debug_file(
-    private_folder: str | None,
-    assignment_name: str,
-    *,
-    session_id: str,
-    course_id: str,
-    assignment_id: str,
-    model_id: str,
-    safe_students: int,
-    packet_info: dict | None,
-    budget: dict | None,
-    privacy_steps: list[dict],
-    exc: Exception,
-) -> str | None:
-    if not private_folder:
-        return None
-    try:
-        debug_root = workspace.system_folder("PowerGrader") or private_folder
-        os.makedirs(workspace.extended_path(debug_root), exist_ok=True)
-        path = os.path.join(
-            debug_root,
-            f"{fp.safe(assignment_name)}__openrouter-debug-{fp.safe(session_id)}.json",
-        )
-        payload = {
-            "created": datetime.now().isoformat(timespec="seconds"),
-            "session_id": session_id,
-            "course_id": course_id,
-            "assignment_id": assignment_id,
-            "assignment_name": assignment_name,
-            "openrouter": {
-                "endpoint": orc.ENDPOINT,
-                "model_id": model_id,
-                "safe_student_count": safe_students,
-                "packet_zip": (packet_info or {}).get("packet_zip"),
-                "packet_folder": (packet_info or {}).get("packet_folder"),
-            },
-            "budget": budget or {},
-            "exception": {
-                "type": type(exc).__name__,
-                "message": str(exc),
-                "context": getattr(exc, "context", ""),
-                "status_code": getattr(exc, "status_code", ""),
-                "response_snippet": getattr(exc, "response_snippet", ""),
-                "traceback": traceback.format_exception_only(type(exc), exc),
-            },
-            "privacy_steps": privacy_steps,
-            "notes": [
-                "No OpenRouter API key is written to this debug file.",
-                "Raw real-name student submissions are not written here; inspect the Safe AI Packet and Private decoder files if needed.",
-            ],
-        }
-        with open(workspace.extended_path(path), "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
         return path
     except Exception:
         return None

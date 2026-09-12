@@ -13,7 +13,6 @@ from api.feedback_vault import Vault
 from api.powergrader import session_actions
 from api.powergrader import new_quiz_grader
 from api.powergrader import new_quiz_csv
-from api.powergrader.helpers import build_late_watch_state
 
 
 class _Response:
@@ -229,15 +228,13 @@ def test_freshness_regenerates_once_then_fails_closed(monkeypatch):
     assert session.post_calls == 2
 
 
-def test_new_quiz_server_gates_block_push_and_late_watch_without_canvas():
+def test_new_quiz_server_gates_block_assignment_total_push_without_canvas():
     session = {"canvas_writeback_supported": False, "students": []}
     load = lambda _: session
     payload, _ = session_actions.review_push("synthetic", user_ids="[]", load_session=load, save_session=lambda _: None, canvas_get=lambda *_args, **_kwargs: None)
     assert payload["code"] == "canvas_writeback_unsupported"
     payload, _ = session_actions.push_grades("synthetic", user_ids="[]", review_token="x", load_session=load, save_session=lambda _: None, canvas_send=lambda *_args: None, canvas_get=lambda *_args, **_kwargs: None)
     assert payload["code"] == "canvas_writeback_unsupported"
-    late = build_late_watch_state(mode="assisted", watch_late="true", has_openrouter_key=True, initial_missing_user_ids=[], submitted_user_ids=[], response_kind="scr", new_quiz_snapshot=True)
-    assert late["supported"] is False and "immutable snapshots" in late["reason"]
 
 
 def test_native_transport_accepts_live_result_shape(tmp_path, monkeypatch):

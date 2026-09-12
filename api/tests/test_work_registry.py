@@ -36,7 +36,7 @@ def _job(status="attention", origin="detected"):
         "course_ids": courses,
         "focused_course_id": "course-1",
         "assignment_id": assignment,
-        "resumable_url": "/powergrader",
+        "resumable_url": "/gradebook",
         "source_ref": source,
         "counts": {"total": 1, "pending": 1, "affected": 0},
         "attention_reason": "Work needs attention" if status == "attention" else "",
@@ -87,9 +87,11 @@ def test_generic_description_falls_back_to_empty_for_an_unknown_kind():
 
 
 def test_fingerprints_are_stable_and_material_changes_digest():
-    source = {"type": "powergrader_session", "value": "session-1"}
-    first = stable_fingerprint("grade.powergrader", source, ["course-1"], "assignment-1")
-    reordered = stable_fingerprint("grade.powergrader", source, ["course-1"], "assignment-1")
+    source = {"type": "canvas_finding", "value": "finding-1"}
+    first = stable_fingerprint("grade.debt", source, ["course-1"], "assignment-1")
+    reordered = stable_fingerprint("grade.debt", source, ["course-1"], "assignment-1")
+    with pytest.raises(RegistryValidationError):
+        validate_source_ref({"type": "powergrader_session", "value": "session-1"})
     assert first == reordered
     assert first == first.lower() and len(first) == 64
     assert material_version({"status": "in_progress", "counts": {"total": 1, "pending": 1, "affected": 0}}) != material_version({"status": "completed", "counts": {"total": 1, "pending": 0, "affected": 0}})

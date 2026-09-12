@@ -1,56 +1,4 @@
-"""Pure helper functions for PowerGrader route parsing and responses."""
-
-AI_MODES = {"packet", "assisted"}
-
-
-def normalize_mode(mode: str) -> str:
-    if mode in {"fast", "packet", "assisted"}:
-        return mode
-    return "fast"
-
-
-def build_late_watch_state(
-    *,
-    mode: str,
-    watch_late: str,
-    has_openrouter_key: bool,
-    initial_missing_user_ids: list[str],
-    submitted_user_ids: list[str],
-    response_kind: str,
-    new_quiz_snapshot: bool = False,
-) -> dict:
-    watch_late_enabled = str(watch_late).lower() in {"1", "true", "yes", "on"}
-    late_supported = mode in ("assisted", "packet") and not new_quiz_snapshot
-    late_reason = ""
-    if new_quiz_snapshot:
-        late_reason = "New Quiz sessions are immutable snapshots; late catch-up is not supported."
-        watch_late_enabled = False
-    elif not watch_late_enabled:
-        late_reason = "Late catch-up is disabled for this session."
-    elif mode == "assisted" and not has_openrouter_key:
-        late_reason = "Late catch-up requires Auto-score with AI and a saved OpenRouter key."
-        watch_late_enabled = False
-    elif mode == "packet":
-        late_reason = ""  # Packet mode late generation is separate from scoring
-    elif mode not in ("assisted", "packet"):
-        late_reason = "Late catch-up requires Auto-score with AI or AI chat mode."
-        watch_late_enabled = False
-
-    return {
-        "enabled": watch_late_enabled,
-        "supported": late_supported,
-        "reason": late_reason,
-        "initial_missing_user_ids": initial_missing_user_ids,
-        "known_user_ids": submitted_user_ids,
-        "scored_user_ids": [],
-        "generated_user_ids": [],
-        "last_checked": None,
-        "last_scored": None,
-        "last_generated": None,
-        "last_summary": "",
-        "source_context": {},
-        "response_kind": response_kind,
-    }
+"""Focused helper functions for private Scoring Session orchestration."""
 
 
 def build_start_error_payload(
@@ -95,9 +43,6 @@ def build_start_success_payload(
         "mode_label": mode_label,
         "ai_scored": len(ai_by_uid),
         "privacy_steps": privacy_steps,
-        "packet_zip": privacy_artifacts.get("packet_zip"),
-        "copilot_batch_count": (copilot_packet or {}).get("batch_count", 0),
-        "copilot_packet_folder": (copilot_packet or {}).get("packet_folder"),
         "evidence_status": evidence_status,
     }
     if auto_post_summary is not None:

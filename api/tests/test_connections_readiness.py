@@ -40,7 +40,7 @@ def _render(monkeypatch, components):
     ("unconfigured", "unconfigured", "Not configured"),
 ])
 def test_canvas_health_line_reflects_the_real_probe(monkeypatch, status, code, expected):
-    components = {"canvas": {"status": status}, "openrouter": {"status": "ready"}, "privacy": {"status": "ready"}}
+    components = {"canvas": {"status": status}, "privacy": {"status": "ready"}}
     if code:
         components["canvas"]["code"] = code
     text = _render(monkeypatch, components)
@@ -52,7 +52,7 @@ def test_canvas_health_line_falls_back_before_the_first_probe(monkeypatch):
     credential-presence check rather than showing a raw "unknown" state."""
     monkeypatch.setattr(readiness, "snapshot", lambda: {
         "ok": True, "status": "unknown", "checked_at": None, "configured_model": "",
-        "components": {name: {"status": "unknown"} for name in ("canvas", "openrouter", "privacy")},
+        "components": {name: {"status": "unknown"} for name in ("canvas", "privacy")},
     })
     text = TestClient(server.app).get("/connections").text
     assert _canvas_line(text) == "Configured"

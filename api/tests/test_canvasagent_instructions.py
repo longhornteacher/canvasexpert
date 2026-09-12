@@ -72,26 +72,11 @@ def test_stays_ascii(text):
 
 
 def test_the_write_default_is_in_the_core(core):
-    """CORE has to carry the write posture, because a teacher who pasted CORE
-    alone sees nothing else, and an assistant that does not know it is what
-    produced false "pushed it to Canvas" claims before.
-
-    The posture is a default, not a prohibition: the assistant stages, the
-    teacher pushes, and a teacher who wants a direct write gets one. CORE used
-    to assert the assistant never writes to Canvas at all, which the bounded
-    preview/apply pairs contradict, so this also pins the denial out."""
+    """The core must carry the exact Scoring Session authorization boundary."""
     lowered = core.lower()
-
-    assert "you stage, the teacher pushes" in lowered
-    assert "review" in lowered and "push" in lowered
-    # The teacher's authority over the direct write survives here, named to the
-    # path that exists: item finalization on a New Quiz, not grade posting at
-    # large. Compression is where a specific capability turns into a promise.
-    assert "new quiz item scores" in lowered
-    assert "never write to canvas" not in lowered, (
-        "CORE is denying the direct-write path again; staging is the default, "
-        "not the limit of what a teacher can ask for"
-    )
+    assert "scoring session" in lowered
+    assert "valid results post" in lowered
+    assert "canvas live" in lowered
 
 
 def test_core_routes_to_every_appendix(text, core):
@@ -140,19 +125,18 @@ def test_every_mcp_tool_named_is_a_real_tool(text):
     """The doc tells the assistant to call these by name, so they must exist."""
     from api.mcp_server import tools
 
-    named = set(re.findall(r"\b((?:get|list|refresh)_[a-z_]+)\b", text))
+    named = set(re.findall(r"\b((?:get|list|refresh|start|submit)_[a-z_]+)\b", text))
     assert named, "no tool names found in the instruction set"
     missing = sorted(n for n in named if not hasattr(tools, n))
     assert not missing, f"instruction set names tools that do not exist: {missing}"
 
 
-def test_grading_mode_names_match_the_code(text):
-    """These are the names the teacher sees, and they were renamed once already."""
-    from api.powergrader import session_store
-
-    for mode in ("fast", "packet", "assisted"):
-        label = session_store.mode_label(mode)
-        assert label in text, f"instruction set is missing the mode name {label!r}"
+def test_scoring_session_flow_is_assignment_type_neutral(text):
+    lowered = text.lower()
+    assert "start_scoring_session" in lowered
+    assert "get_scoring_packet" in lowered
+    assert "submit_scoring_results" in lowered
+    assert "never ask the teacher to choose a scoring transport" in lowered
 
 
 def test_the_superseded_explainer_is_gone_from_the_shipped_defaults():
@@ -229,22 +213,15 @@ def test_the_python_floor_matches_the_launcher(text):
     )
 
 
-def test_it_does_not_claim_python_installs_itself(text):
-    """The launcher prints a message and exits when Python is missing; it does
-    not install it. The doc this replaced claimed otherwise, and that claim is
-    the single most likely first-run question."""
+def test_setup_instructions_match_user_scoped_python_installer(text):
+    """The setup appendix must describe the launcher's current first-run path."""
     setup = text.split("Appendix A.", 1)[1].split("Appendix B.", 1)[0]
-    assert "without installing it" in setup, (
-        "the setup appendix no longer makes clear that Python is the teacher's "
-        "own one-time step"
-    )
-    # And the launcher must still behave that way.
+    assert "winget" in setup.lower()
+    assert "install" in setup.lower()
     with open(os.path.join(REPO_ROOT, "Open Canvas Expert.bat"), encoding="utf-8") as f:
         bat = f.read()
-    assert "exit /b 1" in bat.split("where py", 1)[1].split("REM", 1)[0], (
-        "the launcher now does something other than bail when Python is absent, "
-        "so the setup appendix needs rewriting"
-    )
+    assert "winget install --id Python.Python.3.13" in bat
+    assert "--scope user" in bat
 
 
 def test_the_download_route_serves_it():

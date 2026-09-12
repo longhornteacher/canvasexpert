@@ -92,37 +92,23 @@ check so Canvas drift does not weaken review or write safety.
 
 ## Current implementation facts
 
-- PowerGrader can select New Quizzes and build local written-response sessions.
-- New Quiz sessions support two manual write lanes:
-  - **Comment-only push** (2026-07-14): teacher-approved assignment-level feedback posts
-    as ordinary submission comments through frozen review/drift/idempotency flow; payload
-    excludes `submission`/`posted_grade`. Legacy sessions without `comment_writeback_supported` 
-    stay fully blocked.
-  - **Item-finalization lane** (2026-07-14): teacher-reviewed item scores and per-item
-    grader feedback finalize through a gated two-phase route: `POST .../new-quiz-review`
-    (preflight freeze → 15-minute review token) then `POST .../new-quiz-finalize` (verification
-    and application). Sessions with `new_quiz_item_finalization_supported=true` are eligible;
-    the route validates result-version stability (drift check against cached state digest),
-    applies an idempotency key (keyed on user/state/decision digests), re-fetches and
-    verifies the authoritative result post-write, and logs content-minimized receipts.
-    Concluded enrollment may return `403`. A second caller reaches the same lane
-    unchanged (2026-09-06): the MCP server's `preview_new_quiz_scores` /
-    `apply_new_quiz_scores` pair calls `session_actions.review_new_quiz_finalization`
-    and `finalize_new_quiz` directly, one student per loop iteration, so an assistant
-    scoring a New Quiz from a conversation gets the identical freeze/drift/idempotency/
-    receipt behavior as the interactive PowerGrader queue. It is not a second
-    finalization path; there is exactly one, with two callers.
-
-    **Verification status of that second caller, as of 2026-09-06.** The lane itself was
-    live-verified on 2026-07-14 through the interactive queue and is unchanged. The MCP
-    pair around it has only ever run offline, against stubs. No sandbox course was
-    available when it shipped, so the first time `apply_new_quiz_scores` reaches Canvas
-    will be a real course. What is unproven is the wrapper: the per-student loop, the
-    frozen-token stash and its pruning, the digest check, and the convergence call. The
-    freeze, drift check, idempotency key, post-write verification and receipts underneath
-    are the same code the queue has already exercised live. Treat the first live run as
-    the verification it has not had: one student, then read the receipt and the Canvas
-    state before doing more.
+- A Scoring Session starts for a Current course and assignment without exposing the
+  assignment type. The first packet page includes the resolved scoring basis.
+- New Quiz and ordinary assignment results share `start_scoring_session` ->
+  `get_scoring_packet` -> `submit_scoring_results`. The MCP layer never receives a
+  signed transport, operation id, temporary review token, or live Canvas response.
+- For New Quizzes, `submit_scoring_results` privately calls
+  `session_actions.review_new_quiz_finalization` and `finalize_new_quiz` separately
+  for each eligible student. It preflights the complete result, binds decisions to
+  stable item IDs and result version, finalizes once, verifies the new authoritative
+  result, and records a content-minimized receipt. A per-student refusal does not
+  stop safe rows for other students; an ambiguous write is not retried.
+- Finalization preserves auto-graded and untouched values exactly. Assignment-total
+  submission writes are never used as a substitute. Active/current instructor
+  enrollment is required; concluded, closed, past-enrollment, or otherwise restricted
+  courses may return `403`.
+- New Quiz uploads never enter the scoring packet as files or filenames. Locally
+  extracted text may be included as an essay response; unreadable uploads remain held.
 - `api/powergrader/new_quiz_fetch.py` uses native result acquisition; the live participant
   result key `quiz_api_quiz_session_id` is normalized alongside older/synthetic
   `quiz_session_id` shapes (fixed 2026-07-14, live-verified: file evidence downloads).
@@ -150,17 +136,11 @@ check so Canvas drift does not weaken review or write safety.
 - The ordinary Canvas Submissions API does not expose the complete New Quiz item-result
   collection. Use the focused report/native grader paths described above.
 
-## Product decision for feedback composition
+## Feedback composition
 
-Canvas exposes one grader-feedback value per item. PowerGrader will keep the Teaching
-Assistant block read-only and provide an optional teacher field above it. On finalization,
-Canvas receives teacher feedback, a separator, and the TA score/feedback block. When the
-teacher field is empty, omit the empty section and publish only the TA block.
-
-Since 2026-09-06 the assistant's block is prefixed with
-`Autofeedback from an automated assistant:` rather than the former `TA SCORE + FEEDBACK`
-heading. Item feedback posts under the teacher's own name, so the half an assistant wrote
-has to say so; a student cannot otherwise tell it apart from their teacher's words. The
-wording lives in `api/powergrader/attribution.py` and is shared with the reviewed
-assignment push and automatic posting. See the attribution guardrail in
-`docs/reference/powergrader-scoring-map.md`.
+Canvas exposes one grader-feedback value per item. Feedback written by the external
+scoring agent is visibly attributed to that agent before it is posted, so it cannot be
+mistaken for teacher-authored text. Attribution is enforced by the private scoring
+write path in `api/powergrader/attribution.py`; it is shared by ordinary assignment
+comments and New Quiz item feedback. No teacher persona or hosted model supplies the
+feedback block.

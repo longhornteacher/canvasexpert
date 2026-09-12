@@ -11,7 +11,6 @@ import shutil
 from api.feedback_vault import Vault
 from api import feedback_pipeline as fp
 from api import feedback_safety as safety
-from api import openrouter_client as orc
 from api.nq_report import parse_student_analysis_file
 from api.platform_services import workspace
 
@@ -512,102 +511,8 @@ def test_validate_results_warns_on_partial_coverage(tmp_path):
     assert any("left unscored" in w for w in out["warnings"])  # …but flagged for review
 
 
-def test_build_request_injects_feedback_pattern():
-    bundle = {"students": []}
-    pattern = {"id": "basic", "name": "Glows & Grows (Basic)",
-               "glows": {"min": 2, "max": 3}, "grows": {"min": 1, "max": 2},
-               "strategy_sentences": {"min": 2, "max": 3}, "sign_with_persona": True}
-    body = orc.build_request(
-        bundle, "",
-        {"name": "Sage", "signoff_policy": "ai_disclosure",
-         "signoff_text": "Drafted by {name} (AI), reviewed by your teacher."},
-        "x/y",
-        feedback_pattern=pattern,
-    )
-    system = body["messages"][0]["content"]
-    assert "Glows & Grows (Basic)" in system
-    assert "2–3 Glows" in system and "1–2 Grows" in system
-    assert "Sage" in system
-    assert "persona signoff" in system
-    assert "Do not add a separate signature" in system
-    assert "Sign each feedback entry" not in system
-
-
-def test_build_request_does_not_require_signoff_for_plain_persona():
-    body = orc.build_request(
-        {"students": []}, "", {"name": "Plain", "signoff_policy": "none"}, "x/y",
-        feedback_pattern={"id": "basic", "name": "Basic", "sign_with_persona": True},
-    )
-    system = body["messages"][0]["content"]
-    assert "Drafted by" not in system
-    assert "persona signoff" not in system
-
-
-# ── The scoring contract's rules, and the surfaces that must carry them ──────
-
-
-def _ai_facing_surfaces():
-    """Every rendered text a scoring AI reads, with the contract kwargs it uses.
-
-    Four renderers. ``build_contract_text`` serves two delivery paths -- the
-    packet's START HERE file and the MCP ``get_scoring_packet`` tool -- so the
-    list is by renderer, not by file.
-    """
-    from api.powergrader import copilot_packet_support as support, packet
-
-    bundle = {"contract_version": "1.0", "quiz_title": "Essay",
-              "students": [{"pseudonym": "Sparky McGee",
-                            "responses": [{"item_id": "42", "prompt": "",
-                                           "response": "A response.", "possible": 2}]}]}
-    persona = {"name": "Sage"}
-    return [
-        ("START HERE / MCP contract",
-         fp.build_contract_text("Sage", persona=persona),
-         dict(persona=persona, ai_ta_name="Sage", identity_source="the bundle",
-              pseudonym="<copy>", item_id="<copy>")),
-        ("paste-back format",
-         packet.paste_format_text(bundle, persona),
-         dict(persona=persona, identity_source="Student Responses.json",
-              pseudonym="Sparky McGee", item_id="42",
-              include_signoff_in_feedback=True)),
-        ("copilot batch prompt",
-         support.batch_prompt(1, 2, persona=persona),
-         dict(persona=persona, identity_source="StudentWork",
-              pseudonym="<copy>", item_id="<copy>")),
-        ("copilot rubric/persona file",
-         support.rubric_persona_text("Essay", "3 pts: uses evidence", persona),
-         dict(persona=persona, ai_ta_name="Sage", identity_source="StudentWork",
-              pseudonym="<copy from StudentWork exactly>",
-              item_id="<copy from StudentWork exactly>",
-              include_signoff_in_feedback=True)),
-    ]
-
-
-def test_every_scoring_rule_reaches_every_ai_facing_surface():
-    """CONTRACT: each surface renders the whole rules list, not a subset.
-
-    Driven from the rules list itself, so a rule added to
-    ``scoring_output_contract`` is covered here without a new test -- and a
-    surface that stops rendering ``rules_text`` fails even if every existing
-    rule happens to survive elsewhere.
-    """
-    from api import feedback_contract
-
-    for label, text, kwargs in _ai_facing_surfaces():
-        for rule in feedback_contract.scoring_output_contract(**kwargs)["rules"]:
-            assert rule in text, f"{label} is missing rule: {rule[:60]}..."
-
-
 def test_pseudonym_quoting_rule_is_in_the_scoring_contract():
-    """LAW: the don't-quote-a-pseudonym rule exists.
-
-    Separate from the contract test above, which would still pass if this rule
-    were deleted from the list -- every *remaining* rule would still reach every
-    surface. Scrubbing is whole-word and biases to over-correction, so a student
-    surname that is also a common noun ("bell", "brown") replaces that word
-    everywhere in prose. An AI told to "quote briefly from the response" will
-    otherwise quote the substituted token straight back at the student.
-    """
+    """LAW: the scorer is explicitly told never to quote pseudonyms back."""
     from api import feedback_contract
 
     rules = feedback_contract.scoring_output_contract()["rules"]
@@ -615,19 +520,19 @@ def test_pseudonym_quoting_rule_is_in_the_scoring_contract():
 
     assert len(matches) == 1, rules
     assert "whole words" in matches[0]
-    # It qualifies the quoting rule, so it must follow it to read as the exception.
     quoting = next(i for i, rule in enumerate(rules) if rule.startswith("Quote briefly"))
     assert rules.index(matches[0]) == quoting + 1
 
 
-def test_ai_facing_text_stays_pastable_plain_text():
-    """LAW: every AI-facing surface stays ASCII.
+def test_server_authored_scoring_contract_contains_every_rule():
+    """CONTRACT: the packet's only norms delivery renders the complete rule list."""
+    from api import feedback_contract
 
-    The teacher pastes these into a chat assistant and reads results back on a
-    cp1252 console, the same reason the product guides are ASCII-only
-    (api/tests/mcp_server/test_tools.py). These were ASCII by habit rather than
-    by rule until an em-dash in a new scoring rule broke it.
-    """
-    for label, text, _kwargs in _ai_facing_surfaces():
-        offenders = sorted({char for char in text if ord(char) > 127})
-        assert not offenders, f"{label} is not ASCII: {[hex(ord(c)) for c in offenders]}"
+    text = fp.build_contract_text()
+    for rule in feedback_contract.scoring_output_contract()["rules"]:
+        assert rule in text
+
+
+def test_scoring_contract_stays_ascii_for_chat_clients():
+    text = fp.build_contract_text()
+    assert not {char for char in text if ord(char) > 127}

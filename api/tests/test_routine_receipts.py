@@ -113,16 +113,6 @@ def test_run_routine_no_effect(tmp_path, monkeypatch):
     assert result["ok"] is True
 
 
-def test_run_routine_with_scheduled_due(tmp_path, monkeypatch):
-    _root(tmp_path, monkeypatch)
-    result = coord.run_routine(
-        "powergrader_scheduled_autoscore",
-        _fake_runner({"status": "applied", "summary": "scored 5"}),
-        scheduled_due="2026-07-11T12:00:00Z",
-    )
-    assert result["status"] == "applied"
-
-
 # ── Concurrent execution ─────────────────────────────────────────────────
 
 def test_concurrent_runs_execute_once(tmp_path, monkeypatch):

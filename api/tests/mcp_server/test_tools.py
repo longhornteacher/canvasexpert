@@ -692,7 +692,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     contract_names = {item["name"] for item in contract.load_contract()["tools"]}
     grouped = [name for names in tools._TOOL_GROUPS.values() for name in names]
     expected_groups = {
-        "Course discovery and catalog", "Create and Forge", "PowerGrader",
+        "Course discovery and catalog", "Create and Forge", "Scoring Sessions", "Gradebook",
         "SIS Grade Bridges", "Learning Objectives", "School Calendar",
         "Writing Timeline", "Writing Record", "Students",
         "Assessments and DataForge",
@@ -703,7 +703,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 48
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 44
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -2217,9 +2217,8 @@ def test_server_registers_the_expected_tool_set():
             "apply_learning_objective", "delete_learning_objective",
             "get_roster_student_settings", "preview_roster_student_change",
             "apply_roster_student_change", "clear_roster_student_field",
-        "start_scoring_session", "list_scoring_sessions", "get_scoring_packet", "stage_scores",
-        "preview_new_quiz_scores", "apply_new_quiz_scores",
-        "preview_assignment_scores", "apply_assignment_scores",
+        "start_scoring_session", "list_scoring_sessions", "get_scoring_packet",
+        "submit_scoring_results",
         }
 
 

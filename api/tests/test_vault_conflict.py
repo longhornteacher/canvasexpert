@@ -27,7 +27,7 @@ for _path in (_API_DIR, _REPO_ROOT):
 from api.feedback_vault import Vault
 from api.mcp_server import pseudonym, tools
 from api.mirror import store as mirror_store
-from api.powergrader.autoscore_claims import machine_id
+from api.feedback_vault import machine_id
 from api.platform_services import workspace
 
 FIXTURE_USERS = [

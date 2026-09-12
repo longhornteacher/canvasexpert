@@ -7,8 +7,9 @@ guessing, and say plainly when a question goes past what it covers.
 
 What Writing Timeline is
 
-PowerGrader can read a submitted Word document's own revision metadata on the
-teacher's computer and show how the writing arrived: whether there is a
+Canvas Expert can read a submitted Word document's own revision metadata on the
+teacher's computer and include limited observations in the SAFE scoring packet:
+whether there is a
 revision trail at all, how large each insertion was and when it landed, roughly
 how long the document was open, and whether the file descended from a handout
 whose tracking was locked.
@@ -29,9 +30,9 @@ Canvas state, not a CanvasExpert flag:
   not tracked  Anything else: text entry, a second submission type alongside
                upload, or any extra allowed extension such as pdf.
 
-PowerGrader applies Writing Timeline automatically to every tracked
-assignment, including ones the teacher built by hand in Canvas without
-CanvasExpert. There is no separate switch to turn on. Add pdf to the allowed
+Canvas Expert can include Writing Timeline observations in the SAFE packet for a
+tracked assignment, including one the teacher built by hand in Canvas without
+Canvas Expert. There is no separate switch to turn on. Add pdf to the allowed
 extensions and the same assignment stops being tracked.
 
 Ask the teacher which one they want. Do not infer it from the task. An

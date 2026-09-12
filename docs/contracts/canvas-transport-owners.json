@@ -280,6 +280,17 @@
       "reason": "The central operation-ledger post-apply hook invalidates applicable catalog scopes after the confirmed operation succeeds."
     },
     {
+      "path": "api/operation_ledger/adapters/quiz_steps.py",
+      "symbol": "rollback_quiz",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(\"DELETE\", rollback_path, {}) [delete quiz created by this failed attempt]",
+      "classification": "canvas_mutation",
+      "scopes": ["new_quiz.metadata"],
+      "reconciliation": "invalidate",
+      "reason": "This is the bounded rollback of a quiz created by the same operation after a definitive item failure; the adapter's failure path invalidates the assignment catalog after the rollback attempt."
+    },
+    {
       "path": "api/operation_ledger/adapters/module_placement.py",
       "symbol": "_resolve_or_create_module",
       "detector": "attr:_canvas_send",
@@ -423,17 +434,6 @@
       "reason": "Scheduled-routine curve writer. Its caller _run_routine_curve fires one coalesced mirror_service.notify_course_changed(course_id) after each course's whole curve batch (once per course that curved at least one assignment), which runs sync.refresh_submissions_course_delta — the same narrow per-course submissions delta refresh PowerGrader and the direct curve routes use. Fire-and-forget; the heartbeat repairs any miss."
     },
     {
-      "path": "api/powergrader/autopush_executor.py",
-      "symbol": "run_autopush_for_session",
-      "detector": "name:canvas_send",
-      "call_index": 1,
-      "call_form": "canvas_send(\"PUT\", _path(session, user_id), payload) [grade + optional comment]",
-      "classification": "canvas_mutation",
-      "scopes": ["private.submissions", "private.submission_comments"],
-      "reconciliation": "targeted",
-      "reason": "Reconciled on every entry point. The three api/webui/routes/powergrader.py callers of the wrapper run_interactive_autopush call _notify_write_through -> mirror_service.notify_course_changed -> sync.refresh_submissions_course_delta on success. The direct scheduled-autoscore caller api/webui/routes/routines_powergrader.py (which calls run_autopush_for_session, bypassing the wrapper) reconciles inline via mirror_service.notify_course_changed guarded on pushed. Both are the same narrow per-course submissions delta refresh."
-    },
-    {
       "path": "api/powergrader/session_actions.py",
       "symbol": "push_grades",
       "detector": "name:canvas_send",
@@ -442,7 +442,7 @@
       "classification": "canvas_mutation",
       "scopes": ["private.submissions", "private.submission_comments"],
       "reconciliation": "targeted",
-      "reason": "The /api/powergrader/session/{id}/push route calls _notify_write_through -> mirror_service.notify_course_changed -> sync.refresh_submissions_course_delta after a verified push."
+      "reason": "The unified MCP Scoring Session submit path calls scoring_apply.apply_plan, which reaches this frozen, drift-checked, receipt-backed grade writer and triggers a narrow mirror refresh after a verified push."
     },
     {
       "path": "api/powergrader/new_quiz_grader.py",
@@ -619,17 +619,6 @@
       "scopes": ["focused_evidence"],
       "reconciliation": "n/a",
       "reason": "Auth-probe CLI tool (`py diagnose_newquizzes.py`). Method is a caller-supplied parameter, but per the module docstring every call is read-only except the New Quiz Student Analysis report-create POST, which only enqueues a Canvas-generated report and never mutates course content."
-    },
-    {
-      "path": "api/openrouter_client.py",
-      "symbol": "score",
-      "detector": "alias:post",
-      "call_index": 1,
-      "call_form": "http_post = requests.post (default parameter aliasing; later invoked as http_post(ENDPOINT, ...))",
-      "classification": "external",
-      "scopes": ["none"],
-      "reconciliation": "n/a",
-      "reason": "OpenRouter scoring transport; not a Canvas write. Listed explicitly (rather than silently excluded) because requests.post is referenced by attribute here even though the actual invocation is an indirected local-name call, which a naive call-only scanner could miss."
     }
   ]
 }

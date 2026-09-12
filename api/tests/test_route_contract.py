@@ -13,12 +13,10 @@ The gradebook student-list endpoint is at `/api/students/list` (returns id+name 
 the extra-time panel). The reports endpoint is at `/api/students` (returns id+name+monitored).
 These were previously both at `/api/students` causing a shadow; the gradebook one was renamed.
 """
-import json
-import hashlib
 import pytest
+from fastapi.testclient import TestClient
 
 from api.webui.server import app
-from api.webui.routes import powergrader as powergrader_routes
 
 EXPECTED = [
     ('/', ('GET',)),
@@ -112,10 +110,6 @@ EXPECTED = [
     ('/api/students/monitor', ('POST',)),
     ('/api/students/monitored', ('GET',)),
     ('/api/support-bundle', ('POST',)),
-    ('/api/powergrader/refresh', ('POST',)),
-    ('/api/powergrader/open-assignment-folder', ('POST',)),
-    ('/api/powergrader/oral-reading/model-status', ('GET',)),
-    ('/api/powergrader/oral-reading/setup-model', ('POST',)),
     ('/api/sweep/preview', ('POST',)),
     ('/api/temp-upload', ('POST',)),
     ('/api/tier-tags', ('GET',)),
@@ -142,14 +136,10 @@ EXPECTED = [
     ('/settings/courses/{course_id}/remove', ('POST',)),
     ('/settings/courses/{course_id}/set-active', ('POST',)),
     ('/settings/download-root', ('POST',)),
-    ('/settings/openrouter', ('POST',)),
-    ('/settings/openrouter/models', ('GET',)),
-    ('/settings/openrouter/test', ('POST',)),
     ('/settings/test-connection', ('POST',)),
     ('/welcome', ('GET',)),
     ('/welcome/workspace', ('POST',)),
     ('/welcome/browse-workspace', ('POST',)),
-    ('/feedback-expert', ('GET',)),
     ('/api/feedback/personas', ('GET',)),
     ('/api/feedback/personas/custom', ('POST',)),
     ('/api/feedback/personas/custom', ('DELETE',)),
@@ -177,28 +167,6 @@ EXPECTED = [
     ('/api/roster/score-matrix', ('POST',)),
     ('/api/roster/student', ('POST',)),
     ('/roster', ('GET',)),
-    ('/powergrader', ('GET',)),
-    ('/powergrader/session/{session_id}', ('GET',)),
-    ('/api/powergrader/session/{session_id}', ('GET',)),
-    ('/api/powergrader/session/{session_id}/media/{stream_key}', ('GET',)),
-    ('/api/powergrader/session/{session_id}/staged', ('GET',)),
-    ('/api/powergrader/session/{session_id}/blind-first', ('POST',)),
-    ('/api/powergrader/session/{session_id}/blind-reveal', ('POST',)),
-    ('/api/powergrader/session/{session_id}/grade', ('POST',)),
-    ('/api/powergrader/session/{session_id}/late-preview', ('POST',)),
-    ('/api/powergrader/session/{session_id}/late-score', ('POST',)),
-    ('/api/powergrader/session/{session_id}/late-watch', ('POST',)),
-    ('/api/powergrader/session/{session_id}/import-results', ('POST',)),
-    ('/api/powergrader/session/{session_id}/auto-post-disable', ('POST',)),
-    ('/api/powergrader/session/{session_id}/new-quiz-finalize', ('POST',)),
-    ('/api/powergrader/session/{session_id}/new-quiz-csv-resolve', ('POST',)),
-    ('/api/powergrader/session/{session_id}/new-quiz-review', ('POST',)),
-    ('/api/powergrader/session/{session_id}/push-review', ('POST',)),
-    ('/api/powergrader/session/{session_id}/push', ('POST',)),
-    ('/api/powergrader/estimate', ('POST',)),
-    ('/api/powergrader/sessions', ('GET',)),
-    ('/api/powergrader/start', ('POST',)),
-    ('/api/powergrader/new-quiz-csv', ('POST',)),
     ('/api/readiness', ('GET',)),
     ('/api/readiness/probe', ('POST',)),
     ('/api/receipts', ('GET',)),
@@ -209,94 +177,6 @@ EXPECTED = [
     ('/api/work/{job_id}/ignore', ('POST',)),
     ('/api/work/{job_id}/snooze', ('POST',)),
 ]
-
-
-def test_powergrader_staged_route_is_narrow_and_404s(monkeypatch):
-    monkeypatch.setattr(powergrader_routes, "_load_session", lambda _session_id: {
-        "students": [{"ai_score": 7}, {"ai_score": None}],
-        "assistant_staged": {"staged_at": "2026-08-04T12:00:00", "updated": 1},
-    })
-    response = powergrader_routes.pg_get_staged("session-1")
-    assert response.status_code == 200
-    assert json.loads(response.body) == {
-        "ok": True,
-        "staged_at": "2026-08-04T12:00:00",
-        "updated": 1,
-        "scored": 1,
-    }
-
-    monkeypatch.setattr(powergrader_routes, "_load_session", lambda _session_id: None)
-    missing = powergrader_routes.pg_get_staged("missing")
-    assert missing.status_code == 404
-    assert json.loads(missing.body) == {"ok": False, "error": "Session not found."}
-
-
-def test_oral_reading_model_routes_are_local_status_and_explicit_setup(monkeypatch):
-    monkeypatch.setattr(powergrader_routes.oral_reading, "model_status", lambda: {
-        "available": False, "model_id": "small.en", "approximate_download_mib": 500,
-    })
-    status = powergrader_routes.pg_oral_reading_model_status()
-    assert json.loads(status.body) == {
-        "ok": True, "available": False, "model_id": "small.en", "approximate_download_mib": 500,
-    }
-    monkeypatch.setattr(powergrader_routes.oral_reading, "install_model", lambda: {
-        "ok": False, "error": "The local speech model could not be prepared.",
-    })
-    setup = powergrader_routes.pg_oral_reading_setup_model()
-    assert setup.status_code == 503
-    assert json.loads(setup.body)["ok"] is False
-
-
-def test_media_stream_is_session_owned_per_record_and_workspace_contained(tmp_path, monkeypatch):
-    audio = tmp_path / "ready.wav"
-    audio.write_bytes(b"synthetic wav")
-    digest = hashlib.sha256(audio.read_bytes()).hexdigest()
-    stream_key = powergrader_routes.media_recordings.stream_key("media")
-    monkeypatch.setattr(powergrader_routes, "_load_session", lambda _session_id: {
-        "course_id": "course", "assignment_id": "assignment", "students": [{"user_id": "student", "attachments": [{"media_recording": True, "stream_key": stream_key}]}],
-    })
-    monkeypatch.setattr(powergrader_routes.workspace, "workspace_root", lambda: str(tmp_path))
-    monkeypatch.setattr(powergrader_routes.config, "course_display_name", lambda _course: "Synthetic")
-    monkeypatch.setattr(powergrader_routes.workspace, "read_assignment_evidence_manifest", lambda *args: {
-        "status": "incomplete", "evidence": [{"kind": "media_recording", "user_id": "student", "evidence_id": "media",
-        "relative_path": "ready.wav", "canonical_sha256": digest}],
-    })
-    ready = powergrader_routes.pg_media_stream("session", stream_key)
-    assert ready.media_type == "audio/wav"
-    assert ready.headers["cache-control"].startswith("no-store")
-    assert powergrader_routes.pg_media_stream("session", "other").status_code == 404
-    assert powergrader_routes.pg_media_stream("session", "../media").status_code == 404
-    monkeypatch.setattr(powergrader_routes.workspace, "read_assignment_evidence_manifest", lambda *args: {
-        "status": "current", "evidence": [{"kind": "media_recording", "user_id": "student", "evidence_id": "media",
-        "relative_path": "../outside.wav", "canonical_sha256": digest}],
-    })
-    assert powergrader_routes.pg_media_stream("session", stream_key).status_code == 409
-
-
-@pytest.mark.parametrize("record", [
-    None,
-    {"kind": "media_recording", "user_id": "student", "evidence_id": "media", "canonical_sha256": "hash"},
-    {"kind": "media_recording", "user_id": "student", "evidence_id": "media", "relative_path": "missing.wav", "canonical_sha256": "hash"},
-    {"kind": "media_recording", "user_id": "other", "evidence_id": "media", "relative_path": "ready.wav", "canonical_sha256": "hash"},
-    {"kind": "media_recording", "user_id": "student", "evidence_id": "media", "relative_path": "ready.wav"},
-])
-def test_media_stream_missing_record_path_or_file_fails_closed(tmp_path, monkeypatch, record):
-    key = powergrader_routes.media_recordings.stream_key("media")
-    monkeypatch.setattr(powergrader_routes, "_load_session", lambda _: {"course_id": "course", "assignment_id": "assignment", "students": [{"user_id": "student", "attachments": [{"media_recording": True, "stream_key": key}]}]})
-    monkeypatch.setattr(powergrader_routes.workspace, "workspace_root", lambda: str(tmp_path))
-    monkeypatch.setattr(powergrader_routes.config, "course_display_name", lambda _: "Synthetic")
-    monkeypatch.setattr(powergrader_routes.workspace, "read_assignment_evidence_manifest", lambda *args: {"status": "incomplete", "evidence": [] if record is None else [record]})
-    assert powergrader_routes.pg_media_stream("session", key).status_code == 409
-
-
-def test_media_stream_tampered_digest_fails_closed(tmp_path, monkeypatch):
-    audio = tmp_path / "ready.wav"; audio.write_bytes(b"synthetic")
-    key = powergrader_routes.media_recordings.stream_key("media")
-    monkeypatch.setattr(powergrader_routes, "_load_session", lambda _: {"course_id":"course", "assignment_id":"assignment", "students":[{"user_id":"student", "attachments":[{"media_recording":True,"stream_key":key}]}]})
-    monkeypatch.setattr(powergrader_routes.workspace, "workspace_root", lambda: str(tmp_path))
-    monkeypatch.setattr(powergrader_routes.config, "course_display_name", lambda _: "Synthetic")
-    monkeypatch.setattr(powergrader_routes.workspace, "read_assignment_evidence_manifest", lambda *args: {"evidence":[{"kind":"media_recording","user_id":"student","evidence_id":"media","relative_path":"ready.wav","canonical_sha256":"wrong"}]})
-    assert powergrader_routes.pg_media_stream("session", key).status_code == 409
 
 
 def _current_routes():
@@ -312,3 +192,9 @@ def _current_routes():
 def test_route_contract():
     """The full (path, methods) surface must match the frozen baseline."""
     assert _current_routes() == sorted(EXPECTED)
+
+
+@pytest.mark.parametrize("path", ["/powergrader", "/feedback-expert", "/api/powergrader/session/x"])
+def test_retired_teacher_scoring_routes_are_absent(path):
+    response = TestClient(app).get(path)
+    assert response.status_code == 404

@@ -484,10 +484,12 @@ def test_private_group_snapshot_round_trip_has_only_allowlisted_fields(tmp_path)
     assert set(document) == {
         "schema_version", "course_id", "state", "last_success_at", "last_attempt_at", "error_code", "categories",
     }
+    membership_id = document["categories"][0]["groups"][0]["memberships"][0]["user_id"]
     assert document["categories"] == [{
         "category_id": "7", "category_name": "Reading groups",
-        "groups": [{"id": "8", "name": "Blue", "memberships": [{"id": "9", "user_id": "101"}]}],
+        "groups": [{"id": "8", "name": "Blue", "memberships": [{"id": "9", "user_id": membership_id}]}],
     }]
+    assert membership_id != "101" and membership_id.isalpha()
     stale = mirror_store.invalidate_groups("1", root=tmp_path, attempted_at="2026-07-18T01:00:00Z")
     assert stale["state"] == "stale"
     assert stale["categories"] == document["categories"]

@@ -1,7 +1,7 @@
 Writing Record - private longitudinal writing evidence
 
 Use get_writing_history(pseudonym) when a teacher asks to inspect one
-student's dated writing evidence. It is separate from PowerGrader and from
+student's dated writing evidence. It is separate from Scoring Sessions and from
 Writing Timeline. It does not score, coach, assign a tier, infer a trend,
 recommend feedback, or decide whether an assignment meets a rubric.
 
@@ -46,4 +46,4 @@ it before sending it to any external AI service.
 Open boundaries
 
 Rubric capture, delivered-feedback history, and automatic acquisition are not yet
-implemented. PowerGrader remains the grading and feedback-review surface.
+implemented. Scoring Sessions use Canvas Live as the grading and feedback-review surface.

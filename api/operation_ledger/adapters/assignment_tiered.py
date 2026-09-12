@@ -18,12 +18,6 @@ def execute(
     resolve_assignment_groups,
     group_resolution_error,
     find_assignment_group,
-    autoscore_queue_factory,
-    autoscore_settings,
-    autoscore_push_policy,
-    schedule_autoscore,
-    active_course_name,
-    as_bool,
     read_modules,
 ) -> dict:
     course_id = target["course_id"]
@@ -165,28 +159,10 @@ def execute(
                     result["state"] = "partial"
                 return result
 
-        if payload.get("autoscore_schedule"):
-            result = _schedule_tier_autoscore(
-                payload,
-                course_id,
-                assignment_id,
-                index,
-                steps,
-                context,
-                autoscore_queue_factory=autoscore_queue_factory,
-                autoscore_settings=autoscore_settings,
-                autoscore_push_policy=autoscore_push_policy,
-                schedule_autoscore=schedule_autoscore,
-                active_course_name=active_course_name,
-                as_bool=as_bool,
-            )
-            if result is not None:
-                return result
-
     return build_result("applied", steps=steps, returned_object_id=None, returned_object_url=None)
 
 
-def reconcile(payload: dict, target: dict, *, ordered_steps, autoscore_queue_factory) -> dict:
+def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
     course_id = target["course_id"]
     stored_steps = ordered_steps(target)
     projected = []
@@ -240,22 +216,6 @@ def reconcile(payload: dict, target: dict, *, ordered_steps, autoscore_queue_fac
             ):
                 return _tier_reconcile_result("sent_unknown", projected)
             projected.append(_applied_safe_step(attach_step))
-
-        if payload.get("autoscore_schedule"):
-            schedule_step = find_step(stored_steps, f"schedule_autoscore:{index}")
-            expected_job_id = autoscore_queue_factory().make_job_id(course_id, assignment_id)
-            if not schedule_step.get("returned_object_id"):
-                return _tier_reconcile_unfinished(schedule_step, projected)
-            if str(schedule_step.get("returned_object_id")) != str(expected_job_id):
-                return _tier_reconcile_result("sent_unknown", projected)
-            try:
-                jobs = (autoscore_queue_factory().load_queue() or {}).get("jobs", [])
-            except Exception:
-                return _tier_reconcile_result("sent_unknown", projected)
-            job = next((row for row in jobs if str(row.get("job_id")) == str(expected_job_id)), None)
-            if not job or str(job.get("course_id")) != str(course_id) or str(job.get("assignment_id")) != str(assignment_id):
-                return _tier_reconcile_result("sent_unknown", projected)
-            projected.append(_applied_safe_step(schedule_step))
 
     return _tier_reconcile_result("applied", projected)
 
@@ -316,69 +276,6 @@ def _tier_failure_state(steps: list[dict]) -> str:
         step.get("state") in ("applied", "skipped") and step.get("returned_object_id")
         for step in steps
     ) else "failed"
-
-
-def _schedule_tier_autoscore(
-    payload,
-    course_id,
-    assignment_id,
-    index,
-    steps,
-    context,
-    *,
-    autoscore_queue_factory,
-    autoscore_settings,
-    autoscore_push_policy,
-    schedule_autoscore,
-    active_course_name,
-    as_bool,
-):
-    queue = autoscore_queue_factory()
-    settings = autoscore_settings(payload)
-    policy = autoscore_push_policy(payload)
-    job_id = queue.make_job_id(course_id, assignment_id)
-    key = f"schedule_autoscore:{index}"
-    step = ensure_step(steps, key)
-    if step.get("returned_object_id") == job_id and step.get("state") in ("applied", "skipped"):
-        step["state"] = "skipped"
-        return None
-    marked = context.before_send(
-        key,
-        models.sha256_dict(
-            {
-                "assignment_id": assignment_id,
-                "due_at": payload.get("due_at"),
-                "settings": settings,
-                "auto_push": as_bool(payload.get("autoscore_auto_push")),
-                "push_policy": policy,
-            }
-        ),
-    )
-    _replace_local_step(steps, marked)
-    try:
-        job = schedule_autoscore(
-            course_id=course_id,
-            course_name=active_course_name(course_id),
-            assignment_id=assignment_id,
-            assignment_name=payload["name"],
-            payload=payload,
-            settings=settings,
-            push_policy=policy,
-            queue=queue,
-        )
-        if str(job.get("job_id") or job_id) != job_id:
-            raise ValueError("unexpected queue job ID")
-        marked["state"] = "applied"
-        marked = context.checkpoint_step(marked, returned_object_id=job_id)
-        _replace_local_step(steps, marked)
-        return None
-    except Exception as exc:
-        marked["state"] = "failed"
-        marked["error_code"] = "autoscore_queue_failed"
-        marked["private_diagnostic"] = type(exc).__name__
-        marked = context.checkpoint_step(marked)
-        _replace_local_step(steps, marked)
-        return build_result("partial", steps=steps, error_code="autoscore_queue_failed")
 
 
 def _replace_local_step(steps: list[dict], step: dict) -> None:

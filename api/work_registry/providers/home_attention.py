@@ -169,46 +169,11 @@ def scan_comment_follow_up(course_id: str, *, now, reads: WorkCourseReads) -> li
                 latest_submitted_at=row["latest_submitted_at"],
                 latest_attempt_number=row["latest_attempt_number"],
                 due_at=row["due_at"],
-                resumable_url="/powergrader",
+                resumable_url="/gradebook",
             ))
     return output
 
 
-def _is_text_entry_assignment(assignment: dict) -> bool:
-    types = assignment.get("submission_types")
-    if not isinstance(types, list) or "online_text_entry" not in {text(item) for item in types}:
-        return False
-    return not any(assignment.get(key) for key in ("quiz_id", "quiz_type", "is_quiz", "is_quiz_assignment"))
-
-
-def scan_powergrader_ready(course_id: str, *, now, reads: WorkCourseReads) -> list[dict]:
-    """Project text-entry assignments with ungraded submitted work for PowerGrader."""
-    assignments, submissions = _submission_rows(course_id, reads=reads)
-    aggregates = defaultdict(_aggregate_row)
-    for submission in submissions:
-        if not _eligible_submission(submission) or submission.get("score") is not None:
-            continue
-        assignment_id = text(submission.get("assignment_id"))
-        assignment = assignments.get(assignment_id)
-        if assignment is None or not _is_text_entry_assignment(assignment):
-            continue
-        _add_submission(aggregates[assignment_id], submission, assignment)
-    return [
-        finding(
-            kind="grade.powergrader_ready",
-            course_id=str(course_id),
-            assignment_id=assignment_id,
-            counts={key: row[key] for key in ("total", "pending", "affected")},
-            now=now,
-            latest_submitted_at=row["latest_submitted_at"],
-            latest_attempt_number=row["latest_attempt_number"],
-            due_at=row["due_at"],
-            resumable_url="/powergrader",
-        )
-        for assignment_id, row in sorted(aggregates.items())
-    ]
-
-
 __all__ = [
-    "classify_comment_follow_up", "scan_comment_follow_up", "scan_powergrader_ready",
+    "classify_comment_follow_up", "scan_comment_follow_up",
 ]

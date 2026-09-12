@@ -24,36 +24,6 @@ def _configure(monkeypatch):
         {"id": "course-1", "name": "Course One", "nickname": "Course One", "active": True},
         {"id": "course-2", "name": "Course Two", "nickname": "Course Two", "active": True},
     ])
-    monkeypatch.setattr(pages.work_routes, "_session_assignment_names", lambda: {})
-    monkeypatch.setattr(pages.work_routes, "_scheduled_display_metadata", lambda: {})
-
-
-def _powergrader_job():
-    source = {"type": "powergrader_session", "value": "session-fictitious"}
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    counts = {"total": 24, "pending": 22, "affected": 2}
-    return {
-        "job_id": "job-fictitious-session",
-        "fingerprint": stable_fingerprint(
-            "grade.powergrader", source, ["course-1"], "assignment-1"
-        ),
-        "material_version": material_version({"status": "attention", "counts": counts}),
-        "origin": "intentional",
-        "kind": "grade.powergrader",
-        "status": "attention",
-        "title": "PowerGrader work",
-        "description": "PowerGrader session",
-        "course_ids": ["course-1"],
-        "focused_course_id": "course-1",
-        "assignment_id": "assignment-1",
-        "resumable_url": "/powergrader/session/session-fictitious",
-        "source_ref": source,
-        "counts": counts,
-        "attention_reason": "Work needs attention",
-        "created_at": now,
-        "updated_at": now,
-        "completed_at": "",
-    }
 
 
 def test_desk_empty_render_is_local_and_honest(monkeypatch):
@@ -422,52 +392,24 @@ def test_desk_populated_render_uses_registry_and_real_receipt_projection(monkeyp
     assert "operation-applied-id" not in response.text
 
 
-def test_desk_populated_powergrader_row_uses_semantic_sidecar(monkeypatch):
-    _configure(monkeypatch)
-    job = _powergrader_job()
-    monkeypatch.setattr(pages.work_routes, "_section_jobs", lambda section: [job])
-    monkeypatch.setattr(
-        pages.work_routes,
-        "_session_assignment_names",
-        lambda: {"session-fictitious": "Fictional Reflection"},
-    )
-    monkeypatch.setattr(pages.operation_store, "list_operations_pii_minimized", lambda: [])
-    monkeypatch.setattr(pages.receipt_store, "list_receipts", lambda: [])
-
-    response = _client().get("/")
-
-    assert response.status_code == 200
-    assert "Course One" in response.text
-    assert "Fictional Reflection" in response.text
-    assert "24 students · 22 awaiting review · 2 approved, not posted" in response.text
-    assert "Review &amp; post" in response.text
-    assert "grade.powergrader · 24 items" not in response.text
-
-
 def test_desk_home_attention_render_is_aggregate_only(monkeypatch):
     _configure(monkeypatch)
     jobs = [
         finding(
             kind="grade.followup", course_id="course-1", assignment_id="assignment-1",
             counts={"total": 2, "pending": 2, "affected": 2},
-            now="2026-07-11T12:00:00+00:00", resumable_url="/powergrader",
+            now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
         ),
         finding(
             kind="grade.staff_check", course_id="course-1", assignment_id="assignment-2",
             counts={"total": 1, "pending": 1, "affected": 1},
-            now="2026-07-11T12:00:00+00:00", resumable_url="/powergrader",
-        ),
-        finding(
-            kind="grade.powergrader_ready", course_id="course-1", assignment_id="assignment-3",
-            counts={"total": 3, "pending": 3, "affected": 3},
-            now="2026-07-11T12:00:00+00:00", resumable_url="/powergrader",
+            now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
         ),
     ]
     monkeypatch.setattr(pages.work_routes, "_section_jobs", lambda section: jobs)
     monkeypatch.setattr(pages.work_routes, "_finding_assignment_names", lambda jobs: {
         ("course-1", "assignment-1"): "Reflection One",
         ("course-1", "assignment-2"): "Reflection Two",
-        ("course-1", "assignment-3"): "Reflection Three",
     })
     monkeypatch.setattr(pages.operation_store, "list_operations_pii_minimized", lambda: [])
     monkeypatch.setattr(pages.receipt_store, "list_receipts", lambda: [])
@@ -479,7 +421,6 @@ def test_desk_home_attention_render_is_aggregate_only(monkeypatch):
     for text in (
         "Reflection One", "2 responses need a human check",
         "Reflection Two", "1 response needs a staff response check",
-        "Reflection Three", "3 ungraded text entries ready for review",
     ):
         assert text in response.text
     assert "synthetic-student" not in response.text

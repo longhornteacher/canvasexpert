@@ -261,7 +261,7 @@ def _run_routine_curve(params):
         # per-course submissions refresh so mirror-backed grade reads pick up the
         # curved scores. Fire-and-forget (self-guarding, swallows its own errors);
         # the heartbeat's full delta pass repairs any miss — same contract as the
-        # PowerGrader grade-push path. A course that curved nothing fires nothing.
+        # A course that curved nothing fires no write-through refresh.
         if course_applied:
             try:
                 mirror_service.notify_course_changed(cid)

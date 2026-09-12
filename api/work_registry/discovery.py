@@ -60,7 +60,6 @@ def _scan_course(course: dict, *, now: str, deadline: float, canvas_get_all=None
     providers = (
         grading_debt.scan_course,
         home_attention.scan_comment_follow_up,
-        home_attention.scan_powergrader_ready,
         late_work.scan_course,
         roster_warnings.scan_course,
     )

@@ -10,7 +10,6 @@ from functools import wraps
 from api import operational_log
 from api.powergrader import attribution
 from api.powergrader import blind_first
-from api.powergrader import late_catchup
 from api.powergrader import session_store
 
 
@@ -289,7 +288,6 @@ def _payload(student: dict, *, comments_only: bool = False) -> dict:
         payload["submission"] = {"posted_grade": str(score)}
     if feedback:
         payload["comment"] = {"text_comment": feedback}
-    late_catchup.apply_lateness_to_submission_payload(payload, student)
     return payload
 
 

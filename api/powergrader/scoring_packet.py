@@ -34,8 +34,8 @@ def _canonical_digest(value: dict) -> str:
 def packet_digest(session_id, safe_bundle: dict) -> str:
     """Identity of one session's bundle content.
 
-    ``stage_scores`` recomputes this and refuses to land scores once it has
-    moved, so a re-run between retrieval and staging cannot be scored blind.
+    ``submit_scoring_results`` recomputes this and refuses to write scores once
+    it has moved, so a re-run between retrieval and submission cannot be scored blind.
     Both sides call this helper so the two digests cannot drift apart.
     """
     return _canonical_digest({
@@ -62,7 +62,7 @@ def build_packet(
     anyone who wants it, and is deliberately not what paging is measured in.
 
     Returns a dict with:
-    - packet_digest: bundle identity, required by ``stage_scores``
+    - packet_digest: bundle identity, required by ``submit_scoring_results``
     - items: list of {item_id, prompt, possible}, deduplicated by item_id
     - students: list of {pseudonym, item_id, text} for this page
     - total: scorable rows in the whole bundle

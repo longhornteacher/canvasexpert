@@ -116,7 +116,6 @@ def build_students(
             "extra_time_days": extra_days,
             **({"new_quiz_attempt": s.get("new_quiz_attempt"), "canvas_late": bool(s.get("late")),
                 "seconds_late": s.get("seconds_late")} if s.get("new_quiz_attempt") is not None else {}),
-            **({"late_catchup": s.get("late_catchup")} if s.get("late_catchup") else {}),
         })
 
     students.sort(key=lambda x: x["real_name"].lower())

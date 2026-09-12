@@ -256,7 +256,7 @@ def test_late_work_scan_course_reads_mirror_with_zero_live_calls(monkeypatch, tm
     assert findings[0]["counts"] == {"total": 2, "pending": 2, "affected": 2}
 
 
-def test_grading_debt_and_home_attention_read_mirror_with_comment_shape(monkeypatch, tmp_path):
+def test_grading_debt_and_comment_followup_read_mirror_with_comment_shape(monkeypatch, tmp_path):
     _mount(monkeypatch, tmp_path)
     _populate(str(tmp_path))
     # The rich (include_comments=True) read is bounded by its own comment
@@ -264,7 +264,6 @@ def test_grading_debt_and_home_attention_read_mirror_with_comment_shape(monkeypa
     # fresh here so this fixture continues to serve entirely from the mirror.
     store.record_submission_comments_state(
         COURSE, ok=True, attempted_at=store.now_iso(), root=str(tmp_path))
-    monkeypatch.setattr(grading_debt, "powergrader_evidence", lambda: {})
 
     reads = _reads(_explode)
     debt_findings = grading_debt.scan_course(
@@ -284,17 +283,11 @@ def test_grading_debt_and_home_attention_read_mirror_with_comment_shape(monkeypa
     assert definite[0]["assignment_id"] == "700101"
     assert definite[0]["counts"] == {"total": 1, "pending": 1, "affected": 1}
 
-    ready = home_attention.scan_powergrader_ready(
-        COURSE, now="2026-07-11T12:00:00+00:00", reads=reads,
-    )
-    ready_ids = {item["assignment_id"] for item in ready}
-    assert ready_ids == {"700100", "700101"}
 
 
 def test_grading_debt_falls_back_live_when_mirror_is_stale(monkeypatch, tmp_path):
     _mount(monkeypatch, tmp_path)
     _populate(str(tmp_path), fresh=False)
-    monkeypatch.setattr(grading_debt, "powergrader_evidence", lambda: {})
 
     def fake_get(path, params=None, timeout=None, deadline=None):
         if path.endswith("/assignments"):

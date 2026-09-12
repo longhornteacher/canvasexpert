@@ -1,6 +1,5 @@
-"""PowerGrader backend package.
+"""Private scoring backend package.
 
-Submodules are intentionally loaded lazily.  Feedback artifact code shares the
-attachment router with this package, and eager imports here would create a
-feedback-pipeline/OpenRouter circular import during offline tests.
+Submodules are intentionally loaded lazily to keep SAFE artifact and evidence
+owners independent and avoid circular imports during offline tests.
 """
