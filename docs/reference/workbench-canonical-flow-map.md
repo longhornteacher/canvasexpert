@@ -13,7 +13,7 @@
 | 3 | **Gradebook actions** | `/gradebook` | `gradebook.html` (`layouts/workspace.html`, `left-main`) | `gradebook.js` + `gradebook/*.js` | `routes/gradebook.py` (facade) + `routes/gradebook_*.py`, `gradebook_service.py` | `gradebook-module-map.md` | Single-course scope; late-policy/sweep/curve writes are reversible; extra-time reads from Roster config |
 | 4 | **Roster & student-group actions** | `/roster` | `roster.html` (`layouts/workspace.html`, `left-main`) | `roster.js` + `roster/*.js` | `routes/roster.py` + `routes/roster_*.py`, `routes/names.py` | `roster-module-map.md` | V3: Canvas groups are source of truth; V2 tier/planned_group writes rejected; vault is PRIVATE |
 | 5 | **Student reports** | `/students/reports` | `student_reports.html` (`layouts/document.html`, `wide`) | `course_expert/student_reports.js`, `course_expert/portfolio.js` | `routes/pages.py::student_reports_page`, `routes/reports.py` | `roster-module-map.md` | Private report roots, monitored-student data, CSV handling, and portfolio behavior remain owned by the existing report routes; no data migration or new Canvas write path. |
-| 6 | **Scoring Sessions** – agent-assisted scoring | MCP `start_scoring_session` → `get_scoring_packet` → `submit_scoring_results` | No Canvas Expert scoring page | MCP server and private scoring engine | `api/mcp_server/`, `api/powergrader/` | `powergrader-scoring-map.md`, `feedback-scoring-contract.md` | One assignment-type-neutral SAFE packet; valid results write immediately with per-student review, drift, idempotency, verification, and receipts. Canvas Live is review/edit surface. |
+| 6 | **Scoring Sessions** – agent-assisted scoring | MCP `start_scoring_session` → `continue_scoring_session` → `get_scoring_packet` → `submit_scoring_results` | No Canvas Expert scoring page | MCP server and private scoring engine | `api/mcp_server/`, `api/powergrader/` | `powergrader-scoring-map.md`, `feedback-scoring-contract.md` | One root session advances through a frozen Current-course backlog; each SAFE packet and write stays assignment-bounded with per-student review, drift, idempotency, verification, and receipts. Canvas Live is review/edit surface. |
 | 8 | **Settings & first-run** | `/settings` (first-run: `/welcome`) | `settings.html` (`layouts/workspace.html`, `left-main`) / `welcome.html` (`layouts/wizard.html`) | `settings.js` + `settings/*.js` / `welcome.js` | `routes/settings.py`, `routes/calendar.py`, `routes/onboarding.py`, `config/` | `settings-module-map.md` | Token in OS credential store only; no district defaults in source; local-only bind |
 | 9 | **Routines** | `/routines` | `routines.html` (`layouts/document.html`, `wide`) | inline / route-driven | `routes/routines.py` + `routes/routines_builtin.py` + `routes/routines_custom.py` | `operation-ledger-contract.md` (routines integration) | Local automations only; no cloud scheduler; writes gated by routine definitions |
 
@@ -59,9 +59,9 @@ The retired roster tier-scheme HTTP endpoints have no scoring-UI dependency.
 
 | Removed | Replacement | Changes |
 |---|---|---|
-| `/powergrader`, `/feedback-expert`, `/api/powergrader/**`, OpenRouter settings/routes/client | MCP Scoring Session and Canvas Live | Teacher-facing queue, import, and hosted-model surfaces removed; one neutral `submit_scoring_results` path owns both assignment write lanes |
+| `/powergrader`, `/feedback-expert`, `/api/powergrader/**`, OpenRouter settings/routes/client | Backlog-wide MCP Scoring Session and Canvas Live | Teacher-facing grading UI, import, and hosted-model surfaces removed; assignment-bounded `submit_scoring_results` owns both existing write lanes |
 
-**Why:** Canvas Live is the teacher's only scoring review/edit surface. Canvas Expert keeps private identity, SAFE evidence, and write safeguards, but exposes no scoring queue or hosted grader.
+**Why:** Canvas Live is the teacher's only scoring review/edit surface. Canvas Expert keeps private identity, SAFE evidence, and write safeguards. The MCP root queue is a resumable session boundary, not a local grading UI or hosted grader.
 
 ---
 

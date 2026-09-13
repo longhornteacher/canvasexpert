@@ -112,6 +112,7 @@ def build_start_session(
     evidence_status: str = "unknown",
     auto_post_enabled: bool = False,
     oral_reading_passage: dict | None = None,
+    parent_scoring_session_id: str = "",
 ) -> dict:
     session = build_session(
         session_id=session_id,
@@ -137,6 +138,7 @@ def build_start_session(
         evidence_manifest=evidence_manifest,
         evidence_status=evidence_status,
         oral_reading_passage=oral_reading_passage,
+        parent_scoring_session_id=parent_scoring_session_id,
     )
     session["auto_post"] = _auto_post_block(mode, auto_post_enabled)
     session["auto_post_log"] = []
@@ -164,6 +166,7 @@ def run_start_session(
     save_session,
     scoring_session: bool = False,
     scoring_guidance: str = "",
+    parent_scoring_session_id: str = "",
 ) -> dict:
     """Run the PowerGrader session-start orchestration for one assignment.
 
@@ -374,6 +377,7 @@ def run_start_session(
         evidence_status=refresh.get("status", "unknown"),
         auto_post_enabled=auto_post_enabled,
         oral_reading_passage=({"enabled": True, "passage": oral_passage, "digest": oral_reading.passage_digest(passage_tokens)} if oral_enabled else {"enabled": False}),
+        parent_scoring_session_id=parent_scoring_session_id,
     )
     session["writing_timeline_tracked"] = writing_timeline_tracked
     if scoring_session:

@@ -149,12 +149,13 @@ def test_mcp_server_instructions_cover_unscoped_scoring_discovery_and_held_work(
         "get_gradebook_snapshot",
         "ungraded greater than zero",
         "partially_scored",
-        "which exact assignment",
-        "held or otherwise unscorable work",
+        "do not ask the teacher to pick an assignment",
+        "held work",
         "item/catalog or evidence gaps",
     ):
         assert phrase in lowered
-    assert "use assignment type to choose one" in lowered
+    assert "never ask the teacher to choose a scoring transport" in lowered
+    assert "use assignment type" in lowered
 
 
 def test_the_superseded_explainer_is_gone_from_the_shipped_defaults():

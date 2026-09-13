@@ -51,7 +51,7 @@ Source tests never substitute for rendered verification.
 | `/students/reports` | **Student reports** — packet and portfolio tools under Students | `student_reports.html` + `course_expert/student_reports.js` + `course_expert/portfolio.js` |
 | `/gradebook` | **Gradebook tools** — single-course grade operations | `gradebook.js` + `gradebook/*.js` |
 | `/roster` | **Rosters** — student-level Canvas-group and local settings console | `roster.js`, `roster/*.js` |
-| Scoring Sessions | MCP only; no Canvas Expert scoring page or browser assets. Review and edit posted results in Canvas Live. | `docs/reference/powergrader-scoring-map.md` |
+| Scoring Sessions | MCP only; one frozen Current-course backlog session with assignment-bounded packets. No Canvas Expert scoring page or browser assets; review and edit posted results in Canvas Live. | `docs/reference/powergrader-scoring-map.md` |
 | `/ai-expert` | **AI helper files** — paste-ready LLM skill files | inline |
 | `/course` | Course Info detail page | `course_info.js` |
 | `/settings` | Settings | `settings.js` |
@@ -123,10 +123,11 @@ refreshes Canvas, writes groups, or calls the AI provider.
 
 ### Scoring Sessions
 
-Scoring Sessions are available through MCP only. The agent receives a SAFE
-pseudonymized packet and returns results through one assignment-type-neutral
-submit call. Canvas Expert privately selects the ordinary assignment or New Quiz
-write lane; Canvas Live is the only review/edit surface. See
+Scoring Sessions are available through MCP only. The agent starts one frozen
+Current-course backlog session and continues across assignments, while every SAFE
+pseudonymized packet and result submission remains assignment-bounded. Canvas Expert
+privately selects the ordinary assignment or New Quiz write lane; Canvas Live is the
+only review/edit surface. See
 `docs/guides/scoring-sessions.md` and `docs/reference/powergrader-scoring-map.md`.
 
 ### Gradebook module routing
@@ -416,8 +417,9 @@ Read-only grade distribution view.
 ## Scoring Sessions (MCP)
 
 Canvas Expert has no local scoring queue, result-import panel, or hosted grader. The
-connected agent scores only a SAFE pseudonymized packet and submits results through
-one public tool. Canvas Live is the only review/edit surface. See
+connected agent starts one frozen Current-course backlog session and continues it across
+assignments; every SAFE pseudonymized packet and result submission remains limited to its
+active assignment. Canvas Live is the only review/edit surface. See
 `docs/guides/scoring-sessions.md` and `docs/reference/powergrader-scoring-map.md`.
 
 ---

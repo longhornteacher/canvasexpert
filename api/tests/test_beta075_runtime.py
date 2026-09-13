@@ -216,3 +216,5 @@ def test_quick_fix_contract_and_version(monkeypatch, tmp_path):
     response = TestClient(server.app).get("/about")
     assert response.status_code == 200
     assert __version__ in response.text
+    assert "every assignment currently needing scoring" in response.text
+    assert "one pseudonymized assignment packet at a time" in response.text

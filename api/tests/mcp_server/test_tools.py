@@ -703,7 +703,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 44
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 45
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -2219,7 +2219,7 @@ def test_server_registers_the_expected_tool_set():
             "apply_learning_objective", "delete_learning_objective",
             "get_roster_student_settings", "preview_roster_student_change",
             "apply_roster_student_change", "clear_roster_student_field",
-        "start_scoring_session", "list_scoring_sessions", "get_scoring_packet",
+        "start_scoring_session", "continue_scoring_session", "list_scoring_sessions", "get_scoring_packet",
         "submit_scoring_results",
         }
 
@@ -2366,21 +2366,13 @@ def _game_score_workspace(monkeypatch, tmp_path):
     return path
 
 
-def test_get_scoring_packet_reads_a_pre_rename_on_disk_session(_on_disk_scoring_session):
-    """scoring_session_id (docs/handoffs/scoring-session-id-rename.md) is a
-    call-boundary rename only: a session written to disk in the shape
-    session_store has always used -- keyed session_id, never rewritten by
-    this change -- must still load and score through the new
-    scoring_session_id argument.
-    """
+def test_get_scoring_packet_ignores_pre_root_assignment_session(_on_disk_scoring_session):
+    """The backlog queue is a clean break; old assignment records are not roots."""
     session_id = _on_disk_scoring_session()
 
     result = tools.get_scoring_packet(scoring_session_id=session_id)
 
-    assert result["ok"] is True, result
-    assert result["packet_digest"]
-    assert result["total"] == 1
-    assert result["students_total"] == 1
-    assert result["students"]["rows"][0][0] == "Pikachu"
+    assert result["ok"] is False
+    assert result["code"] == "session_not_found"
 
 

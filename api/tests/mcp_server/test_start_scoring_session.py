@@ -1,415 +1,176 @@
-"""Tests for the start_scoring_session MCP tool.
-
-start_scoring_session is a thin wrapper over
-api.powergrader.start_workflow.run_start_session: it never reimplements
-session-start orchestration, only locks the call down to packet mode with
-every optional side effect turned off, then reads back the session it just
-saved for the assistant-facing summary. run_start_session itself is stubbed
-throughout, since exercising the real assignment-refresh/mirror path belongs
-to start_workflow's own tests.
-"""
+"""Backlog-wide Scoring Session MCP start and continuation behavior."""
 from __future__ import annotations
 
+import copy
 import json
-
-import pytest
+from contextlib import nullcontext
 
 from api.mcp_server import tools
 
 
-def _fake_run_start_session(*, captured=None, session_id="sess-1",
-                            assignment_name="Essay 1", student_count=2,
-                            ok=True, error="", refusal_payload=None):
-    def fake(**kwargs):
-        if captured is not None:
-            captured.update(kwargs)
-        if not ok:
-            payload = refusal_payload or {
-                "ok": False, "error": error, "privacy_steps": [],
-            }
-            return {"ok": False, "payload": payload}
-        return {
-            "ok": True,
-            "payload": {
-                "ok": True,
-                "session_id": session_id,
-                "student_count": student_count,
-                "assignment_name": assignment_name,
-                "mode": "packet",
-                "mode_label": "AI chat",
-                "ai_scored": 0,
-                "privacy_steps": [],
-                "packet_zip": None,
-                "copilot_batch_count": 0,
-                "copilot_packet_folder": None,
-                "evidence_status": "ok",
-            },
-            "session_id": session_id,
-            "mode": "packet",
-            "auto_post_enabled": False,
-        }
-    return fake
+def _bind_courses(monkeypatch, courses):
+    monkeypatch.setattr(tools.config, "active_courses", lambda: copy.deepcopy(courses))
 
 
-def _fake_session(session_id, course_id, *, new_quiz_supported=False, bundle_path=None):
-    session = {
-        "session_id": session_id,
-        "course_id": course_id,
-        "mode": "packet",
-        "scoring_basis": {"source": "canvas_rubric", "label": "Canvas rubric"},
-        "privacy_artifacts": {},
-        "students": [],
-    }
-    if bundle_path:
-        session["privacy_artifacts"]["safe_bundle"] = bundle_path
-    return session
+def _bind_snapshots(monkeypatch, snapshots):
+    calls = []
+
+    def load(course_id):
+        calls.append(course_id)
+        return snapshots.get(course_id, (None, "stale"))
+
+    monkeypatch.setattr(tools, "_load_snapshot", load)
+    return calls
 
 
-def _write_bundle(tmp_path, students, name="bundle.json"):
-    path = tmp_path / name
-    path.write_text(json.dumps({"students": students}), encoding="utf-8")
-    return str(path)
+def _bind_session_store(monkeypatch):
+    from api.powergrader import session_store
 
-
-def _bind_session_store(monkeypatch, sessions: dict):
-    monkeypatch.setattr("api.powergrader.session_store.load_session",
-                        lambda sid: sessions.get(sid))
-    monkeypatch.setattr("api.powergrader.session_store.save_session",
-                        lambda s: sessions.__setitem__(s["session_id"], s))
-
-
-def _refuse_if_called(**_kwargs):
-    raise AssertionError("run_start_session must not be called")
-
-
-# --- example: packet-mode session created end to end ------------------------
-
-def test_start_scoring_session_creates_packet_session_end_to_end(monkeypatch, tmp_path, _set_active_courses):
-    _set_active_courses(["111"])
-    captured = {}
-    monkeypatch.setattr(
-        "api.powergrader.start_workflow.run_start_session",
-        _fake_run_start_session(captured=captured, session_id="sess-1",
-                                assignment_name="Essay 1", student_count=2),
-    )
-    bundle_path = _write_bundle(tmp_path, [
-        {"pseudonym": "Pikachu", "responses": [
-            {"item_id": "i1", "response": "answer one", "prompt": "Q1", "possible": 10},
-            {"item_id": "i2", "response": "answer two", "prompt": "Q2", "possible": 10},
-        ]},
-        {"pseudonym": "Eevee", "responses": [
-            {"item_id": "i1", "response": "answer three", "prompt": "Q1", "possible": 10},
-        ]},
+    sessions = {}
+    monkeypatch.setattr(session_store, "load_session",
+                        lambda session_id: copy.deepcopy(sessions.get(session_id)))
+    monkeypatch.setattr(session_store, "save_session",
+                        lambda session: sessions.__setitem__(session["session_id"], copy.deepcopy(session)))
+    monkeypatch.setattr(session_store, "list_session_summaries", lambda: [
+        {"session_id": session["session_id"], "session_kind": session.get("session_kind", ""),
+         "created": session.get("created", "")}
+        for session in sessions.values()
     ])
-    sessions = {"sess-1": _fake_session("sess-1", "111", new_quiz_supported=True, bundle_path=bundle_path)}
-    _bind_session_store(monkeypatch, sessions)
-
-    result = tools.start_scoring_session("111", "700010")
-
-    assert result == {
-        "ok": True,
-        "scoring_session_id": "sess-1",
-        "assignment_name": "Essay 1",
-        "student_count": 2,
-        # 2 students x 2 items + 1 student x 1 item = 3 scorable rows, the
-        # same "total" get_scoring_packet would report for this bundle. This
-        # is deliberately not equal to student_count, proving the count is
-        # read from the SAFE bundle rather than echoed from student_count.
-        "response_count": 3,
-        # Every response carried text, so nothing is held and no pseudonym
-        # rides along in the summary.
-        "held": 0,
-        "scoring_basis": {"source": "canvas_rubric", "label": "Canvas rubric"},
-        "next": tools._NEXT_STEPS["start_scoring_session"],
-    }
-    assert captured["course_id"] == "111"
-    assert captured["assignment_id"] == "700010"
+    monkeypatch.setattr(session_store, "session_lock", lambda _session_id: nullcontext())
+    return sessions
 
 
-def test_start_scoring_session_refuses_to_expose_a_session_without_a_safe_bundle(monkeypatch, _set_active_courses):
-    _set_active_courses(["111"])
-    monkeypatch.setattr(
-        "api.powergrader.start_workflow.run_start_session",
-        _fake_run_start_session(session_id="sess-2", assignment_name="Quiz 1", student_count=5),
-    )
-    sessions = {"sess-2": _fake_session("sess-2", "111", new_quiz_supported=False, bundle_path=None)}
-    _bind_session_store(monkeypatch, sessions)
-
-    result = tools.start_scoring_session("111", "700020")
-
-    assert result == {
-        "ok": False, "code": "packet_missing",
-        "error": "The SAFE scoring packet was not completed; no session was exposed.",
-    }
+def _snapshot(*assignments):
+    return {"assignments": list(assignments), "source": "mirror"}
 
 
-def test_start_scoring_session_requests_missing_norms_without_exposing_a_session(
-    monkeypatch, _set_active_courses,
-):
-    _set_active_courses(["111"])
-    monkeypatch.setattr(
-        "api.powergrader.start_workflow.run_start_session",
-        _fake_run_start_session(ok=False, refusal_payload={
-            "ok": False,
-            "code": "needs_scoring_norms",
-            "assignment_name": "Argument Essay",
-            "rubric_labels": ["Argument Writing", "Short Response"],
-        }),
-    )
-    monkeypatch.setattr(
-        "api.powergrader.session_store.load_session",
-        lambda _sid: (_ for _ in ()).throw(AssertionError("session must not be loaded")),
-    )
-
-    result = tools.start_scoring_session("111", "700020")
-
-    assert result == {
-        "ok": True,
-        "status": "needs_teacher_input",
-        "code": "needs_scoring_norms",
-        "assignment_name": "Argument Essay",
-        "rubric_labels": ["Argument Writing", "Short Response"],
-        "question": (
-            "Which rubric should I use, or what bounded scoring guidance "
-            "should I follow for this assignment?"
-        ),
-    }
-    assert "error" not in result
-    assert "scoring_session_id" not in result
+def _assignment(assignment_id, name, ungraded, partially_scored=0, due_at=""):
+    return {"id": assignment_id, "name": name, "ungraded": ungraded,
+            "partially_scored": partially_scored, "due_at": due_at}
 
 
-def test_start_scoring_session_reports_race_resolved_assignment_without_a_session(
-    monkeypatch, _set_active_courses,
-):
-    _set_active_courses(["111"])
-    monkeypatch.setattr(
-        "api.powergrader.start_workflow.run_start_session",
-        _fake_run_start_session(ok=False, refusal_payload={
-            "ok": False,
-            "code": "nothing_to_grade",
-            "assignment_name": "Resolved Essay",
-        }),
-    )
-    monkeypatch.setattr(
-        "api.powergrader.session_store.load_session",
-        lambda _sid: (_ for _ in ()).throw(AssertionError("session must not be loaded")),
-    )
+def test_unscoped_start_freezes_ordered_queue_from_every_current_snapshot(monkeypatch):
+    _bind_courses(monkeypatch, [
+        {"id": "c1", "name": "Course One"},
+        {"id": "c2", "name": "Course Two"},
+    ])
+    calls = _bind_snapshots(monkeypatch, {
+        "c1": (_snapshot(_assignment("a2", "Second", 2, 1, "2026-10-01"),
+                         _assignment("a1", "First", 1)), None),
+        "c2": (_snapshot(_assignment("b1", "Third", 3)), None),
+    })
+    sessions = _bind_session_store(monkeypatch)
 
-    result = tools.start_scoring_session("111", "700020")
+    result = tools.start_scoring_session()
 
-    assert result == {
-        "ok": True,
-        "status": "nothing_to_grade",
-        "assignment_name": "Resolved Essay",
-        "message": (
-            "Canvas no longer marks any submissions for this assignment as needing grading."
-        ),
-    }
-    assert "error" not in result
-    assert "scoring_session_id" not in result
-
-
-def test_start_scoring_session_retries_with_teacher_guidance_and_creates_session(
-    monkeypatch, tmp_path, _set_active_courses,
-):
-    _set_active_courses(["111"])
-    captured = {}
-    monkeypatch.setattr(
-        "api.powergrader.start_workflow.run_start_session",
-        _fake_run_start_session(captured=captured, session_id="sess-guided"),
-    )
-    bundle_path = _write_bundle(tmp_path, [{
-        "pseudonym": "Pikachu",
-        "responses": [{"item_id": "response", "response": "Draft"}],
-    }])
-    sessions = {
-        "sess-guided": _fake_session("sess-guided", "111", bundle_path=bundle_path),
-    }
-    _bind_session_store(monkeypatch, sessions)
-
-    result = tools.start_scoring_session(
-        "111", "700020", scoring_guidance="Score claim, evidence, and reasoning.",
-    )
-
-    assert result["ok"] is True
-    assert result["scoring_session_id"] == "sess-guided"
-    assert captured["scoring_guidance"] == "Score claim, evidence, and reasoning."
-
-
-# --- example: held work is reported, not silently counted as nothing --------
-
-def _held_bundle(tmp_path, pseudonyms, *, scorable=()):
-    """A bundle whose responses carry no text, as attachment-only work does."""
-    students = [
-        {"pseudonym": name, "responses": [
-            {"item_id": "i1", "response": "", "prompt": "Q1", "possible": 100},
-        ]}
-        for name in pseudonyms
+    assert result["ok"] is True and result["status"] == "started"
+    assert calls == ["c1", "c2"]
+    [root] = [session for session in sessions.values()
+              if session.get("session_kind") == "scoring_session"]
+    assert [(item["course_id"], item["assignment_id"]) for item in root["queue"]] == [
+        ("c1", "a2"), ("c1", "a1"), ("c2", "b1"),
     ]
-    students += [
-        {"pseudonym": name, "responses": [
-            {"item_id": "i1", "response": "real answer", "prompt": "Q1", "possible": 100},
-        ]}
-        for name in scorable
-    ]
-    return _write_bundle(tmp_path, students, name="held-bundle.json")
+    assert root["queue"][0]["partially_scored"] == 1
+    assert root["queue"][0]["due_at"] == "2026-10-01"
 
 
-def test_start_scoring_session_names_held_students_instead_of_reporting_an_empty_session(
-    monkeypatch, tmp_path, _set_active_courses, _use_vault,
-):
-    """The reported failure mode: an attachment-only assignment came back as
-    response_count 0 against 19 students with no reason given, which reads as
-    an empty assignment rather than work that is deliberately kept local."""
-    _set_active_courses(["111"])
-    monkeypatch.setattr(
-        "api.powergrader.start_workflow.run_start_session",
-        _fake_run_start_session(session_id="sess-held", assignment_name="My Poem",
-                                student_count=3),
-    )
-    bundle_path = _held_bundle(tmp_path, ["Pikachu", "Eevee", "Snorlax"])
-    sessions = {"sess-held": _fake_session("sess-held", "111", bundle_path=bundle_path)}
-    _bind_session_store(monkeypatch, sessions)
+def test_scoped_start_includes_only_the_exact_assignment(monkeypatch):
+    _bind_courses(monkeypatch, [{"id": "c1", "name": "Course One"}])
+    calls = _bind_snapshots(monkeypatch, {
+        "c1": (_snapshot(_assignment("a1", "First", 1),
+                         _assignment("a2", "Second", 2)), None),
+    })
+    sessions = _bind_session_store(monkeypatch)
 
-    result = tools.start_scoring_session("111", "700030")
+    result = tools.start_scoring_session("c1", "a2")
 
-    assert result["ok"] is True
-    assert result["scoring_session_id"] == "sess-held"
-    assert result["response_count"] == 0
-    assert result["held"] == 3
-    assert "held_pseudonyms" not in result
-    # The one static hint has to carry the held branch too, so a held-only
-    # session is never left reading as an empty assignment.
-    assert "held responses could not be scored from text" in result["next"]
+    assert result["status"] == "started"
+    assert calls == ["c1"]
+    [root] = [session for session in sessions.values() if session.get("session_kind")]
+    assert [item["assignment_id"] for item in root["queue"]] == ["a2"]
 
 
-def test_start_scoring_session_keeps_the_standard_hint_when_some_work_is_scorable(
-    monkeypatch, tmp_path, _set_active_courses, _use_vault,
-):
-    """Partly-held is still a scoring session: the packet reports held itself."""
-    _set_active_courses(["111"])
-    monkeypatch.setattr(
-        "api.powergrader.start_workflow.run_start_session",
-        _fake_run_start_session(session_id="sess-mixed", student_count=3),
-    )
-    bundle_path = _held_bundle(tmp_path, ["Pikachu"], scorable=["Eevee", "Snorlax"])
-    sessions = {"sess-mixed": _fake_session("sess-mixed", "111", bundle_path=bundle_path)}
-    _bind_session_store(monkeypatch, sessions)
+def test_assignment_filter_without_course_is_refused_without_saving(monkeypatch):
+    sessions = _bind_session_store(monkeypatch)
 
-    result = tools.start_scoring_session("111", "700040")
-
-    assert result["response_count"] == 2
-    assert result["held"] == 1
-    assert "held_pseudonyms" not in result
-    assert result["next"] == tools._NEXT_STEPS["start_scoring_session"]
-
-
-def test_start_scoring_session_drops_held_names_rather_than_the_scoring_session_id(
-    monkeypatch, tmp_path, _set_active_courses,
-):
-    """The names take the outbound scan every student-data read takes. When it
-    cannot run, the session is already on disk, so losing its scoring_session_id
-    would strand it: the count survives and only the names go."""
-    _set_active_courses(["111"])
-    monkeypatch.setattr(
-        "api.powergrader.start_workflow.run_start_session",
-        _fake_run_start_session(session_id="sess-novault", student_count=2),
-    )
-    bundle_path = _held_bundle(tmp_path, ["Pikachu", "Eevee"])
-    sessions = {"sess-novault": _fake_session("sess-novault", "111", bundle_path=bundle_path)}
-    _bind_session_store(monkeypatch, sessions)
-
-    def _unavailable():
-        raise tools._VaultUnavailable("Identity Vault is unavailable.")
-
-    monkeypatch.setattr(tools, "_vault_factory", _unavailable)
-
-    result = tools.start_scoring_session("111", "700050")
-
-    assert result["ok"] is True
-    assert result["scoring_session_id"] == "sess-novault"
-    assert result["held"] == 2
-    assert "held_pseudonyms" not in result
-
-
-# --- laws: refusal behaviour --------------------------------------------------
-
-def test_start_scoring_session_refuses_a_non_current_course_without_starting_one(monkeypatch, _set_active_courses):
-    _set_active_courses(["222"])  # "111" is not Current
-    monkeypatch.setattr("api.powergrader.start_workflow.run_start_session", _refuse_if_called)
-
-    result = tools.start_scoring_session("111", "700010")
+    result = tools.start_scoring_session(assignment_id="a1")
 
     assert result["ok"] is False
-    assert "not a Current course" in result["error"]
+    assert result["code"] == "invalid_scope"
+    assert sessions == {}
 
 
-@pytest.mark.parametrize("error_text", [
-    "No submissions found for this assignment.",
-    "No workspace configured, finish setup first.",
-])
-def test_start_scoring_session_surfaces_run_start_session_refusals_verbatim(
-    monkeypatch, _set_active_courses, error_text,
+def test_stale_course_blocks_queue_creation_for_entire_scope(monkeypatch):
+    _bind_courses(monkeypatch, [{"id": "c1"}, {"id": "c2"}])
+    calls = _bind_snapshots(monkeypatch, {
+        "c1": (_snapshot(_assignment("a1", "First", 1)), None),
+        "c2": (None, "stale"),
+    })
+    sessions = _bind_session_store(monkeypatch)
+
+    result = tools.start_scoring_session()
+
+    assert result["status"] == "needs_refresh"
+    assert result["course_ids"] == ["c2"]
+    assert calls == ["c1", "c2"]
+    assert sessions == {}
+
+
+def test_empty_snapshot_creates_no_session(monkeypatch):
+    _bind_courses(monkeypatch, [{"id": "c1"}])
+    _bind_snapshots(monkeypatch, {"c1": (_snapshot(_assignment("a1", "Done", 0)), None)})
+    sessions = _bind_session_store(monkeypatch)
+
+    result = tools.start_scoring_session("c1")
+
+    assert result["status"] == "nothing_to_grade"
+    assert result["counts"]["total"] == 0
+    assert sessions == {}
+
+
+def test_continue_pauses_for_norms_then_resumes_same_root_idempotently(
+    monkeypatch, tmp_path,
 ):
-    _set_active_courses(["111"])
-    monkeypatch.setattr(
-        "api.powergrader.start_workflow.run_start_session",
-        _fake_run_start_session(ok=False, error=error_text),
-    )
+    from api.powergrader import session_store
 
-    result = tools.start_scoring_session("111", "700010")
+    _bind_courses(monkeypatch, [{"id": "c1", "name": "Course One"}])
+    _bind_snapshots(monkeypatch, {"c1": (_snapshot(_assignment("a1", "Essay", 1)), None)})
+    sessions = _bind_session_store(monkeypatch)
+    started = tools.start_scoring_session("c1")
+    root_id = started["scoring_session_id"]
+    bundle_path = tmp_path / "safe.json"
+    bundle_path.write_text(json.dumps({"contract_version": "1.0", "students": []}), encoding="utf-8")
+    attempts = []
 
-    assert result == {"ok": False, "code": "start_failed", "error": error_text}
+    def run_start(**kwargs):
+        attempts.append(kwargs)
+        if len(attempts) == 1:
+            return {"ok": False, "payload": {
+                "code": "needs_scoring_norms", "rubric_labels": ["Writing"],
+            }}
+        child_id = "child-1"
+        kwargs["save_session"]({
+            "session_id": child_id, "session_kind": "assignment_run",
+            "parent_scoring_session_id": root_id, "course_id": "c1",
+            "assignment_id": "a1", "assignment_name": "Essay", "mode": "packet",
+            "scoring_basis": {"source": "local_rubric", "label": "Writing"},
+            "students": [], "privacy_artifacts": {"safe_bundle": str(bundle_path)},
+        })
+        return {"ok": True, "session_id": child_id, "payload": {"ok": True}}
 
+    monkeypatch.setattr("api.powergrader.start_workflow.run_start_session", run_start)
 
-# --- law: this tool can never open an assisted session or enable auto_post --
+    paused = tools.continue_scoring_session(root_id)
+    root_after_pause = sessions[root_id]
+    resumed = tools.continue_scoring_session(root_id, rubric_name="Writing")
+    repeated = tools.continue_scoring_session(root_id)
 
-def test_start_scoring_session_never_requests_assisted_mode_or_auto_post(monkeypatch, _set_active_courses):
-    """Pin the security-relevant property directly at the run_start_session call.
-
-    assisted mode would run the teacher's own AI key from a chat request, and
-    auto_post can post to Canvas on a trigger; this tool must never be able
-    to reach either, no matter what a future caller passes in (today it takes
-    only course_id/assignment_id, so there is nothing to pass).
-    """
-    _set_active_courses(["111"])
-    captured = {}
-    monkeypatch.setattr(
-        "api.powergrader.start_workflow.run_start_session",
-        _fake_run_start_session(captured=captured),
-    )
-    sessions = {"sess-1": _fake_session("sess-1", "111")}
-    _bind_session_store(monkeypatch, sessions)
-
-    tools.start_scoring_session("111", "700010")
-
-    assert captured["mode"] == "packet"
-    assert captured["auto_post"] == "false"
-    assert captured["source_uploads"] is None
-    assert captured["source_files_json"] == ""
-    assert captured["source_text"] == ""
-    assert captured["oral_reading_enabled"] == "false"
-    assert captured["oral_reading_passage"] == ""
-
-
-# --- server wiring ------------------------------------------------------------
-
-def test_start_scoring_session_is_registered_and_wraps_the_tool(monkeypatch):
-    from api.mcp_server import server
-
-    monkeypatch.setattr(
-        tools, "start_scoring_session",
-        lambda course_id, assignment_id, rubric_name="", scoring_guidance="": {
-            "ok": True, "course_id_seen": course_id, "assignment_id_seen": assignment_id,
-        },
-    )
-    wire = server.start_scoring_session("111", "700010")
-    assert wire == '{"ok":true,"course_id_seen":"111","assignment_id_seen":"700010"}'
-
-
-def test_server_instructions_treat_nothing_to_grade_as_a_terminal_conversation_state():
-    from api.mcp_server import server
-
-    lowered = server._SERVER_INSTRUCTIONS.lower()
-    assert "nothing_to_grade" in lowered
-    assert "do not create or retry a session" in lowered
+    assert paused["status"] == "needs_teacher_input"
+    assert paused["scoring_session_id"] == root_id
+    assert root_after_pause["queue"][0]["status"] == "needs_teacher_input"
+    assert resumed["status"] == "ready"
+    assert resumed["scoring_session_id"] == root_id
+    assert repeated["status"] == "ready"
+    assert len(attempts) == 2
+    assert attempts[1]["parent_scoring_session_id"] == root_id
+    assert sessions[root_id]["queue"][0]["child_session_id"] == "child-1"

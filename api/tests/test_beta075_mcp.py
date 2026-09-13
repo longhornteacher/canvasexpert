@@ -19,7 +19,7 @@ def _explode_live(*_args, **_kwargs):
 def test_live_mcp_schema_matches_versioned_contract():
     from api.mcp_server import server
 
-    assert contract.TOOL_SCHEMA_VERSION == 44
+    assert contract.TOOL_SCHEMA_VERSION == 45
     expected = contract.load_contract()
     live = contract.live_contract(server.mcp)
     assert live == expected
@@ -122,11 +122,12 @@ def test_live_mcp_schema_matches_versioned_contract():
     # preview_new_quiz_scores now take scoring_session_id instead. v41
     # remains the immutable 46-tool snapshot under the old name.
     # v44 retires stage/preview/apply scoring tools and exposes the single
-    # assignment-type-neutral submit_scoring_results contract.
+    # assignment-type-neutral submit_scoring_results contract. v45 adds the
+    # backlog-wide Scoring Session continuation tool.
     assert len(contract.load_contract(40)["tools"]) == 44
     assert len(contract.load_contract(41)["tools"]) == 46
     assert len(contract.load_contract(42)["tools"]) == 46
-    assert len(live["tools"]) == 44
+    assert len(live["tools"]) == 45
     v22 = contract.load_contract(22)
     assert v22["schema_version"] == 22
     assert len(v22["tools"]) == 39

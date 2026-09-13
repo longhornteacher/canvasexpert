@@ -87,6 +87,8 @@ def test_gradebook_snapshot_route_aggregates_mocked_canvas_data(monkeypatch):
         "html_url": "https://example.invalid/quiz-1",
         "submitted": 2,
         "graded": 1,
+        "ungraded": 1,
+        "partially_scored": 0,
         "missing": 0,
         "late": 0,
         "avg_pct": 90,

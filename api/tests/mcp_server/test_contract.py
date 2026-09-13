@@ -9,8 +9,8 @@ a new test -- only a version bump and a regenerated schema file.
 from api.mcp_server import contract, server
 
 
-def test_v44_schema_matches_the_live_fastmcp_registry():
-    assert contract.TOOL_SCHEMA_VERSION == 44
+def test_v45_schema_matches_the_live_fastmcp_registry():
+    assert contract.TOOL_SCHEMA_VERSION == 45
     expected = contract.load_contract()
     live = contract.live_contract(server.mcp)
     assert live == expected

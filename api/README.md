@@ -9,8 +9,8 @@ pushes content to live courses via the REST and New Quizzes APIs:
 - **Push Rubrics** (RubricForge JSON → live course rubrics with an optional student explainer page)
 - **Printable outputs** (QuizForge JSON → local DOCX + PDF files)
 - **Gradebook tools** — late policy sweep, student extensions, curves
-- **Scoring Sessions** — MCP-connected agent scores a SAFE packet and submits valid
-  results to Canvas Live through one assignment-type-neutral contract
+- **Scoring Sessions** — MCP-connected agent works through one frozen Current-course
+  backlog using assignment-bounded SAFE packets and submits valid results to Canvas Live
 - **School Calendar:** school dates, day kinds, grading periods, bell schedules, and Teacher Schedule
 - **MCP server:** local pseudonymized reads, guarded writes, and Scoring Sessions
 - **Daily Writing:** longitudinal Writing Record and tracked-assignment Writing Timeline

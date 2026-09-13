@@ -23,53 +23,44 @@ from mcp.server.fastmcp import FastMCP
 from . import tools
 
 _SERVER_INSTRUCTIONS = (
-    "CanvasExpert reads this teacher's own Canvas courses, assignments, "
-    "rosters, grades, and submissions from a local copy on "
-    "their computer. Call list_courses first for a course_id. Student data "
-    "comes through a local vault: stable one-word stand-in names (e.g. "
-    "\"Pikachu\") take the place of real students, and real names and Canvas/SIS "
-    "ids stay on the machine, so the stand-in is the only handle you have. "
-    "get_roster, get_submissions, and "
-    "get_gradebook_snapshot serve only from the local mirror and refuse when "
-    "it is stale; call refresh_mirror for that course, then retry once. "
-    "Results are compact JSON: many lists use {columns, rows} tables, while "
-    "some use arrays. Refusals are {ok:false} text results with MCP "
-    "isError=false. "
-    "Prefer narrow calls: include_text=false or specific stand-ins first. "
-    "To create other content, call get_authoring_contract for the kind. "
-    "When the teacher wants it in Canvas, push_content_live stages the draft "
-    "and creates it in one call; stage_content alone leaves it in their "
-    "review queue, and the preview_content_push/apply_content_push pair adds "
-    "due, unlock and lock dates. "
+    "CanvasExpert reads this teacher's Canvas courses and student data from a "
+    "local mirror. Call list_courses for course_id. Student records use stable "
+    "one-word stand-ins; real names and Canvas/SIS ids stay local. get_roster, "
+    "get_submissions, and get_gradebook_snapshot refuse stale mirror data; call "
+    "refresh_mirror once, then retry. Results are compact JSON tables or arrays; "
+    "refusals are {ok:false} text with isError=false. Prefer narrow calls and "
+    "include_text=false. "
+    "For content, call get_authoring_contract. push_content_live stages and "
+    "creates in one call; stage_content leaves a draft for review. Use the "
+    "preview_content_push/apply_content_push pair for due, unlock, or lock dates. "
     "For an unscoped request such as 'start a Scoring Session' or 'what needs "
     "grading', list Current courses, call refresh_mirror for each Current course, "
-    "then read each get_gradebook_snapshot result. Report every assignment with "
-    "ungraded greater than zero, call out partially_scored counts, and ask which "
-    "exact assignment to grade. Never ask the teacher to choose a scoring "
-    "transport or use assignment type to choose one. When the exact Current "
-    "course and assignment are named, call start_scoring_session. If it returns "
-    "needs_scoring_norms, ask its question so the teacher can choose one returned "
-    "rubric label or give bounded scoring guidance, then retry. If it returns "
-    "nothing_to_grade, tell the teacher Canvas no longer marks work for that "
-    "assignment as needing grading and do not create or retry a session. Before scoring, "
-    "tell the teacher about held or otherwise unscorable work; item/catalog or "
-    "evidence gaps do not mean the assignment is empty. Read every SAFE response "
-    "page with get_scoring_packet, keeping the first-page scoring contract "
-    "and rubric. Score only those pseudonymized responses and call "
-    "submit_scoring_results with the packet digest. Valid results post to "
-    "Canvas immediately; if needs_teacher_input is returned, ask only the "
-    "listed questions and resubmit the same results with its review digest "
-    "and explicit answers. This authorizes only the named session. "
-    "list_scoring_sessions is an identity-free resume aid. SIS grade bridges "
-    "are separate: preview_sis_grade_bridge returns an aggregate review and "
-    "apply_sis_grade_bridge writes it. Asking for a write is the authorization; "
-    "it covers only its named target and course, never another session or assignment. "
-    "Ask if the target is unclear; invariant failures stop the write. "
-    "For product capabilities or writing plans, call get_product_guide first. "
-    "get_writing_history reads a separate private per-student writing record "
-    "for coaching development over time; use a stand-in and no course_id. "
-    "Read get_product_guide(topic=\"writing_record\") before assuming it "
-    "does not exist."
+    "then read get_gradebook_snapshot for each. Report assignments with ungraded "
+    "greater than zero and partially_scored counts. Start one session for the "
+    "Current backlog; do not ask the teacher to pick an assignment. A scoped start "
+    "may name one Current course or exact assignment. On needs_refresh, refresh "
+    "listed courses and retry. The queue is frozen; later work needs a later session. "
+    "Never ask the teacher to choose a scoring transport or use assignment type. "
+    "Call continue_scoring_session to prepare the first item. For needs_scoring_norms, "
+    "ask its question, then continue with a returned rubric label or bounded "
+    "scoring guidance. If empty, report nothing_to_grade. Disclose held work; item/catalog "
+    "or evidence gaps do not mean the assignment is empty. Read every SAFE page "
+    "with get_scoring_packet, including first-page contract and rubric. Score only "
+    "those pseudonymized responses; submit_scoring_results with its packet digest. "
+    "Valid results post to Canvas immediately. For needs_teacher_input, ask only its listed "
+    "questions and resubmit the same results with the review digest and answers. "
+    "After each terminal submit, continue with the same root id until complete, "
+    "teacher input, a blocker, or the teacher stops. Authorization covers only the "
+    "frozen queue. list_scoring_sessions is an identity-free resume aid. "
+    "SIS grade bridges are separate: preview_sis_grade_bridge reviews; "
+    "apply_sis_grade_bridge writes. Asking for a write is the authorization; "
+    "it covers only its named target and course, never another session or "
+    "assignment; ask if unclear and "
+    "stop on invariant failures. "
+    "For product capabilities or writing plans, call get_product_guide. "
+    "get_writing_history reads a separate private per-student coaching record; "
+    "use a stand-in and no course_id. Read "
+    "get_product_guide(topic=\"writing_record\") before assuming it does not exist."
 )
 
 mcp = FastMCP("canvas-expert", instructions=_SERVER_INSTRUCTIONS)
@@ -464,18 +455,22 @@ def get_school_calendar(date_from: str = "", date_to: str = "") -> str:
 
 
 @mcp.tool(structured_output=False)
-def start_scoring_session(course_id: str, assignment_id: str,
-                          rubric_name: str = "", scoring_guidance: str = "") -> str:
-    """Start one assignment-bound session, or ask for missing scoring norms."""
-    return _compact(tools.start_scoring_session(
-        course_id, assignment_id, rubric_name, scoring_guidance))
+def start_scoring_session(course_id: str = "", assignment_id: str = "") -> str:
+    """Freeze a mirror-backed queue for all Current courses or one narrower scope."""
+    return _compact(tools.start_scoring_session(course_id, assignment_id))
+
+
+@mcp.tool(structured_output=False)
+def continue_scoring_session(scoring_session_id: str, rubric_name: str = "",
+                             scoring_guidance: str = "") -> str:
+    """Prepare or resume the active assignment in a frozen Scoring Session queue."""
+    return _compact(tools.continue_scoring_session(
+        scoring_session_id, rubric_name, scoring_guidance))
 
 
 @mcp.tool(structured_output=False)
 def list_scoring_sessions() -> str:
-    """List Current-course Scoring Sessions with SAFE bundles, newest first.
-    newer_session_exists compares only strictly newer visible runs for the same
-    course and assignment. No student response data."""
+    """List identity-free root Scoring Sessions with aggregate queue progress."""
     return _compact(tools.list_scoring_sessions())
 
 

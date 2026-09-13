@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 
 from api.feedback_vault import Vault
 from api.mcp_server import tools
@@ -13,7 +14,7 @@ REAL_NAME = "Ada Lovelace"
 PSEUDONYM = "Pikachu"
 
 
-def _wire(monkeypatch, tmp_path, _set_active_courses, *, new_quiz=False):
+def _wire(monkeypatch, tmp_path, _set_active_courses, *, new_quiz=False, two_items=False):
     _set_active_courses(["course-1"])
     from api.powergrader import session_store
 
@@ -31,8 +32,11 @@ def _wire(monkeypatch, tmp_path, _set_active_courses, *, new_quiz=False):
     vault.set_pseudonym(REAL_ID, PSEUDONYM)
     vault.save()
     monkeypatch.setattr(tools, "_vault_factory", lambda: vault)
+    root_id = "session-1"
+    child_id = "session-1-assignment-run"
     session = {
-        "session_id": "session-1", "course_id": "course-1",
+        "session_id": child_id, "session_kind": "assignment_run",
+        "parent_scoring_session_id": root_id, "course_id": "course-1",
         "assignment_id": "assignment-1", "assignment_name": "Essay",
         "scoring_basis": {"source": "canvas_rubric", "label": "Canvas rubric"},
         "privacy_artifacts": {"safe_bundle": str(bundle_path)},
@@ -40,15 +44,30 @@ def _wire(monkeypatch, tmp_path, _set_active_courses, *, new_quiz=False):
         "assignment": {"points_possible": 10},
         "students": [{"user_id": REAL_ID, "new_quiz_items": []}],
     }
-    monkeypatch.setattr(session_store, "load_session", lambda _sid: session)
-    monkeypatch.setattr(session_store, "save_session", lambda updated: session.update(updated))
-
-    class _Lock:
-        def __enter__(self): return self
-        def __exit__(self, *_exc): return False
-
-    monkeypatch.setattr(session_store, "session_lock", lambda _sid: _Lock())
-    return session, bundle
+    sessions = {child_id: session}
+    monkeypatch.setattr(session_store, "load_session", lambda sid: sessions.get(sid))
+    monkeypatch.setattr(session_store, "save_session",
+                        lambda updated: sessions.__setitem__(updated["session_id"], updated))
+    monkeypatch.setattr(session_store, "session_lock", lambda _sid: nullcontext())
+    from api.powergrader import scoring_queue
+    queue = [{
+        "course_id": "course-1", "course_label": "Course One",
+        "assignment_id": "assignment-1", "assignment_label": "Essay",
+        "due_at": "", "ungraded": 1, "partially_scored": 0,
+    }]
+    if two_items:
+        queue.append({"course_id": "course-1", "course_label": "Course One",
+                      "assignment_id": "assignment-2", "assignment_label": "Second Essay",
+                      "due_at": "", "ungraded": 1, "partially_scored": 0})
+    root = scoring_queue.create_root_session(queue=queue, scope={}, session_id=root_id)
+    root["queue"][0]["status"] = "ready"
+    root["queue"][0]["child_session_id"] = child_id
+    root["queue_digest"] = scoring_queue._queue_digest(root["queue"])
+    root["status"] = "ready"
+    sessions[root_id] = root
+    monkeypatch.setattr(session_store, "save_session",
+                        lambda updated: sessions.__setitem__(updated["session_id"], updated))
+    return session, bundle, sessions
 
 
 def _result(score=8):
@@ -57,7 +76,9 @@ def _result(score=8):
 
 
 def _digest(bundle):
-    return scoring_packet.packet_digest("session-1", bundle)
+    return scoring_packet.packet_digest(
+        "session-1", bundle, assignment_run_id="session-1-assignment-run",
+        course_id="course-1", assignment_id="assignment-1")
 
 
 def _blob(payload):
@@ -67,7 +88,7 @@ def _blob(payload):
 def test_ordinary_results_submit_once_without_exposing_private_identity(
     monkeypatch, tmp_path, _set_active_courses,
 ):
-    session, bundle = _wire(monkeypatch, tmp_path, _set_active_courses)
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
     from api.powergrader import session_store
     from api.powergrader import scoring_apply
     writes = []
@@ -112,7 +133,7 @@ def test_ordinary_results_submit_once_without_exposing_private_identity(
 def test_new_quiz_missing_score_holds_instead_of_offering_comment_only(
     monkeypatch, tmp_path, _set_active_courses,
 ):
-    session, bundle = _wire(monkeypatch, tmp_path, _set_active_courses, new_quiz=True)
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses, new_quiz=True)
     vault, error = tools._open_vault()
     assert error is None
 
@@ -193,6 +214,142 @@ def test_stale_review_and_malformed_results_fail_closed_without_write(
     assert writes == []
 
 
+def test_packet_digest_from_prior_queue_item_fails_before_writer(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    _session, bundle, sessions = _wire(
+        monkeypatch, tmp_path, _set_active_courses, two_items=True)
+    from api.powergrader import scoring_apply, scoring_queue, session_store
+    first_item_digest = _digest(bundle)
+    second_id = "session-1-second-assignment-run"
+    second = {
+        "session_id": second_id, "session_kind": "assignment_run",
+        "parent_scoring_session_id": "session-1", "course_id": "course-1",
+        "assignment_id": "assignment-2", "assignment_name": "Second Essay",
+        "scoring_basis": {"source": "canvas_rubric", "label": "Canvas rubric"},
+        "privacy_artifacts": {"safe_bundle": str(tmp_path / "safe-bundle.json")},
+        "students": [{"user_id": REAL_ID, "new_quiz_items": []}],
+    }
+    session_store.save_session(second)
+    root = sessions["session-1"]
+    root["active_index"] = 1
+    root["queue"][1]["status"] = "ready"
+    root["queue"][1]["child_session_id"] = second_id
+    root["queue_digest"] = scoring_queue._queue_digest(root["queue"])
+    root["status"] = "ready"
+    session_store.save_session(root)
+    monkeypatch.setattr(scoring_apply, "build_plan",
+                        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                            AssertionError("stale digest must be rejected before planning")))
+
+    result = tools.submit_scoring_results("session-1", _result(), first_item_digest)
+
+    assert result["code"] == "stale_packet"
+
+
+def test_backlog_session_pauses_submits_advances_and_completes_after_reload(
+    monkeypatch, tmp_path,
+):
+    """One root crosses Current courses while child writes stay assignment-bound."""
+    from contextlib import nullcontext
+    from api.feedback_vault import Vault
+    from api.powergrader import scoring_apply, scoring_queue, session_store
+
+    courses = [{"id": "course-1", "name": "Course One"},
+               {"id": "course-2", "name": "Course Two"}]
+    monkeypatch.setattr(tools.config, "active_courses", lambda: courses)
+    snapshots = {
+        "course-1": ({"assignments": [{"id": "assignment-1", "name": "Essay One",
+                                        "ungraded": 1, "partially_scored": 0}], "source": "mirror"}, None),
+        "course-2": ({"assignments": [{"id": "assignment-2", "name": "Essay Two",
+                                        "ungraded": 1, "partially_scored": 0}], "source": "mirror"}, None),
+    }
+    monkeypatch.setattr(tools, "_load_snapshot", lambda course_id: snapshots[course_id])
+    sessions = {}
+    monkeypatch.setattr(session_store, "load_session", lambda session_id: sessions.get(session_id))
+    monkeypatch.setattr(session_store, "save_session",
+                        lambda value: sessions.__setitem__(value["session_id"], value))
+    monkeypatch.setattr(session_store, "session_lock", lambda _sid: nullcontext())
+    safe_bundle = {
+        "contract_version": "1.0",
+        "students": [{"pseudonym": PSEUDONYM, "responses": [{
+            "item_id": "item-1", "prompt": "Explain.",
+            "response": "A sufficiently long synthetic answer.", "possible": 10,
+        }]}],
+    }
+    bundle_path = tmp_path / "safe-bundle.json"
+    bundle_path.write_text(json.dumps(safe_bundle), encoding="utf-8")
+    vault = Vault(str(tmp_path / "vault.json"))
+    vault.get_or_assign(REAL_ID, real_name=REAL_NAME)
+    vault.set_pseudonym(REAL_ID, PSEUDONYM)
+    vault.save()
+    monkeypatch.setattr(tools, "_vault_factory", lambda: vault)
+    started = tools.start_scoring_session()
+    root_id = started["scoring_session_id"]
+    start_calls = []
+
+    def run_start(**kwargs):
+        start_calls.append(kwargs)
+        if kwargs["assignment_id"] == "assignment-1" and not kwargs["rubric_name"]:
+            return {"ok": False, "payload": {
+                "code": "needs_scoring_norms", "rubric_labels": ["Writing"],
+            }}
+        child_id = f"child-{kwargs['assignment_id']}"
+        kwargs["save_session"]({
+            "session_id": child_id, "session_kind": "assignment_run",
+            "parent_scoring_session_id": root_id,
+            "course_id": kwargs["course_id"], "assignment_id": kwargs["assignment_id"],
+            "assignment_name": kwargs["assignment_id"], "mode": "packet",
+            "scoring_basis": {"source": "local_rubric", "label": "Writing"},
+            "new_quiz_item_finalization_supported": False,
+            "privacy_artifacts": {"safe_bundle": str(bundle_path)},
+            "students": [{"user_id": REAL_ID, "status": "pending"}],
+        })
+        return {"ok": True, "session_id": child_id, "payload": {"ok": True}}
+
+    monkeypatch.setattr("api.powergrader.start_workflow.run_start_session", run_start)
+    apply_calls = []
+    monkeypatch.setattr(scoring_apply, "build_plan", lambda candidate, **_kwargs: {
+        "ok": True, "candidate_ids": [REAL_ID], "questions": [],
+        "digest": f"review-{candidate['course_id']}", "notes": [],
+    })
+
+    def apply_plan(child_id, **_kwargs):
+        apply_calls.append(child_id)
+        return ({"ok": True, "pushed": [REAL_ID],
+                 "results": [{"user_id": REAL_ID, "status": "pushed"}]}, 200)
+
+    monkeypatch.setattr(scoring_apply, "apply_plan", apply_plan)
+
+    paused = tools.continue_scoring_session(root_id)
+    assert paused["status"] == "needs_teacher_input"
+    first_ready = tools.continue_scoring_session(root_id, rubric_name="Writing")
+    first_packet = tools.get_scoring_packet(root_id)
+    assert first_packet["ok"] is True, first_packet
+    first_submit = tools.submit_scoring_results(root_id, _result(), first_packet["packet_digest"])
+
+    # Reload the persisted root before advancing to the second Current course.
+    assert scoring_queue.load_root_session(root_id)["queue"][0]["status"] == "completed"
+    second_ready = tools.continue_scoring_session(root_id)
+    second_packet = tools.get_scoring_packet(root_id)
+    second_submit = tools.submit_scoring_results(root_id, _result(), second_packet["packet_digest"])
+    completed = tools.continue_scoring_session(root_id)
+
+    assert first_ready["status"] == second_ready["status"] == "ready"
+    assert first_submit["queue_counts"]["completed"] == 1
+    assert second_submit["queue_counts"]["completed"] == 2
+    assert completed["status"] == "complete"
+    assert completed["counts"] == {
+        "total": 2, "completed": 2, "completed_with_holds": 0,
+        "no_longer_needs_grading": 0, "remaining": 0, "failed": 0,
+    }
+    assert [call["course_id"] for call in start_calls if call.get("session_id") is None] == [
+        "course-1", "course-1", "course-2",
+    ]
+    assert apply_calls == ["child-assignment-1", "child-assignment-2"]
+    assert "child-assignment-1" not in json.dumps(first_submit)
+
+
 def test_new_quiz_uses_same_submit_and_hides_internal_finalize_coordinates(
     monkeypatch, tmp_path, _set_active_courses,
 ):
@@ -215,7 +372,8 @@ def test_new_quiz_uses_same_submit_and_hides_internal_finalize_coordinates(
 
     result = tools.submit_scoring_results("session-1", _result(), _digest(bundle))
 
-    assert calls == [("review", "session-1"), ("finalize", "private-operation", "private-digest")]
+    assert calls == [("review", "session-1-assignment-run"),
+                     ("finalize", "private-operation", "private-digest")]
     assert result["counts"]["finalized"] == 1
     assert "operation_id" not in result and "private-operation" not in _blob(result)
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)

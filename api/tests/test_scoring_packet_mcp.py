@@ -126,11 +126,49 @@ def _attach_bundle(session: dict, tmp_path, bundle: dict, name: str = "bundle.js
 
 
 def _bind_session_store(monkeypatch, sessions: dict) -> dict:
-    """Bind load/save against an in-memory session map. Returns the map."""
+    """Bind root/child records against an in-memory map. Returns the map."""
+    from contextlib import nullcontext
     monkeypatch.setattr("api.powergrader.session_store.load_session",
                         lambda sid: sessions.get(sid))
     monkeypatch.setattr("api.powergrader.session_store.save_session",
                         lambda s: sessions.__setitem__(s["session_id"], s))
+    monkeypatch.setattr("api.powergrader.session_store.session_lock",
+                        lambda _sid: nullcontext())
+    monkeypatch.setattr("api.powergrader.session_store.list_session_summaries", lambda: [
+        {"session_id": session["session_id"],
+         "session_kind": session.get("session_kind", ""),
+         "course_id": session.get("course_id", ""),
+         "created": session.get("created", ""),
+         "total": len(session.get("students") or [])}
+        for session in sessions.values()
+    ])
+    # Existing packet fixtures describe the private assignment run. Expose
+    # them through the new root boundary instead of making them public roots.
+    from api.powergrader import scoring_queue
+    for root_id, child in list(sessions.items()):
+        if child.get("session_kind") == scoring_queue.ROOT_KIND:
+            continue
+        child_id = f"{root_id}-assignment-run"
+        child["session_id"] = child_id
+        child["session_kind"] = scoring_queue.CHILD_KIND
+        child["parent_scoring_session_id"] = root_id
+        queue_item = {
+            "course_id": str(child.get("course_id") or ""),
+            "course_label": str(child.get("course_id") or ""),
+            "assignment_id": str(child.get("assignment_id") or ""),
+            "assignment_label": str(child.get("assignment_name") or ""),
+            "due_at": "", "ungraded": 1, "partially_scored": 0,
+        }
+        root = scoring_queue.create_root_session(
+            queue=[queue_item], scope={}, session_id=root_id,
+        )
+        root["queue"][0]["status"] = "ready"
+        root["queue"][0]["child_session_id"] = child_id
+        sessions[child_id] = child
+        sessions[root_id] = root
+        sessions[root_id]["queue_digest"] = scoring_queue._queue_digest(root["queue"])
+        sessions[root_id]["progress"] = scoring_queue._progress(root)
+        sessions[root_id]["status"] = "ready"
     return sessions
 
 
@@ -372,10 +410,12 @@ def test_build_packet_oversize_guard_on_a_single_response(monkeypatch):
 def test_packet_digest_is_shared_by_both_sides():
     """build_packet and the staging guard must derive the same digest."""
     bundle = _fake_safe_bundle([{"pseudonym": "Pikachu"}], items=1)
-    packet = scoring_packet.build_packet(session=_fake_session("s1", "c1"),
-                                         safe_bundle=bundle, include_context=False)
+    session = _fake_session("s1-run", "c1")
+    session.update({"parent_scoring_session_id": "root-1", "assignment_id": "a1"})
+    packet = scoring_packet.build_packet(session=session, safe_bundle=bundle, include_context=False)
 
-    assert packet["packet_digest"] == scoring_packet.packet_digest("s1", bundle)
+    assert packet["packet_digest"] == scoring_packet.packet_digest(
+        "root-1", bundle, assignment_run_id="s1-run", course_id="c1", assignment_id="a1")
 
 
 # --- list_scoring_sessions --------------------------------------------------
@@ -403,36 +443,25 @@ def test_list_scoring_sessions_filters_to_current_courses(monkeypatch, tmp_path)
     _attach_bundle(previous, tmp_path, _fake_safe_bundle(people, items=1), "b2.json")
 
     _bind_session_store(monkeypatch, {"s1": current, "s2": previous})
-    monkeypatch.setattr("api.powergrader.session_store.list_session_summaries",
-                        lambda: [_summary("s1", "111"), _summary("s2", "222")])
-
     result = tools.list_scoring_sessions()
 
     assert result["ok"] is True
     assert [row[0] for row in result["sessions"]["rows"]] == ["s1"]
 
 
-def test_list_scoring_sessions_skips_sessions_without_a_bundle(monkeypatch, tmp_path):
-    """A session whose bundle is gone is left out, not offered and then refused."""
+def test_list_scoring_sessions_lists_root_without_private_child_rows(monkeypatch, tmp_path):
     people = _seed_vault(monkeypatch, tmp_path, count=1)
     _set_active_courses(monkeypatch, ["111"])
 
-    with_bundle = _fake_session("s1", "111", people)
-    _attach_bundle(with_bundle, tmp_path, _fake_safe_bundle(people, items=1))
-    without_bundle = _fake_session("s2", "111", people)
-    vanished = _fake_session("s3", "111", people)
-    vanished["privacy_artifacts"]["safe_bundle"] = str(tmp_path / "not-there.json")
-
-    _bind_session_store(monkeypatch, {"s1": with_bundle, "s2": without_bundle,
-                                      "s3": vanished})
-    monkeypatch.setattr(
-        "api.powergrader.session_store.list_session_summaries",
-        lambda: [_summary("s1", "111"), _summary("s2", "111"), _summary("s3", "111")],
-    )
+    child = _fake_session("s1", "111", people)
+    _attach_bundle(child, tmp_path, _fake_safe_bundle(people, items=1))
+    sessions = _bind_session_store(monkeypatch, {"s1": child})
 
     result = tools.list_scoring_sessions()
 
     assert [row[0] for row in result["sessions"]["rows"]] == ["s1"]
+    assert len(result["sessions"]["rows"]) == 1
+    assert sessions["s1-assignment-run"]["session_kind"] == "assignment_run"
 
 
 def test_list_scoring_sessions_uses_compact_neutral_columns(monkeypatch, tmp_path):
@@ -442,45 +471,14 @@ def test_list_scoring_sessions_uses_compact_neutral_columns(monkeypatch, tmp_pat
     session = _fake_session("s1", "111", people)
     _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
     _bind_session_store(monkeypatch, {"s1": session})
-    monkeypatch.setattr("api.powergrader.session_store.list_session_summaries",
-                        lambda: [_summary("s1", "111", student_count=3)])
 
     result = tools.list_scoring_sessions()
     row = result["sessions"]["rows"][0]
 
-    assert list(result["sessions"]["columns"]) == [
-        "scoring_session_id", "assignment_name", "course_id", "created",
-        "student_count", "newer_session_exists",
-    ]
+    assert list(result["sessions"]["columns"]) == list(tools._SCORING_SESSION_COLUMNS)
     assert row[0] == "s1"
-    assert row[4] == 3
-    assert row[5] is False
-
-
-def test_scoring_session_freshness_marks_older_runs_and_packets(monkeypatch, tmp_path):
-    people = _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-    old = _fake_session("old", "111", people)
-    old["created"] = "2026-01-01T08:00:00"
-    new = _fake_session("new", "111", people)
-    new["created"] = "2026-01-02T08:00:00"
-    _attach_bundle(old, tmp_path, _fake_safe_bundle(people, items=1), "old.json")
-    _attach_bundle(new, tmp_path, _fake_safe_bundle(people, items=1), "new.json")
-    _bind_session_store(monkeypatch, {"old": old, "new": new})
-    monkeypatch.setattr(
-        "api.powergrader.session_store.list_session_summaries",
-        lambda: [_summary("new", "111", created=new["created"]),
-                 _summary("old", "111", created=old["created"])],
-    )
-
-    result = tools.list_scoring_sessions()
-    rows = {row[0]: row for row in result["sessions"]["rows"]}
-    assert rows["old"][5] is True
-    assert rows["new"][5] is False
-
-    packet = tools.get_scoring_packet("old", offset=1, include_context=False)
-    assert packet["ok"] is True
-    assert packet["newer_session_exists"] is True
+    assert row[5] == 1
+    assert row[8] == 0
 
 
 # --- get_scoring_packet -----------------------------------------------------
@@ -493,7 +491,7 @@ def test_get_scoring_packet_missing_session(monkeypatch, tmp_path):
     result = tools.get_scoring_packet("nonexistent")
 
     assert result["ok"] is False
-    assert "Session not found" in result["error"]
+    assert result["code"] == "session_not_found"
 
 
 def test_get_scoring_packet_non_current_course(monkeypatch, tmp_path):

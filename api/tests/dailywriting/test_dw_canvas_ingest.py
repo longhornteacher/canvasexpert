@@ -312,11 +312,7 @@ def test_no_real_name_leaks_into_get_writing_history(monkeypatch, tmp_path):
 
 
 def test_scrub_bypass_would_be_caught_by_the_storage_leak_guard(monkeypatch, tmp_path):
-    """Positive control for the test above: if `_process`'s scrub step were
-    ever bypassed, the store's own `assert_clean_for_storage` guard (already
-    wired into `Repository.append_submission`) raises rather than silently
-    storing the leak -- so the green/soft assertion above is not vacuously
-    true just because nothing in this fixture happens to trip it."""
+    """Positive control: the storage guard rejects a scrub-bypassed ingest result."""
     _mount(monkeypatch, tmp_path)
     root = str(tmp_path)
     _write_catalog(root)
@@ -324,15 +320,47 @@ def test_scrub_bypass_would_be_caught_by_the_storage_leak_guard(monkeypatch, tmp
         900001: ("<p>My friend Learner Two helped me plan this paragraph.</p>",
                  "2026-09-14T20:00:00Z"),
     })
-    repository, _vault = _repository(tmp_path)
+    repository, vault = _repository(tmp_path)
+    # `_repository` creates an empty isolated vault; give its roster scanner
+    # the fabricated fixture identities so the storage guard sees this name.
+    monkeypatch.setattr(
+        vault,
+        "all_real_identifiers",
+        lambda: (
+            {user["name"] for user in FIXTURE_USERS},
+            {str(user["id"]) for user in FIXTURE_USERS},
+        ),
+    )
+
+    # Patch the exact runtime handoff used by canvas_ingest. Return its normal
+    # submission structure with the original text restored, modeling a scrub
+    # bypass immediately before Repository.append_submission.
+    from dataclasses import replace
+
+    original_ingest = canvas_ingest.ingest_module.ingest
+    bypassed_text = []
+    unscrubbed_text = "My friend Learner Two helped me plan this paragraph."
+
+    def bypass_scrub_at_ingest_call(**kwargs):
+        # This scenario has already scrubbed the mirror text before this
+        # handoff; restore the original fixture body in the returned record to
+        # model the scrub-bypass regression the store guard must catch.
+        assert "Learner Two" not in kwargs["text"]
+        submission = original_ingest(**kwargs)
+        submission = replace(submission, raw_text=unscrubbed_text)
+        assert submission.raw_text == unscrubbed_text
+        bypassed_text.append(submission.raw_text)
+        return submission
 
     monkeypatch.setattr(
-        core_ingest_module.scrub, "scrub_writing",
-        lambda text, **_: scrub.ScrubResult(text=text, findings=[]))
+        canvas_ingest.ingest_module, "ingest", bypass_scrub_at_ingest_call)
 
     with pytest.raises(scrub.ScrubLeakError):
         list(canvas_ingest.ingest_canvas_assignment(COURSE_ID, ASSIGNMENT_ID,
                                                      repository=repository))
+    assert bypassed_text == [
+        unscrubbed_text
+    ]
 
 
 # --- AC4: structured refusal on a missing/stale catalog or mirror -----------

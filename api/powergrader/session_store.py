@@ -138,10 +138,13 @@ def list_session_summaries() -> list[dict]:
         students = s.get("students", [])
         sessions.append({
             "session_id":      s.get("session_id"),
+            "session_kind":    s.get("session_kind", ""),
+            "parent_scoring_session_id": s.get("parent_scoring_session_id", ""),
             "assignment_name": s.get("assignment_name"),
             "course_id":       s.get("course_id"),
             "assignment_id":   s.get("assignment_id"),
             "created":         s.get("created"),
+            "status":          s.get("status", ""),
             "mode":            s.get("mode"),
             "mode_label":      mode_label(s.get("mode", "fast")),
             "total":           len(students),

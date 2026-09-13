@@ -9,6 +9,7 @@ because the tail is what gets cut.
 """
 import asyncio
 import json
+from contextlib import nullcontext
 
 from api import feedback_vault
 from api.mcp_server import server, tools
@@ -42,6 +43,7 @@ DESCRIPTION_BUDGET = 343
 RESULT_NEXT_TOOLS = {
     "get_scoring_packet",
     "start_scoring_session",
+    "continue_scoring_session",
     "preview_sis_grade_bridge",
     "preview_learning_objective",
     "preview_roster_student_change",
@@ -187,7 +189,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 44
+    assert len(listed) == 45
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -244,7 +246,8 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
     )
 
     session = {
-        "session_id": "session-1",
+        "session_id": "session-1-child", "session_kind": "assignment_run",
+        "parent_scoring_session_id": "session-1",
         "course_id": "111",
         "assignment_name": "Quiz",
         "assignment_id": "assignment-1",
@@ -266,9 +269,21 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
             }],
         }],
     }), encoding="utf-8")
-    monkeypatch.setattr(
-        "api.powergrader.session_store.load_session", lambda _session_id: session
-    )
+    from api.powergrader import scoring_queue, session_store
+    sessions = {session["session_id"]: session}
+    monkeypatch.setattr(session_store, "load_session", lambda session_id: sessions.get(session_id))
+    monkeypatch.setattr(session_store, "save_session",
+                        lambda item: sessions.__setitem__(item["session_id"], item))
+    monkeypatch.setattr(session_store, "session_lock", lambda _sid: nullcontext())
+    root = scoring_queue.create_root_session(queue=[{
+        "course_id": "111", "course_label": "Course", "assignment_id": "assignment-1",
+        "assignment_label": "Quiz", "due_at": "", "ungraded": 1, "partially_scored": 0,
+    }], scope={}, session_id="session-1")
+    root["queue"][0]["status"] = "ready"
+    root["queue"][0]["child_session_id"] = session["session_id"]
+    root["queue_digest"] = scoring_queue._queue_digest(root["queue"])
+    root["status"] = "ready"
+    session_store.save_session(root)
 
     wire = server._compact(tools.get_scoring_packet("session-1"))
     result = json.loads(wire)
@@ -297,9 +312,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 44
-    assert len(_synthetic_mcp["calls"]) == 44
-    assert len(_synthetic_mcp["gated"]) == 44
+    assert len(results) == 45
+    assert len(_synthetic_mcp["calls"]) == 45
+    assert len(_synthetic_mcp["gated"]) == 45
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

@@ -31,16 +31,21 @@ def _canonical_digest(value: dict) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def packet_digest(session_id, safe_bundle: dict) -> str:
-    """Identity of one session's bundle content.
+def packet_digest(root_session_id, safe_bundle: dict, *, assignment_run_id="",
+                  course_id="", assignment_id="") -> str:
+    """Identity of one root session's active assignment bundle.
 
     ``submit_scoring_results`` recomputes this and refuses to write scores once
     it has moved, so a re-run between retrieval and submission cannot be scored blind.
-    Both sides call this helper so the two digests cannot drift apart.
+    The root, private assignment run, exact coordinates, and SAFE content all
+    participate so a replay from an earlier queue item fails closed.
     """
     return _canonical_digest({
         "bundle": safe_bundle,
-        "session_id": str(session_id or ""),
+        "root_session_id": str(root_session_id or ""),
+        "assignment_run_id": str(assignment_run_id or root_session_id or ""),
+        "course_id": str(course_id or ""),
+        "assignment_id": str(assignment_id or ""),
     })
 
 
@@ -131,7 +136,13 @@ def build_packet(
 
     result = {
         "ok": True,
-        "packet_digest": packet_digest(session.get("session_id"), safe_bundle),
+        "packet_digest": packet_digest(
+            session.get("parent_scoring_session_id") or session.get("session_id"),
+            safe_bundle,
+            assignment_run_id=session.get("session_id"),
+            course_id=session.get("course_id"),
+            assignment_id=session.get("assignment_id"),
+        ),
         "items": sorted(items_by_id.values(), key=lambda i: i["item_id"]),
         "students": page,
         "total": total,
