@@ -554,7 +554,7 @@ def test_get_scoring_packet_resolves_declared_rubric_and_persona(monkeypatch, tm
     result = tools.get_scoring_packet("s1")
 
     assert result["ok"] is True
-    assert result["rubric"] == {"name": "Test Rubric", "included": True}
+    assert result["rubric"] == {"label": "Test Rubric", "included": True}
     assert "3 pts: uses a loop" in result["contract"]
     assert "your teaching assistant" in result["contract"]
     assert "Drafted by Packet TA" not in result["contract"]
@@ -572,7 +572,7 @@ def test_get_scoring_packet_reports_missing_declared_rubric(monkeypatch, tmp_pat
     result = tools.get_scoring_packet("s1")
 
     assert result["ok"] is True
-    assert result["rubric"] == {"name": "Test Rubric", "included": False}
+    assert result["rubric"] == {"label": "Test Rubric", "included": False}
     assert "attached as Knowledge" not in result["contract"]
     assert "No scoring rubric was provided" in result["contract"]
 
@@ -603,7 +603,7 @@ def test_get_scoring_packet_preserves_legacy_inline_context(monkeypatch, tmp_pat
     result = tools.get_scoring_packet("s1")
 
     assert result["ok"] is True
-    assert result["rubric"] == {"name": "Test Rubric", "included": True}
+    assert result["rubric"] == {"label": "Test Rubric", "included": True}
     assert "Legacy rubric text" in result["contract"]
     assert "Legacy TA" not in result["contract"]
 

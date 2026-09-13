@@ -2800,7 +2800,7 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     - held: responses with no scorable text (media-only or empty)
     - held_pseudonyms: distinct pseudonyms holding at least one held response
     - included_context: bool (true if contract/rubric were included)
-    - rubric: declared rubric name and whether its text resolved, when context is included
+    - rubric: declared rubric label and whether its text resolved, when context is included
     - estimated_tokens: projected token count for this response
 
     Course-gated on the session's course_id. Refuses when:
@@ -2870,7 +2870,7 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
             str(session.get("session_id") or session_id), False)
         if include_context:
             result["rubric"] = {
-                "name": rubric_name,
+                "label": rubric_name,
                 "included": bool(str(rubric_text or "").strip()),
             }
         result["items"] = _tabulate(result["items"], _PACKET_ITEM_COLUMNS)

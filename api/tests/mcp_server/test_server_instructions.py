@@ -10,6 +10,7 @@ because the tail is what gets cut.
 import asyncio
 import json
 
+from api import feedback_vault
 from api.mcp_server import server, tools
 
 
@@ -217,6 +218,74 @@ def test_compact_preserves_unicode_tables_and_runs_final_gate(monkeypatch):
     assert "échec" in wire and "Zoë" in wire
     assert "\\u00e9" not in wire
     assert json.loads(wire)["table"]["rows"] == [["Zoë"]]
+
+
+def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
+    monkeypatch, tmp_path,
+):
+    vault = feedback_vault.Vault(str(tmp_path / "vault.json"))
+    vault.get_or_assign("900001", real_name="Invented Student")
+    pseudonym = feedback_vault._REGISTRY_WORDS[1]
+    vault.set_pseudonym("900001", pseudonym)
+    monkeypatch.setattr(tools, "_vault_factory", lambda: vault)
+    monkeypatch.setattr(tools, "_open_vault", lambda: (vault, None))
+    monkeypatch.setattr(
+        tools.config, "active_courses", lambda: [{"id": "111", "name": "Course"}]
+    )
+    monkeypatch.setattr(tools, "_visible_scoring_sessions", lambda: [])
+    monkeypatch.setattr(
+        "api.powergrader.context.load_rubric_text",
+        lambda _label: "Award credit for a correct explanation.",
+    )
+    monkeypatch.setattr(
+        tools.config,
+        "get_persona",
+        lambda _persona_id: {"name": "Test TA", "signoff_policy": "none"},
+    )
+
+    session = {
+        "session_id": "session-1",
+        "course_id": "111",
+        "assignment_name": "Quiz",
+        "assignment_id": "assignment-1",
+        "created": "2026-01-01T08:00:00",
+        "scoring_basis": {"source": "canvas_expert_rubric", "label": "Test Rubric"},
+        "students": [{"user_id": "900001", "status": "pending"}],
+        "privacy_artifacts": {"safe_bundle": str(tmp_path / "bundle.json")},
+    }
+    (tmp_path / "bundle.json").write_text(json.dumps({
+        "contract_version": "1.0",
+        "quiz_title": "Quiz",
+        "students": [{
+            "pseudonym": pseudonym,
+            "responses": [{
+                "item_id": "item-1",
+                "prompt": "Explain the answer.",
+                "response": "A fabricated response with enough words to score.",
+                "possible": 10,
+            }],
+        }],
+    }), encoding="utf-8")
+    monkeypatch.setattr(
+        "api.powergrader.session_store.load_session", lambda _session_id: session
+    )
+
+    wire = server._compact(tools.get_scoring_packet("session-1"))
+    result = json.loads(wire)
+
+    assert result["ok"] is True
+    assert result["rubric"] == {"label": "Test Rubric", "included": True}
+    assert "Award credit for a correct explanation." in result["contract"]
+    assert result["included_context"] is True
+
+    blocked_wire = server._compact({
+        "ok": True,
+        "students": [{"pseudonym": pseudonym}],
+        "rubric": {"name": "Identity-bearing field"},
+    })
+    blocked = json.loads(blocked_wire)
+    assert blocked["ok"] is False
+    assert "identity field 'name'" in " ".join(blocked["violations"])
 
 
 def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
