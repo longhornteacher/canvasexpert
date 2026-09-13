@@ -66,7 +66,8 @@ With explicit user authorization, the following was verified against dummy cours
 
 A temporary dummy item score and temporary grader feedback were each accepted with `201`,
 verified on the newly authoritative result, and cleared afterward. No live identifiers,
-credentials, responses, or grades were stored in the repository.
+credentials, responses, or grades were stored in the repository. This historical check
+predates the current request-shape finding below and does not verify the current serializer.
 
 ## Versioning and write safety
 
@@ -103,17 +104,18 @@ check so Canvas drift does not weaken review or write safety.
   stable item IDs and result version, finalizes once, verifies the new authoritative
   result, and records a content-minimized receipt. A per-student refusal does not
   stop safe rows for other students; an ambiguous write is not retried.
-- Finalization preserves auto-graded and untouched values exactly. Assignment-total
-  submission writes are never used as a substitute. Active/current instructor
-  enrollment is required; concluded, closed, past-enrollment, or otherwise restricted
-  courses may return `403`.
-- Live read-only evidence (2026-09-12) found each `session_item_results[].feedback`
-  value as an object containing `item_feedback.neutral`; grader comments are written through
-  `feedback.grader_feedback.content` while preserving the complete feedback object.
-  The prior adapter replaced that object with a string, and Canvas rejected all 25
-  attempted student finalizations (`write_rejected`; 0 verified finalizations, with
-  Canvas unchanged).
-  This repair has not been verified by a live write.
+- Finalization explicitly serializes raw snake_case GET rows into the 12-member camelCase
+  first-party POST shape. It supplies only the evidenced defaults for omitted `errors`
+  and `graderId`, drops raw-only `id`, `grading_method`, and unknown members, preserves
+  untouched `itemFeedback.neutral`, and sends edited feedback as
+  `feedback.graderFeedback.content`. Assignment-total writes are never used as a
+  substitute. Active/current instructor enrollment is required; concluded, closed,
+  past-enrollment, or otherwise restricted courses may return `403`.
+- Content-free request evidence (2026-09-12), captured with the POST aborted before
+  transmission, showed the exact 12-member first-party row contract and the raw GET's
+  additional `grading_method` member. Two Canvas Expert runs sent raw/snake or mixed-case
+  rows; both were rejected 25/25 with zero verified changes. No successful live write
+  using the explicit serializer has been verified.
 - New Quiz uploads never enter the scoring packet as files or filenames. Locally
   extracted text may be included as an essay response; unreadable uploads remain held.
 - `api/powergrader/new_quiz_fetch.py` uses native result acquisition; the live participant

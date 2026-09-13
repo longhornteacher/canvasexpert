@@ -446,17 +446,25 @@ def test_new_quiz_finalization_does_not_retry_an_unverified_write():
 
 def _grader_state(result_id="result-1", essay_score=0.0, essay_feedback=None, total=2.0):
     if essay_feedback is None:
-        essay_feedback = {
-            "item_feedback": {"neutral": "Quiz-authored item feedback"},
-            "extension": {"source": "Canvas"},
-        }
+        essay_feedback = {"item_feedback": {"neutral": "Quiz-authored item feedback"}}
     rows = [
-        {"id": "row-essay", "item_id": "essay-1", "points_possible": 5.0,
-         "score": essay_score, "feedback": copy.deepcopy(essay_feedback)},
-        {"id": "row-auto", "item_id": "auto-1", "points_possible": 2.0,
-         "score": 2.0, "feedback": {
-             "item_feedback": {"neutral": "Auto feedback"}, "extension": "preserve",
-         }},
+        {
+            "id": "row-essay", "answer_feedback": {"neutral": "Essay response"},
+            "attempt": 2, "feedback": copy.deepcopy(essay_feedback),
+            "graded_at": None, "item_id": "essay-1", "points_possible": 5.0,
+            "position": 1, "regrade_info": None, "score": essay_score,
+            "scored_data": {"response": "Synthetic essay evidence"},
+            "grading_method": "manual", "future_member": "must be dropped",
+        },
+        {
+            "id": "row-auto", "answer_feedback": {"neutral": "Selected option"},
+            "attempt": 2,
+            "feedback": {"item_feedback": {"neutral": "Auto feedback"}},
+            "graded_at": None, "item_id": "auto-1", "points_possible": 2.0,
+            "position": 2, "regrade_info": None, "score": 2.0,
+            "scored_data": {"response": "Synthetic auto-graded evidence"},
+            "grading_method": "automatic", "future_member": "must be dropped",
+        },
     ]
     return {
         "host": "https://synthetic-quiz.invalid",
@@ -485,8 +493,7 @@ def _final_decisions():
 def test_new_quiz_adapter_writes_complete_collection_and_verifies(monkeypatch):
     before = _grader_state()
     composed = "MY FEEDBACK\n\nTeacher note\n\n-------\n\nAutofeedback from an automated assistant:\n\nTA draft"
-    expected_essay_feedback = copy.deepcopy(before["rows"][0]["feedback"])
-    expected_essay_feedback.setdefault("grader_feedback", {})["content"] = composed
+    expected_essay_feedback = {"grader_feedback": {"content": composed}}
     after = _grader_state("result-2", 3.0,
                           expected_essay_feedback, 5.0)
     http = _WriteSession()
@@ -505,30 +512,43 @@ def test_new_quiz_adapter_writes_complete_collection_and_verifies(monkeypatch):
     assert len(http.posts) == 1
     payload = http.posts[0][1]["json"]
     assert set(payload) == {"results", "fudge_points"}
-    assert all("id" not in row for row in payload["results"])
-    expected_rows = copy.deepcopy(before["rows"])
-    expected_rows[0]["score"] = 3.0
-    expected_rows[0]["feedback"] = expected_essay_feedback
-    expected_rows = [{key: value for key, value in row.items() if key != "id"}
-                     for row in expected_rows]
+    assert payload["fudge_points"] == before["authoritative"]["fudge_points"]
+    expected_rows = [
+        {
+            "answerFeedback": {"neutral": "Essay response"}, "attempt": 2,
+            "errors": {}, "feedback": {"graderFeedback": {"content": composed}},
+            "gradedAt": None, "graderId": None, "itemId": "essay-1",
+            "pointsPossible": 5.0, "position": 1, "regradeInfo": None,
+            "score": 3.0, "scoredData": {"response": "Synthetic essay evidence"},
+        },
+        {
+            "answerFeedback": {"neutral": "Selected option"}, "attempt": 2,
+            "errors": {},
+            "feedback": {"itemFeedback": {"neutral": "Auto feedback"}},
+            "gradedAt": None, "graderId": None, "itemId": "auto-1",
+            "pointsPossible": 2.0, "position": 2, "regradeInfo": None,
+            "score": 2.0,
+            "scoredData": {"response": "Synthetic auto-graded evidence"},
+        },
+    ]
     assert payload["results"] == expected_rows
     assert json.dumps(payload["results"], separators=(",", ":")) == json.dumps(
         expected_rows, separators=(",", ":")
     )
-    assert payload["results"][0]["feedback"]["grader_feedback"]["content"] == composed
-    assert payload["results"][0]["feedback"]["item_feedback"] == {
-        "neutral": "Quiz-authored item feedback"
+    assert payload["results"][0]["feedback"] == {
+        "graderFeedback": {"content": composed}
     }
-    assert payload["results"][0]["feedback"]["extension"] == {"source": "Canvas"}
     assert payload["results"][1] == expected_rows[1]
-    assert "grader_feedback" not in before["rows"][0]["feedback"]
+    assert "grading_method" not in payload["results"][0]
+    assert "future_member" not in payload["results"][0]
+    assert all("id" not in row for row in payload["results"])
 
 
 @pytest.mark.parametrize("feedback_override", [
     None,
     "obsolete string feedback",
-    {"item_feedback": {"neutral": "Authored"}, "grader_feedback": "obsolete string"},
-    {"item_feedback": {"neutral": "Authored"}, "grader_feedback": {"content": 17}},
+    {"item_feedback": "not an object"},
+    {"grader_feedback": {"content": "missing item feedback"}},
 ])
 def test_new_quiz_adapter_rejects_unusable_feedback_before_post(monkeypatch, feedback_override):
     before = _grader_state()
@@ -541,7 +561,31 @@ def test_new_quiz_adapter_rejects_unusable_feedback_before_post(monkeypatch, fee
         "state_digest": new_quiz_grader._digest(new_quiz_grader._result_state(before["authoritative"], before["rows"])),
     }
 
-    with pytest.raises(new_quiz_grader.GraderError, match="^feedback_shape$"):
+    with pytest.raises(new_quiz_grader.GraderError, match="^result_row_shape$"):
+        new_quiz_grader.apply(
+            canvas_base="https://canvas.invalid", token="synthetic-pat", assignment_id="assignment",
+            user_id="student", decisions=_final_decisions(), baseline=baseline,
+        )
+
+    assert http.posts == []
+
+
+@pytest.mark.parametrize("missing_field", [
+    "answer_feedback", "attempt", "feedback", "graded_at", "item_id",
+    "points_possible", "position", "regrade_info", "score", "scored_data",
+])
+def test_new_quiz_adapter_rejects_missing_raw_row_field_before_post(monkeypatch, missing_field):
+    before = _grader_state()
+    before["rows"][0].pop(missing_field)
+    http = _WriteSession()
+    monkeypatch.setattr(new_quiz_grader, "_signed_context", lambda **_kwargs: (http, "unused", {}, "unused"))
+    monkeypatch.setattr(new_quiz_grader, "_read_current", lambda _context: before)
+    baseline = {
+        "result_id": "result-1",
+        "state_digest": new_quiz_grader._digest(new_quiz_grader._result_state(before["authoritative"], before["rows"])),
+    }
+
+    with pytest.raises(new_quiz_grader.GraderError, match="^result_row_shape$"):
         new_quiz_grader.apply(
             canvas_base="https://canvas.invalid", token="synthetic-pat", assignment_id="assignment",
             user_id="student", decisions=_final_decisions(), baseline=baseline,
@@ -574,10 +618,9 @@ def test_new_quiz_adapter_fails_closed_on_item_mismatch_and_drift(monkeypatch):
 
 def test_new_quiz_adapter_marks_ambiguous_write_without_retry(monkeypatch):
     before = _grader_state()
-    expected_essay_feedback = copy.deepcopy(before["rows"][0]["feedback"])
-    expected_essay_feedback.setdefault("grader_feedback", {})["content"] = (
-        "MY FEEDBACK\n\nTeacher note\n\n-------\n\nAutofeedback from an automated assistant:\n\nTA draft"
-    )
+    expected_essay_feedback = {"grader_feedback": {
+        "content": "MY FEEDBACK\n\nTeacher note\n\n-------\n\nAutofeedback from an automated assistant:\n\nTA draft"
+    }}
     after = _grader_state("result-2", 3.0, expected_essay_feedback, 5.0)
     http = _WriteSession(status=500)
     monkeypatch.setattr(new_quiz_grader, "_signed_context", lambda **_kwargs: (http, "unused", {}, "unused"))

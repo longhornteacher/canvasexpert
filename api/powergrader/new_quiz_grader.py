@@ -20,6 +20,25 @@ from api.powergrader.attribution import attribute
 
 
 TIMEOUT = 30
+_RESULT_ROW_FIELDS = (
+    ("answer_feedback", "answerFeedback"),
+    ("attempt", "attempt"),
+    ("errors", "errors"),
+    ("feedback", "feedback"),
+    ("graded_at", "gradedAt"),
+    ("grader_id", "graderId"),
+    ("item_id", "itemId"),
+    ("points_possible", "pointsPossible"),
+    ("position", "position"),
+    ("regrade_info", "regradeInfo"),
+    ("score", "score"),
+    ("scored_data", "scoredData"),
+)
+_RESULT_ROW_DEFAULTS = {"errors": {}, "grader_id": None}
+_UNCHANGED_RESULT_FIELDS = (
+    "answerFeedback", "attempt", "feedback", "itemId", "pointsPossible",
+    "position", "regradeInfo", "score", "scoredData",
+)
 GRAPHQL_PREVIEW = """query Preview($assignmentId: ID!, $userId: ID!) {
   assignment(id: $assignmentId) {
     submissionsConnection(first: 1, filter: {userId: $userId}) {
@@ -88,6 +107,94 @@ def _score_total(rows: list, fudge):
             return None
         values.append(score or 0)
     return sum(values) + (fudge or 0)
+
+
+def _serialize_feedback(feedback: object, *, require_item_feedback: bool) -> dict:
+    """Serialize only the structured feedback members observed in Canvas rows."""
+    if not isinstance(feedback, dict):
+        raise GraderError("result_row_shape")
+    if set(feedback) - {"item_feedback", "grader_feedback"}:
+        raise GraderError("result_row_shape")
+    if require_item_feedback and "item_feedback" not in feedback:
+        raise GraderError("result_row_shape")
+
+    serialized = {}
+    if "item_feedback" in feedback:
+        if not isinstance(feedback["item_feedback"], dict):
+            raise GraderError("result_row_shape")
+        serialized["itemFeedback"] = copy.deepcopy(feedback["item_feedback"])
+    if "grader_feedback" in feedback:
+        grader_feedback = feedback["grader_feedback"]
+        if (not isinstance(grader_feedback, dict)
+                or ("content" in grader_feedback
+                    and not isinstance(grader_feedback["content"], str))):
+            raise GraderError("result_row_shape")
+        serialized["graderFeedback"] = copy.deepcopy(grader_feedback)
+    if not serialized:
+        raise GraderError("result_row_shape")
+    return serialized
+
+
+def _serialize_result_row(row: object, *, edited_feedback: str | None = None,
+                           require_item_feedback: bool = True) -> dict:
+    """Map one raw GET row to the exact first-party POST row shape."""
+    if not isinstance(row, dict):
+        raise GraderError("result_row_shape")
+    required = {raw for raw, _wire in _RESULT_ROW_FIELDS} - set(_RESULT_ROW_DEFAULTS)
+    if not required.issubset(row):
+        raise GraderError("result_row_shape")
+    item_id = row.get("item_id")
+    if not isinstance(item_id, str) or not item_id:
+        raise GraderError("result_row_shape")
+
+    # Validate the source feedback even when a reviewed edit replaces it on the
+    # wire. That keeps malformed Canvas state from being silently guessed at.
+    current_feedback = _serialize_feedback(
+        row.get("feedback"), require_item_feedback=require_item_feedback
+    )
+    if edited_feedback is not None and not isinstance(edited_feedback, str):
+        raise GraderError("result_row_shape")
+
+    serialized = {}
+    for raw_key, wire_key in _RESULT_ROW_FIELDS:
+        if raw_key == "feedback":
+            serialized[wire_key] = (
+                {"graderFeedback": {"content": edited_feedback}}
+                if edited_feedback is not None else current_feedback
+            )
+        elif raw_key in row:
+            value = row[raw_key]
+            if raw_key == "errors" and not isinstance(value, dict):
+                raise GraderError("result_row_shape")
+            serialized[wire_key] = copy.deepcopy(value)
+        else:
+            serialized[wire_key] = copy.deepcopy(_RESULT_ROW_DEFAULTS[raw_key])
+    return serialized
+
+
+def _serialize_result_rows(rows: object, *, edited_feedback: dict | None = None,
+                           require_item_feedback: bool = True) -> list[dict]:
+    """Serialize a complete, unique item-result collection or fail closed."""
+    if not isinstance(rows, list) or not rows:
+        raise GraderError("result_row_shape")
+    edited_feedback = edited_feedback or {}
+    serialized = []
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise GraderError("result_row_shape")
+        item_id = str(row.get("item_id") or "")
+        if not item_id or item_id in seen:
+            raise GraderError("result_row_shape")
+        seen.add(item_id)
+        serialized.append(_serialize_result_row(
+            row,
+            edited_feedback=edited_feedback.get(item_id),
+            require_item_feedback=require_item_feedback,
+        ))
+    if set(edited_feedback) - seen:
+        raise GraderError("result_row_shape")
+    return serialized
 
 
 def compose_feedback(teacher_feedback: str, ta_block: str) -> str:
@@ -179,7 +286,7 @@ def preflight(*, canvas_base: str, token: str, assignment_id: str, user_id: str,
     context = _signed_context(canvas_base=canvas_base, token=token, assignment_id=assignment_id, user_id=user_id, http_session=http_session)
     current = _read_current(context)
     state = _result_state(current["authoritative"], current["rows"])
-    _validate_feedback_shapes(current["rows"])
+    _serialize_result_rows(current["rows"])
     _validate_decisions(current["rows"], decisions)
     total = _score_total(current["rows"], state["fudge_points"])
     if total is None or not isinstance(current["authoritative"].get("score"), (int, float)) or abs(total - current["authoritative"]["score"]) > 1e-8:
@@ -214,56 +321,74 @@ def apply(*, canvas_base: str, token: str, assignment_id: str, user_id: str, dec
     state = _result_state(current["authoritative"], current["rows"])
     if state["result_id"] != str(baseline.get("result_id") or "") or _digest(state) != baseline.get("state_digest"):
         raise GraderError("result_version_drift")
-    _validate_feedback_shapes(current["rows"])
+    _serialize_result_rows(current["rows"])
     _validate_decisions(current["rows"], decisions)
-    results = copy.deepcopy(current["rows"])
-    by_id = {str(row["item_id"]): row for row in results}
+    edited_feedback = {}
     for decision in decisions:
-        row = by_id[str(decision["item_id"])]
-        row["score"] = float(decision["score"])
-        grader_feedback = dict(row["feedback"].get("grader_feedback") or {})
-        grader_feedback["content"] = compose_feedback(
+        edited_feedback[str(decision["item_id"])] = compose_feedback(
             decision.get("teacher_feedback", ""), decision.get("ta_feedback", "")
         )
-        row["feedback"]["grader_feedback"] = grader_feedback
-    # The first-party client sends the complete result collection, stripping the
-    # client-side row id from every entry rather than only from edited rows.
-    for row in results:
-        row.pop("id", None)
+    results = _serialize_result_rows(
+        current["rows"], edited_feedback=edited_feedback
+    )
+    by_id = {row["itemId"]: row for row in results}
+    for decision in decisions:
+        by_id[str(decision["item_id"])]["score"] = float(decision["score"])
     payload = {"results": results, "fudge_points": state["fudge_points"]}
     try:
         response = context[0].post(f"{current['host']}/api/quiz_sessions/{current['quiz_session_id']}/results", headers=current["headers"], json=payload, timeout=TIMEOUT)
     except requests.RequestException:
-        return _reconcile_ambiguous(context, state, results)
+        return _reconcile_ambiguous(context, state, results, set(edited_feedback))
     if getattr(response, "status_code", 0) not in (200, 201):
         if getattr(response, "status_code", 0) in (400, 401, 403, 404, 422):
             raise GraderError("write_rejected")
-        return _reconcile_ambiguous(context, state, results)
-    return _verify_applied(context, state, results)
+        return _reconcile_ambiguous(context, state, results, set(edited_feedback))
+    return _verify_applied(context, state, results, set(edited_feedback))
 
 
-def _reconcile_ambiguous(context, before_state: dict, expected_rows: list) -> dict:
+def _reconcile_ambiguous(context, before_state: dict, expected_rows: list,
+                         edited_item_ids: set[str]) -> dict:
     """A single re-read decides whether an uncertain POST actually landed.
 
     This never retries the write.  A result that cannot be proved is deliberately
     routed back for SpeedGrader review as ``write_unknown``.
     """
     try:
-        return _verify_applied(context, before_state, expected_rows)
+        return _verify_applied(context, before_state, expected_rows, edited_item_ids)
     except GraderError:
         raise GraderError("write_unknown")
 
 
-def _verify_applied(context, before_state: dict, expected_rows: list) -> dict:
+def _verify_applied(context, before_state: dict, expected_rows: list,
+                    edited_item_ids: set[str]) -> dict:
     after = _read_current(context)
     after_state = _result_state(after["authoritative"], after["rows"])
-    expected = {str(item["item_id"]): item for item in expected_rows}
-    actual = {str(item.get("item_id")): item for item in after["rows"]}
-    valid_items = set(actual) == set(expected) and all(
-        actual[key].get("score") == value.get("score")
-        and actual[key].get("feedback") == value.get("feedback")
-        for key, value in expected.items()
-    )
+    expected = {str(item["itemId"]): item for item in expected_rows}
+    try:
+        actual_rows = _serialize_result_rows(
+            after["rows"], require_item_feedback=False
+        )
+    except GraderError:
+        raise GraderError("write_unverified")
+    actual = {str(item["itemId"]): item for item in actual_rows}
+    valid_items = set(actual) == set(expected)
+    for item_id, expected_row in expected.items():
+        actual_row = actual.get(item_id)
+        if not actual_row:
+            valid_items = False
+            break
+        if item_id in edited_item_ids:
+            expected_content = expected_row["feedback"]["graderFeedback"]["content"]
+            actual_content = (actual_row.get("feedback") or {}).get(
+                "graderFeedback", {}
+            ).get("content")
+            valid_items = (valid_items and actual_row["score"] == expected_row["score"]
+                           and actual_content == expected_content)
+        else:
+            valid_items = valid_items and all(
+                actual_row.get(field) == expected_row.get(field)
+                for field in _UNCHANGED_RESULT_FIELDS
+            )
     derived = _score_total(after["rows"], after_state["fudge_points"])
     if after_state["result_id"] == before_state["result_id"] or not valid_items or derived is None or not isinstance(after["authoritative"].get("score"), (int, float)) or abs(derived - after["authoritative"]["score"]) > 1e-8:
         raise GraderError("write_unverified")
@@ -286,18 +411,3 @@ def _validate_decisions(rows: list, decisions: list[dict]) -> None:
             raise GraderError("invalid_item_score")
         if not str((decision or {}).get("ta_feedback") or "").strip():
             raise GraderError("missing_ta_feedback")
-
-
-def _validate_feedback_shapes(rows: list) -> None:
-    """Require structured Canvas feedback before editing any row."""
-    for row in rows:
-        feedback = row.get("feedback")
-        if not isinstance(feedback, dict):
-            raise GraderError("feedback_shape")
-        if "grader_feedback" not in feedback:
-            continue
-        grader_feedback = feedback["grader_feedback"]
-        if (not isinstance(grader_feedback, dict)
-                or ("content" in grader_feedback
-                    and not isinstance(grader_feedback["content"], str))):
-            raise GraderError("feedback_shape")
