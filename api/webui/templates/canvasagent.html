@@ -1,0 +1,93 @@
+{% extends "layouts/workspace.html" %}
+{% from "ui/_macros.html" import page_header %}
+{% block title %}CanvasAgent — Canvas Expert{% endblock %}
+{% block workspace_body_class %}ce-canvasagent-page{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/pages/canvasagent.css?v={{ asset_v }}">{% endblock %}
+{% block workspace_header %}{{ page_header('CanvasAgent', 'Check your local assistant connection, Canvas access, and course-data freshness.') }}{% endblock %}
+{% block primary %}
+<div id="canvasagent-root" class="ce-canvasagent" aria-busy="true">
+  <section id="canvasagent-overall" class="ce-panel ce-agent-overall" data-state="loading" aria-live="polite">
+    <span class="ce-agent-state-icon" aria-hidden="true">…</span>
+    <div><p class="ce-eyebrow">System status</p><h2 data-overall-label>Checking local and Canvas health</h2>
+      <p class="ce-hint" data-overall-detail>Loading the current status. This page does not change Canvas.</p></div>
+  </section>
+
+  <section class="ce-panel ce-agent-component ce-agent-mcp" id="mcp-connections" data-state="loading">
+    <div class="ce-agent-heading"><div><p class="ce-eyebrow">Primary</p><h2>MCP connections</h2></div><span class="ce-agent-status" data-mcp-status>Checking</span></div>
+    <p class="ce-hint" data-mcp-detail>These local desktop apps can connect to the Canvas Expert MCP server.</p>
+    <div class="ce-agent-client-grid">
+      {% for client_key, label, connect_label, restart_note in [
+        ('claude', 'Claude Desktop', 'Connect to Claude Desktop', 'Restart Claude Desktop to finish.'),
+        ('chatgpt', 'ChatGPT desktop', 'Connect to ChatGPT', 'Restart ChatGPT to finish.')
+      ] %}
+      {% set c = connection.clients[client_key] %}
+      <article class="ce-agent-client" data-client-card data-client="{{ c.client }}" data-connect-label="{{ connect_label }}" data-restart-note="{{ restart_note }}" data-connected="{{ 'true' if c.connected else 'false' }}" data-current="{{ 'true' if c.current else 'false' }}" data-detected="{{ 'true' if c.detected else 'false' }}" data-error="{{ 'true' if c.get('error') else 'false' }}">
+        <div class="ce-agent-heading"><h3>{{ label }}</h3><span class="ce-agent-status" data-client-status>
+          {% if c.error %}Status unavailable{% elif c.connected and c.current %}Connected{% elif c.connected %}Update available{% elif not c.detected %}App not found{% else %}Not connected{% endif %}
+        </span></div>
+        <p class="ce-hint" data-client-description>{% if c.client == 'claude' %}Adds Canvas Expert to Claude Desktop so you can ask it about your courses.{% else %}Adds Canvas Expert to the ChatGPT desktop app's local tools.{% endif %}</p>
+        <div class="ce-actions" data-client-actions>
+          {% if c.connected and c.current %}
+          <button type="button" class="ce-btn ce-agent-action" data-action="connect">Reconnect</button>
+          <button type="button" class="ce-btn ce-agent-action" data-action="disconnect">Disconnect</button>
+          {% elif c.connected %}
+          <button type="button" class="ce-btn ce-btn--primary ce-agent-action" data-action="connect">Update connection</button>
+          <button type="button" class="ce-btn ce-agent-action" data-action="disconnect">Disconnect</button>
+          {% else %}
+          <button type="button" class="ce-btn ce-btn--primary ce-agent-action" data-action="connect">{{ connect_label }}</button>
+          {% endif %}
+        </div>
+        <p class="ce-agent-result" data-client-result role="status" aria-live="polite"></p>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <div class="ce-agent-health-grid">
+    <section class="ce-panel ce-agent-component" id="canvas-account" data-state="loading">
+      <div class="ce-agent-heading"><h2>Canvas account</h2><span class="ce-agent-status" data-canvas-status>Checking</span></div>
+      <p class="ce-agent-status-copy" data-canvas-detail>Checking Canvas access…</p>
+      <a class="ce-btn" href="/settings#workspace-card">Review Canvas settings</a>
+    </section>
+    <section class="ce-panel ce-agent-component" id="canvas-data" data-state="loading">
+      <div class="ce-agent-heading"><h2>Canvas data</h2><span class="ce-agent-status" data-mirror-status>Checking</span></div>
+      <p class="ce-agent-status-copy" data-mirror-detail>Checking CanvasMirror freshness…</p>
+      <div class="ce-actions ce-agent-data-actions">
+        <a class="ce-btn" href="/settings#mirror-card">Mirror settings</a>
+        <a class="ce-btn" href="/settings#current-courses-card">Current courses</a>
+        <button class="ce-btn" type="button" id="canvasagent-refresh" hidden>Refresh course data</button>
+      </div>
+      <p class="ce-agent-result" data-mirror-result role="status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <section class="ce-panel ce-agent-component ce-agent-privacy" id="local-privacy" data-state="loading">
+    <div class="ce-agent-heading"><h2>Local workspace &amp; privacy</h2><span class="ce-agent-status" data-privacy-status>Checking</span></div>
+    <p class="ce-agent-status-copy" data-privacy-detail>Checking local workspace and privacy protections…</p>
+    <a class="ce-btn" href="/settings#workspace-card">Review local settings</a>
+  </section>
+
+  <details class="ce-panel ce-agent-advanced">
+    <summary>Advanced setup and instructions</summary>
+    <section class="ce-agent-instructions">
+      <h2>CanvasAgent instructions</h2>
+      <p class="ce-hint">Download the instructions or copy them into your assistant. Connecting a desktop app is optional.</p>
+      <div class="ce-actions">
+        <a class="ce-btn ce-btn--primary" href="/api/download-contract?name=CanvasAgent" download>Download CanvasAgent</a>
+        <button type="button" class="ce-btn" data-agent-copy="full">Copy full instructions</button>
+        <button type="button" class="ce-btn" data-agent-copy="core">Copy short version</button>
+        <form method="post" action="/api/connections/claude-package"><button type="submit" class="ce-btn">Download Claude package</button></form>
+      </div>
+      <p class="ce-agent-result" data-agent-result role="status" aria-live="polite"></p>
+      <a href="/ai-expert">More AI authoring files</a>
+    </section>
+    <section class="ce-agent-stdio">
+      <h2>Other local MCP clients</h2>
+      <p class="ce-hint">Use this local stdio configuration with another client that supports MCP servers.</p>
+      <pre id="generic-stdio-config">{{ connection.generic_stdio_config | tojson(indent=2) }}</pre>
+      <button type="button" class="ce-btn" data-copy-target="generic-stdio-config">Copy local configuration</button>
+    </section>
+  </details>
+</div>
+{% endblock %}
+{% block workspace_scripts %}<script src="/static/canvasagent.js?v={{ asset_v }}"></script>{% endblock %}

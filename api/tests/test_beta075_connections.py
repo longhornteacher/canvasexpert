@@ -180,20 +180,19 @@ def test_connections_page_and_mcpb_use_runtime_paths_without_client_config_write
 
     monkeypatch.setattr(server.config, "token_is_set", lambda: True)
     monkeypatch.setattr(server.config, "get_canvas_base", lambda: "https://canvas.invalid")
-    response = TestClient(server.app).get("/connections")
+    response = TestClient(server.app).get("/")
     assert response.status_code == 200
-    # The page is titled CanvasAgent now; it used to be "AI Connections".
     assert response.text.count("CanvasAgent") >= 1
-    assert "Canvas Expert runs from this unzipped folder." in response.text
+    assert "MCP connections" in response.text
+    assert 'href="/settings#workspace-card"' in response.text
+    assert TestClient(server.app).get("/connections").status_code == 404
     assert TestClient(server.app).get("/api/connections/health").status_code == 200
     assert TestClient(server.app).post("/api/connections/claude-package").status_code == 200
     assert TestClient(server.app).post("/api/support-bundle").status_code == 200
 
     after = {path: sorted(item.name for item in path.iterdir()) for path in client_dirs}
     assert after == before
-    assert diagnostics.health_snapshot()["environment"]["tunnel_client_present"] is False
-    (second_app / "tools" / "tunnel-client.exe").write_bytes(b"synthetic")
-    assert diagnostics.health_snapshot()["environment"]["tunnel_client_present"] is True
+    assert "tunnel_client_present" not in diagnostics.health_snapshot()["environment"]
 
 
 def test_health_snapshot_pseudonym_registry_when_no_workspace_is_configured(monkeypatch):

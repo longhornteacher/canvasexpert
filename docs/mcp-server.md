@@ -358,10 +358,11 @@ compact. Client and model token treatment varies:
 
 ## Running it
 
-The Connections page in the local web UI is the source for current, copy-only snippets.
+The CanvasAgent page in the local web UI is the source for current local stdio setup.
 It resolves the exact Python interpreter and absolute entry point from the unzipped
-folder at the moment you copy them. Canvas Expert does not write client configuration
-files, install a global module, change `PATH`, or require administrator access.
+folder at the moment you copy them. Client-specific connect actions write only the
+selected user's config file, keep a backup, preserve other servers, and do not require
+administrator access.
 
 For another MCP client that supports local stdio, copy this shape and replace the values
 with the current page values:
@@ -379,7 +380,7 @@ with the current page values:
 
 ## Claude Desktop
 
-Use Connections → Download `.mcpb`, then in the already installed Claude Desktop open
+Use CanvasAgent → Advanced setup → Download Claude package, then in the already installed Claude Desktop open
 Settings → Extensions → Advanced settings → Install Extension and select the package.
 The package is folder-linked: it contains only a launcher and a manifest, while Canvas
 Expert and its dependencies remain in the unzipped folder. The package embeds the current
@@ -391,22 +392,12 @@ policy rather than attempting a bypass.
 Official references: [Claude local MCP servers](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)
 and [MCPB manifest](https://github.com/modelcontextprotocol/mcpb/blob/main/MANIFEST.md).
 
-## ChatGPT workspace
+## ChatGPT desktop
 
-ChatGPT cannot connect directly to a local stdio server. The optional path uses OpenAI's
-outbound-only [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels).
-It has two distinct permission layers: Platform tunnel permissions and ChatGPT workspace
-developer-mode permissions. Keep the tunnel client running, create a developer-mode app
-with Connection set to Tunnel, select the tunnel or enter its `tunnel_id`, and run Scan
-Tools. Use the PowerShell block on Connections as a copy-only starting point. Its
-`CONTROL_PLANE_API_KEY` placeholder is set only for the external tunnel process at
-runtime; Canvas Expert never asks for or stores that key. ChatGPT [developer mode](https://help.openai.com/en/articles/12584461)
-may need a client review/refresh when the tool schema changes.
-
-The optional portable tunnel executable lives under the current app folder when supplied;
-Canvas Expert does not download, start, install, or assume a machine-wide client or `PATH`
-entry. The tunnel's `run` command stays active until stopped, after which the cleanup
-command should be run.
+The supported desktop connection uses the ChatGPT app's local stdio configuration,
+managed from CanvasAgent. There is no hosted or tunnel path in Canvas Expert. If the
+installed client cannot use local MCP tools, follow district policy and use another
+supported local client; do not expose the MCP server publicly.
 
 ## Verifying it works
 

@@ -20,9 +20,6 @@ from api.platform_services import config, workspace
 from .. import deps, school_calendar
 from api import operational_log, runtime_paths
 from ..local_request_guard import csrf_token
-from api.operation_ledger import operations as operation_store
-from api.operation_ledger import receipts as receipt_store
-from . import work as work_routes
 from ..deps import (
     API_DIR, REPO_ROOT, _CUSTOM_DIR, templates,
     list_ai_ta_files, list_assignment_files,
@@ -54,114 +51,6 @@ def _routines_template_context() -> dict:
         "custom_templates": custom_templates,
         "active_count":     len(config.active_courses()),
     }
-
-
-def _calendar_home_warnings(readiness: dict) -> list[dict]:
-    """Return only concrete Calendar repairs that belong on Home."""
-    status = readiness.get("status")
-    create_href = "/calendar#calendar-create-card"
-    if status == "ready":
-        return []
-    if status == "unconfigured":
-        return [{
-            "message": "The Calendar school year and dates need to be set up.",
-            "actions": [{"label": "Set up Calendar", "href": create_href}],
-        }]
-    if status == "invalid_calendar":
-        return [{
-            "message": "Calendar could not read the saved school year.",
-            "actions": [{"label": "Review and replace it", "href": create_href}],
-        }]
-    if status != "needs_attention":
-        return []
-
-    warnings = []
-    today = readiness.get("today") or {}
-    if (
-        today.get("state") == "outside_coverage"
-        and readiness.get("coverage_position") == "after"
-    ):
-        warnings.append({
-            "message": "Calendar does not cover today.",
-            "actions": [{
-                "label": "Extend or replace the school year",
-                "href": create_href,
-            }],
-        })
-
-    unknown_schedule_count = len(readiness.get("unknown_schedule_dates") or [])
-    if unknown_schedule_count:
-        date_label = "date" if unknown_schedule_count == 1 else "dates"
-        warnings.append({
-            "message": (
-                f"Calendar references {unknown_schedule_count} {date_label} "
-                "with an unavailable Bell Schedule."
-            ),
-            "actions": [
-                {
-                    "label": "Restore or add the schedule",
-                    "href": "/calendar#calendar-bell-card",
-                },
-                {
-                    "label": "Update the affected dates",
-                    "href": "/calendar#calendar-change-card",
-                },
-            ],
-        })
-
-    remaining_coverage_days = readiness.get("remaining_coverage_days")
-    coverage_end = (readiness.get("coverage") or {}).get("end")
-    if (
-        readiness.get("coverage_position") == "within"
-        and remaining_coverage_days is not None
-        and remaining_coverage_days < 30
-        and coverage_end
-    ):
-        warnings.append({
-            "message": f"Calendar coverage ends on {coverage_end}.",
-            "actions": [{
-                "label": "Extend or replace the school year",
-                "href": create_href,
-            }],
-        })
-    return warnings
-
-
-@router.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
-    courses = config.active_courses()
-    bell_schedules, _bell_problems = deps.load_bell_schedules()
-    calendar_readiness = school_calendar.readiness(bell_schedule_ids=bell_schedules)
-    calendar_warnings = _calendar_home_warnings(calendar_readiness)
-    initial_jobs, initial_presentations = work_routes.visible_work("all") or ([], {})
-    initial_operations = [
-        {
-            "kind": operation.get("kind"),
-            "status": operation.get("status"),
-            "target_count": operation.get("target_count"),
-        }
-        for operation in operation_store.list_operations_pii_minimized()
-    ]
-    workspace_root = workspace.workspace_root()
-    workspace_status = "local folders"
-    if workspace_root:
-        parts = os.path.normpath(workspace_root).split(os.sep)
-        folder = parts[-1] if parts else workspace_root
-        workspace_status = f"OneDrive/{folder}" if any("OneDrive" in p for p in parts) else folder
-    return templates.TemplateResponse(request, "dashboard.html", {
-        "nav_section":    "",
-        "token_is_set":   config.token_is_set(),
-        "canvas_base":    config.get_canvas_base(),
-        "saved_courses":  courses,
-        "active_count":   len(courses),
-        "calendar_warnings": calendar_warnings,
-        "workspace_status": workspace_status,
-        "csrf_token": csrf_token(),
-        "initial_jobs": initial_jobs,
-        "initial_presentations": initial_presentations,
-        "initial_operations": initial_operations,
-        "initial_receipts": receipt_store.list_receipts(),
-    })
 
 
 @router.get("/course-expert", response_class=HTMLResponse)

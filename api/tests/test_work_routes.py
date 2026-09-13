@@ -63,7 +63,8 @@ def test_launcher_rendered_csrf_authorizes_stubbed_scan():
         from fastapi.testclient import TestClient
 
         from api.webui import server
-        from api.webui.routes import pages, work
+        from api.webui.routes import work
+        from api.platform_services import workspace
 
 
         class CsrfMetaParser(HTMLParser):
@@ -78,11 +79,7 @@ def test_launcher_rendered_csrf_authorizes_stubbed_scan():
         server.config.token_is_set = lambda: True
         server.config.get_canvas_base = lambda: "https://canvas.invalid"
         server.config.active_courses = lambda: []
-        pages.work_routes._section_jobs = lambda section: []
-        pages.operation_store.list_operations_pii_minimized = lambda: []
-        pages.receipt_store.list_receipts = lambda: []
-        pages.workspace.workspace_root = lambda: None
-
+        workspace.workspace_root = lambda: None
         work.storage.workspace.workspace_root = lambda: "stubbed-workspace"
         work.discovery.scan_active_courses = lambda: {
             "ok": True,

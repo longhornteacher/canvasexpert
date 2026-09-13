@@ -1,58 +1,40 @@
-"""The /connections Canvas health line reads readiness.snapshot(), not the
-naive bool(base_url) and token_is_set() check -- a revoked token used to
-read as "Configured" forever, because nothing ever probed Canvas.
-"""
-import re
+"""CanvasAgent drives its account status from the existing fresh-readiness API."""
 
-import pytest
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from api.webui import readiness, server
 
-_CANVAS_LINE = re.compile(r"Canvas:\s*<strong>\s*(.*?)\s*</strong>", re.S)
+ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.fixture(autouse=True)
-def _configured(monkeypatch):
-    monkeypatch.setattr(server.config, "token_is_set", lambda: True)
-    monkeypatch.setattr(server.config, "get_canvas_base", lambda: "https://canvas.invalid")
+def test_canvasagent_requests_a_fresh_readiness_probe_on_open():
+    script = (ROOT / "api/webui/static/canvasagent.js").read_text(encoding="utf-8")
+    assert 'fetch("/api/readiness/probe?force=true", { method: "POST"' in script
+    assert 'fetch("/api/readiness")' not in script
 
 
-def _canvas_line(text):
-    match = _CANVAS_LINE.search(text)
-    assert match, "Canvas health line not found in rendered /connections page"
-    return match.group(1).strip()
+def test_canvas_account_mapping_contract_covers_configuration_auth_network_and_ready():
+    script = (ROOT / "api/webui/static/canvasagent.js").read_text(encoding="utf-8")
+    for label in (
+        'label: "Ready"',
+        'label: "Not configured"',
+        'label: "Credentials rejected"',
+        'label: "Network timeout"',
+        'label: "Network unavailable"',
+    ):
+        assert label in script
+    assert 'code === "unauthorized"' in script
+    assert 'code === "timeout"' in script
 
 
-def _render(monkeypatch, components):
-    monkeypatch.setattr(readiness, "snapshot", lambda: {
-        "ok": True, "status": "degraded", "checked_at": "2026-08-06T00:00:00+00:00",
-        "configured_model": "", "components": components,
-    })
-    return TestClient(server.app).get("/connections").text
+def test_readiness_probe_route_contract_is_preserved(monkeypatch):
+    expected = {"ok": True, "status": "ready", "components": {"canvas": {"status": "ready"}}}
+    monkeypatch.setattr(readiness, "probe", lambda force=False: expected)
+    monkeypatch.setattr(server.config, "token_is_set", lambda: False)
+    monkeypatch.setattr(server.config, "get_canvas_base", lambda: "")
 
-
-@pytest.mark.parametrize(("status", "code", "expected"), [
-    ("ready", "", "Connected"),
-    ("degraded", "unauthorized", "Token invalid or revoked"),
-    ("degraded", "timeout", "Unreachable (timed out)"),
-    ("degraded", "network", "Unreachable"),
-    ("unconfigured", "unconfigured", "Not configured"),
-])
-def test_canvas_health_line_reflects_the_real_probe(monkeypatch, status, code, expected):
-    components = {"canvas": {"status": status}, "privacy": {"status": "ready"}}
-    if code:
-        components["canvas"]["code"] = code
-    text = _render(monkeypatch, components)
-    assert _canvas_line(text) == expected
-
-
-def test_canvas_health_line_falls_back_before_the_first_probe(monkeypatch):
-    """Right after launch, readiness has never run -- fall back to the old
-    credential-presence check rather than showing a raw "unknown" state."""
-    monkeypatch.setattr(readiness, "snapshot", lambda: {
-        "ok": True, "status": "unknown", "checked_at": None, "configured_model": "",
-        "components": {name: {"status": "unknown"} for name in ("canvas", "privacy")},
-    })
-    text = TestClient(server.app).get("/connections").text
-    assert _canvas_line(text) == "Configured"
+    response = TestClient(server.app).post("/api/readiness/probe?force=true")
+    assert response.status_code == 200
+    assert response.json() == expected

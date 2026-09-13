@@ -79,7 +79,7 @@ def _stale_mirror_error(course_id: str) -> str:
         f"The local CanvasMirror for course {course_id} (roster or "
         "submissions) is stale or missing. The writing record is ingested "
         "only from a fresh mirror, never live Canvas -- sync this course "
-        "from the CanvasExpert web UI (Home > Sync now), then try again."
+        "using CanvasAgent to refresh course data, then try again."
     )
 
 

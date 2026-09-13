@@ -21,7 +21,6 @@ _PROXY_ENV_NAMES = (
     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
     "http_proxy", "https_proxy", "all_proxy",
 )
-_TUNNEL_CLIENT_NAME = "tunnel-client.exe"
 _CLEANUP_EVENT = "diagnostics.workspace_probe_cleanup"
 
 
@@ -144,12 +143,6 @@ def health_snapshot() -> dict:
     except Exception:
         python_available = False
         python_version = "unknown"
-    try:
-        tunnel_present = (
-            Path(runtime_paths.app_root()) / "tools" / _TUNNEL_CLIENT_NAME
-        ).is_file()
-    except Exception:
-        tunnel_present = False
     return {
         "app_version": __version__,
         "tool_schema_version": TOOL_SCHEMA_VERSION,
@@ -167,7 +160,6 @@ def health_snapshot() -> dict:
         "pseudonym_registry": _pseudonym_registry_status(),
         "environment": {
             "proxy_configured": any(bool(os.environ.get(name)) for name in _PROXY_ENV_NAMES),
-            "tunnel_client_present": tunnel_present,
         },
     }
 

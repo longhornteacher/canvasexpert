@@ -124,7 +124,7 @@ app.mount("/static", _StaticFiles(directory=os.path.join(WEBUI_DIR, "static")), 
 # If Canvas URL or token is not yet configured, redirect HTML page requests
 # to the /welcome wizard. Never gate API/static endpoints or the wizard itself.
 
-_ALLOWLIST_PREFIXES = ("/welcome", "/settings", "/connections", "/assessments", "/static", "/api", "/openapi.json", "/docs", "/redoc")
+_ALLOWLIST_PREFIXES = ("/welcome", "/settings", "/assessments", "/static", "/api", "/openapi.json", "/docs", "/redoc")
 
 
 @app.middleware("http")
@@ -136,7 +136,7 @@ async def _onboarding_gate(request: Request, call_next):
         if not config.token_is_set() or not config.get_canvas_base():
             path = request.url.path
             wants_html = "text/html" in request.headers.get("accept", "")
-            allowlisted = any(path.startswith(p) for p in _ALLOWLIST_PREFIXES)
+            allowlisted = path == "/" or any(path.startswith(p) for p in _ALLOWLIST_PREFIXES)
             if wants_html and not allowlisted:
                 from fastapi.responses import RedirectResponse
                 return RedirectResponse(url="/welcome", status_code=303)

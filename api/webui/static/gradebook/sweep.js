@@ -208,7 +208,7 @@
       } else {
         gb.showBanner(banner, "warn",
           "⚠ Sweep finished with status “" + gb.esc(applied.status || "unknown") +
-          "” — check Operations on the Home page for details.");
+          "” — see the operation results above for details.");
       }
     } finally { this.disabled = false; }
   });

@@ -187,8 +187,8 @@ def test_course_picker_uses_shared_context_without_dual_writes():
 
 def test_current_courses_are_the_only_operational_picker_scope():
     settings = _slurp("api/webui/templates/settings.html")
-    dashboard = _slurp("api/webui/templates/dashboard.html")
-    desk = _slurp("api/webui/static/desk.js")
+    canvasagent = _slurp("api/webui/templates/canvasagent.html")
+    canvasagent_js = _slurp("api/webui/static/canvasagent.js")
     gradebook = _slurp("api/webui/static/gradebook.js")
     course_picker = _slurp("api/webui/static/push/course_picker.js")
 
@@ -196,119 +196,19 @@ def test_current_courses_are_the_only_operational_picker_scope():
         assert heading in settings
     assert "Move to Previous" in settings
     assert "Make Current" in settings
-    assert "window.CE_CONTEXT" not in desk
-    assert "context.setFocus" not in desk
-    assert "context.setTargets" not in desk
-    assert "reconcile(" not in desk
-    assert "data-desk-start" not in dashboard
-    for text in (
-        "Sync now", "Checking Canvas sync…", "Syncing Canvas data…",
-        "Canvas data synced ",
-    ):
-        assert text in dashboard or text in desk
+    assert 'href="/settings#current-courses-card"' in canvasagent
+    assert "/api/work" not in canvasagent_js
+    assert "/api/mirror/sync-now" in canvasagent_js
     assert "authoritative: true" in course_picker
     assert 'fetch("/api/courses")' not in course_picker
     assert 'fetch("/api/courses")' not in gradebook
 
 
-def test_desk_runtime_keeps_semantic_presentation_after_refresh():
-    desk_path = ROOT / "api/webui/static/desk.js"
-    script = r'''
-import fs from "node:fs";
-import vm from "node:vm";
-
-class Node {
-  constructor(tag, id = "") {
-    this.tagName = tag;
-    this.id = id;
-    this.children = [];
-    this.dataset = {};
-    this.className = "";
-    this.textContent = "";
-    this.options = [];
-    this.value = "";
-    this.selectedIndex = 0;
-  }
-  appendChild(child) { this.children.push(child); return child; }
-  removeChild(child) { this.children = this.children.filter(item => item !== child); }
-  get firstChild() { return this.children[0] || null; }
-  addEventListener() {}
-  focus() {}
-}
-
-const job = {
-  job_id: "job-runtime",
-  material_version: "material-runtime",
-  origin: "intentional",
-  kind: "grade.powergrader",
-  status: "attention",
-  title: "PowerGrader work",
-  attention_reason: "Work needs attention",
-  resumable_url: "/powergrader/session/runtime",
-  counts: {total: 24, pending: 22, affected: 2}
-};
-const presentation = {
-  course_label: "Fictional Course",
-  title: "Fictional Reflection",
-  summary: "24 students · 22 awaiting review · 2 approved, not posted",
-  action_label: "Review & post"
-};
-const initialData = new Node("script", "desk-initial-data");
-initialData.textContent = JSON.stringify({
-  jobs: [job], presentations: {"job-runtime": presentation}, operations: [], receipts: []
-});
-const elements = {
-  "desk-root": new Node("div", "desk-root"),
-  "desk-initial-data": initialData,
-  "desk-continue-list": new Node("div", "desk-continue-list"),
-  "desk-attention-list": new Node("div", "desk-attention-list"),
-  "desk-prepared-list": new Node("div", "desk-prepared-list"),
-  "desk-receipts-list": new Node("div", "desk-receipts-list")
-};
-
-global.window = {
-  prompt: () => null,
-  confirm: () => false
-};
-global.document = {
-  getElementById: id => elements[id] || null,
-  createElement: tag => new Node(tag),
-  querySelector: selector => selector.includes("csrf") ? {content: "csrf"} : null,
-  querySelectorAll: () => [],
-  addEventListener: () => {}
-};
-global.fetch = async url => ({
-  ok: true,
-  json: async () => {
-    if (url.startsWith("/api/work")) {
-      return {ok: true, jobs: [job], presentations: {"job-runtime": presentation}};
-    }
-    if (url === "/api/operations") return {ok: true, operations: []};
-    if (url === "/api/receipts") return {ok: true, receipts: []};
-    throw new Error("unexpected fetch " + url);
-  }
-});
-
-function textOf(node) {
-  return [node.textContent, ...node.children.flatMap(textOf)].filter(Boolean).join(" | ");
-}
-
-vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
-const initialText = textOf(elements["desk-attention-list"]);
-await new Promise(resolve => setTimeout(resolve, 0));
-const refreshedText = textOf(elements["desk-attention-list"]);
-for (const rendered of [initialText, refreshedText]) {
-  if (!rendered.includes("Fictional Course")) process.exit(2);
-  if (!rendered.includes("Fictional Reflection")) process.exit(3);
-  if (!rendered.includes("24 students · 22 awaiting review · 2 approved, not posted")) process.exit(4);
-  if (!rendered.includes("Review & post")) process.exit(5);
-  if (rendered.includes("grade.powergrader") || rendered.includes("24 items")) process.exit(6);
-}
-'''
-    result = subprocess.run(
-        ["node", "--input-type=module", "-e", script, str(desk_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr or result.stdout
+def test_canvasagent_surface_has_only_local_stdio_and_shared_buttons():
+    template = _slurp("api/webui/templates/canvasagent.html")
+    script = _slurp("api/webui/static/canvasagent.js")
+    assert "Secure MCP Tunnel" not in template + script
+    assert "tunnel-client" not in template + script
+    assert 'class="button' not in template
+    assert "className = \"ce-btn ce-agent-action" in script
+    assert "generic-stdio-config" in template

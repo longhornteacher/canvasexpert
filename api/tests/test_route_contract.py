@@ -121,7 +121,6 @@ EXPECTED = [
     ('/api/validate', ('POST',)),
     ('/course', ('GET',)),
     ('/course-expert', ('GET',)),
-    ('/connections', ('GET',)),
     ('/docs', ('GET',)),
     ('/docs/oauth2-redirect', ('GET',)),
     ('/gradebook', ('GET',)),

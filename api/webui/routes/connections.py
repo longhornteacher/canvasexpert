@@ -9,6 +9,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.background import BackgroundTask
 
 from api import __version__, ai_clients, connections, runtime_paths
+from .. import mirror_service
+from ..local_request_guard import csrf_token
 from ..deps import templates
 
 
@@ -50,11 +52,13 @@ def _download_path(suffix: str) -> Path:
     return directory / f"CanvasExpert-{uuid4().hex}{suffix}"
 
 
-@router.get("/connections", response_class=HTMLResponse)
-def connections_page(request: Request):
-    return templates.TemplateResponse(request, "connections.html", {
+@router.get("/", response_class=HTMLResponse)
+def canvasagent_page(request: Request):
+    return templates.TemplateResponse(request, "canvasagent.html", {
         "nav_section": "connections",
         "connection": connections.connection_context(),
+        "mirror": mirror_service.status(),
+        "csrf_token": csrf_token(),
     })
 
 

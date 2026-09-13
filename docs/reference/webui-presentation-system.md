@@ -86,8 +86,8 @@ ID, existing feature class, or `data-ce-hook`.
 
 The enforcement registry is `api/tests/test_presentation_contracts.py`. It is the
 source of truth for route, template, layout, variant, rail count, and migration state.
-Home and the PowerGrader queue use `workspace/full`; Create uses `workspace/three`;
-PowerGrader setup, Gradebook, Students, and Settings use `workspace/left-main`;
+CanvasAgent and Assessments use `workspace/full`; Create uses `workspace/three`;
+Gradebook, Students, and Settings use `workspace/left-main`;
 Routines, Course Info, and About use `document/wide`; AI Expert uses
 `document/standard`; and Welcome uses `wizard`. Student reports is not a route
 presentation: it is a view inside the Students page (`_student_reports_panels.html`

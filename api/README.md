@@ -24,11 +24,12 @@ only to `127.0.0.1` and preserves the `--port` and `--no-browser` options.
 `api/README.md` owns the backend, CLI, packaging, setup, credentials, workspace, and the
 `api/` files table. `api/webui/README.md` owns routes, pages, templates, static assets, and
 per-route script load order.
-The `/connections` page leads with **CanvasAgent**, the single paste-into-your-AI
-instruction file (download it, or copy the full/short text). Connecting Claude
-Desktop or the ChatGPT desktop app is optional and one click; it writes only that
-app's own config file, with a backup kept. It never installs software, changes
-`PATH`, starts a tunnel, or requests administrator access.
+The **CanvasAgent** root page is the local health console for desktop MCP connections,
+Canvas account access, CanvasMirror freshness, and workspace/privacy readiness. The
+CanvasAgent instruction file, Claude package, and generic local stdio configuration are
+available in its Advanced setup section. Connecting Claude Desktop or the ChatGPT desktop
+app is optional; actions write only that app's own config file and keep a backup. MCP
+execution remains local stdio; no hosted or tunnel setup is offered.
 
 ## Contracts consumed
 
@@ -49,7 +50,7 @@ Netlify publishes only `web/`, so nothing here is served. Keep the token only in
 **Recommended: use the Web UI** (see "Web UI" below). CLI scripts are available for
 automation/headless use.
 
-### Web UI (Canvas Expert dashboard)
+### Web UI (CanvasAgent and Canvas Expert work pages)
 
 1. Launch: `py qf_ui.py` (opens http://127.0.0.1:8765)
 2. Author a Forge file (QuizForge/AssignmentForge/PageForge/RubricForge JSON) — each
@@ -179,7 +180,7 @@ Gradebook web UI and use the reviewed Operation Ledger preview/apply/recovery pa
 | `mirror/` | CanvasMirror storage, freshness envelopes, sync coordinator, and disk-only query services |
 | `operation_ledger/` | High-risk operation checkpoints, claims, receipts, and recovery coordination |
 | `../docs/guides/sis-grade-bridges.md` | SIS grade-bridge operation, recurring update, privacy, verification, and Attention recovery guide |
-| `work_registry/` | Local work items and the Home surface's progress projections |
+| `work_registry/` | Local work items and progress projections |
 | `dailywriting/` | Writing Record and Writing Timeline extraction and storage helpers |
 | `rubrics/` | Default rubric library consumed by authoring and scoring skill generation |
 | `custom_routines/` | Teacher-authored local automation jobs and the routine authoring contract |

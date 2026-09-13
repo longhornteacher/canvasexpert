@@ -46,7 +46,7 @@ Source tests never substitute for rendered verification.
 
 | Route | Page | JS |
 |---|---|---|
-| `/` | **Home** — the cross-course Start / Continue / Attention / Prepared / Receipts surface | `dashboard.html` + `desk.js` |
+| `/` | **CanvasAgent** — local MCP, Canvas account, CanvasMirror, and privacy health | `canvasagent.html` + `canvasagent.js` |
 | `/course-expert` | **Create** — quiz, assignment, page, rubric, and quick-column tools | `push.js` + `push/*.js`, `course_expert/*.js` |
 | `/students/reports` | **Student reports** — packet and portfolio tools under Students | `student_reports.html` + `course_expert/student_reports.js` + `course_expert/portfolio.js` |
 | `/gradebook` | **Gradebook tools** — single-course grade operations | `gradebook.js` + `gradebook/*.js` |
@@ -56,13 +56,12 @@ Source tests never substitute for rendered verification.
 | `/course` | Course Info detail page | `course_info.js` |
 | `/settings` | Settings | `settings.js` |
 | `/calendar` | **Calendar** — school dates, Bell Schedules, Teacher Schedule | `pages/calendar.js` |
-| `/connections` | **Connections** — health, support bundle, and copy-only MCP client snippets | `connections.js` |
 | `/routines` | **Routines** — local automation control surface | inline / route-driven |
 | `/assessments` | **Assessments** — local Eduphoria import, reports, dashboard, history, and read-only roster coverage | route-driven |
 | `/about` | What-is-Canvas-Expert explainer | — |
 
-Home's Canvas sync action queues local read-only coordinator work and polls its opaque
-plan status before refreshing Work cards. It does not keep a Canvas request open.
+CanvasAgent's secondary Canvas refresh queues local read-only coordinator work and polls its
+opaque plan status. It does not scan or refresh retired Home work cards.
 
 ### Create module routing
 
@@ -77,16 +76,16 @@ Create is split for low-token debugging.
 
 For the full ownership map and current hotspot snapshot, see `docs/reference/course-expert-module-map.md`.
 
-### Connections and diagnostics
+### CanvasAgent and diagnostics
 
-`/connections` is a local, read-only portability page. It displays the current
-health snapshot from `api/diagnostics.py`, offers a server-created support bundle,
-and generates copy-only snippets from `api/connections.py` for generic MCP stdio,
-Claude's folder-linked `.mcpb`, and the optional ChatGPT Secure MCP Tunnel path.
-The page never writes client configuration, installs software, changes `PATH`,
-starts a tunnel, or requests administrator access. Review SAFE material before
-uploading it to any external assistant; no provider is promised to be anonymous
-or FERPA safe.
+The root page is the local CanvasAgent health console. It reads Claude Desktop and
+ChatGPT desktop configuration, checks the local MCP runtime, probes Canvas readiness,
+and summarizes the existing CanvasMirror status. Connect, reconnect, update, and
+disconnect actions change only the named desktop app's local config and keep its
+backup. All MCP execution is local stdio; there is no hosted or tunnel connection
+recipe. Support bundles remain available from their existing endpoint. Review SAFE
+material before uploading it to any external assistant; no provider is promised to
+be anonymous or FERPA safe.
 
 The old in-memory activity feed is not part of the Web UI. Current job state and
 receipts are served by `/api/work`, `/api/receipts`, and `/api/operations`; the
@@ -186,28 +185,20 @@ Root folder for submission downloads. Each course gets its own subfolder.
 
 ---
 
-## Home (`/`)
+## CanvasAgent (`/`)
 
-Home is the full-width local landing surface for Start, Continue, Attention,
-Prepared, and Receipts. Its top line lists active course names in saved order and links
-directly to the Current courses section in Settings. Its initial view is rendered from
-local Current-course configuration, the work registry, and real receipt
-projections. Readiness continues to come from `/api/readiness`. Home shows a
-CanvasMirror freshness line and a single **Sync now** action that refreshes the
-local mirror (`POST /api/mirror/sync-now`) and then recomputes the work lists via
-the guarded `POST /api/work/scan` route; an ordinary `GET /api/work` never scans
-Canvas.
+CanvasAgent is the full-width local health console. MCP connections lead, followed by
+Canvas credential readiness, CanvasMirror freshness across Current courses, and local
+workspace/privacy readiness. Canvas readiness is refreshed on page open through
+`POST /api/readiness/probe`; CanvasMirror is a local read through `GET /api/mirror/status`.
+The secondary refresh control appears only when an enabled mirror with Current courses
+can recover stale or missing data; it queues `POST /api/mirror/sync-now` and polls the
+existing plan-status route. It does not scan work cards or perform a Canvas write.
 
-Start links are ordinary navigation and leave course choices to their destination pages.
-Continue and Attention show local work-registry items with a transient, non-persisted presentation sidecar:
-Current-course label, locally known assignment title, aggregate progress sentence, and
-specific action label. Exact registry jobs remain generic and PII-minimized; the sidecar
-does not open scoring sessions or scan Canvas. Scoring Sessions are not Home/Work jobs.
-Ignore, Snooze, and Complete use
-the guarded local mutation routes. Prepared is intentionally honest until prepared-operation
-projections are available, and currently reports that there are no prepared
-operations. Home reads `/api/work` and `/api/receipts`, does not call
-`/api/operations`, and does not expose the retired in-memory activity feed.
+The Advanced disclosure keeps the CanvasAgent instructions, Claude package, and generic
+local stdio config available without competing with health status. The local client
+connect/disconnect routes update only the selected user's desktop config, preserve other
+servers, and keep a backup.
 
 ### Routines
 

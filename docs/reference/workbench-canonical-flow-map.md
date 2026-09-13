@@ -8,7 +8,7 @@
 
 | # | Outcome | Entry point | Template | Browser owner | Backend owner | Contract / map | Safety boundary |
 |---|---|---|---|---|---|---|---|
-| 1 | **Home** – choose or continue work | `/` | `dashboard.html` (`layouts/workspace.html`, `full`) | `desk.js` | `routes/pages.py::dashboard`, `routes/work.py`, `routes/receipts.py`; explicit scan reductions in `work_registry/discovery.py` and `providers/home_attention.py` | `work-registry-contract.md`, `operation-ledger-contract.md` | Exact generic jobs plus a transient local presentation sidecar; no Canvas calls from Home itself. Explicit scans reduce private submission/comment metadata to assignment-scoped counts only. |
+| 1 | **CanvasAgent** – local connection and service health | `/` | `canvasagent.html` (`layouts/workspace.html`, `full`) | `canvasagent.js` | `routes/connections.py`, `api/connections.py`, `api/diagnostics.py`, `readiness.py`, `mirror_service.py` | `mcp-server.md`, `settings-module-map.md` | Local stdio MCP; Canvas readiness probe; read-only CanvasMirror status and explicit read-only refresh; no work-card scan. |
 | 2 | **Course content creation & delivery** | `/course-expert` | `course_expert.html` (`layouts/workspace.html`, `three`) | `push.js` + `push/*.js` + `course_expert/*.js` | `routes/push.py`, `routes/push_validation.py`, `routes/operations.py`, `operation_ledger/adapters/` | `course-expert-module-map.md`, `operation-ledger-module-map.md` | Typed operation-ledger prepare/review/apply; no generic push fallback; teacher review gate before Canvas writes |
 | 3 | **Gradebook actions** | `/gradebook` | `gradebook.html` (`layouts/workspace.html`, `left-main`) | `gradebook.js` + `gradebook/*.js` | `routes/gradebook.py` (facade) + `routes/gradebook_*.py`, `gradebook_service.py` | `gradebook-module-map.md` | Single-course scope; late-policy/sweep/curve writes are reversible; extra-time reads from Roster config |
 | 4 | **Roster & student-group actions** | `/roster` | `roster.html` (`layouts/workspace.html`, `left-main`) | `roster.js` + `roster/*.js` | `routes/roster.py` + `routes/roster_*.py`, `routes/names.py` | `roster-module-map.md` | V3: Canvas groups are source of truth; V2 tier/planned_group writes rejected; vault is PRIVATE |
@@ -89,7 +89,7 @@ No additional grading UI retirement candidates are queued.
 | Template | Extends | Used by |
 |---|---|---|
 | `base.html` | – | Private root; extended only by the three layouts |
-| `layouts/workspace.html` | `base.html` | Home, Create, Gradebook, Roster, Settings |
+| `layouts/workspace.html` | `base.html` | CanvasAgent, Create, Gradebook, Roster, Settings |
 | `layouts/document.html` | `base.html` | Routines, Student Reports, Course Info, About, AI Expert |
 | `layouts/wizard.html` | `base.html` | Welcome |
 
@@ -97,11 +97,6 @@ No additional grading UI retirement candidates are queued.
 layouts; those layouts also load `readiness.js`. The wizard intentionally omits both.
 All layouts load the shared `ui/` stylesheet bundle, while `write_review.js` and
 `app_context.js` remain shared base scripts.
-
-Home's `presentations` mapping is computed by `routes/work.py` for visible jobs only and
-is supplied identically to the initial dashboard JSON and `GET /api/work` refreshes. It
-contains course/title/aggregate-summary/action strings for display, remains separate from
-the exact Work Registry job contract, and is never persisted.
 
 ## Test portfolio notes
 

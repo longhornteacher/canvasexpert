@@ -1,9 +1,8 @@
 <header class="ce-app-header">
   <a class="brand" href="/">{% include "_ce_logo.svg" %} CanvasExpert</a>
   <nav class="ce-app-nav" aria-label="Primary navigation">
-    <a class="{% if request.url.path == '/' %}ce-app-nav--active{% endif %}" href="/"{% if request.url.path == '/' %} aria-current="page"{% endif %}>Home</a>
     <a class="{% if nav_section == 'create' %}ce-app-nav--active{% endif %}" href="/course-expert"{% if nav_section == 'create' %} aria-current="page"{% endif %}>Create</a>
-    <a class="{% if nav_section == 'connections' %}ce-app-nav--active{% endif %}" href="/connections"{% if nav_section == 'connections' %} aria-current="page"{% endif %}>CanvasAgent</a>
+    <a class="{% if request.url.path == '/' %}ce-app-nav--active{% endif %}" href="/"{% if request.url.path == '/' %} aria-current="page"{% endif %}>CanvasAgent</a>
     <a class="{% if nav_section == 'calendar' %}ce-app-nav--active{% endif %}" href="/calendar"{% if nav_section == 'calendar' %} aria-current="page"{% endif %}>Calendar</a>
     <details class="ce-nav-more" id="ce-nav-more">
       <summary class="{% if nav_section in ['manage', 'automate', 'assessments'] %}ce-app-nav--active{% endif %}">More <span class="ce-nav-more__caret">▾</span></summary>

@@ -61,27 +61,6 @@ def generic_stdio_config() -> dict:
     }
 
 
-def _windows_path(path: Path) -> str:
-    return str(path).replace("/", "\\")
-
-
-def _chatgpt_powershell() -> str:
-    app_root, python_executable, mcp_entrypoint = _resolved_paths()
-    tunnel = _windows_path(app_root / "tools" / "tunnel-client.exe")
-    python = _windows_path(python_executable)
-    entrypoint = _windows_path(mcp_entrypoint)
-    return (
-        f'$tunnel = "{tunnel}"\n'
-        f'$mcpCommand = \'"{python}" "{entrypoint}"\'\n'
-        '$env:CONTROL_PLANE_API_KEY = "<runtime-only-control-plane-key>"\n'
-        '& $tunnel init --sample sample_mcp_stdio_local --profile canvas-expert '
-        '--tunnel-id "<tunnel-id>" --mcp-command $mcpCommand\n'
-        '& $tunnel doctor --profile canvas-expert --explain\n'
-        '& $tunnel run --profile canvas-expert\n'
-        'Remove-Item Env:CONTROL_PLANE_API_KEY -ErrorAction SilentlyContinue\n'
-    )
-
-
 def connection_context() -> dict:
     app_root, python_executable, mcp_entrypoint = _resolved_paths()
     return {
@@ -91,8 +70,6 @@ def connection_context() -> dict:
         "mcp_entrypoint": str(mcp_entrypoint),
         "tool_schema_version": TOOL_SCHEMA_VERSION,
         "generic_stdio_config": generic_stdio_config(),
-        "portable_tunnel_executable": str(app_root / "tools" / "tunnel-client.exe"),
-        "chatgpt_powershell": _chatgpt_powershell(),
         "health": diagnostics.health_snapshot(),
         "readiness": readiness.snapshot(),
         "clients": ai_clients.clients_status(),

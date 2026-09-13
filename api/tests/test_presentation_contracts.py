@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from api.webui.server import app
-from api.webui.routes import pages
+from api.webui.routes import connections as connection_routes, pages
 from api.dataforge import paths as dataforge_paths
 
 
@@ -20,7 +20,7 @@ TEMPLATES = ROOT / "api" / "webui" / "templates"
 # finished, which made the subset identical to this dict and the assertion that
 # compared them unfailable. The rollout is done, so the column is gone.
 EXPECTED_PRESENTATION = {
-    "/": ("dashboard.html", "workspace", "full", 0),
+    "/": ("canvasagent.html", "workspace", "full", 0),
     "/course-expert": ("course_expert.html", "workspace", "three", 2),
     "/gradebook": ("gradebook.html", "workspace", "left-main", 1),
     "/roster": ("roster.html", "workspace", "left-main", 1),
@@ -36,7 +36,7 @@ EXPECTED_PRESENTATION = {
     "/welcome": ("welcome.html", "wizard", "", 0),
 }
 FEATURE_CSS = (
-    "api/webui/static/pages/dashboard.css",
+    "api/webui/static/pages/canvasagent.css",
     "api/webui/static/pages/course_expert.css",
     "api/webui/static/pages/gradebook.css",
     "api/webui/static/roster_workbench.css",
@@ -90,10 +90,24 @@ def _configure_fictional(monkeypatch):
     monkeypatch.setattr(pages.workspace, "student_work_root", lambda: "")
     monkeypatch.setattr(pages.workspace, "for_ai_root", lambda: "")
     monkeypatch.setattr(pages.workspace, "system_root", lambda root=None: "")
-    monkeypatch.setattr(pages.work_routes, "_section_jobs", lambda section: [])
-    monkeypatch.setattr(pages.work_routes, "_presentations", lambda jobs, finding_names=None: {})
-    monkeypatch.setattr(pages.operation_store, "list_operations_pii_minimized", lambda: [])
-    monkeypatch.setattr(pages.receipt_store, "list_receipts", lambda: [])
+    monkeypatch.setattr(connection_routes.connections, "connection_context", lambda: {
+        "generic_stdio_config": {"mcpServers": {}},
+        "health": {
+            "python": {"available": True},
+            "mcp": {"importable": True, "entrypoint_present": True},
+            "workspace": {"configured": True, "writable": True},
+            "pseudonym_registry": {"configured": True, "low_runway": False},
+        },
+        "readiness": {"status": "unknown", "components": {"canvas": {"status": "unknown"}, "privacy": {"status": "unknown"}}},
+        "clients": {
+            "claude": {"client": "claude", "detected": True, "connected": True, "current": True},
+            "chatgpt": {"client": "chatgpt", "detected": False, "connected": False, "current": False},
+        },
+    })
+    monkeypatch.setattr(connection_routes.mirror_service, "status", lambda: {
+        "ok": True, "enabled": True, "workspace_configured": True, "serve_max_age_hours": 6,
+        "courses": [], "vault_conflict": [],
+    })
     monkeypatch.setattr(pages, "list_ai_ta_files", lambda: [])
     monkeypatch.setattr(pages, "list_quiz_files", lambda: [])
     monkeypatch.setattr(pages, "list_assignment_files", lambda: [])
@@ -212,6 +226,7 @@ def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_pat
 
     for url in ("/powergrader", "/feedback-expert", "/api/powergrader/session/synthetic/packet"):
         assert client.get(url).status_code == 404
+    assert client.get("/connections").status_code == 404
 
 
 def test_student_reports_redirect_is_preserved(monkeypatch):
