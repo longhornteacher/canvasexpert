@@ -139,6 +139,24 @@ def test_scoring_session_flow_is_assignment_type_neutral(text):
     assert "never ask the teacher to choose a scoring transport" in lowered
 
 
+def test_mcp_server_instructions_cover_unscoped_scoring_discovery_and_held_work():
+    from api.mcp_server import server
+
+    lowered = server._SERVER_INSTRUCTIONS.lower()
+    for phrase in (
+        "list current courses",
+        "refresh_mirror for each current course",
+        "get_gradebook_snapshot",
+        "ungraded greater than zero",
+        "partially_scored",
+        "which exact assignment",
+        "held or otherwise unscorable work",
+        "item/catalog or evidence gaps",
+    ):
+        assert phrase in lowered
+    assert "use assignment type to choose one" in lowered
+
+
 def test_the_superseded_explainer_is_gone_from_the_shipped_defaults():
     stale = os.path.join(ai_ta.DEFAULT_AI_TA_DIR, "START HERE - Canvas Expert.txt")
     assert not os.path.exists(stale), (

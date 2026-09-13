@@ -107,7 +107,8 @@ _ROSTER_COLUMNS = ("pseudonym", "section_names")
 _ASSIGNMENT_COLUMNS = ("id", "title", "due_at", "points_possible",
                        "published", "description_text")
 _GRADEBOOK_ASSIGNMENT_COLUMNS = ("id", "title", "due_at", "points", "has_submission",
-                                 "has_grade", "missing", "late", "avg_pct")
+                                 "has_grade", "ungraded", "partially_scored",
+                                 "missing", "late", "avg_pct")
 _GRADEBOOK_STUDENT_COLUMNS = ("pseudonym", "missing", "late", "ungraded", "pct")
 _MODULE_COLUMNS = ("id", "name", "position", "item_count")
 _MODULE_ITEM_COLUMNS = ("id", "type", "title", "position", "content_id")
@@ -2423,7 +2424,9 @@ def get_gradebook_snapshot(course_id: str) -> dict:
     (``pseudonym`` instead of a name), each as a {columns, rows} table.
     ``has_submission`` counts roster rows with a submitted_at timestamp;
     ``has_grade`` counts graded roster rows with scores, including manual
-    grades without a submission. Their difference is not ungraded work.
+    grades without a submission. ``ungraded`` follows Canvas workflow state;
+    ``partially_scored`` is the subset of those rows with a numeric score.
+    Their difference is not ungraded work.
     Served ONLY from the local CanvasMirror — never live Canvas; a stale or
     missing mirror is refused (call refresh_mirror first). Gated by the
     outbound safety scan before tabulation."""
@@ -2695,9 +2698,22 @@ def start_scoring_session(course_id: str, assignment_id: str, rubric_name: str =
         payload = result["payload"]
         if payload.get("code") == "needs_scoring_norms":
             return {
-                "ok": False, "code": "needs_scoring_norms",
-                "error": "No usable Canvas rubric is attached. Ask the teacher to choose a rubric or provide scoring guidance.",
+                "ok": True,
+                "status": "needs_teacher_input",
+                "code": "needs_scoring_norms",
+                "assignment_name": str(payload.get("assignment_name") or ""),
                 "rubric_labels": [str(label) for label in payload.get("rubric_labels") or []],
+                "question": (
+                    "Which rubric should I use, or what bounded scoring guidance "
+                    "should I follow for this assignment?"
+                ),
+            }
+        if payload.get("code") == "nothing_to_grade":
+            return {
+                "ok": True,
+                "status": "nothing_to_grade",
+                "assignment_name": str(payload.get("assignment_name") or ""),
+                "message": "Canvas no longer marks any submissions for this assignment as needing grading.",
             }
         return {"ok": False, "code": payload.get("code") or "start_failed",
                 "error": payload.get("error") or "Could not start a Scoring Session."}

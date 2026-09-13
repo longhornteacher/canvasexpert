@@ -67,7 +67,7 @@ GRADEBOOK_SUBS = [
     {"assignment_id": 700010, "user_id": 900001, "workflow_state": "graded",
      "score": 9, "submitted_at": "2026-07-01T20:00:00Z"},
     {"assignment_id": 700010, "user_id": 900002, "workflow_state": "submitted",
-     "submitted_at": "2026-07-01T21:00:00Z"},
+     "submitted_at": "2026-07-01T21:00:00Z", "score": 5},
 ]
 
 _LEAKS = [
@@ -1429,7 +1429,9 @@ def test_get_gradebook_snapshot_happy(monkeypatch, tmp_path, _rows, _use_vault, 
     assert result["student_count"] == 2
     assert _rows(result["assignments"]) == [{
         "id": "700010", "title": "Quiz 1", "due_at": "2026-07-01",
-        "points": 10, "has_submission": 2, "has_grade": 1, "missing": 0, "late": 0, "avg_pct": 90,
+        "points": 10, "has_submission": 2, "has_grade": 1,
+        "ungraded": 1, "partially_scored": 1,
+        "missing": 0, "late": 0, "avg_pct": 90,
     }]
     assert result["students"]["columns"] == ["pseudonym", "missing", "late", "ungraded", "pct"]
     assert len(result["students"]["rows"]) == 2

@@ -73,13 +73,13 @@ Tool schema version 44 (44 tools).
 | `clear_roster_student_field(course_id, pseudonym, field, expected_settings_digest)` | Direct digest-protected clear for supported local settings; nickname fields are rejected | Yes, pseudonymized |
 | `get_submissions(course_id, assignment_id, include_text=true, pseudonyms="", max_text_chars=2000)` | Mirror submissions including historical rows; current_enrollment marks same-mirror roster membership; optional pseudonym narrowing and bounded text | Yes, pseudonymized |
 | `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |
-| `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, using the roster population for student and assignment counts | Yes, pseudonymized |
+| `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state | Yes, pseudonymized |
 | `refresh_mirror(course_id)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |
 | `get_bell_schedule(schedule_id="")` | Workspace Bell Schedules; an empty id returns all variants | No |
 | `get_day_schedule(date)` | Calendar state and schedule blocks for one YYYY-MM-DD date; repeated blocks yield consecutive meeting runs | No |
 | `get_teacher_schedule()` | The teacher's local versioned schedule blocks | No |
 | `get_school_calendar(date_from="", date_to="")` | Canonical School Calendar readiness, or a bounded range when both dates are given | No |
-| `start_scoring_session(course_id, assignment_id, rubric_name="", scoring_guidance="")` | Start an assignment-type-neutral Scoring Session; Canvas rubric takes precedence, otherwise an explicit rubric or guidance is required | No |
+| `start_scoring_session(course_id, assignment_id, rubric_name="", scoring_guidance="")` | Start an assignment-type-neutral Scoring Session; missing norms return a successful `needs_teacher_input` question without exposing a session | No |
 | `list_scoring_sessions()` | Compact, identity-free Current-course Scoring Session resume aid | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
 | `submit_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None)` | Post valid SAFE-packet results to Canvas, or return pseudonym-only questions for an explicit conversational answer and retry | Yes, pseudonymized |
@@ -246,9 +246,19 @@ returns only each draft's label, never its absolute path. Pass `kind` to narrow 
 **Scoring Session workflow.** `start_scoring_session(course_id, assignment_id,
 rubric_name="", scoring_guidance="")` privately discovers the assignment type and creates
 one SAFE response bundle. A usable Canvas rubric is authoritative. If none is available,
-the call returns `needs_scoring_norms` and available rubric labels without exposing a
-session; the assistant asks the teacher to select one or provide bounded scoring guidance,
-then retries. `list_scoring_sessions()` is only a compact, identity-free resume aid.
+the call returns `ok: true`, `status: "needs_teacher_input"`, the stable
+`needs_scoring_norms` code, assignment name, available rubric labels, and a concise
+question without exposing a session or returning an error. The assistant asks the teacher
+to select one or provide bounded scoring guidance, then retries.
+
+For an unscoped request such as “start a Scoring Session” or “what needs grading,” the
+assistant lists Current courses, requests `refresh_mirror` for every Current course, and
+reads each `get_gradebook_snapshot`. It reports every assignment whose `ungraded` count is
+positive, calls out its `partially_scored` count, and asks the teacher which exact assignment
+to grade. Canvas workflow state is authoritative: a numeric score or teacher comment does
+not clear `submitted` or `pending_review` work. The assistant never asks for an assignment
+type or scoring transport. `list_scoring_sessions()` is only a compact, identity-free
+resume aid.
 
 `get_scoring_packet()` retrieves pseudonymized response rows with full text (no silent
 truncation) and a packet digest. Page zero must include the server-authored scoring contract
@@ -277,6 +287,8 @@ does not join private identities to pseudonyms or infer why a student was exclud
 `students_without_responses` counts bundle students with no response rows; `held` counts
 responses without scorable text. A 19-student session with 16 held bundle students therefore
 reports 3 excluded students, 16 held responses, and 0 scorable rows.
+The assistant reports held or otherwise unscorable work before scoring. Item/catalog or
+evidence gaps are not described as an empty assignment and are never silently discarded.
 
 The safety scan walks dict keys, so it cannot see into `{columns, rows}` tables. Every tool
 that returns student text therefore gates the dict-row payload first and tabulates only after

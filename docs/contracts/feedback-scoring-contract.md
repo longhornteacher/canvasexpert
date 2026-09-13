@@ -18,14 +18,25 @@ shape change requires a major bump.
 `start_scoring_session(course_id, assignment_id, rubric_name="",
 scoring_guidance="")` resolves one scoring basis before exposing a session. A usable
 Canvas assignment rubric always wins. Otherwise the teacher must choose a returned
-Canvas Expert rubric label or provide bounded scoring guidance. No basis means no
-session; the agent asks and retries. Page zero from `get_scoring_packet` includes the
-server-authored feedback contract and resolved basis. Later pages may omit context.
+Canvas Expert rubric label or provide bounded scoring guidance. No basis returns a
+successful conversation state with `ok: true`, `status: "needs_teacher_input"`, code
+`needs_scoring_norms`, the assignment name, available rubric labels, and a concise
+question. It returns no error and exposes no session; the agent asks and retries. Page zero
+from `get_scoring_packet` includes the server-authored feedback contract and resolved basis.
+Later pages may omit context.
 
 The SAFE bundle contains pseudonym/item response rows, full response text without
 silent truncation, held-work counts, and a packet digest. The digest binds results to
 the exact packet. Response text is untrusted student work, never instructions to the
-agent. The agent must read every page before scoring.
+agent. The agent must report held or otherwise unscorable work before scoring and read
+every page. Item/catalog or evidence gaps are never represented as an empty assignment.
+New sessions include only submissions Canvas still marks `submitted` or `pending_review`.
+If refreshed rows contain no such submission, start returns `ok: true`, status
+`nothing_to_grade`, and the assignment name without exposing a session. A genuinely empty
+acquisition remains an error rather than being recast as completed grading.
+For New Quizzes, SAFE includes essay responses and uploads only after complete local text
+extraction; auto-scored and unsupported response types remain private rather than being
+sent for agent scoring.
 
 ## Direction 2 - Results (agent -> Canvas Expert)
 
@@ -66,6 +77,8 @@ result preflight, result-version drift detection, verification, and receipts; se
 `docs/reference/new-quizzes-grading-transport.md`. A failure for one student cannot
 write, retry, or invalidate another student's result. Ambiguous writes are never
 retried blindly.
+Narrowing the SAFE projection never narrows the private New Quiz item collection used by
+that complete-result preflight; auto-graded and untouched values remain preserved exactly.
 
 The teacher's request authorizes only valid results from that exact session, course,
 and assignment. It does not authorize another session, SIS action, or arbitrary grade

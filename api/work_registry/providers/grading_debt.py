@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from api.gradebook_snapshot import needs_grading
+
 from . import (
     CourseTimeout,
     DiscoveryDeadline,
@@ -22,26 +24,6 @@ def _number(value, default=0) -> int:
         return default
 
 
-def _comment_is_teacher(comment: dict, user_id: str) -> bool:
-    if not isinstance(comment, dict):
-        return False
-    author = comment.get("author") if isinstance(comment.get("author"), dict) else {}
-    author_id = text(comment.get("author_id") or author.get("id"))
-    role = text(comment.get("author_role") or author.get("role") or author.get("type")).casefold()
-    if author_id and author_id == user_id:
-        return False
-    if role in {"student", "student_view", "studentview"}:
-        return False
-    return bool(author_id or role or comment.get("author_name"))
-
-
-def _teacher_touched(submission: dict, user_id: str) -> bool:
-    if submission.get("score") is not None:
-        return True
-    comments = submission.get("submission_comments")
-    return any(_comment_is_teacher(comment, user_id) for comment in (comments or []))
-
-
 def _normalize_assignment_map(assignments: list[dict]) -> dict[str, dict]:
     return {
         text(item.get("id")): item
@@ -51,7 +33,7 @@ def _normalize_assignment_map(assignments: list[dict]) -> dict[str, dict]:
 
 
 def scan_course(course_id: str, *, now, reads: WorkCourseReads) -> list[dict]:
-    """Find submitted/pending-review work lacking teacher evidence."""
+    """Find work whose Canvas workflow state still requires grading."""
     check_deadline(reads._deadline)
     assignments = reads.assignments()
     submissions = reads.submissions(include_comments=True)
@@ -67,9 +49,8 @@ def scan_course(course_id: str, *, now, reads: WorkCourseReads) -> list[dict]:
     for submission in submissions:
         if not isinstance(submission, dict):
             continue
-        workflow = text(submission.get("workflow_state")).casefold()
         submitted_at = text(submission.get("submitted_at"))
-        if workflow not in {"submitted", "pending_review"} or not submitted_at:
+        if not needs_grading(submission):
             continue
         assignment_id = text(submission.get("assignment_id"))
         assignment = assignment_map.get(assignment_id)
@@ -85,11 +66,8 @@ def scan_course(course_id: str, *, now, reads: WorkCourseReads) -> list[dict]:
             row["latest_submitted_at"] = submitted_at
         row["latest_attempt_number"] = max(row["latest_attempt_number"], attempt)
         row["due_at"] = text(assignment.get("due_at"))
-        user_id = text(submission.get("user_id"))
-        touched = _teacher_touched(submission, user_id)
-        if not touched:
-            row["pending"] += 1
-            row["affected"] += 1
+        row["pending"] += 1
+        row["affected"] += 1
     output = []
     for assignment_id in sorted(aggregates):
         row = aggregates[assignment_id]

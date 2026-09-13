@@ -19,12 +19,15 @@ from api.mcp_server import tools
 
 def _fake_run_start_session(*, captured=None, session_id="sess-1",
                             assignment_name="Essay 1", student_count=2,
-                            ok=True, error=""):
+                            ok=True, error="", refusal_payload=None):
     def fake(**kwargs):
         if captured is not None:
             captured.update(kwargs)
         if not ok:
-            return {"ok": False, "payload": {"ok": False, "error": error, "privacy_steps": []}}
+            payload = refusal_payload or {
+                "ok": False, "error": error, "privacy_steps": [],
+            }
+            return {"ok": False, "payload": payload}
         return {
             "ok": True,
             "payload": {
@@ -138,6 +141,99 @@ def test_start_scoring_session_refuses_to_expose_a_session_without_a_safe_bundle
         "ok": False, "code": "packet_missing",
         "error": "The SAFE scoring packet was not completed; no session was exposed.",
     }
+
+
+def test_start_scoring_session_requests_missing_norms_without_exposing_a_session(
+    monkeypatch, _set_active_courses,
+):
+    _set_active_courses(["111"])
+    monkeypatch.setattr(
+        "api.powergrader.start_workflow.run_start_session",
+        _fake_run_start_session(ok=False, refusal_payload={
+            "ok": False,
+            "code": "needs_scoring_norms",
+            "assignment_name": "Argument Essay",
+            "rubric_labels": ["Argument Writing", "Short Response"],
+        }),
+    )
+    monkeypatch.setattr(
+        "api.powergrader.session_store.load_session",
+        lambda _sid: (_ for _ in ()).throw(AssertionError("session must not be loaded")),
+    )
+
+    result = tools.start_scoring_session("111", "700020")
+
+    assert result == {
+        "ok": True,
+        "status": "needs_teacher_input",
+        "code": "needs_scoring_norms",
+        "assignment_name": "Argument Essay",
+        "rubric_labels": ["Argument Writing", "Short Response"],
+        "question": (
+            "Which rubric should I use, or what bounded scoring guidance "
+            "should I follow for this assignment?"
+        ),
+    }
+    assert "error" not in result
+    assert "scoring_session_id" not in result
+
+
+def test_start_scoring_session_reports_race_resolved_assignment_without_a_session(
+    monkeypatch, _set_active_courses,
+):
+    _set_active_courses(["111"])
+    monkeypatch.setattr(
+        "api.powergrader.start_workflow.run_start_session",
+        _fake_run_start_session(ok=False, refusal_payload={
+            "ok": False,
+            "code": "nothing_to_grade",
+            "assignment_name": "Resolved Essay",
+        }),
+    )
+    monkeypatch.setattr(
+        "api.powergrader.session_store.load_session",
+        lambda _sid: (_ for _ in ()).throw(AssertionError("session must not be loaded")),
+    )
+
+    result = tools.start_scoring_session("111", "700020")
+
+    assert result == {
+        "ok": True,
+        "status": "nothing_to_grade",
+        "assignment_name": "Resolved Essay",
+        "message": (
+            "Canvas no longer marks any submissions for this assignment as needing grading."
+        ),
+    }
+    assert "error" not in result
+    assert "scoring_session_id" not in result
+
+
+def test_start_scoring_session_retries_with_teacher_guidance_and_creates_session(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    _set_active_courses(["111"])
+    captured = {}
+    monkeypatch.setattr(
+        "api.powergrader.start_workflow.run_start_session",
+        _fake_run_start_session(captured=captured, session_id="sess-guided"),
+    )
+    bundle_path = _write_bundle(tmp_path, [{
+        "pseudonym": "Pikachu",
+        "responses": [{"item_id": "response", "response": "Draft"}],
+    }])
+    sessions = {
+        "sess-guided": _fake_session("sess-guided", "111", bundle_path=bundle_path),
+    }
+    _bind_session_store(monkeypatch, sessions)
+
+    result = tools.start_scoring_session(
+        "111", "700020", scoring_guidance="Score claim, evidence, and reasoning.",
+    )
+
+    assert result["ok"] is True
+    assert result["scoring_session_id"] == "sess-guided"
+    assert captured["scoring_guidance"] == "Score claim, evidence, and reasoning."
 
 
 # --- example: held work is reported, not silently counted as nothing --------
@@ -309,3 +405,11 @@ def test_start_scoring_session_is_registered_and_wraps_the_tool(monkeypatch):
     )
     wire = server.start_scoring_session("111", "700010")
     assert wire == '{"ok":true,"course_id_seen":"111","assignment_id_seen":"700010"}'
+
+
+def test_server_instructions_treat_nothing_to_grade_as_a_terminal_conversation_state():
+    from api.mcp_server import server
+
+    lowered = server._SERVER_INSTRUCTIONS.lower()
+    assert "nothing_to_grade" in lowered
+    assert "do not create or retry a session" in lowered

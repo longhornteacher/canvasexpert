@@ -6,6 +6,16 @@ from types import SimpleNamespace
 from api import gradebook_queries
 
 
+def needs_grading(submission: dict) -> bool:
+    """Return whether Canvas still marks a submitted row for teacher grading."""
+    workflow_state = str(submission.get("workflow_state") or "").strip().casefold()
+    return (
+        not submission.get("excused")
+        and bool(submission.get("submitted_at"))
+        and workflow_state in {"submitted", "pending_review"}
+    )
+
+
 def build_snapshot(students, assignments, subs) -> dict:
     """Pure aggregation: preserve the existing route/MCP snapshot shape."""
     smap = {s["id"]: {"name": s.get("sortable_name") or s.get("name", ""),
@@ -22,15 +32,19 @@ def build_snapshot(students, assignments, subs) -> dict:
             "points":   a.get("points_possible") or 0,
             "html_url": a.get("html_url", ""),
             "submitted": 0, "graded": 0, "missing": 0, "late": 0,
+            "ungraded": 0, "partially_scored": 0,
             "score_sum": 0.0, "score_n": 0,
         }
 
     for sub in subs:
         a = amap.get(sub.get("assignment_id"))
         s = smap.get(sub.get("user_id"))
-        if not a or not s or sub.get("excused"):
+        if not a or not s:
             continue
-        state = sub.get("workflow_state", "")
+        state = str(sub.get("workflow_state") or "").strip().casefold()
+        ungraded = needs_grading(sub)
+        if sub.get("excused"):
+            continue
         if sub.get("submitted_at"):
             a["submitted"] += 1
         if sub.get("missing"):
@@ -48,9 +62,11 @@ def build_snapshot(students, assignments, subs) -> dict:
             if s and a["points"]:
                 s["score"] += sub["score"]
                 s["possible"] += a["points"]
-        elif sub.get("submitted_at") and state in ("submitted", "pending_review"):
-            if s:
-                s["ungraded"] += 1
+        if ungraded:
+            a["ungraded"] += 1
+            s["ungraded"] += 1
+            if sub.get("score") is not None:
+                a["partially_scored"] += 1
 
     out_assignments = []
     for aid, a in amap.items():
@@ -60,6 +76,8 @@ def build_snapshot(students, assignments, subs) -> dict:
             "id": str(aid), "name": a["name"], "due_at": a["due_at"],
             "points": a["points"], "html_url": a["html_url"],
             "submitted": a["submitted"], "graded": a["graded"],
+            "ungraded": a["ungraded"],
+            "partially_scored": a["partially_scored"],
             "missing": a["missing"], "late": a["late"], "avg_pct": avg,
         })
     out_assignments.sort(key=lambda a: a["due_at"] or "0000-00-00", reverse=True)
@@ -82,7 +100,7 @@ def build_snapshot(students, assignments, subs) -> dict:
         "class_avg": class_avg,
         "student_count": len(out_students),
         "total_missing": sum(s["missing"] for s in out_students),
-        "total_ungraded": sum(s["ungraded"] for s in out_students),
+        "total_ungraded": sum(a["ungraded"] for a in out_assignments),
         "assignments": out_assignments,
         "students": out_students,
     }

@@ -7,6 +7,7 @@ import os
 from api.nq_report import constructed_responses, html_to_text
 from api.feedback_vault import Vault
 from api import feedback_scrub, feedback_safety
+from api.mirror import new_quizzes
 from api.powergrader import student_attachments, writing_timeline
 from api.platform_services import workspace
 from api.feedback_contract import (
@@ -171,6 +172,8 @@ def _new_quiz_ai_response(item: dict) -> dict | None:
     anything else (image, PDF, PPTX, failed download) is excluded from the AI
     payload entirely and stays in the local queue for teacher review.
     """
+    if not new_quizzes.is_teacher_scorable_item(item):
+        return None
     if _is_upload_item(item):
         response_text = _extracted_upload_text(item.get("files"))
         if response_text is None:

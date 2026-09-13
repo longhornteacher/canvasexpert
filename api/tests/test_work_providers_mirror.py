@@ -31,12 +31,11 @@ USERS = [
      "short_name": "Learner Two", "sis_user_id": "SIS-900102", "enrollments": []},
 ]
 
-# Assignment 700100: one on-time ungraded submission (grading debt candidate,
-# no comments) and two genuinely late submissions with string ids (aggregation
-# check). Assignment 700101: a submission carrying submission_comments in the
-# exact slice-5 mirror shape ({author_id, comment, created_at}) so
-# grading_debt._teacher_touched and home_attention's comment classifier are
-# both exercised against mirror rows, not live Canvas rows.
+# Assignment 700100: one on-time ungraded submission and two genuinely late
+# submissions with string ids (aggregation check). Assignment 700101 carries
+# comments in the exact mirror shape ({author_id, comment, created_at}); its
+# submitted workflow state remains grading debt while the same row separately
+# drives the comment-follow-up provider.
 SUBMISSIONS_700100 = [
     {"assignment_id": 700100, "user_id": 900101, "workflow_state": "submitted",
      "submitted_at": "2026-07-02T09:00:00Z", "score": None,
@@ -269,11 +268,13 @@ def test_grading_debt_and_comment_followup_read_mirror_with_comment_shape(monkey
     debt_findings = grading_debt.scan_course(
         COURSE, now="2026-07-11T12:00:00+00:00", reads=reads,
     )
-    # Assignment 700100/user 900101: submitted, no score, no comments -> debt.
-    # Assignment 700101/user 900102: no score but a staff comment -> touched,
-    # so not counted as debt (exercises submission_comments from the mirror).
+    # Both submitted rows remain debt; a teacher comment does not override the
+    # authoritative Canvas workflow state.
     debt_by_assignment = {item["assignment_id"]: item["counts"] for item in debt_findings}
-    assert debt_by_assignment == {"700100": {"total": 1, "pending": 1, "affected": 1}}
+    assert debt_by_assignment == {
+        "700100": {"total": 1, "pending": 1, "affected": 1},
+        "700101": {"total": 1, "pending": 1, "affected": 1},
+    }
 
     followups = home_attention.scan_comment_follow_up(
         COURSE, now="2026-07-11T12:00:00+00:00", reads=reads,

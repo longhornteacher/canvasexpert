@@ -41,10 +41,19 @@ _SERVER_INSTRUCTIONS = (
     "and creates it in one call; stage_content alone leaves it in their "
     "review queue, and the preview_content_push/apply_content_push pair adds "
     "due, unlock and lock dates. "
-    "When the teacher explicitly asks to start a Scoring Session for one "
-    "named Current course and assignment, call start_scoring_session. If it "
-    "returns needs_scoring_norms, ask them to choose one returned rubric label "
-    "or give bounded scoring guidance, then retry. Read every SAFE response "
+    "For an unscoped request such as 'start a Scoring Session' or 'what needs "
+    "grading', list Current courses, call refresh_mirror for each Current course, "
+    "then read each get_gradebook_snapshot result. Report every assignment with "
+    "ungraded greater than zero, call out partially_scored counts, and ask which "
+    "exact assignment to grade. Never ask the teacher to choose a scoring "
+    "transport or use assignment type to choose one. When the exact Current "
+    "course and assignment are named, call start_scoring_session. If it returns "
+    "needs_scoring_norms, ask its question so the teacher can choose one returned "
+    "rubric label or give bounded scoring guidance, then retry. If it returns "
+    "nothing_to_grade, tell the teacher Canvas no longer marks work for that "
+    "assignment as needing grading and do not create or retry a session. Before scoring, "
+    "tell the teacher about held or otherwise unscorable work; item/catalog or "
+    "evidence gaps do not mean the assignment is empty. Read every SAFE response "
     "page with get_scoring_packet, keeping the first-page scoring contract "
     "and rubric. Score only those pseudonymized responses and call "
     "submit_scoring_results with the packet digest. Valid results post to "
@@ -252,10 +261,9 @@ def get_writing_history(pseudonym: str, since: str = "", until: str = "",
 
 @mcp.tool(structured_output=False)
 def get_gradebook_snapshot(course_id: str) -> str:
-    """Read a Current course's pseudonymized gradebook snapshot from the local mirror.
-    Assignment has_submission counts roster rows with submitted_at; has_grade counts
-    graded roster rows with scores, including manual grades without submissions.
-    total_ungraded sums students' submitted/pending_review work needing grading."""
+    """Read Current-course assignment grading counts and pseudonymized students.
+    Assignment rows include ungraded and partially_scored. This tool never falls
+    back to a live Canvas read."""
     return _compact(tools.get_gradebook_snapshot(course_id))
 
 
@@ -458,7 +466,7 @@ def get_school_calendar(date_from: str = "", date_to: str = "") -> str:
 @mcp.tool(structured_output=False)
 def start_scoring_session(course_id: str, assignment_id: str,
                           rubric_name: str = "", scoring_guidance: str = "") -> str:
-    """Start one Scoring Session for a Current course assignment."""
+    """Start one assignment-bound session, or ask for missing scoring norms."""
     return _compact(tools.start_scoring_session(
         course_id, assignment_id, rubric_name, scoring_guidance))
 

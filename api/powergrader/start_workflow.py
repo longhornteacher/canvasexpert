@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 
+from api import gradebook_snapshot
 from api.nq_report import html_to_text
 from api.platform_services import config, workspace
 from api.powergrader import (
@@ -204,6 +205,14 @@ def run_start_session(
     points_possible = float(adata.get("points_possible") or 100)
     is_new_quiz = adata.get("is_quiz_lti_assignment") is True
 
+    submitted = [s for s in subs if gradebook_snapshot.needs_grading(s)]
+    if not submitted:
+        return {"ok": False, "payload": {
+            "ok": False,
+            "code": "nothing_to_grade",
+            "assignment_name": str(assignment_name),
+        }}
+
     rubric_text_override = None
     scoring_basis = None
     if scoring_session:
@@ -230,19 +239,13 @@ def run_start_session(
             return {"ok": False, "payload": {"ok": False,
                 "code": "needs_scoring_norms",
                 "error": "No usable Canvas rubric is attached. Choose a Canvas Expert rubric or provide scoring guidance.",
+                "assignment_name": str(assignment_name),
                 "rubric_labels": labels}}
         if len(str(rubric_text_override or "")) > 12000:
             return {"ok": False, "payload": {"ok": False,
                 "error": "Scoring guidance is too long; provide at most 12,000 characters.",
                 "code": "scoring_guidance_too_long"}}
 
-    submitted = [
-        s for s in subs
-        if s.get("submission_type") and s.get("workflow_state") != "unsubmitted"
-    ]
-    if not submitted:
-        return {"ok": False, "payload": {"ok": False, "error": "No submitted work found for this assignment.",
-                                          "privacy_steps": []}}
     media_submissions = [s for s in submitted if s.get("submission_type") == "media_recording"]
     oral_enabled = str(oral_reading_enabled).lower() in {"1", "true", "yes", "on"}
     if oral_enabled and not media_submissions:

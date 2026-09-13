@@ -94,7 +94,9 @@ check so Canvas drift does not weaken review or write safety.
 ## Current implementation facts
 
 - A Scoring Session starts for a Current course and assignment without exposing the
-  assignment type. The first packet page includes the resolved scoring basis.
+  assignment type. It includes only submissions Canvas still marks as needing grading,
+  while the first packet page includes the resolved scoring basis. If refreshed rows are
+  all already graded, start reports `nothing_to_grade` with no session.
 - New Quiz and ordinary assignment results share `start_scoring_session` ->
   `get_scoring_packet` -> `submit_scoring_results`. The MCP layer never receives a
   signed transport, operation id, temporary review token, or live Canvas response.
@@ -118,6 +120,13 @@ check so Canvas drift does not weaken review or write safety.
   using the explicit serializer has been verified.
 - New Quiz uploads never enter the scoring packet as files or filenames. Locally
   extracted text may be included as an essay response; unreadable uploads remain held.
+- The SAFE packet contains only teacher-scorable New Quiz responses: essays and uploads
+  with complete locally extracted text. Auto-scored items and unsupported unscored types
+  stay private; the complete private item collection remains available to preserve every
+  auto-graded and untouched value during finalization.
+- A stale catalog ID on an already-scored non-manual item does not make a cached attempt
+  incomplete. Essay, upload, unscored, missing, and ambiguous identities still fail closed
+  with no position, prompt, or points-based matching.
 - `api/powergrader/new_quiz_fetch.py` uses native result acquisition; the live participant
   result key `quiz_api_quiz_session_id` is normalized alongside older/synthetic
   `quiz_session_id` shapes (fixed 2026-07-14, live-verified: file evidence downloads).

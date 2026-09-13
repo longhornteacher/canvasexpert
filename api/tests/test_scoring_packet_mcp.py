@@ -290,6 +290,22 @@ def test_build_packet_counts_each_held_response_once():
     assert result["returned"] == 0
 
 
+def test_build_packet_reports_private_student_excluded_from_manual_response_bundle():
+    people = [{"canvas_id": "synthetic-1", "pseudonym": "Pikachu"}]
+
+    result = scoring_packet.build_packet(
+        session=_fake_session("s1", "c1", people),
+        safe_bundle=_fake_safe_bundle([], items=1),
+        include_context=False,
+    )
+
+    assert result["total"] == 0
+    assert result["held"] == 0
+    assert result["session_student_count"] == 1
+    assert result["bundle_student_count"] == 0
+    assert result["excluded_student_count"] == 1
+
+
 def test_build_packet_held_never_exceeds_responses_present():
     """Held count stays within the responses that exist, mixed cases included."""
     people = [{"pseudonym": f"Learner {_ORDINALS[i]}"} for i in (1, 2)]

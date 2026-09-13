@@ -169,6 +169,37 @@ def test_pseudonymize_new_quiz_uploads_use_extracted_text_or_stay_local(tmp_path
     assert students[0]["local_attachments"] == []   # New Quiz files never enter the media lane
 
 
+def test_new_quiz_safe_projection_excludes_auto_scored_and_unsupported_items(tmp_path):
+    submissions = [{
+        "user_id": "fake-01", "user": {"name": "Fictional Student"},
+        "new_quiz_items": [
+            {"item_id": "choice-1", "type": "multiple_choice", "prompt": "Choose.",
+             "raw_html_answer": "Textual option", "possible": 1, "earned_score": 1},
+            {"item_id": "essay-1", "type": "essay", "prompt": "Explain.",
+             "raw_html_answer": "Constructed response", "possible": 4,
+             "earned_score": None},
+            {"item_id": "formula-1", "type": "formula", "prompt": "Calculate.",
+             "raw_html_answer": "x = 2", "possible": 1, "earned_score": None},
+        ],
+    }, {
+        "user_id": "fake-02", "user": {"name": "Second Fictional"},
+        "new_quiz_items": [{
+            "item_id": "unsupported-1", "type": "categorization", "prompt": "Sort.",
+            "raw_html_answer": "Text that must stay local", "possible": 2,
+            "earned_score": None,
+        }],
+    }]
+
+    bundle = pseudonymize_submissions(
+        submissions, Vault(str(tmp_path / "vault.json")), "Mixed Quiz",
+    )
+
+    assert len(bundle["students"]) == 1
+    assert [row["item_id"] for row in bundle["students"][0]["responses"]] == ["essay-1"]
+    assert "Textual option" not in json.dumps(bundle)
+    assert "Text that must stay local" not in json.dumps(bundle)
+
+
 def test_normalize_uses_nested_student_analysis_attempt_and_timestamp():
     core = [{"user_id": "fictional-user", "submitted_at": "2026-01-02T00:00:00Z"}]
     rows = [

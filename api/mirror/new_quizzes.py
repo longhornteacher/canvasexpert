@@ -196,6 +196,22 @@ def _text(value):
     return str(value) if value not in (None, "") else ""
 
 
+def is_teacher_scorable_item(item: dict) -> bool:
+    """Return whether an item uses a supported manual-response lane."""
+    kind = _text(item.get("type")).strip().casefold().replace("-", "_")
+    return kind == "essay" or "upload" in kind
+
+
+def _is_safely_auto_scored_item(item: dict) -> bool:
+    """Require explicit non-manual type and score evidence for mismatch tolerance."""
+    kind = _text(item.get("type")).strip()
+    return (
+        bool(kind)
+        and not is_teacher_scorable_item(item)
+        and item.get("earned_score") is not None
+    )
+
+
 def normalize_assignment(row: dict, assignment_id=None) -> dict:
     row = row if isinstance(row, dict) else {}
     aid = assignment_id or row.get("id")
@@ -437,7 +453,7 @@ def _attempt_record(normalized, *, catalog, root, duplicate=False):
     incomplete = not items
     for item in items:
         item_id = _text(item.get("item_id"))
-        if not item_id or item_id not in catalog:
+        if not item_id or (item_id not in catalog and not _is_safely_auto_scored_item(item)):
             incomplete = True
         item_responses.append({
             "item_id": item_id,

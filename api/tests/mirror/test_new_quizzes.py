@@ -369,6 +369,60 @@ def test_malformed_item_join_and_unmatched_attempt_are_explicit(tmp_path):
     assert unmatched_doc["attempts"][0]["join_error"] == "student_submission_missing"
 
 
+def test_scored_nonmanual_catalog_replacement_does_not_poison_freshness(tmp_path):
+    scored_choice = _attempt(1, "Option A", result_id="result-1")
+    scored_choice["new_quiz_items"] = [{
+        "item_id": "choice-retired", "type": "multiple_choice",
+        "prompt": "Choose.", "raw_html_answer": "Option A",
+        "possible": 1, "earned_score": 0, "status": "Scored", "files": [],
+    }]
+    current_catalog = [{
+        "id": "outer-choice", "points_possible": 1,
+        "entry": {"id": "choice-current", "interaction_type_slug": "multiple_choice",
+                  "item_body": "Choose."},
+    }]
+
+    result = new_quizzes.write_response_snapshot(
+        COURSE, ASSIGNMENT, assignment=_assignment(), items=current_catalog,
+        normalized_attempts=[scored_choice], root=str(tmp_path), attempted_at=NOW,
+    )
+
+    assert result["state"] == "current"
+    snapshot, error = new_quizzes.read_fresh_snapshot(
+        COURSE, ASSIGNMENT, root=str(tmp_path), max_age_hours=6, now=NOW,
+    )
+    assert error is None
+    preserved = snapshot["students"][0]["new_quiz_items"][0]
+    assert preserved["item_id"] == "choice-retired"
+    assert preserved["earned_score"] == 0
+    assert new_quizzes._is_safely_auto_scored_item(
+        {"type": "multiple_choice", "earned_score": 0},
+    ) is True
+    assert new_quizzes._is_safely_auto_scored_item(
+        {"type": "", "earned_score": 1},
+    ) is False
+
+
+def test_unscored_nonmanual_catalog_mismatch_remains_explicitly_incomplete(tmp_path):
+    unscored = _attempt(1, "Unscored answer")
+    unscored["new_quiz_items"] = [{
+        "item_id": "unsupported-retired", "type": "categorization",
+        "prompt": "Sort.", "raw_html_answer": "Unscored answer",
+        "possible": 1, "earned_score": None, "status": "NotGraded", "files": [],
+    }]
+
+    result = new_quizzes.write_response_snapshot(
+        COURSE, ASSIGNMENT, assignment=_assignment(), items=_items(),
+        normalized_attempts=[unscored], root=str(tmp_path), attempted_at=NOW,
+    )
+
+    assert result["state"] == "incomplete"
+    student = new_quizzes.read_student(
+        COURSE, ASSIGNMENT, "student-synthetic", root=str(tmp_path),
+    )
+    assert student["attempts"][0]["join_error"] == "item_catalog_join_incomplete"
+
+
 def test_cached_new_quiz_path_skips_core_and_report_reads(monkeypatch, tmp_path):
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
     monkeypatch.setattr(new_quiz_fetch, "canvas_headers", lambda: ({"Authorization": "synthetic"}, "https://canvas.invalid"))

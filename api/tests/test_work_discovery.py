@@ -224,20 +224,21 @@ def test_scan_course_shares_successful_assignment_and_submission_reads(monkeypat
 
 
 
-def test_grading_debt_counts_zero_as_graded_and_teacher_comment_as_touched(monkeypatch):
+def test_grading_debt_uses_canvas_state_for_new_quiz_score_and_teacher_comment(monkeypatch):
 
     def fake_get(path, params=None, timeout=None):
         assert timeout == 10
         if path.endswith("/assignments"):
-            return [{"id": 1, "due_at": "2026-07-10T11:00:00+00:00"}], None
+            return [{"id": 1, "due_at": "2026-07-10T11:00:00+00:00",
+                     "is_quiz_lti_assignment": True}], None
         return [
-            {"assignment_id": 1, "user_id": "u-zero", "workflow_state": "submitted",
+            {"assignment_id": 1, "user_id": "u-zero", "workflow_state": "graded",
              "submitted_at": "2026-07-11T11:00:00+00:00", "score": 0},
             {"assignment_id": 1, "user_id": "u-comment", "workflow_state": "submitted",
              "submitted_at": "2026-07-11T10:00:00+00:00", "score": None,
              "submission_comments": [{"author_id": "teacher-1"}]},
             {"assignment_id": 1, "user_id": "u-pending", "workflow_state": "pending_review",
-             "submitted_at": "2026-07-11T09:00:00+00:00", "score": None,
+             "submitted_at": "2026-07-11T09:00:00+00:00", "score": 7,
              "submission_comments": []},
         ], None
 
@@ -246,7 +247,7 @@ def test_grading_debt_counts_zero_as_graded_and_teacher_comment_as_touched(monke
         "course-1", now="2026-07-11T12:00:00+00:00", reads=reads,
     )
     assert len(findings) == 1
-    assert findings[0]["counts"] == {"total": 3, "pending": 1, "affected": 1}
+    assert findings[0]["counts"] == {"total": 2, "pending": 2, "affected": 2}
 
 
 def test_late_work_uses_school_day_and_extra_time(monkeypatch):
