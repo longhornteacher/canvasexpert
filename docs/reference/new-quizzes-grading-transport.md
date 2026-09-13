@@ -107,6 +107,13 @@ check so Canvas drift does not weaken review or write safety.
   submission writes are never used as a substitute. Active/current instructor
   enrollment is required; concluded, closed, past-enrollment, or otherwise restricted
   courses may return `403`.
+- Live read-only evidence (2026-09-12) found each `session_item_results[].feedback`
+  value as an object containing `item_feedback.neutral`; grader comments are written through
+  `feedback.grader_feedback.content` while preserving the complete feedback object.
+  The prior adapter replaced that object with a string, and Canvas rejected all 25
+  attempted student finalizations (`write_rejected`; 0 verified finalizations, with
+  Canvas unchanged).
+  This repair has not been verified by a live write.
 - New Quiz uploads never enter the scoring packet as files or filenames. Locally
   extracted text may be included as an essay response; unreadable uploads remain held.
 - `api/powergrader/new_quiz_fetch.py` uses native result acquisition; the live participant

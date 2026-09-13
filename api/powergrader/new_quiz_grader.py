@@ -179,6 +179,7 @@ def preflight(*, canvas_base: str, token: str, assignment_id: str, user_id: str,
     context = _signed_context(canvas_base=canvas_base, token=token, assignment_id=assignment_id, user_id=user_id, http_session=http_session)
     current = _read_current(context)
     state = _result_state(current["authoritative"], current["rows"])
+    _validate_feedback_shapes(current["rows"])
     _validate_decisions(current["rows"], decisions)
     total = _score_total(current["rows"], state["fudge_points"])
     if total is None or not isinstance(current["authoritative"].get("score"), (int, float)) or abs(total - current["authoritative"]["score"]) > 1e-8:
@@ -213,13 +214,18 @@ def apply(*, canvas_base: str, token: str, assignment_id: str, user_id: str, dec
     state = _result_state(current["authoritative"], current["rows"])
     if state["result_id"] != str(baseline.get("result_id") or "") or _digest(state) != baseline.get("state_digest"):
         raise GraderError("result_version_drift")
+    _validate_feedback_shapes(current["rows"])
     _validate_decisions(current["rows"], decisions)
     results = copy.deepcopy(current["rows"])
     by_id = {str(row["item_id"]): row for row in results}
     for decision in decisions:
         row = by_id[str(decision["item_id"])]
         row["score"] = float(decision["score"])
-        row["feedback"] = compose_feedback(decision.get("teacher_feedback", ""), decision.get("ta_feedback", ""))
+        grader_feedback = dict(row["feedback"].get("grader_feedback") or {})
+        grader_feedback["content"] = compose_feedback(
+            decision.get("teacher_feedback", ""), decision.get("ta_feedback", "")
+        )
+        row["feedback"]["grader_feedback"] = grader_feedback
     # The first-party client sends the complete result collection, stripping the
     # client-side row id from every entry rather than only from edited rows.
     for row in results:
@@ -253,7 +259,11 @@ def _verify_applied(context, before_state: dict, expected_rows: list) -> dict:
     after_state = _result_state(after["authoritative"], after["rows"])
     expected = {str(item["item_id"]): item for item in expected_rows}
     actual = {str(item.get("item_id")): item for item in after["rows"]}
-    valid_items = all(key in actual and actual[key].get("score") == value.get("score") and actual[key].get("feedback") == value.get("feedback") for key, value in expected.items())
+    valid_items = set(actual) == set(expected) and all(
+        actual[key].get("score") == value.get("score")
+        and actual[key].get("feedback") == value.get("feedback")
+        for key, value in expected.items()
+    )
     derived = _score_total(after["rows"], after_state["fudge_points"])
     if after_state["result_id"] == before_state["result_id"] or not valid_items or derived is None or not isinstance(after["authoritative"].get("score"), (int, float)) or abs(derived - after["authoritative"]["score"]) > 1e-8:
         raise GraderError("write_unverified")
@@ -276,3 +286,18 @@ def _validate_decisions(rows: list, decisions: list[dict]) -> None:
             raise GraderError("invalid_item_score")
         if not str((decision or {}).get("ta_feedback") or "").strip():
             raise GraderError("missing_ta_feedback")
+
+
+def _validate_feedback_shapes(rows: list) -> None:
+    """Require structured Canvas feedback before editing any row."""
+    for row in rows:
+        feedback = row.get("feedback")
+        if not isinstance(feedback, dict):
+            raise GraderError("feedback_shape")
+        if "grader_feedback" not in feedback:
+            continue
+        grader_feedback = feedback["grader_feedback"]
+        if (not isinstance(grader_feedback, dict)
+                or ("content" in grader_feedback
+                    and not isinstance(grader_feedback["content"], str))):
+            raise GraderError("feedback_shape")
