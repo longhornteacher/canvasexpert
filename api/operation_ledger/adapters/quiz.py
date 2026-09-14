@@ -7,11 +7,13 @@ writes with exact-ID reconciliation. Supports whole-class and differentiated
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
+import math
 from datetime import datetime, timezone
 
 from .. import models
-from . import quiz_differentiated, quiz_whole
+from . import differentiated_bridge, quiz_differentiated, quiz_whole
 from .adapter_support import (
     as_list as _as_list,
     build_result as _build_result,
@@ -88,7 +90,12 @@ class QuizAdapter:
         variants_in = prepare_request.get("variants")
         if not variants_in or not isinstance(variants_in, list) or len(variants_in) < 2:
             raise ValueError("differentiated mode requires at least two variants")
-        settings = prepare_request.get("settings") or {}
+        settings = copy.deepcopy(prepare_request.get("settings") or {})
+        due_at, module_name, bridge_due_at = (
+            differentiated_bridge.require_family_delivery(
+                settings.get("due_at"), settings.get("module_name")
+            )
+        )
         variants = []
         for row in variants_in:
             path = row.get("path")
@@ -116,10 +123,78 @@ class QuizAdapter:
                 "group_name": str(group_name).strip(),
                 "plan": plan,
             })
+        base_titles = [
+            differentiated_bridge.normalize_base_title(v["plan"].get("title"))
+            for v in variants
+        ]
+        if any(title != base_titles[0] for title in base_titles[1:]):
+            raise ValueError(
+                "All differentiated QuizForge files must use the same exact unsuffixed base title"
+            )
+        labels = []
+        for variant in variants:
+            metadata = variant["plan"].get("metadata") or {}
+            labels.append(metadata.get("variant") or metadata.get("variant_label"))
+        tags = differentiated_bridge.resolve_public_tags(labels)
+        if any(
+            base_titles[0].casefold().endswith(f" - {row['tag']}".casefold())
+            for row in tags
+        ):
+            raise ValueError(
+                "Differentiated QuizForge titles must be unsuffixed; Canvas Expert appends the public tag"
+            )
+        totals = [
+            variant["plan"].get("quiz_payload", {}).get("quiz", {}).get("points_possible")
+            for variant in variants
+        ]
+        try:
+            numeric_totals = [float(total) for total in totals]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Differentiated QuizForge variants require numeric total points"
+            ) from exc
+        if any(not math.isfinite(total) or total < 0 for total in numeric_totals):
+            raise ValueError(
+                "Differentiated QuizForge variants require numeric total points"
+            )
+        if any(
+            not math.isclose(numeric_totals[0], total, rel_tol=0.0, abs_tol=1e-6)
+            for total in numeric_totals[1:]
+        ):
+            raise ValueError("Differentiated QuizForge variants must have equal total points")
+        group_names = [
+            str((variant["plan"].get("assignment_settings") or {}).get(
+                "assignment_group_name", settings.get("assignment_group_name") or ""
+            )).strip().casefold()
+            for variant in variants
+        ]
+        if len(set(group_names)) != 1:
+            raise ValueError("Differentiated QuizForge variants must use one assignment group")
+        base_title = base_titles[0]
+        settings.update({"due_at": due_at, "module_name": module_name})
+        for variant, resolved in zip(variants, tags):
+            title = differentiated_bridge.source_title(base_title, resolved["tag"])
+            variant.update(resolved)
+            variant["plan"]["title"] = title
+            variant["plan"]["quiz_payload"]["quiz"]["title"] = title
+            assignment_settings = variant["plan"].setdefault("assignment_settings", {})
+            assignment_settings.update({
+                "due_at": due_at,
+                "published": True,
+                "only_visible_to_overrides": True,
+                "omit_from_final_grade": True,
+                "post_to_sis": False,
+            })
+            variant["plan"]["module"] = {}
         return {
             "mode": "differentiated",
             "variants": variants,
             "settings": settings,
+            "base_title": base_title,
+            "due_at": due_at,
+            "module_name": module_name,
+            "bridge_due_at": bridge_due_at,
+            "bridge_description": differentiated_bridge.bridge_description(),
         }
 
     def source_digest(self, payload: dict) -> str:
@@ -133,6 +208,7 @@ class QuizAdapter:
                         "plan": {
                             "version": v["plan"].get("version"),
                             "title": v["plan"].get("title"),
+                            "metadata": v["plan"].get("metadata"),
                             "quiz_payload": v["plan"].get("quiz_payload"),
                             "items": [
                                 {k: item.get(k) for k in ("index", "source_item_id", "source_type", "payload")}
@@ -145,6 +221,11 @@ class QuizAdapter:
                     for v in variants
                 ],
                 "settings": payload.get("settings"),
+                "base_title": payload.get("base_title"),
+                "due_at": payload.get("due_at"),
+                "module_name": payload.get("module_name"),
+                "bridge_due_at": payload.get("bridge_due_at"),
+                "bridge_description": payload.get("bridge_description"),
             })
         plan = payload.get("plan", {})
         return models.sha256_dict({
@@ -245,8 +326,10 @@ class QuizAdapter:
 
         existing_by_title = {}
         existing_by_variant = {}
-        for index, v in enumerate(variants):
-            title = v["plan"].get("title", "")
+        titles = [payload.get("base_title", ""), *[
+            v["plan"].get("title", "") for v in variants
+        ]]
+        for title in titles:
             assignments, error = canvas_client.canvas_get(
                 f"/api/v1/courses/{course_id}/assignments",
                 params={"per_page": 100, "search_term": title},
@@ -259,8 +342,11 @@ class QuizAdapter:
                 if row.get("id") is not None
                 and _normalize(row.get("name")) == _normalize(title)
             ]
-            existing_by_variant[_variant_identity(v, index)] = matches
-            existing_by_title.setdefault(title, matches)
+            existing_by_title[title] = matches
+        for index, v in enumerate(variants):
+            existing_by_variant[_variant_identity(v, index)] = existing_by_title.get(
+                v["plan"].get("title", ""), []
+            )
 
         return {
             "group_snapshot": resolved["safe"],
@@ -283,10 +369,13 @@ class QuizAdapter:
                 known = {
                     str(step.get("returned_object_id"))
                     for step in target.get("steps", [])
-                    if step.get("step_key", "").startswith("create_quiz:")
+                    if (
+                        step.get("step_key", "").startswith("create_quiz:")
+                        or step.get("step_key") == "create_bridge"
+                    )
                     and step.get("returned_object_id") is not None
                 }
-                existing_map = fresh.get("existing_by_variant") or fresh.get("existing_by_title", {})
+                existing_map = fresh.get("existing_by_title", {})
                 for matches in existing_map.values():
                     current = {m["id"] for m in matches}
                     if current - known:
@@ -400,6 +489,8 @@ class QuizAdapter:
                 t = str(item.get("source_type") or "unknown")
                 item_types[t] = item_types.get(t, 0) + 1
             variant_summaries.append({
+                "tier": v.get("tier"),
+                "public_tag": v.get("tag"),
                 "group_name": v["group_name"],
                 "title": plan.get("title"),
                 "item_count": len(items),
@@ -412,10 +503,17 @@ class QuizAdapter:
             "mode": "differentiated",
             "variant_count": len(variants),
             "variants": variant_summaries,
+            "bridge": {
+                "title": payload.get("base_title"),
+                "due_at": payload.get("bridge_due_at"),
+                "module_name": payload.get("module_name"),
+                "post_to_sis": True,
+            },
             "only_visible_to_overrides": True,
             "tier_warning": (
-                "Canvas will create one New Quiz per variant; "
-                "only that group's students can see each quiz."
+                "Canvas will create one color-suffixed New Quiz per tier and one "
+                "unsuffixed bridge in the module. Review them in Canvas Live; "
+                "the teacher initiates SIS sync there."
             ),
         }
 
@@ -512,11 +610,19 @@ def _ordered_steps(target: dict) -> list[dict]:
             "create_override": 2,
             "create_item": 3,
             "patch_assignment": 4,
-            "attach_module": 5,
         }.get(prefix, 9)
         parts = suffix.split(":") if suffix else ["0"]
         variant = int(parts[0]) if parts[0].isdigit() else 0
         item_idx = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        family_rank = {
+            "create_bridge": 100,
+            "create_module": 101,
+            "attach_bridge_module": 102,
+            "activate_bridge": 103,
+            "register_family": 104,
+        }.get(key)
+        if family_rank is not None:
+            return (999999, family_rank, 0)
         return (variant, rank, item_idx)
 
     return sorted(existing.values(), key=step_order)

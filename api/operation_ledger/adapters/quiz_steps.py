@@ -67,10 +67,12 @@ def build_assignment_patch(assignment_settings: dict) -> dict:
         value = assignment_settings.get(key)
         if value:
             patch[key] = str(value).strip()
-    if assignment_settings.get("post_to_sis"):
-        patch["post_to_sis"] = True
-    if assignment_settings.get("published"):
-        patch["published"] = True
+    for key in (
+        "post_to_sis", "published", "only_visible_to_overrides",
+        "omit_from_final_grade",
+    ):
+        if key in assignment_settings:
+            patch[key] = bool(assignment_settings[key])
     assignment_group_name = assignment_settings.get("assignment_group_name")
     if assignment_group_name:
         patch["assignment_group_name"] = str(assignment_group_name).strip()
@@ -479,6 +481,25 @@ def patch_assignment(
             returned_object_url=quiz_url,
             error_code="assignment_verify_failed",
         )
+    for key, expected in patch_data.items():
+        if key == "assignment_group_name":
+            continue
+        actual = verify.get(key)
+        if key == "assignment_group_id":
+            matched = str(actual) == str(expected)
+        else:
+            matched = actual == expected
+        if not matched:
+            patch_step["state"] = "sent_unknown"
+            patch_step["error_code"] = "assignment_verify_failed"
+            patch_step["private_diagnostic"] = f"{key} postcondition mismatch"
+            patch_step = context.checkpoint_step(patch_step)
+            replace_step(steps, patch_step)
+            return build_result(
+                "sent_unknown", steps=steps, returned_object_id=quiz_id,
+                returned_object_url=quiz_url,
+                error_code="assignment_verify_failed",
+            )
     patch_step["state"] = "applied"
     patch_step = context.checkpoint_step(patch_step)
     replace_step(steps, patch_step)

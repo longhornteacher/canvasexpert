@@ -2,42 +2,26 @@
 
 **Origin:** Historical 11d discovery
 
-**Decision date:** 2026-07-12
+**Decision date:** 2026-09-14
 
-**Status:** Implemented architecture reference; the former 11d slices are released.
+**Status:** Implemented architecture reference.
 
 ## Existing live path
 
-The Course Expert Quiz UI calls typed operation-ledger prepare/review/apply through
-`push/core.js::pushContent`. The legacy QuizForge streaming HTTP wrappers
-(`api/webui/routes/push_streaming.py`) were removed in July 2026.
-
-Direct CLI (`qf_pusher.py`, `push_tiers.py`) remains a supported manual teacher path.
-
-`qf_pusher.py` currently:
-
-1. parses the QuizForge envelope, merges rationales, inlines stimulus HTML, and transforms
-   questions locally;
-2. POSTs a New Quiz and retains its returned ID;
-3. POSTs each New Quiz item but discards returned item IDs;
-4. PUTs the underlying assignment settings;
-5. optionally creates/reuses a module and POSTs a module item but discards its ID;
-6. prints a URL/success marker and writes only the quiz ID to `.experiment_state.json`.
-
-`push_tiers.py` then creates ad-hoc assignment overrides and visibility patches, storing
-raw student IDs in manifests and override IDs in the experiment file. This path cannot
-meet write-ahead, exact reconciliation, FERPA minimization, or lost-client guarantees.
+Course Expert and standalone Quiz use the typed `content.quiz` Operation Ledger
+prepare/review/apply path. `qf_pusher.py` remains the local plan and whole-quiz transport owner
+consumed by the adapter. The former `push_tiers.py` direct differentiated CLI is retired; it
+cannot bypass the reviewed family operation.
 
 ## Confirmed Canvas objects
 
-Official Canvas documentation confirms:
+Canvas New Quiz create returns a quiz backed by a Canvas assignment. Item create returns an exact
+item ID and supports exact GET verification. The assignment supports ad-hoc student overrides,
+`only_visible_to_overrides`, `omit_from_final_grade`, and `post_to_sis`. Assignment-type module
+items return an exact ID and can be verified by item ID and content ID.
 
-- New Quiz create: `POST /api/quiz/v1/courses/{course_id}/quizzes`, returning a NewQuiz.
-- New Quiz/item APIs use the assignment-associated quiz ID in the path.
-- Item create returns a QuizItem with its exact `id`; exact GET is available at the same
-  path plus `/{item_id}`.
-- Core assignment overrides accept ad-hoc `student_ids`; exact override GET is available.
-- Module items return an exact ID and can be verified by ID/content ID.
+No separate Stimulus API object is created. QuizForge stimulus HTML is intentionally inlined into
+the question payload before item creation.
 
 Sources:
 
@@ -46,91 +30,67 @@ Sources:
 - <https://developerdocs.instructure.com/services/canvas/resources/assignments>
 - <https://developerdocs.instructure.com/services/canvas/resources/modules>
 
-No separate Stimulus API object is created by the current product: QuizForge stimulus HTML
-is intentionally inlined into the attached question payload before item creation.
-
 ## Locked decisions
 
 ### Planning and subprocess isolation
 
-- Refactor `qf_pusher.py` to expose a pure `build_push_plan(path, settings)` containing
-  normalized title, quiz-create payload, ordered item payloads with source item IDs/types,
-  assignment settings, and module request.
-- Add a CLI JSON-plan mode that performs no Canvas import/call and emits only one JSON
-  document. Preparation invokes this mode through a bounded subprocess and validates the
-  schema/exit status before persisting the normalized plan.
-- The legacy CLI may consume the same pure plan for compatibility, but the Web UI operation
-  adapter never invokes the legacy live-write subprocess.
+- `qf_pusher.py::build_push_plan(path, settings)` produces a local normalized quiz-create
+  payload, ordered item payloads, assignment settings, metadata, and module request.
+- Preparation invokes JSON-plan mode through a bounded subprocess and validates the output before
+  persisting it. The adapter never invokes a legacy live-write subprocess.
+- Whole-class mode keeps one ordinary quiz and preserves its existing publish, module, date,
+  category, and SIS choices.
 
 ### Targets and differentiated identity
 
-- One operation target remains one selected course.
-- Whole mode has one quiz variant. Differentiated mode has ordered variants, each with a
-  source file and a **group name**, never browser-supplied student IDs.
-- For each course, the server resolves group names within that course's teacher-selected
-  Canvas group category using the safe resolver accepted in 11b4. It requires nonempty,
-  nonoverlapping groups with exact active-roster coverage and stores only IDs/counts and
-  membership digests. Raw student IDs remain transient.
-- Existing extra-time configuration is applied in memory to each variant membership,
-  producing one or more ad-hoc override buckets. Only bucket counts/digests and date
-  effects enter frozen review/baseline; raw IDs never persist.
+- One operation target owns one selected course and the complete differentiated family.
+- A family contains two or more ordered QuizForge files. Every file has the same exact trimmed,
+  unsuffixed base title and declares one canonical pedagogical tier in `metadata.variant` or the
+  supported `metadata.variant_label` alias.
+- `Support`, `Core`, `Accelerate`, and `Extend` resolve through `config.get_tier_tags()` to required,
+  unique, trimmed public Canvas tags. The server appends ` - <tag>`; an authored suffix or a
+  differing title is rejected.
+- Selected `group_name` remains separate Canvas membership authority. The server resolves groups
+  in the teacher-selected category and requires nonempty, nonoverlapping exact active-roster
+  coverage. Raw student IDs remain transient.
+- Preparation requires one timezone-aware due timestamp, a selected module, equal New Quiz totals,
+  one assignment group, valid public tags, and no unknown same-title collision.
 
 ### Ordered mutation steps
 
-For each course/variant in source order:
+For each source in request order:
 
-1. `create_quiz:{variant}` — POST New Quiz; checkpoint quiz/assignment ID and URL.
-2. For differentiated variants, `restrict_assignment:{variant}` — PUT the underlying
-   assignment with `only_visible_to_overrides=true` before any possible publish.
-3. `create_override:{variant}:{bucket}` — POST each transient ad-hoc student override and
-   checkpoint its exact ID.
-4. `create_item:{variant}:{item}` — POST each ordered item and checkpoint exact item ID.
-5. `patch_assignment:{variant}` — apply requested dates/category/SIS/publish settings and
-   verify the exact assignment. A rejected requested effect is partial, never a warning
-   reported as success.
-6. `create_module` once per course if needed, then `attach_module:{variant}` for each quiz
-   assignment with exact module-item ID verification.
+1. create the color-suffixed New Quiz and checkpoint its exact quiz/assignment ID;
+2. restrict the assignment before any possible publish;
+3. create and verify every transient group/extra-time override bucket by exact ID;
+4. create and verify every ordered item by exact ID; and
+5. patch and verify the assignment as published, override-only, points-graded, omitted from the
+   final grade, SIS-disabled, and due at the requested timestamp.
 
-Same-title matching never proves success. Before first write, unknown same-title New Quiz
-assignments block. After partial execution, only exact IDs in durable steps are excluded
-from drift. Missing returned IDs or uncertain transport are `sent_unknown`; definitive
-failure after a prior successful step is `partial`; retry verifies exact completed IDs and
-resumes the first unfinished step.
+No source gets a module item. After every source verifies, the shared differentiated-family tail
+creates the unsuffixed bridge in a safe inactive shape, attaches only that exact bridge ID to the
+selected module, activates the bridge, and registers the fully re-verified family. The bridge is
+due at 23:59 on the same source date and UTC offset and carries the runtime Canvas Dashboard link.
 
-### Durable progress
+### Durable progress and recovery
 
-The shipped transport is a **polling progress endpoint**
-(`GET /api/operations/{id}/status`, returning PII-minimized target/step states). The
-originally sketched SSE event-log stream plus `asyncio.to_thread` worker were **not built**:
-there is no SSE endpoint, no bounded event list, and no event-loop threading. Startup ledger
-recovery reconciles claimed/sent-unknown quiz steps by exact IDs and finalizes operation
-status/receipt when all targets become terminal. Authoritative behavior lives in
-`docs/contracts/operation-ledger-contract.md` and `api/operation_ledger/adapters/quiz_*.py`.
+The polling progress endpoint exposes PII-minimized target and step state. Every Canvas send has a
+write-ahead marker and exact-ID postcondition. Same-title matching never proves success. Unknown
+matches block; only checkpointed exact IDs are excluded during retry.
 
-### Browser and compatibility
+An uncertain send is `sent_unknown` and is never repeated by guess. A definitive downstream
+failure is partial and resumes only from exact-ID reconciliation. Retry cannot duplicate quizzes,
+overrides, items, bridge, module, or module item. Registration occurs only after all required live
+postconditions pass.
 
-- `quiz.js` prepares `content.quiz` through the shared selected-target envelope. Whole
-  mode sends one path/settings; differentiated mode sends ordered `{path, group_name}`
-  variants. It sends no course manifest, Canvas URL, group ID, or student ID.
-- Shared review displays server-frozen quiz/item counts, settings, group/count rows, and
-  extra-time bucket counts. Apply polls the operation status endpoint to render step progress.
-- Both Course Expert and standalone Quiz use the same path. Existing live streaming routes
-  become fail-closed compatibility responses (HTTP 410/no write) after migration. Preview
-  remains a no-network planner operation.
-- `qf_pusher.py` and `push_tiers.py` remain explicit manual CLI tools; they are not reachable
-  from a migrated browser live-write control.
+### Browser and teacher workflow
 
-## Slice order
+The browser sends ordered `{path, group_name}` variants and shared delivery settings. It sends no
+Canvas URL, group/category ID, student ID, or pre-suffixed title. Frozen review shows each
+pedagogical tier, public tag, exact source title, group/count facts, common settings, and the
+planned bridge.
 
-1. **11d1 — plan and whole-class adapter:** pure subprocess plan, direct checkpointed
-   quiz/item/settings/module writes, exact reconciliation, registered kind, fake tests.
-   Browser remains on the legacy path until acceptance.
-2. **11d2 — differentiation:** safe group/extra-time resolution and checkpointed override
-   steps. Implemented — two or more ordered variants with group-restricted overrides.
-   Browser still remains legacy.
-3. **11d3 — progress polling endpoint:** `GET /api/operations/{id}/status` returning
-   PII-minimized target/step states. No SSE, no event log, no asyncio threading.
-   Browser polling loop can be wired post-release.
-
-All three slices are released. Browser migration from legacy streaming to the polling
-endpoint is deferred to post-release.
+A teacher request to land the family authorizes the internal reviewed sequence for that exact
+course and family. Results report the created source and bridge URLs and direct the teacher to
+Canvas Live for review and teacher-owned Canvas Grade Sync. The retired differentiated CLI cannot
+perform live writes.

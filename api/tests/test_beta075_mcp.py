@@ -19,7 +19,7 @@ def _explode_live(*_args, **_kwargs):
 def test_live_mcp_schema_matches_versioned_contract():
     from api.mcp_server import server
 
-    assert contract.TOOL_SCHEMA_VERSION == 45
+    assert contract.TOOL_SCHEMA_VERSION == 46
     expected = contract.load_contract()
     live = contract.live_contract(server.mcp)
     assert live == expected
@@ -58,7 +58,8 @@ def test_live_mcp_schema_matches_versioned_contract():
         # 54-tool snapshot. v37 adds the staged-content push pair,
         # preview_content_push and apply_content_push, so a teacher can ask
         # for an authored draft to be landed in Canvas from the chat; v36
-        # stays the immutable 50-tool snapshot.
+        # stays the immutable 50-tool snapshot. v46 removes the SIS-sync
+        # confirmation tool; grade projection never starts Canvas Grade Sync.
     v1 = contract.load_contract(1)
     v2 = contract.load_contract(2)
     assert v1["schema_version"] == 1
@@ -127,7 +128,10 @@ def test_live_mcp_schema_matches_versioned_contract():
     assert len(contract.load_contract(40)["tools"]) == 44
     assert len(contract.load_contract(41)["tools"]) == 46
     assert len(contract.load_contract(42)["tools"]) == 46
-    assert len(live["tools"]) == 45
+    assert len(live["tools"]) == 44
+    assert "confirm_sis_grade_bridge_passback" not in {
+        tool["name"] for tool in live["tools"]
+    }
     v22 = contract.load_contract(22)
     assert v22["schema_version"] == 22
     assert len(v22["tools"]) == 39

@@ -4,152 +4,114 @@ Status: accepted product and safety contract.
 
 ## 1. Purpose and boundary
 
-An SIS grade bridge projects the final grades from one family of mutually exclusive,
-student-differentiated Canvas assignments into one ordinary whole-course Canvas assignment.
-The bridge is the only member of the family that counts toward the Canvas final grade and the
-only member enabled for SIS grade passback. The differentiated source assignments remain the
-student work and evidence surfaces.
+A differentiated AssignmentForge or QuizForge delivery is one Canvas family. The
+color-suffixed assignments are the student work surfaces. One unsuffixed no-submission
+assignment is the bridge shown in the selected module and used as the family gradebook
+column.
 
-CanvasExpert owns the projection and the Canvas writes. It never connects to an SIS directly,
-stores SIS credentials, or treats CanvasMirror as mutation authority. The assistant invokes a
-bounded CanvasExpert tool; CanvasExpert re-reads and validates live Canvas state, applies through
-the Operation Ledger, and asks Canvas to run its configured grade-passback integration.
+CanvasExpert creates and verifies that family in Canvas Live and may later project final
+Canvas scores from the registered source assignments into the registered bridge. The teacher
+reviews the result in Canvas Live and owns Canvas Grade Sync. CanvasExpert never calls an SIS,
+stores SIS credentials, triggers Canvas Grade Sync, or treats CanvasMirror as write authority.
 
-## 2. Family identity and configuration
+## 2. Family identity and registration
 
-A family is course-scoped and has one exact bridge title, an ordered set of exact Canvas source
-assignment IDs, and (after creation) one exact bridge assignment ID. Those IDs, the title, and a
-digest of the last verified bridge state are student-free configuration and may live in the
-synced workspace settings. Raw student IDs, names, grades, statuses, and per-student digests never
-enter that settings record.
+A family is course-scoped and contains one exact unsuffixed title, two or more exact
+color-suffixed source assignment IDs and titles, one exact bridge assignment ID, and a digest
+of the verified bridge structure. This student-free record may live in synced workspace
+settings. It never contains names, student IDs, memberships, submissions, scores, or private
+evidence.
 
-Initial adoption may discover source assignments only by the exact pattern
-`<bridge title> - <non-empty variant label>`. Preparation freezes the exact returned IDs and
-titles. Discovery blocks on an exact bridge-title collision, fewer than two sources, a duplicate
-normalized source title, or any source outside the selected Current course. After successful
-creation, every later run uses the registered IDs; it never rediscovers or retargets by name.
+The differentiated content operation creates the family and writes the registration only
+after it verifies every source, the bridge, and the bridge's exact module item. Later grade
+projection accepts only that registered identity. It never discovers or adopts a family by
+title, creates a bridge, repairs family structure, or changes source or bridge SIS settings.
 
-## 3. Required source invariants
+## 3. Differentiated delivery laws
 
-Before any write, CanvasExpert must prove from live Canvas that:
+The pedagogical tiers remain `Support`, `Core`, `Accelerate`, and `Extend`. Every used tier
+must resolve through the teacher's Settings to a trimmed, nonempty public Canvas tag, and the
+used tags must be unique after case-folding. AssignmentForge resolves the authored
+`tier.label`; QuizForge declares the tier in `metadata.variant` or
+`metadata.variant_label`. The server appends ` - <tag>` to one common exact base title.
 
-- every source is published, graded in points, visible only to overrides, and assigned through
-  either explicit student overrides or exact Canvas Differentiation Tag overrides;
-- all sources have the same points possible, assignment group, and one common effective source
-  due date;
-- no active student is assigned to more than one source;
-- every registered source ID still has its frozen title and belongs to the same course; and
-- a registered bridge ID, when present, still names the exact expected assignment.
+Preparation blocks before a Canvas write unless the family has at least two tiers, a
+timezone-aware due timestamp, a selected module, equal points possible and assignment group,
+and exact nonoverlapping group coverage of active students. Raw group membership is transient.
 
-An active student assigned to no source is a warning and receives no invented bridge score.
-Inactive source assignees are ignored. A student assigned to multiple sources blocks the entire
-operation. A source with `workflow_state=pending_review` is not final even when it has a numeric
-partial score; it is reported and skipped. `unsubmitted` and other ungraded source rows are also
-reported and skipped.
+Every source finishes with its exact color-suffixed title, the requested due timestamp, point
+grading, one exact group override, `published=true`,
+`only_visible_to_overrides=true`, `omit_from_final_grade=true`, and
+`post_to_sis=false`. Sources are never attached to a module.
 
-A Differentiation Tag override is accepted only when it has one `group_id`, the resolved Group
-belongs to the selected course and explicitly returns `non_collaborative=true`, the assignment is
-not a group assignment, and the group's complete paginated membership can be resolved. Its Group
-Category must resolve in the selected course, but Canvas's omission of `non_collaborative` from the
-category response does not override the exact Group-level proof. Collaborative groups, section
-overrides, incomplete membership collections, mixed target kinds within a family, or group/course
-mismatches block preparation. Tag membership IDs and their digest remain private ledger evidence;
-they never enter synced settings or assistant output.
+## 4. Bridge shape
 
-## 4. Bridge shape and grade law
+The bridge finishes with:
 
-The bridge is an ordinary Canvas assignment with:
+- the exact unsuffixed family title, common points possible, and assignment group;
+- a due time of 23:59:00 on the source due date, preserving the source timestamp's UTC offset;
+- `submission_types=["none"]`, point grading, no overrides, and whole-course visibility;
+- `published=true`, `omit_from_final_grade=false`, and `post_to_sis=true`; and
+- neutral instructions that no submission is made there and that students should open the
+  color-suffixed work assigned to them from the runtime-configured Canvas Dashboard link.
 
-- the exact family title, no variant suffix;
-- the common source points possible, assignment group, and due date;
-- `submission_types=["none"]`, point grading, and no assignment overrides;
-- whole-course visibility (`only_visible_to_overrides=false`);
-- a clear student-facing explanation that the bridge is not the real quiz/assignment and exists
-  only to sync the grade, directing students to open the color-tagged version assigned to them
-  from the Canvas Dashboard or To Do list; and
-- final state `published=true`, `omit_from_final_grade=false`, and `post_to_sis=true`.
+Exactly one Assignment-type item in the selected module points to that exact bridge ID. No
+district URL is embedded in source. The bridge's `post_to_sis` flag only enables Canvas's SIS
+Sync setting; it does not authorize or cause CanvasExpert to run a sync.
 
-Every source's final state is `omit_from_final_grade=true` and `post_to_sis=false`. The bridge is
-therefore the sole counted and SIS-synced gradebook item in the family.
+## 5. Ordered creation protocol
 
-For an assigned active student, CanvasExpert copies a final numeric score exactly as points; it
-does not scale percentages. An excused final source becomes excused on the bridge. A source's
-explicit `late_policy_status` may be copied when Canvas accepts that status on the no-submission
-bridge. Submission text, comments, rubric rows, attempts, and New Quiz item scores are never
-copied. A blank or non-final source never becomes zero.
+The reviewed differentiated content operation runs in this order:
 
-## 5. Review and assistant behavior
+1. Revalidate group membership, public tags, title, points and assignment group, due date,
+   module, and same-title collisions.
+2. Create and verify every source in its safe final shape, preserving each exact returned ID.
+3. Create the bridge unpublished, omitted from the final grade, and SIS-disabled, then
+   checkpoint its exact ID.
+4. Resolve or create the selected module and attach only the exact bridge ID.
+5. Activate and verify the bridge's published, counted, SIS-enabled final shape.
+6. Re-read every required postcondition, save the family registration, and re-read that exact
+   registration.
 
-The assistant-facing surface has four specific tools: list configured bridges, preview one
-family, apply the exact preview, and confirm one otherwise-ambiguous passback from explicit
-teacher-observed Canvas Grade Sync evidence. It is not a generic Canvas mutation tool.
+A teacher request to land the family authorizes this complete internal sequence for the named
+course and family. The assistant does not insert another chat approval. It reports the created
+Canvas objects and directs the teacher to Canvas Live for review.
 
-Preview performs live reads inside CanvasExpert and returns only assignment-level facts,
-aggregate counts, warnings, opaque operation/batch identifiers, and the review digest. It never
-returns student names, Canvas/SIS student IDs, or per-student grades. Apply accepts only the
-opaque operation ID, batch ID, and review digest produced by preview. The Operation Ledger
-revalidates live state and refuses drift before the first write.
+## 6. Grade projection law
 
-A teacher may authorize the complete preview/apply cycle in the same request by naming the
-course and family or by explicitly requesting all already-registered bridges. Otherwise the
-assistant summarizes the preview before apply. Any blocking problem always stops regardless of
-preauthorization.
+Projection begins from one exact registered family and re-reads live Canvas state inside the
+token-holding app. It verifies the registered source IDs and titles, their overrides and
+safe source settings, the registered bridge ID, its saved structural digest and locked shape,
+and nonoverlapping active-student membership. Drift or incomplete pagination blocks before a
+write.
 
-Passback confirmation is a narrow recovery action, not an alternative success path. It is allowed
-only when the teacher explicitly reports the exact bridge row's Canvas Grade Sync `Last Sync`
-timestamp, that timestamp is at or after the operation's persisted passback `before_send` marker,
-and the same operation is stopped only at an ambiguous passback outcome. Confirmation records the
-student-free observed timestamp and evidence kind in the private ledger, never resends the Canvas
-request, and resumes only registration/reconciliation. A missing row, blank timestamp, older
-timestamp, approximate title match, or assistant inference cannot confirm passback.
+For an assigned active student, CanvasExpert copies a final numeric score exactly as points.
+An excused final source becomes excused on the bridge. An accepted explicit late-policy status
+may accompany the score. Blank, unsubmitted, pending-review, and otherwise non-final source
+rows are skipped and never become zero. Submission content, comments, rubric rows, attempts,
+New Quiz item scores, and feedback are never copied.
 
-## 6. Ordered write protocol
+Each eligible write is checkpointed and verified at its exact bridge submission coordinate.
+An uncertain send remains `sent_unknown` and is never resent by guess. Successful writes request
+the existing targeted submissions refresh. No structural write or SIS-sync request is part of
+grade projection.
 
-Initial creation uses this order:
+## 7. Review, recovery, and receipts
 
-1. Create the bridge unpublished, excluded from final-grade calculation, and not SIS-enabled;
-   persist its returned ID before continuing.
-2. Publish the bridge while it remains excluded and not SIS-enabled, and verify that exact safe
-   state. Canvas rejects grade writes to an unpublished assignment.
-3. Write and verify every eligible final grade/status to the exact bridge ID.
-4. Patch and verify every source to excluded-from-final-grade and not SIS-enabled.
-5. Patch and verify the bridge to counted and SIS-enabled.
-6. Ask Canvas to post that exact bridge assignment to the configured SIS using the documented
-   `{\"assignments\": [<bridge_id>]}` JSON body.
-7. Persist the student-free registration and the digest of the verified final bridge state.
+The assistant-facing surface lists registered families, previews one exact registered family,
+and applies the unchanged frozen projection. Preview returns aggregate facts, warnings, and
+opaque review coordinates; it never returns a student identity or per-student score. Apply
+accepts only those coordinates and refuses live drift.
 
-An update of an existing registered bridge starts at step 3. If the current bridge-state digest
-differs from the last verified digest, preparation blocks as an external/manual bridge edit;
-CanvasExpert never silently overwrites it. A deliberate repair/adopt workflow is outside this
-contract's first implementation.
-
-Each Canvas call is a separate, write-ahead-checkpointed ledger step. An uncertain bridge-create
-or grade-passback outcome remains `sent_unknown` and is never resent by guess. Exact assignment
-and submission IDs plus exact postconditions are the only reconciliation evidence. A partial
-cutover remains visible in Attention and resumes only unfinished, exactly verifiable steps.
-The one additional passback postcondition is the explicit teacher-observed Canvas Grade Sync proof
-defined in section 5; it converts the unresolved passback step to applied without another outbound
-request.
-
-## 7. Reconciliation and receipts
-
-Successful assignment create/patch work invalidates the course assignment catalog. Successful
-grade writes request the existing targeted per-course submissions refresh. The bridge operation
-does not claim that Canvas and the SIS are transactional: a successful Canvas grade-passback
-request proves that Canvas accepted the request, not that an inaccessible SIS record was read
-back.
-
-Every apply attempt produces the standard private Operation Ledger receipt. Assistant results
-expose only content-free step states, aggregate counts, the bridge assignment ID/URL when known,
-and Canvas's passback acceptance state.
+Exact postconditions are the only recovery evidence. A partial operation remains visible in
+Attention and resumes only from verified exact IDs and pending write-ahead steps. Every apply
+attempt produces the standard private Operation Ledger receipt. Assistant results expose only
+aggregate counts, content-free step states, and the registered bridge reference.
 
 ## 8. Non-goals
 
-- No direct Skyward client or Skyward credential.
-- No name-based retargeting after registration.
-- No percentage scaling, score invention, or copying a `pending_review` score.
-- No generic assistant grade-write tool.
-- No browser automation of the Canvas Grade Sync modal.
-- No automatic bridge creation in Forge authoring flows in this first implementation.
-- No batch transaction across several families; assistants invoke the reviewed pair once per
-  configured family.
+- No Skyward or other SIS client, credential, sync request, polling, or browser automation.
+- No unregistered-family discovery, adoption, migration, structure repair, or title retargeting.
+- No percentage scaling, score invention, rubric/comment copying, or New Quiz item-score copy.
+- No generic assistant grade-write tool or batch transaction across several families.
+- No bridge for whole-class delivery and no student-facing source module items.

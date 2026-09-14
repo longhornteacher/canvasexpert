@@ -24,19 +24,21 @@ These are high-risk Canvas write flows.
 
 - `api/operation_ledger/adapters/assignment_whole.py` — whole-class assignment create,
   printable upload, module attachment, autoscore scheduling, and whole reconcile.
-- `api/operation_ledger/adapters/assignment_tiered.py` — tiered assignment create,
-  override creation, module attachment, autoscore scheduling, and tiered reconcile.
+- `api/operation_ledger/adapters/assignment_tiered.py` — color-suffixed assignment
+  create, override creation, autoscore scheduling, shared family-tail dispatch, and
+  tiered reconcile.
 - `api/operation_ledger/adapters/quiz_whole.py` — whole-class quiz coordinator and reconcile.
 - `api/operation_ledger/adapters/quiz_differentiated.py` — differentiated quiz
-  coordinator, extra-time bucket handling, variant failure-state policy, and reconcile.
+  coordinator, extra-time bucket handling, variant failure-state policy, shared
+  family-tail dispatch, and reconcile.
 - `api/operation_ledger/adapters/quiz_steps.py` — shared quiz write-ahead helpers for
   quiz creation, item creation, assignment restriction, override creation, assignment
   patch verification, and Assignment-type module attachment.
-- `api/operation_ledger/adapters/sis_grade_bridge.py` — exact family discovery,
-  explicit-student or verified Differentiation Tag membership resolution,
-  aggregate review, grade projection, source/bridge cutover, SIS passback,
-  narrow teacher-observed passback confirmation, registration, and
-  ambiguous-outcome reconciliation for `gradebook.sis_bridge`.
+- `api/operation_ledger/adapters/sis_grade_bridge.py` — registered-family exact-ID
+  verification, explicit-student or verified Differentiation Tag membership
+  resolution, aggregate review, grade projection, and ambiguous grade-write
+  reconciliation for `gradebook.sis_bridge`. It owns no family discovery,
+  structure repair, registration, or SIS-sync request.
 
 ## Shared Support
 
@@ -48,6 +50,10 @@ These are high-risk Canvas write flows.
   module find/create/attach behavior for Assignment and Quiz flows only.
 - `api/operation_ledger/adapters/assignment_groups.py` — canonical safe group-resolution
   helper used by tiered assignments and differentiated quizzes.
+- `api/operation_ledger/adapters/differentiated_bridge.py` — one shared owner for
+  public-tag normalization, source/bridge shape verification, end-of-day bridge due
+  time, runtime Dashboard instructions, bridge create/activate, bridge-only module
+  placement, final family verification, and student-free registration.
 
 ## Safety Boundaries
 
@@ -56,6 +62,11 @@ These are high-risk Canvas write flows.
   and the high-risk adapter tests together.
 - Keep Assignment/Page module-item behavior separate. `module_placement.py` is only for
   Canvas Assignment-type module items.
+- Differentiated sources never call module placement. The shared family helper is the
+  only differentiated owner allowed to attach the bridge assignment.
+- Grade projection starts from an exact registered family and may only write eligible
+  final submission scores/statuses to that bridge. It cannot change family structure or
+  trigger Canvas Grade Sync.
 - Preserve facade monkeypatch seams when moving code. Existing tests still patch the
   facade modules rather than every leaf helper.
 - No live Canvas verification belongs here. Use mocked adapter tests only.

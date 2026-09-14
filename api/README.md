@@ -68,9 +68,12 @@ bundled Pandoc through `pypandoc-binary`.
 ### CLI (for automation)
 
 - **Quiz**: `py qf_pusher.py "<quiz.txt>"` → live New Quiz (unpublished)
-- **Tiers** (diff variants): `py push_tiers.py --manifest <manifest.json>`
 - **Validate**: `py validate_qf.py <file.txt>`
 - **New Quizzes diagnostic**: `py diagnose_newquizzes.py --course <id> [--assignment <nq_id>]`
+
+Differentiated live delivery has no direct CLI. Use the reviewed AssignmentForge or
+QuizForge Operation Ledger path so public tags, bridge creation, exact-ID recovery,
+module placement, and registration are one operation.
 
 ## Web UI (recommended for day-to-day use)
 
@@ -116,7 +119,9 @@ local model is unavailable, the affected media evidence remains held. Weights st
 
 Assistant-operated SIS grade bridges are documented in the
 [SIS Grade Bridges guide](../docs/guides/sis-grade-bridges.md). They are separate from the
-Gradebook web UI and use the reviewed Operation Ledger preview/apply/recovery path.
+Gradebook web UI and use the reviewed Operation Ledger preview/apply/recovery path. They
+copy verified Canvas scores only within Canvas Live. The teacher reviews there and owns
+Canvas Grade Sync.
 
 ## What each push does automatically
 
@@ -137,17 +142,27 @@ Gradebook web UI and use the reviewed Operation Ledger preview/apply/recovery pa
   populate the question-level correct/incorrect boxes for MC/MA — the durable
   idea lives in the correct-answer rationale, kept at one layer for simplicity.
 - Embeds a visible **TEKS** label per tagged item + prints a coverage report.
-- **Tier overrides**: one file with tiers → multiple quizzes, each assigned to
-  its group, with `only_visible_to_overrides` so a tier is truly group-only
-  (no leftover "Everyone else" assignee).
+- **Differentiated family**: two or more files with the same unsuffixed base title and
+  canonical `metadata.variant` tier create exact `Base - <configured tag>` quizzes. Each
+  source is published, group-only, omitted from the final grade, and SIS-disabled. One
+  unsuffixed no-submission bridge is attached to the required module and registered only
+  after exact postconditions pass.
 
 ### Assignments (AssignmentForge)
 - Extracts JSON from the `<ASSIGNMENTFORGE_JSON>` envelope.
 - Resolves course-resource placeholders (`{{file:NAME}}`, `{{page:Title}}` per course).
 - Creates assignment(s) with configurable submission types, points, dates, grading category.
-- **Tier overrides**: one file with tiers → multiple assignments, each visible only to
-  its group via an assignment override. Each tier can have its own scaffolding text;
-  the operation review shows safe group counts and one gradebook column per tier.
+- **Differentiated family**: one file with two or more canonical tiers creates exact
+  `Base - <configured tag>` assignments, each visible only to its Canvas group and each
+  able to carry its own scaffolding. Sources are published, omitted from the final grade,
+  SIS-disabled, and absent from modules. The unsuffixed no-submission bridge is the only
+  family item placed in the required module.
+
+Differentiated assignment and quiz delivery requires a timezone-aware due timestamp,
+a module, valid unique public tags in Settings, equal points, and one assignment group.
+The bridge is due at 23:59 on the same date and offset, links to the runtime Canvas
+Dashboard, and finishes published, counted, and SIS-enabled. CanvasExpert does not start
+the teacher's Canvas Grade Sync.
 
 ### Pages (PageForge)
 - Extracts JSON from the `<PAGEFORGE_JSON>` envelope.
@@ -170,7 +185,7 @@ Gradebook web UI and use the reviewed Operation Ledger preview/apply/recovery pa
 | `codefmt.py` | VSCode-style code highlighting (Pygments → inline styles) |
 | `teks.py` | TEKS coverage report + visible labels |
 | `qf_pusher.py` | Driver: envelope → live quiz (points, settings, stimulus, TEKS) |
-| `push_tiers.py` | Differentiation: variants → student groups via assignment overrides (`--manifest`) |
+| `push_tiers.py` | Retired compatibility stub; differentiated writes use the reviewed Forge operation path |
 | `downloader.py` | Submission downloader → canonical `Student Work/Submissions/<course>/Assignments/<assignment>/<student>/Attempt <n>/` tree; no duplicate raw by-student mirror |
 | `validate_qf.py` | QuizForge compliance checker |
 | `qf_ui.py` | Launches the local web UI (see "Web UI" above) |
@@ -210,6 +225,9 @@ ANTHROPIC_KEY=
   For true tier isolation, PATCH the assignment `only_visible_to_overrides: true`
   **after** the override exists — otherwise Canvas keeps an "Everyone else"
   assignee and the whole class can see the tier.
+- The New Quiz assignment shell accepts and reports `omit_from_final_grade` and
+  `post_to_sis`. Differentiated delivery verifies both flags on every exact source and
+  bridge assignment before registration.
 - **`result_view_settings` must explicitly enable feedback — an empty/unset one
   shows the student NOTHING** (confirmed live: rationales stay hidden even after
   manually toggling result viewing on). Canvas only surfaces per-item feedback +
@@ -221,7 +239,8 @@ ANTHROPIC_KEY=
   Canvas's "Hide results" toggle read as ON/customized — there is **no** way to
   show feedback with that toggle fully off. Feedback wins; the toggle label is
   cosmetic.
-- **Publishing** a New Quiz via API is unresolved (returns 400) — publish in the UI.
+- New Quiz create does not own final publish state. The reviewed operation applies and
+  verifies `published` on the backing assignment after items and overrides are safe.
 - **New Quizzes do NOT launch in "Student View" (Test Student).** A correctly
   published New Quiz with items will show the generic *"Oops, something went wrong"*
   page when opened as the Test Student. New Quizzes are an LTI tool

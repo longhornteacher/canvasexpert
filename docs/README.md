@@ -16,7 +16,8 @@ For canonical AI-agent guidance and safety rules, read `../AGENTS.md` first.
 Useful starting references for new debugging and refactor sessions:
 
 - [`docs/guides/sis-grade-bridges.md`](guides/sis-grade-bridges.md) - teacher workflow,
-  privacy boundary, recurring updates, and safe Attention/passback recovery for SIS grade bridges;
+  automatic differentiated family registration, grade projection, privacy boundary,
+  recurring updates, and safe exact-ID Attention recovery for SIS grade bridges;
   the linked contract remains normative.
 - `docs/reference/canvasmirror-1.0beta-information-spine.md` - grand vision, migration order,
   tool-to-Canvas routing, and release gates for making CanvasMirror the default project read

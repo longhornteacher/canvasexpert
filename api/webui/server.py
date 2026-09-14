@@ -8,9 +8,9 @@ covers all of the teacher's courses. The teacher picks which course to target
 from a live dropdown (or from their saved bookmarks) on the dashboard — no
 more separate "profiles" for each class.
 
-Push/dry-run/differentiation still delegate to the existing CLI scripts as
-subprocesses (api/qf_pusher.py, push_tiers.py) with credentials injected via
-environment variables. See runner.py. Push logic is never touched by this UI.
+QuizForge planning and validation may delegate to existing CLI scripts as
+subprocesses with credentials injected via environment variables. Live
+differentiated delivery uses the reviewed Operation Ledger path. See runner.py.
 """
 import os
 import threading

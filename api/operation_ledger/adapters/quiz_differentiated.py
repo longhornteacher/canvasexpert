@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .. import models
 from .adapter_support import as_list, build_result, has_outbound_marker, normalize
-from . import quiz_steps
+from . import differentiated_bridge, quiz_steps
 from api.platform_services import canvas_client, config
 
 
@@ -146,22 +146,21 @@ def execute(
             if result is not None:
                 return result
 
-        module_name = (plan.get("module", {}) or {}).get("module_name")
-        if module_name and quiz_id:
-            result = quiz_steps.attach_module(
-                course_id=course_id,
-                quiz_id=quiz_id,
-                title=title,
-                module_name=module_name,
-                steps=steps,
-                context=context,
-                attach_step_key=f"attach_module:{index}",
-                failure_state=_variant_failure_state(steps),
-            )
-            if result.get("state") != "applied":
-                return result
-
-    return build_result("applied", steps=steps, returned_object_id=last_quiz_id, returned_object_url=last_quiz_url)
+    return differentiated_bridge.execute_family_tail(
+        course_id=course_id,
+        payload=payload,
+        source_ids=[
+            str(next(
+                step for step in steps
+                if step.get("step_key") == f"create_quiz:{index}"
+            ).get("returned_object_id"))
+            for index, _variant in enumerate(variants)
+        ],
+        source_titles=[variant["plan"]["title"] for variant in variants],
+        steps=steps,
+        context=context,
+        failure_state="partial",
+    )
 
 
 def reconcile(payload: dict, target: dict) -> dict:
@@ -170,16 +169,6 @@ def reconcile(payload: dict, target: dict) -> dict:
     stored_steps = {step["step_key"]: step for step in target.get("steps", [])}
     projected = []
     has_marker = has_outbound_marker(list(stored_steps.values()))
-    module_id = None
-
-    create_module_step = stored_steps.get("create_module")
-    if create_module_step and create_module_step.get("returned_object_id"):
-        module_id = create_module_step["returned_object_id"]
-        module, error = canvas_client.canvas_get(f"/api/v1/courses/{course_id}/modules/{module_id}")
-        if error or not module or str(module.get("id")) != str(module_id):
-            return {"state": "sent_unknown", "steps": projected}
-        projected.append({"step_key": "create_module", "state": "applied", "returned_object_id": module_id, "returned_object_url": None, "error_code": None})
-
     for index, variant in enumerate(variants):
         plan = variant["plan"]
         title = plan.get("title", "")
@@ -212,6 +201,29 @@ def reconcile(payload: dict, target: dict) -> dict:
             "error_code": None,
         })
 
+        restrict_key = f"restrict_assignment:{index}"
+        restrict_step = stored_steps.get(restrict_key, models.new_step(restrict_key))
+        if restrict_step.get("state") not in {"applied", "skipped"}:
+            return {"state": "sent_unknown" if has_marker else "pending", "steps": projected}
+        projected.append({"step_key": restrict_key, "state": "applied", "returned_object_id": None, "returned_object_url": None, "error_code": None})
+
+        override_keys = sorted(
+            key for key in stored_steps if key.startswith(f"create_override:{index}:")
+        )
+        if not override_keys:
+            return {"state": "sent_unknown" if has_marker else "pending", "steps": projected}
+        for override_key in override_keys:
+            override_step = stored_steps[override_key]
+            override_id = override_step.get("returned_object_id")
+            if not override_id:
+                return {"state": "sent_unknown" if has_marker else "pending", "steps": projected}
+            override, override_error = canvas_client.canvas_get(
+                f"/api/v1/courses/{course_id}/assignments/{quiz_id}/overrides/{override_id}"
+            )
+            if override_error or not override:
+                return {"state": "sent_unknown", "steps": projected}
+            projected.append({"step_key": override_key, "state": "applied", "returned_object_id": override_id, "returned_object_url": None, "error_code": None})
+
         for item in plan.get("items", []):
             item_key = f"create_item:{index}:{item.get('index', 0)}"
             item_step = stored_steps.get(item_key, models.new_step(item_key))
@@ -225,35 +237,23 @@ def reconcile(payload: dict, target: dict) -> dict:
                 return {"state": "sent_unknown", "steps": projected, "returned_object_id": quiz_id}
             projected.append({"step_key": item_key, "state": "applied", "returned_object_id": item_id, "returned_object_url": None, "error_code": None})
 
-        module_name = (plan.get("module", {}) or {}).get("module_name")
-        if module_name and quiz_id and module_id:
-            attach_key = f"attach_module:{index}"
-            attach_step = stored_steps.get(attach_key, models.new_step(attach_key))
-            attach_item_id = attach_step.get("returned_object_id")
-            if attach_item_id:
-                item, error = canvas_client.canvas_get(f"/api/v1/courses/{course_id}/modules/{module_id}/items/{attach_item_id}")
-                if not error and item:
-                    if str(item.get("type", "")).lower() == "assignment" and str(item.get("content_id")) == str(quiz_id):
-                        projected.append({"step_key": attach_key, "state": "applied", "returned_object_id": attach_item_id, "returned_object_url": None, "error_code": None, "module_id": module_id})
-                        continue
-            items_list, error = canvas_client.canvas_get_all(
-                f"/api/v1/courses/{course_id}/modules/{module_id}/items",
-                {"per_page": 100},
-            )
-            if error:
-                return {"state": "sent_unknown", "steps": projected, "returned_object_id": quiz_id}
-            matches = [
-                item for item in (items_list or [])
-                if str(item.get("type", "")).lower() == "assignment" and str(item.get("content_id")) == str(quiz_id)
-            ]
-            if len(matches) == 1 and matches[0].get("id") is not None:
-                projected.append({"step_key": attach_key, "state": "applied", "returned_object_id": str(matches[0]["id"]), "returned_object_url": None, "error_code": None, "module_id": module_id})
-                continue
-            if attach_step.get("outbound_started_at") or has_marker:
-                return {"state": "sent_unknown", "steps": projected, "returned_object_id": quiz_id}
-            return {"state": "pending", "steps": projected, "returned_object_id": quiz_id}
+        patch_key = f"patch_assignment:{index}"
+        patch_step = stored_steps.get(patch_key, models.new_step(patch_key))
+        if patch_step.get("state") not in {"applied", "skipped"}:
+            return {"state": "sent_unknown" if has_marker else "pending", "steps": projected}
+        projected.append({"step_key": patch_key, "state": "applied", "returned_object_id": None, "returned_object_url": None, "error_code": None})
 
-    return {"state": "applied", "returned_object_id": None, "returned_object_url": None, "steps": projected}
+    return differentiated_bridge.reconcile_family_tail(
+        course_id=course_id,
+        payload=payload,
+        source_ids=[
+            str(stored_steps.get(f"create_quiz:{index}", {}).get("returned_object_id"))
+            for index, _variant in enumerate(variants)
+        ],
+        source_titles=[variant["plan"]["title"] for variant in variants],
+        stored_steps=list(stored_steps.values()),
+        projected=projected,
+    )
 
 
 def _variant_failure_state(steps: list[dict]) -> str:

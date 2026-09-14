@@ -1,103 +1,94 @@
 # AssignmentForge differentiation design
 
 **Origin:** Historical 11b4 discovery
-**Decision date:** 2026-07-12
-**Status:** Implemented design reference; the former 11b4 handoff is archived.
+
+**Decision date:** 2026-09-14
+
+**Status:** Implemented design reference.
 
 ## Existing path and product constraint
 
 `api/webui/af.py::tier_payloads(data)` produces one variant per authored tier with a
-label, Canvas group name, common student-visible title, and a tier-specific description.
-The description may replace the base description or append the authored scaffolding
-panel. Because Canvas assignment overrides cannot vary an assignment description,
-AssignmentForge differentiation requires **one Canvas assignment per tier**.
+pedagogical label, Canvas group name, common base title, and tier-specific description.
+Canvas assignment overrides cannot vary a description, so differentiated AssignmentForge
+delivery requires one real Canvas assignment per tier.
 
-The legacy `api/push_tiers.py` proves the broad Canvas shape for quizzes—create an
-assignment-backed object, create an ad-hoc student override, and set
-`only_visible_to_overrides`—but it is not reusable operation-ledger code. It writes
-student IDs into manifests/state and uses the CLI Canvas client. It must not be called by
-the Assignment adapter.
-
-Canvas officially supports `assignment[only_visible_to_overrides]` on assignment create
-and `assignment_override[student_ids][]` on override create. The latter is the compatible
-shape for ordinary, non-group assignments; `group_id` is not assumed because Canvas
-documents it for group assignments/differentiation-tag configurations. Sources:
-
-- <https://developerdocs.instructure.com/services/canvas/resources/assignments>
-- <https://developerdocs.instructure.com/services/canvas/resources/groups>
+The reviewed `content.assignment` Operation Ledger path owns all live delivery. The former
+`api/push_tiers.py` direct live CLI is retired because it bypassed write-ahead checkpoints,
+stored unsafe identity-bearing state, and could not create the required bridge family.
 
 ## Locked decisions
 
-### State and target ownership
+### State, title, and target ownership
 
-- One `content.assignment` operation remains one target per selected Canvas course.
-- A course target owns ordered tier substeps. Tiers are not separate operations or
-  top-level targets because selection, review, drift, partial truth, and retry are
-  course-scoped.
-- Step keys are stable by authored tier index: `create_tier_assignment:{index}` and
-  `create_tier_override:{index}`. Optional module and Auto-Score dependencies use the
-  same index suffix.
-- The safe receipt/result projection includes step key, state, returned object ID/URL,
-  and error code so every created tier assignment/override remains visible without
-  exposing student IDs.
+- One operation target owns one selected Canvas course and the complete family.
+- `Support`, `Core`, `Accelerate`, and `Extend` remain the pedagogical labels. Each used
+  `tier.label` resolves through `config.get_tier_tags()` to a required, unique, trimmed public
+  Canvas tag.
+- Every source title is the exact authored base title plus ` - <tag>`. The unsuffixed title is
+  reserved for the bridge.
+- Tier step keys remain stable by source order. Shared family steps create the bridge, attach it
+  to the module, activate it, and register the exact family.
+- Safe reviews and results expose labels, public tags, aggregate group counts, and exact created
+  object references without student identities.
 
 ### Group authority and preparation
 
-- Canvas groups are authoritative. The selected group category comes from
-  `config.get_selected_group_category_id(course_id)`, which is teacher-controlled in
-  Roster. The browser does not submit a category or student list.
-- The adapter never creates group sets, groups, or memberships. Missing configuration or
-  groups blocks preparation and directs the teacher to Roster.
-- Each authored `tier.group` must match exactly one group name, case-insensitively, within
-  the selected category. Matching outside that category is forbidden.
-- Preparation reads active student enrollments and accepted group memberships, then
-  blocks unless every referenced group is nonempty, referenced memberships do not
-  overlap, and their union exactly covers the active-student roster.
-- The durable baseline stores category/group IDs, labels/names, counts, and deterministic
-  membership/roster digests only. Raw student IDs and names are never stored in an
-  operation, review, receipt, diagnostic, log, fixture, or repo file.
-- Apply re-fetches transient student IDs, recomputes the safe snapshot, and requires an
-  exact match to the frozen snapshot before the first write. Membership drift blocks.
+- Canvas groups in the teacher-selected group category are authoritative. The browser sends no
+  category ID or student list.
+- Every authored `tier.group` must match exactly one nonempty group in that category. Referenced
+  memberships must not overlap and must cover the active-student roster exactly.
+- Preparation also requires at least two tiers, a timezone-aware due timestamp, a selected
+  module, one common points value, one assignment group, and no unknown same-title collision.
+- Frozen baselines contain only group IDs/names, counts, and deterministic membership and roster
+  digests. Raw student IDs are transient and never enter operations, reviews, receipts, results,
+  logs, fixtures, or source control.
+- Apply re-fetches membership and requires an exact match before the first write.
 
 ### Canvas write order and safety
 
-Each tier assignment is created with `only_visible_to_overrides: true` in the initial POST,
-so a tier with no override stays invisible to students. The exact ordered write steps per
-tier (create assignment, persist ID, create ad-hoc override, module attach, optional
-Auto-Score job) live in `api/operation_ledger/adapters/assignment_tiered.py` — treat that
-adapter as authoritative rather than duplicating the sequence here.
+Each source is created with its color-suffixed title and safe group-only shape. Its exact group
+override is checkpointed and verified. Every source finishes published, visible only to its
+override, omitted from the final grade, SIS-disabled, points-graded, and due at the requested
+timestamp. No source receives a module item.
 
-Printable upload remains supported only when the existing adapter can reuse one confirmed
-file upload safely across all tier descriptions; otherwise preparation must fail closed
-with an explicit unsupported-combination error. Rubric association remains outside 11b4.
+After all sources verify, the shared differentiated-family helper:
+
+1. creates the unsuffixed bridge unpublished, omitted, and SIS-disabled, then checkpoints its ID;
+2. resolves or creates the selected module and attaches only the exact bridge ID;
+3. activates and verifies the bridge as published, counted, whole-course, and SIS-enabled; and
+4. re-verifies the sources, bridge, overrides, and module item before saving and re-reading the
+   student-free family registration.
+
+The bridge is a points-graded no-submission assignment with no overrides. It is due at 23:59 on
+the source due date and offset. Its neutral description links to the runtime Canvas Dashboard
+and directs students to the color-suffixed work assigned to them.
 
 ### Idempotency, drift, and retry
 
-- Same-title matching never proves success and never supplies a returned ID.
-- Before the first write, any pre-existing same-normalized-title assignment blocks the
-  target, preserving the existing whole-class invariant.
-- After partial execution, exact assignment and override IDs from durable steps are the
-  only success proof. Known step IDs are excluded from same-title drift; unknown matches
-  still block.
-- Timeout/disconnect or missing returned IDs are `sent_unknown` and stop downstream work.
-- A definitive failure after any earlier tier step succeeded yields target/operation
-  `partial`. Retry verifies every completed exact ID and resumes the first unfinished
-  step without duplicating assignments, overrides, module items, or queue jobs.
-- Reversal remains unsupported; deleting tier assignments after submissions is not
-  authorized.
+- Same-title matching never proves success or supplies an ID.
+- Before the first write, an unknown matching source or bridge title blocks the target.
+- After a partial execution, only exact IDs from durable steps prove prior success.
+- Timeout, disconnect, or a missing returned ID is `sent_unknown` and stops downstream work.
+- A definitive failure after a successful write is partial. Retry verifies exact completed IDs
+  and resumes the first unfinished step without duplicating assignments, overrides, bridge,
+  module, module item, or Auto-Score work.
+- Registration is the last step and never substitutes for live postcondition verification.
 
-### UI semantics
+### UI and teacher workflow
 
-Server-frozen review shows the selected course, common assignment settings, and every
-tier's label, group name, and student count. It warns that Canvas will create one
-gradebook assignment per tier and that only that group's students can see each assignment.
-No student identity is rendered. Both Course Expert and standalone Assignment use the
-existing shared operation gateway.
+Frozen review shows the course, common settings, each pedagogical label and public tag, exact
+source title, group name, aggregate count, and the planned unsuffixed bridge. A teacher request
+to land the family authorizes the internal prepare/apply sequence for that exact target; the
+assistant does not add another chat approval. Results report the created sources and bridge, then
+direct the teacher to Canvas Live for review and teacher-owned Canvas Grade Sync.
+
+Whole-class AssignmentForge delivery remains one ordinary assignment and preserves its existing
+publish, module, and SIS choices.
 
 ## Explicit exclusions
 
-- No group/group-set/membership creation or mutation.
-- No local roster tier fallback, automatic roster splitting, or client-supplied IDs.
-- No extra-time expansion in this slice; existing extension operations remain separate.
-- No assignment-rubric association or tier deletion/reversal.
-- No live Canvas write without a separately authorized disposable-course matrix.
+- No group, group-set, or membership creation; no local roster fallback or automatic splitting.
+- No percentage scaling, grade invention, comments/rubrics copy, or structural repair/adoption.
+- No source module items, whole-class bridge, reversal, or deletion after submissions.
+- No CanvasExpert SIS-sync request or direct SIS integration.

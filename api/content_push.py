@@ -616,8 +616,11 @@ def _result_projection(operation: dict, result: dict) -> dict:
     from a push they asked for in chat.
     """
     targets = []
-    differentiated = (operation.get("normalized_payload") or {}).get("mode") == "differentiated"
-    variants = (operation.get("normalized_payload") or {}).get("variants") or []
+    normalized = operation.get("normalized_payload") or {}
+    differentiated = (
+        normalized.get("mode") == "differentiated" or bool(normalized.get("tiers"))
+    )
+    variants = normalized.get("variants") or normalized.get("tiers") or []
     for target_index, target in enumerate(result.get("target_results") or []):
         row = {"state": target.get("state")}
         if target.get("returned_object_url"):
@@ -641,17 +644,31 @@ def _result_projection(operation: dict, result: dict) -> dict:
             row["unfinished_steps"] = steps
         if differentiated:
             created = []
+            create_prefix = (
+                "create_quiz" if normalized.get("mode") == "differentiated"
+                else "create_tier_assignment"
+            )
             for index, variant in enumerate(variants):
                 step = next((step for step in step_source
-                             if step.get("step_key") == f"create_quiz:{index}"
+                             if step.get("step_key") == f"{create_prefix}:{index}"
                              and step.get("state") in ("applied", "skipped")
                              and step.get("returned_object_url")), None)
                 if step:
-                    created.append({"group_name": variant.get("group_name"),
-                                    "title": (variant.get("plan") or {}).get("title"),
+                    created.append({"group_name": (variant.get("group_name")
+                                                   or variant.get("group")),
+                                    "title": ((variant.get("plan") or {}).get("title")
+                                              or variant.get("title")),
                                     "url": step["returned_object_url"]})
             if created:
                 row["created"] = created
+            bridge_step = next((step for step in step_source
+                                if step.get("step_key") == "create_bridge"
+                                and step.get("returned_object_id")), None)
+            if bridge_step:
+                row["bridge"] = {
+                    "title": normalized.get("base_title"),
+                    "url": bridge_step.get("returned_object_url"),
+                }
         targets.append(row)
 
     return {

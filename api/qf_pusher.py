@@ -196,6 +196,7 @@ def build_push_plan(path, settings=None):
     return {
         "version": 1,
         "title": title,
+        "metadata": data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
         "source_path": str(path),
         "quiz_payload": {"quiz": {
             "title": title,

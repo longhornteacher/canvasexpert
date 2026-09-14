@@ -139,6 +139,20 @@ def test_scoring_session_flow_is_assignment_type_neutral(text):
     assert "never ask the teacher to choose a scoring transport" in lowered
 
 
+def test_connected_guidance_describes_differentiated_family_ownership(text):
+    lowered = text.lower()
+    for phrase in (
+        "public color tags",
+        "unsuffixed no-submission bridge",
+        "only the bridge in the selected module",
+        "canvas live",
+        "teacher-owned canvas grade sync",
+    ):
+        assert phrase in lowered
+    assert "confirm_sis_grade_bridge_passback" not in text
+    assert "post_grades" not in text
+
+
 def test_mcp_server_instructions_cover_unscoped_scoring_discovery_and_held_work():
     from api.mcp_server import server
 

@@ -211,7 +211,7 @@ def _split_for_extra_time(course_id, student_ids, base_due_iso, base_lock_iso=No
 
 
 def _expand_variants_extra_time(course_id, entries, settings):
-    """Bake per-student extra-time overrides into a push_tiers manifest.
+    """Bake per-student extra-time overrides into a differentiated plan.
 
     A tier whose extra-time split fails closed (see _split_for_extra_time)
     keeps its whole-group override and carries an explicit "extra_time_error"

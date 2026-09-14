@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .. import models
 from .adapter_support import build_result, ensure_step, find_step
-from .module_placement import attach_assignment_type_module_item
+from . import differentiated_bridge
 from api.platform_services import canvas_client
 
 
@@ -51,8 +51,10 @@ def execute(
         elif assignment_step.get("outbound_started_at"):
             return build_result("sent_unknown", steps=steps, error_code="assignment_creation_unresolved")
         else:
-            assignment_data = _assignment_data(payload, tier["description"], course_id, find_assignment_group)
-            assignment_data["only_visible_to_overrides"] = True
+            assignment_data = _assignment_data(
+                payload, tier["title"], tier["description"], course_id,
+                find_assignment_group,
+            )
             request = {"assignment": assignment_data}
             path = f"/api/v1/courses/{course_id}/assignments"
             marked = context.before_send(
@@ -141,40 +143,24 @@ def execute(
             marked = context.checkpoint_step(marked, returned_object_id=override_id)
             _replace_local_step(steps, marked)
 
-        if payload.get("module_name"):
-            result = attach_assignment_type_module_item(
-                course_id=course_id,
-                content_id=assignment_id,
-                title=payload["name"],
-                module_name=payload["module_name"],
-                steps=steps,
-                context=context,
-                attach_step_key=f"attach_module:{index}",
-                returned_object_id=assignment_id,
-                deterministic_failure_state="failed",
-                read_modules=read_modules,
-            )
-            if result.get("state") != "applied":
-                if result.get("state") == "failed":
-                    result["state"] = "partial"
-                return result
-
-    return build_result("applied", steps=steps, returned_object_id=None, returned_object_url=None)
+    return differentiated_bridge.execute_family_tail(
+        course_id=course_id,
+        payload=payload,
+        source_ids=[
+            str(find_step(steps, f"create_tier_assignment:{index}").get("returned_object_id"))
+            for index, _tier in enumerate(tiers)
+        ],
+        source_titles=[tier["title"] for tier in tiers],
+        steps=steps,
+        context=context,
+        failure_state="partial",
+    )
 
 
 def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
     course_id = target["course_id"]
     stored_steps = ordered_steps(target)
     projected = []
-    module_step = find_step(stored_steps, "create_module")
-    module_id = module_step.get("returned_object_id")
-
-    if payload.get("module_name") and module_id:
-        module, error = canvas_client.canvas_get(f"/api/v1/courses/{course_id}/modules/{module_id}")
-        if error or not module or str(module.get("id")) != str(module_id):
-            return _tier_reconcile_result("sent_unknown", projected)
-        projected.append(_applied_safe_step(module_step))
-
     for index, _tier in enumerate(payload.get("tiers") or []):
         assignment_step = find_step(stored_steps, f"create_tier_assignment:{index}")
         assignment_id = assignment_step.get("returned_object_id")
@@ -198,26 +184,19 @@ def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
             return _tier_reconcile_result("sent_unknown", projected)
         projected.append(_applied_safe_step(override_step))
 
-        if payload.get("module_name"):
-            attach_step = find_step(stored_steps, f"attach_module:{index}")
-            item_id = attach_step.get("returned_object_id")
-            step_module_id = attach_step.get("module_id") or module_id
-            if not item_id or not step_module_id:
-                return _tier_reconcile_unfinished(attach_step, projected)
-            item, error = canvas_client.canvas_get(
-                f"/api/v1/courses/{course_id}/modules/{step_module_id}/items/{item_id}"
-            )
-            if (
-                error
-                or not item
-                or str(item.get("id")) != str(item_id)
-                or str(item.get("type", "")).casefold() != "assignment"
-                or str(item.get("content_id")) != str(assignment_id)
-            ):
-                return _tier_reconcile_result("sent_unknown", projected)
-            projected.append(_applied_safe_step(attach_step))
-
-    return _tier_reconcile_result("applied", projected)
+    return differentiated_bridge.reconcile_family_tail(
+        course_id=course_id,
+        payload=payload,
+        source_ids=[
+            str(find_step(stored_steps, f"create_tier_assignment:{index}").get(
+                "returned_object_id"
+            ))
+            for index, _tier in enumerate(payload.get("tiers") or [])
+        ],
+        source_titles=[tier["title"] for tier in payload.get("tiers") or []],
+        stored_steps=stored_steps,
+        projected=projected,
+    )
 
 
 def _tier_reconcile_unfinished(step: dict, projected: list[dict]) -> dict:
@@ -244,10 +223,18 @@ def _applied_safe_step(step: dict, returned_object_url=None) -> dict:
     }
 
 
-def _assignment_data(payload: dict, description: str, course_id: str, find_assignment_group) -> dict:
+def _assignment_data(
+    payload: dict, title: str, description: str, course_id: str,
+    find_assignment_group,
+) -> dict:
     data = {
-        "name": payload.get("name", "Untitled assignment"),
+        "name": title,
         "submission_types": payload.get("submission_types", ["online_text_entry"]),
+        "grading_type": "points",
+        "only_visible_to_overrides": True,
+        "omit_from_final_grade": True,
+        "post_to_sis": False,
+        "published": True,
     }
     if description:
         data["description"] = description
@@ -259,10 +246,6 @@ def _assignment_data(payload: dict, description: str, course_id: str, find_assig
     for key in ("due_at", "unlock_at", "lock_at"):
         if payload.get(key):
             data[key] = payload[key]
-    if payload.get("post_to_sis"):
-        data["post_to_sis"] = True
-    if payload.get("published"):
-        data["published"] = True
     assignment_group_name = payload.get("assignment_group_name")
     if assignment_group_name:
         group_id = find_assignment_group(course_id, assignment_group_name)

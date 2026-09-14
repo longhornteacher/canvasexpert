@@ -24,13 +24,6 @@ def test_plain_tools_delegate_to_shared_use_case(monkeypatch):
             "ok": True, "coordinates": [operation_id, batch_id, digest]
         },
     )
-    monkeypatch.setattr(
-        tools.sis_grade_bridge, "confirm_sis_grade_bridge_passback",
-        lambda operation_id, observed_at: {
-            "ok": True, "evidence": [operation_id, observed_at]
-        },
-    )
-
     assert tools.list_sis_grade_bridges("course-x")["course_id"] == "course-x"
     preview = tools.preview_sis_grade_bridge("course-x", "Invented")
     assert preview["title"] == "Invented"
@@ -38,9 +31,6 @@ def test_plain_tools_delegate_to_shared_use_case(monkeypatch):
     assert tools.apply_sis_grade_bridge("op", "batch", "digest")["coordinates"] == [
         "op", "batch", "digest"
     ]
-    assert tools.confirm_sis_grade_bridge_passback(
-        "op", "2030-01-02T03:04:05-06:00"
-    )["evidence"] == ["op", "2030-01-02T03:04:05-06:00"]
 
 
 def test_mcp_preview_output_never_projects_private_student_rows(
@@ -114,16 +104,6 @@ def test_server_instructions_lock_one_command_preauthorization():
     assert "only its named target and course" in instructions
 
 
-def test_passback_evidence_rule_rides_with_its_own_tool():
-    """The evidence rule lives on the tool, not in the always-loaded block: it
-    only matters once a passback is actually ambiguous, and the block is paid
-    for on every request."""
-    tool = server.mcp._tool_manager._tools["confirm_sis_grade_bridge_passback"]
-    # The docstring is hard-wrapped, so compare on collapsed whitespace.
-    description = " ".join((tool.description or "").split())
-
-    assert "Canvas Grade Sync row" in description
-    assert "at or after the persisted" in description
-    assert "Do not infer" in description
-    assert "do not resend passback while confirming" in description
-    assert "Grade Sync row" not in server._SERVER_INSTRUCTIONS
+def test_no_current_tool_can_confirm_or_trigger_sis_sync():
+    assert "confirm_sis_grade_bridge_passback" not in server.mcp._tool_manager._tools
+    assert all("post_grades" not in name for name in server.mcp._tool_manager._tools)

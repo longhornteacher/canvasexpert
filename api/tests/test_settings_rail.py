@@ -88,3 +88,16 @@ def test_unlinked_panels_sit_next_to_the_panel_that_covers_them():
             f"{panel_id} is {gap} panels away from {covering_id}, so keeping "
             "the highlight on it would be misleading"
         )
+
+
+def test_differentiation_tag_copy_matches_family_delivery():
+    source = SETTINGS.read_text(encoding="utf-8")
+    for phrase in (
+        "required when used",
+        "appends",
+        "no-submission bridge",
+        "only family item in the selected module",
+        "Canvas Live",
+        "Canvas Grade Sync",
+    ):
+        assert phrase in source

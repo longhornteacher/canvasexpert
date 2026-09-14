@@ -1,4 +1,4 @@
-"""Run the existing qf_pusher / push_tiers / validate_qf CLI scripts as
+"""Run the existing qf_pusher / validate_qf CLI scripts as
 subprocesses, with per-request Canvas credentials injected via the
 environment. canvas.py calls `load_dotenv()` (which never overrides vars
 already present in the environment), so setting CANVAS_BASE / COURSE_ID /

@@ -79,10 +79,10 @@ contract and test entries have been removed.
 grades/statuses to the whole-course bridge, verifies each write, then invokes
 `mirror_service.notify_course_changed` once for the course. Pending-review,
 unsubmitted, uncovered, and inactive rows never become scores.
-An ambiguous passback can become applied only from the narrow teacher-observed
-Canvas Grade Sync timestamp evidence defined by the bridge contract. That local
-ledger transition never sends another Canvas request; the resumed operation
-performs registration and then uses the same central catalog invalidation hook.
+It starts only from the exact family registered by differentiated content
+delivery and performs no structure repair, registration, or SIS-sync request.
+An ambiguous grade write is reconciled only from its exact bridge-submission
+postcondition and is never resent by guess.
 
 ### 2. Assignment/Quiz/Module/Page structure (`catalog.assignments`, `catalog.modules`, `catalog.pages`, `new_quiz.metadata`)
 
@@ -236,10 +236,10 @@ Canvas content — spine 14.3 explicitly protects the report-create call as a
   `api/canvas.py request`): the shared low-level HTTP call each owner above
   ultimately runs through. Classified `generic_transport_internal` rather
   than silently excluded, per the brief's requirement.
-- **Sandbox/demo CLI scripts** (`api/qf_pusher.py`, `api/push_tiers.py`, both
-  routed through `api/canvas.py`): these are standalone experimental tools
+- **Sandbox/demo CLI script** (`api/qf_pusher.py`, routed through `api/canvas.py`):
+  this is a standalone experimental tool
   with zero CanvasMirror or operation-ledger integration — reconciliation
-  `n/a` because no reconciliation concept applies to them, not because
+  `n/a` because no reconciliation concept applies to it, not because
   reconciliation was skipped.
 
 ## Batch 7 seeds (named gaps, in priority order)

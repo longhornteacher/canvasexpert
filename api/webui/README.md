@@ -294,8 +294,9 @@ The Quiz tab also links the standalone QuizForge app for QTI-ZIP manual import.
 ### Quiz tab
 **Whole class:** pick a QuizForge file, then **Validate**, **Dry-run preview** (no
 live calls), or **Push live quiz…** (confirmation → streamed log).
-**Differentiated:** a quiz file per Canvas group, pushed as overrides via
-`push_tiers.py`; fans out to every checked course, groups matched by name.
+**Differentiated:** a quiz file per Canvas group, delivered through the reviewed
+Operation Ledger family path. Settings supplies public title tags; only the
+unsuffixed no-submission bridge is attached to the selected module.
 Delivery options: due / unlock / lock dates, grading category, add-to-module
 (or create one), shuffle answers/questions, SIS sync, publish, hide results,
 access code, multiple attempts (+ cooldown, score-to-keep, build-on-last), time
@@ -449,14 +450,12 @@ modules, assignments, Canvas quick-links, download folder path.
 
 ## Under the hood
 
-Quiz pushes delegate to the existing CLI scripts as subprocesses with credentials
-injected via environment variables (`QF_PUSH_SETTINGS` carries assignment settings as
-JSON) and stream progress over SSE. Assignment evidence refreshes are focused reads
-used by the private Scoring Session packet builder.
+Quiz planning may delegate to the existing CLI helpers as a subprocess. Live writes
+run through the Operation Ledger adapters. Assignment evidence refreshes are focused
+reads used by the private Scoring Session packet builder.
 Assignment / page / rubric / quick-assignment creation plus gradebook and
 course-info reads are direct Canvas REST calls through split Web UI routes
-(`/api/gradebook`, `/api/course-detail`). The push logic itself
-(`qf_pusher.py` / `push_tiers.py`) is never modified by the UI.
+(`/api/gradebook`, `/api/course-detail`).
 
 Push routes are split by role: `routes/push.py` keeps the shared router, Canvas
 module/group lookup, and generic content push; `routes/push_validation.py` owns

@@ -9,7 +9,7 @@ Excluded from this adapter:
 import requests
 
 from .. import models
-from . import assignment_tiered, assignment_whole
+from . import assignment_tiered, assignment_whole, differentiated_bridge
 from .adapter_support import (
     as_list as _as_list,
     build_result as _build_result,
@@ -50,7 +50,6 @@ class AssignmentAdapter:
         tiers = [] if not data.get("tiers") else [{
             "label": str(row.get("label") or "").strip(),
             "group": str(row.get("group") or "").strip(),
-            "title": str(row.get("title") or "").strip(),
             "description": str(row.get("description") or ""),
         } for row in tier_rows]
         normalized_groups = [_normalize(row["group"]) for row in tiers]
@@ -60,6 +59,22 @@ class AssignmentAdapter:
             raise ValueError("Rubric association is not supported for tiered assignments")
         if tiers and prepare_request.get("printable_path"):
             raise ValueError("Printable attachments are not supported for tiered assignments")
+
+        if tiers:
+            tags = differentiated_bridge.resolve_public_tags(
+                [row["label"] for row in tiers]
+            )
+            due_at, module_name, bridge_due_at = (
+                differentiated_bridge.require_family_delivery(
+                    prepare_request.get("due_at"), prepare_request.get("module_name")
+                )
+            )
+            base_title = differentiated_bridge.normalize_base_title(name)
+            for row, resolved in zip(tiers, tags):
+                row.update(resolved)
+                row["title"] = differentiated_bridge.source_title(
+                    base_title, resolved["tag"]
+                )
 
         description = str(data.get("description") or "")
         if af.PLACEHOLDER_RE.search(description):
@@ -87,6 +102,13 @@ class AssignmentAdapter:
         }
         if tiers:
             payload["tiers"] = tiers
+            payload.update({
+                "base_title": base_title,
+                "due_at": due_at,
+                "module_name": module_name,
+                "bridge_due_at": bridge_due_at,
+                "bridge_description": differentiated_bridge.bridge_description(),
+            })
         if sub_fields.get("allowed_extensions"):
             payload["allowed_extensions"] = sub_fields["allowed_extensions"]
         if sub_fields.get("external_tool_tag_attributes"):
@@ -94,7 +116,7 @@ class AssignmentAdapter:
 
         for key in ("due_at", "unlock_at", "lock_at"):
             val = prepare_request.get(key)
-            if val:
+            if val and not (tiers and key == "due_at"):
                 payload[key] = str(val).strip()
 
         ag_name = prepare_request.get("assignment_group_name")
@@ -111,7 +133,7 @@ class AssignmentAdapter:
 
         # Module placement
         mod_name = prepare_request.get("module_name")
-        if mod_name:
+        if mod_name and not tiers:
             payload["module_name"] = str(mod_name).strip()
 
         return payload
@@ -131,6 +153,9 @@ class AssignmentAdapter:
             "printable_path": payload.get("printable_path"),
             "module_name": payload.get("module_name"),
             "tiers": payload.get("tiers"),
+            "base_title": payload.get("base_title"),
+            "bridge_due_at": payload.get("bridge_due_at"),
+            "bridge_description": payload.get("bridge_description"),
         }
         return models.sha256_dict(keys)
 
@@ -175,18 +200,22 @@ class AssignmentAdapter:
                 groups = resolve_assignment_groups(course_id, payload["tiers"])
             except GroupResolutionError as exc:
                 return {"canvas_error": str(exc)}
-            assignments, error = canvas_client.canvas_get_all(
-                f"/api/v1/courses/{course_id}/assignments",
-                {"per_page": 100, "search_term": name},
-            )
-            if error:
-                return {"canvas_error": "Canvas assignments could not be read."}
-            matches = [
-                {"id": str(row.get("id")), "html_url": row.get("html_url")}
-                for row in (assignments or [])
-                if row.get("id") is not None
-                and _normalize(row.get("name")) == _normalize(name)
-            ]
+            matches = []
+            for title in [payload["base_title"], *[
+                row["title"] for row in payload["tiers"]
+            ]]:
+                assignments, error = canvas_client.canvas_get_all(
+                    f"/api/v1/courses/{course_id}/assignments",
+                    {"per_page": 100, "search_term": title},
+                )
+                if error:
+                    return {"canvas_error": "Canvas assignments could not be read."}
+                matches.extend({
+                    "id": str(row.get("id")),
+                    "name": str(row.get("name") or ""),
+                    "html_url": row.get("html_url"),
+                } for row in (assignments or []) if row.get("id") is not None
+                    and _normalize(row.get("name")) == _normalize(title))
             return {"group_snapshot": groups["safe"], "existing_assignments": matches}
 
         baseline = {"existing_assignment": None}
@@ -221,7 +250,10 @@ class AssignmentAdapter:
             known = {
                 str(step.get("returned_object_id"))
                 for step in target.get("steps", [])
-                if str(step.get("step_key", "")).startswith("create_tier_assignment:")
+                if (
+                    str(step.get("step_key", "")).startswith("create_tier_assignment:")
+                    or step.get("step_key") == "create_bridge"
+                )
                 and step.get("returned_object_id") is not None
             }
             current = {row["id"] for row in fresh.get("existing_assignments", [])}
@@ -282,13 +314,22 @@ class AssignmentAdapter:
                 "tier_count": len(payload["tiers"]),
                 "tiers": [{
                     "label": row.get("label"),
+                    "public_tag": payload["tiers"][row.get("index", 0)].get("tag"),
                     "group": row.get("group_name"),
                     "student_count": row.get("student_count"),
+                    "source_title": payload["tiers"][row.get("index", 0)].get("title"),
                 } for row in safe.get("tiers", [])],
+                "bridge": {
+                    "title": payload.get("base_title"),
+                    "due_at": payload.get("bridge_due_at"),
+                    "module_name": payload.get("module_name"),
+                    "post_to_sis": True,
+                },
                 "only_visible_to_overrides": True,
                 "tier_warning": (
-                    "Canvas will create one assignment/gradebook column per tier; "
-                    "only that group's students can see each assignment."
+                    "Canvas will create one color-suffixed assignment per tier and "
+                    "one unsuffixed bridge in the module. Review them in Canvas Live; "
+                    "the teacher initiates SIS sync there."
                 ),
             })
             review["baseline_has_existing"] = bool(baseline.get("existing_assignments"))
@@ -423,10 +464,22 @@ def _ordered_steps(target: dict) -> list[dict]:
             rank = {
                 "create_tier_assignment": 0,
                 "create_tier_override": 1,
-                "attach_module": 2,
             }.get(prefix, 9)
             return (int(suffix) if suffix.isdigit() else 999999, rank)
-        return sorted(existing.values(), key=tier_order)
+        family_order = {
+            "create_bridge": 1000000,
+            "create_module": 1000001,
+            "attach_bridge_module": 1000002,
+            "activate_bridge": 1000003,
+            "register_family": 1000004,
+        }
+        return sorted(
+            existing.values(),
+            key=lambda step: (
+                family_order.get(str(step.get("step_key") or ""), -1),
+                tier_order(step),
+            ) if str(step.get("step_key") or "") in family_order else (0, tier_order(step)),
+        )
     order = ("create_assignment", "create_module", "attach_module")
     return [existing[key] for key in order if key in existing]
 

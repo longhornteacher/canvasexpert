@@ -1,7 +1,7 @@
 """Launch the local Canvas Expert web UI.
 
-Starts a local server (default http://127.0.0.1:8765) wrapping qf_pusher /
-push_tiers / validate_qf behind a browser UI — no terminal commands, no
+Starts a local server (default http://127.0.0.1:8765) wrapping Forge validation,
+planning, and reviewed Operation Ledger delivery behind a browser UI — no terminal commands, no
 remembering tokens or course IDs (see api/webui/ for the implementation,
 api/README.md for the walkthrough).
 

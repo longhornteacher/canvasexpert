@@ -251,15 +251,6 @@ def apply_sis_grade_bridge(
     )
 
 
-def confirm_sis_grade_bridge_passback(
-    operation_id: str, observed_last_sync_at: str,
-) -> dict:
-    """Confirm one unresolved passback from explicit teacher-observed evidence."""
-    return sis_grade_bridge.confirm_sis_grade_bridge_passback(
-        operation_id, observed_last_sync_at
-    )
-
-
 def _truncate_text(text: str, max_chars: int) -> str:
     """Trim with an explicit marker so the client knows to re-request the
     full text (max_text_chars=0) instead of assuming it saw everything."""
@@ -1138,7 +1129,6 @@ _TOOL_GROUPS = {
         "list_sis_grade_bridges",
         "preview_sis_grade_bridge",
         "apply_sis_grade_bridge",
-        "confirm_sis_grade_bridge_passback",
     ),
     "Learning Objectives": (
         "list_learning_objectives",

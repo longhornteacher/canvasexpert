@@ -88,7 +88,9 @@ Expert loads that bundle first, then the shared push cards, then the page-specif
 - Course Expert uses typed operation preparation and review as the sole browser live-write path for quizzes.
   The legacy QuizForge streaming HTTP wrappers (`/api/push/stream`, `/api/push-multi-whole/stream`,
   `/api/push-variants/stream`, `/api/push-multi/stream`) were removed in July 2026.
-  Direct CLI (`qf_pusher.py`, `push_tiers.py`) remains a supported manual path.
+  `qf_pusher.py` remains a whole-quiz/planning owner. The unsafe differentiated
+  `push_tiers.py` live CLI is retired; differentiated writes must use the reviewed
+  Operation Ledger family path.
 - Assignment/Page/Rubric printable path ownership lives in `api/operation_ledger/adapters/assignment.py`.
 
 ## First Places To Look By Symptom
@@ -103,6 +105,9 @@ Expert loads that bundle first, then the shared push cards, then the page-specif
 - QuizForge validate/preview: `push/quiz.js`, `routes/push_validation.py`
 - QuizForge prepare/review/apply/progress: `push/quiz.js`, `push/core.js`,
   `routes/operations.py`, `operation_ledger/adapters/quiz.py`
+- Differentiated public suffix, bridge, bridge-only module placement, and family
+  registration: `operation_ledger/adapters/differentiated_bridge.py`, reached through
+  the assignment or quiz adapter
 - Assignment/Page/Rubric card behavior: matching `push/*.js`,
   `routes/push_validation.py`
 - file paste/upload issues: `push/file_sources.js`, `routes/push_validation.py`
@@ -120,3 +125,7 @@ as part of UI or routing work. Preserve DOM ids, `_push_common_scripts.html` loa
 legacy globals (`window.CE_PUSH`, `localToISO`, `pushContent`, `targetCourses`,
 `initFileSource`, `copySkill`) unless all legacy pages and feature scripts are
 updated in the same change.
+
+Differentiated delivery requires Settings-backed public tags, a timezone-aware due
+timestamp, and a module. Only the unsuffixed bridge is module-visible. The teacher reviews
+the completed family in Canvas Live and owns Canvas Grade Sync.

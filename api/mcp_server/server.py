@@ -120,18 +120,6 @@ def apply_sis_grade_bridge(
 
 
 @mcp.tool(structured_output=False)
-def confirm_sis_grade_bridge_passback(
-    operation_id: str, observed_last_sync_at: str,
-) -> str:
-    """Confirm one ambiguous SIS passback from exact teacher-observed evidence.
-    Use only the teacher-observed Canvas Grade Sync row's Last Sync timestamp at or
-    after the persisted request marker. Do not infer the timestamp, and do not
-    resend passback while confirming."""
-    return _compact(tools.confirm_sis_grade_bridge_passback(
-        operation_id, observed_last_sync_at
-    ))
-
-
 @mcp.tool(structured_output=False)
 def list_sections(course_id: str) -> str:
     """List a saved course's section names from the local mirror. No student data."""

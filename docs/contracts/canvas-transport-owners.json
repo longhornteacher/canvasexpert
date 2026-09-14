@@ -38,48 +38,37 @@
   "allowed_reconciliation_states": ["targeted", "invalidate", "none", "n/a"],
   "owners": [
     {
-      "path": "api/operation_ledger/adapters/sis_grade_bridge.py",
-      "symbol": "SisGradeBridgeAdapter.execute",
+      "path": "api/operation_ledger/adapters/differentiated_bridge.py",
+      "symbol": "execute_family_tail",
       "detector": "attr:_canvas_send",
       "call_index": 1,
-      "call_form": "canvas_client._canvas_send(\"POST\", <course_assignments_path>, request) [create SIS bridge]",
+      "call_form": "canvas_client._canvas_send(\"POST\", <course_assignments_path>, request) [create differentiated-family bridge]",
       "classification": "canvas_mutation",
       "scopes": ["catalog.assignments"],
       "reconciliation": "invalidate",
-      "reason": "Creates the reviewed whole-course bridge assignment. The central operation-ledger post-apply hook invalidates catalog.assignments after the complete bridge operation succeeds."
+      "reason": "Creates the unpublished, omitted, SIS-disabled bridge after every exact differentiated source is verified. The central operation-ledger post-apply hook invalidates catalog.assignments after the complete content operation succeeds."
+    },
+    {
+      "path": "api/operation_ledger/adapters/differentiated_bridge.py",
+      "symbol": "execute_family_tail",
+      "detector": "attr:_canvas_send",
+      "call_index": 2,
+      "call_form": "canvas_client._canvas_send(\"PUT\", <bridge_assignment_path>, request) [activate differentiated-family bridge]",
+      "classification": "canvas_mutation",
+      "scopes": ["catalog.assignments"],
+      "reconciliation": "invalidate",
+      "reason": "Activates the exact bridge only after its module item and every source postcondition are verified. The central operation-ledger post-apply hook invalidates catalog.assignments after the complete content operation succeeds."
     },
     {
       "path": "api/operation_ledger/adapters/sis_grade_bridge.py",
       "symbol": "SisGradeBridgeAdapter.execute",
       "detector": "attr:_canvas_send",
-      "call_index": 2,
+      "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"PUT\", <bridge_submission_path>, request) [copy one final grade/status]",
       "classification": "canvas_mutation",
       "scopes": ["private.submissions"],
       "reconciliation": "targeted",
       "reason": "Each copied final row is write-ahead checkpointed and exactly verified; after confirmed grade writes the adapter invokes mirror_service.notify_course_changed once for the course, reusing the targeted submissions delta refresh."
-    },
-    {
-      "path": "api/operation_ledger/adapters/sis_grade_bridge.py",
-      "symbol": "SisGradeBridgeAdapter._apply_assignment_phase",
-      "detector": "attr:_canvas_send",
-      "call_index": 1,
-      "call_form": "canvas_client._canvas_send(\"PUT\", <assignment_path>, request) [publish/exclude/activate/description bridge family]",
-      "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments"],
-      "reconciliation": "invalidate",
-      "reason": "Patches reviewed source/bridge assignment state with exact postcondition checks. The central operation-ledger post-apply hook invalidates catalog.assignments after the complete bridge operation succeeds."
-    },
-    {
-      "path": "api/operation_ledger/adapters/sis_grade_bridge.py",
-      "symbol": "SisGradeBridgeAdapter.execute",
-      "detector": "attr:_canvas_send",
-      "call_index": 3,
-      "call_form": "canvas_client._canvas_send(\"POST\", <course_post_grades_path>, {\"assignments\": [<bridge_id>]})",
-      "classification": "canvas_mutation",
-      "scopes": ["none"],
-      "reconciliation": "n/a",
-      "reason": "Asks Canvas to submit only the verified bridge through its configured SIS grade-passback integration. Canvas acceptance is recorded, but no SIS record is accessible to reconcile; an uncertain response is never resent."
     },
     {
       "path": "api/operation_ledger/adapters/assignment_tiered.py",
@@ -530,7 +519,7 @@
       "classification": "generic_transport_internal",
       "scopes": ["none"],
       "reconciliation": "n/a",
-      "reason": "Shared internal transport for the standalone sandbox/demo scripts (qf_pusher.py, push_tiers.py) below; not part of the served app, operation ledger, or CanvasMirror. The get/post/put/patch/delete wrappers in this module are literal-method pass-throughs to this same function and issue no independent HTTP call."
+      "reason": "Shared internal transport for the standalone qf_pusher.py script below; not part of the served app, operation ledger, or CanvasMirror. The get/post/put/patch/delete wrappers in this module are literal-method pass-throughs to this same function and issue no independent HTTP call."
     },
     {
       "path": "api/qf_pusher.py",
@@ -584,28 +573,6 @@
       "call_form": "canvas.post(quiz(f\"/courses/{course_id}/quizzes\"), json=...) [create quiz shell]",
       "classification": "canvas_mutation",
       "scopes": ["new_quiz.metadata"],
-      "reconciliation": "n/a",
-      "reason": "Standalone experimental CLI script; no CanvasMirror or operation-ledger integration."
-    },
-    {
-      "path": "api/push_tiers.py",
-      "symbol": "main",
-      "detector": "attr:post",
-      "call_index": 1,
-      "call_form": "canvas.post(core(f\"/courses/{course_id}/assignments/{assignment_id}/overrides\"), json=...) [tier override create]",
-      "classification": "canvas_mutation",
-      "scopes": ["private.assignments"],
-      "reconciliation": "n/a",
-      "reason": "Standalone experimental CLI script (`py push_tiers.py`) for the differentiation demo; no CanvasMirror or operation-ledger integration."
-    },
-    {
-      "path": "api/push_tiers.py",
-      "symbol": "main",
-      "detector": "attr:put",
-      "call_index": 1,
-      "call_form": "canvas.put(core(f\"/courses/{course_id}/assignments/{assignment_id}/overrides/{override_id}\"), json=...) [tier override verify/patch]",
-      "classification": "canvas_mutation",
-      "scopes": ["private.assignments"],
       "reconciliation": "n/a",
       "reason": "Standalone experimental CLI script; no CanvasMirror or operation-ledger integration."
     },

@@ -27,7 +27,7 @@
 <QUIZFORGE_JSON>
 {
   "version": "3.0-json",
-  "title": "Optional quiz title",
+  "title": "Optional unsuffixed base quiz title",
   "instructions": "Optional quiz-level directions shown before any questions (Canvas Instructions panel).",
   "metadata": {},               // Optional quiz-level metadata
   "items": [ ... ],             // Required, ordered list of items
@@ -38,12 +38,30 @@
 - `version`: `"3.0-json"` (new strict JSON spec). Use `"2.0"` only when a teacher explicitly requests legacy schema.
 - `total_points` (optional): Set by QuizForge. Omit unless a teacher explicitly requests a specific total.
 - `keep_points` (optional): Engine flag to respect per-item weights. Omit unless a teacher explicitly requests it.
-- `metadata`: free-form key/value notes (strings/numbers/booleans).
+- `metadata`: free-form key/value notes (strings/numbers/booleans). A file used for
+  differentiated live delivery must include one canonical pedagogical tier as
+  `metadata.variant` (preferred) or `metadata.variant_label`: `Support`, `Core`,
+  `Accelerate`, or `Extend`.
 - Metadata may include tool-specific or extension-specific keys. Students never see metadata, and tools are free to ignore keys they do not recognize.
 - Extensions may place structured data under `metadata.extensions`. Tools that do not recognize an extension MUST ignore it without warning.
 - `instructions` (optional, string): Quiz-level directions displayed to students **before any questions**, in the Canvas Instructions panel. Use this for test-wide directions (e.g., "Read the article and answer the questions that follow."). HTML is supported. Do **not** use STIMULUS for this purpose.
 - `items`: every quiz block, including STIMULUS and STIMULUS_END.
 - `rationales`: array aligned to scored items; see Section 11.
+
+### Differentiated live delivery
+
+Author one QuizForge file per tier and use at least two files. Every file in the family
+must carry the same exact trimmed, unsuffixed base `title`; do not add a color, tier, form,
+or group suffix. Canvas Expert resolves the declared metadata tier through Settings and
+appends the configured public tag when it creates the real quiz, for example
+`Reading Check - Silver`.
+
+The Canvas group is chosen separately at delivery time. Differentiated delivery requires a
+timezone-aware due date, a module, equal point totals, and one assignment group. Canvas
+Expert publishes each real quiz only to its group, omits it from the final grade, disables
+its SIS Sync setting, and keeps it out of modules. It also creates one unsuffixed
+no-submission bridge as the only module item. The teacher reviews the family in Canvas Live
+and owns Canvas Grade Sync.
 
 ## 4. COMMON ITEM FIELDS (APPLY TO ALL ITEMS)
 - `id` (string): Required for STIMULUS; optional but recommended for all other items so rationales can target them.
@@ -201,9 +219,9 @@ challenge**. What flexes is **language register (grammar + vocabulary), extraneo
 load, structure, scaffolds, and rigor of coverage** — never the learning objective and never
 a watered-down standard. **Support is access to the same work, not a smaller version of it.**
 
-**Title wording is the teacher's choice.** When authoring tier quizzes, the teacher may
-use a shared title or include a tier/form label. The readiness tier is still set by the
-Canvas group assignment, and the contract does not conceal or automatically rewrite titles.
+**Use one unsuffixed base title for a differentiated family.** Public Canvas suffixes come
+from the teacher's Settings mapping, not authored title text. The pedagogical tier comes
+from `metadata.variant`; Canvas group membership remains a separate delivery choice.
 
 **The four tiers (lowest → highest readiness)** — Canvas Expert's fixed product standard:
 - **Support** *(below grade level)* — the **same Bloom target and standard as Core**, reached by removing barriers: high-frequency vocabulary, define complex terms, active voice, shorter sentences; reduce extraneous load with Word Banks or Dropdowns for FITB, chunking, sentence starters for essays, text descriptions for visuals. Addresses **language or motivation** barriers, **never** ability — do not lower the cognitive bar or condescend.
@@ -330,6 +348,8 @@ This applies to correct choices, distractors, and the single-rationale types ali
  Choice IDs: MC/MA letter ids are contiguous from A (A, B, C, ...); do not skip a letter.
  Rationales (Section 11): one per scored item, skip stimuli; every rationale is exactly two sentences (concept, then applied to this choice or answer); MC/MA need a per-choice rationale for every choice `id`; other scorable types use one two-sentence string; ESSAY/FILEUPLOAD take a single rationale holding a student-facing exemplar.
  Stimuli: set `stimulus_id` to attach; 2–4 questions per stimulus; every STIMULUS holds real content (passage/code/image/table), never a bare instruction.
+ Differentiated family: at least two files; one exact unsuffixed title; one canonical
+ `metadata.variant` (or `metadata.variant_label`) per file; distinct tiers; equal totals.
 
 **Maintainer:** QuizForge Core Team  
 **Target:** Canvas New Quizzes (QTI 1.2)  

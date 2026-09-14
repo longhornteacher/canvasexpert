@@ -35,15 +35,14 @@ while CanvasExpert keeps sole custody of the Canvas PAT and almost every write p
 
 ## Tools
 
-Tool schema version 45 (45 tools).
+Tool schema version 46 (44 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
 | `list_courses` | First call for every saved course (Current + Previous) and the `course_id` used by course-scoped tools | No |
 | `list_sis_grade_bridges(course_id)` | Configured whole-course SIS bridges for a Current `course_id` returned by `list_courses` | No |
-| `preview_sis_grade_bridge(course_id, family_title)` | Persists a local aggregate, digest-protected review for one exact differentiated family; `next` carries the confirm-then-apply handoff | No |
-| `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | Writes only the unchanged frozen bridge coordinates to Canvas through the Operation Ledger | No |
-| `confirm_sis_grade_bridge_passback(operation_id, observed_last_sync_at)` | Confirms one ambiguous passback from an exact teacher-observed Canvas Grade Sync timestamp; never resends passback | No |
+| `preview_sis_grade_bridge(course_id, family_title)` | Persists a local aggregate, digest-protected grade-projection review for one exact registered differentiated family | No |
+| `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | Copies eligible final Canvas scores to the exact registered bridge through the Operation Ledger | No |
 | `list_sections(course_id)` | Saved section values from the local mirror | No |
 | `get_course_assignments(course_id, full_descriptions=false)` | Disk-only catalog assignments; descriptions are previews unless `full_descriptions=true` | No |
 | `get_modules(course_id, include_items=false)` | Disk-only catalog modules; set `include_items=true` to include their items | No |
@@ -61,7 +60,7 @@ Tool schema version 45 (45 tools).
 | `list_staged_content(kind="")` | Drafts in the local review Inbox; pass `kind` to filter or omit it for all drafts | No |
 | `preview_content_push(course_id, kind, label, published=false, module_name="", assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=false)` | Persists a local frozen review of one staged draft for one Current course; `next` carries the confirm-then-apply handoff | No |
 | `list_groups(course_id)` | Current-course group-set and group names from the fresh local mirror, including the group set selected in Roster; no memberships or Canvas IDs | No |
-| `preview_differentiated_quiz_push(course_id, variants, published=false, module_name="", assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=false)` | Persists a frozen review for staged QuizForge labels bound to distinct selected groups; `next` carries the existing `apply_content_push` handoff | No |
+| `preview_differentiated_quiz_push(course_id, variants, published=false, module_name="", assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=false)` | Persists a frozen review for one staged QuizForge family; preparation requires canonical metadata tiers, configured public tags, a due timestamp, and a module, then `apply_content_push` creates color-suffixed sources plus the unsuffixed bridge | No |
 | `apply_content_push(operation_id, batch_id, review_digest)` | Creates the exact frozen draft in Canvas through the Operation Ledger; same claims, drift check, and receipt as the push tab | No |
 | `push_content_live(course_id, kind, label, content, published=false, module_name="", assignment_group_name="", post_to_sis=false)` | The route for a teacher who asked for content in Canvas; stages the draft, freezes and drift-checks it internally, then creates it. Unpublished unless `published=true`. Carries no dates: use the preview pair for those | No |
 | `preview_assignment_update(course_id, assignment_id, published=None, due_at="", unlock_at="", lock_at="")` | Persists a local frozen field-diff review against one existing Canvas assignment named by id, read live from Canvas; refuses with no Canvas call when no field is supplied | No |
@@ -114,6 +113,12 @@ and the Roster-selected set, and refuses with `refresh_mirror` when the private 
 snapshot is stale or missing. Differentiated quiz preview is the separate write path:
 it resolves staged labels, captures a fresh private Canvas baseline through the
 Operation Ledger quiz adapter, and exposes only the safe frozen review projection.
+Every file declares one canonical pedagogical tier in `metadata.variant` (or
+`metadata.variant_label`) and carries the same unsuffixed base title. Settings maps those
+tiers to the public color suffixes. Apply creates the exact color-suffixed sources and one
+unsuffixed no-submission bridge, attaches only the bridge to the required module, and
+registers the verified family. The result directs the teacher to Canvas Live for review;
+the teacher owns Canvas Grade Sync.
 
 The reviewed-preview machinery is not what makes the write safe to skip asking about --
 it runs on every route. What the pair adds over the live push is a chance to look and a
@@ -146,10 +151,11 @@ the mirror or Course Catalog -- freezes its `updated_at` as the drift anchor, an
 Canvas is ever called, and apply is blocked as `drift_detected`, not overwritten, if the
 assignment changed in Canvas since the preview.
 
-The SIS grade-bridge pair is a bounded, family-specific Canvas write surface.
+The SIS grade-bridge pair is a bounded, registered-family grade-projection surface.
 Preview persists a local frozen operation and returns all three coordinates apply needs:
-`operation_id`, `batch_id`, and `review_digest`. Apply writes that exact review to Canvas;
-it does not post grades directly to the SIS. Canvas Grade Sync remains the separate passback.
+`operation_id`, `batch_id`, and `review_digest`. Apply copies only eligible final Canvas
+scores to the exact registered bridge. It never discovers a family, creates or repairs a
+bridge, changes family SIS settings, or starts Canvas Grade Sync.
 A teacher who asks for the write has authorized it: the assistant runs the
 preview/apply cycle and reports what landed, rather than asking a second time
 for what was just requested. The authorization covers the course and family
@@ -158,15 +164,9 @@ does not extend to another family or to an unbounded Canvas write. An assistant
 choosing the target itself should summarize the preview first. Any invariant
 failure still stops the write.
 
-An ambiguous bridge passback may be confirmed only when the teacher explicitly
-identifies the exact Canvas Grade Sync row and reports its `Last Sync` timestamp.
-`confirm_sis_grade_bridge_passback` requires that timestamp to be at or after the
-persisted passback request marker, records only student-free evidence, and resumes
-registration without another `POST /post_grades`. Never infer or approximate this
-evidence from a title or unrelated sync status.
-
-See the [SIS Grade Bridges guide](guides/sis-grade-bridges.md) for the complete four-tool
-workflow, recurring updates, privacy boundaries, and Attention recovery. The linked contract,
+See the [SIS Grade Bridges guide](guides/sis-grade-bridges.md) for the complete three-tool
+workflow, automatic family creation, recurring updates, privacy boundaries, and exact-ID
+Attention recovery. The linked contract,
 not the guide, remains the normative behavior authority.
 
 `get_authoring_contract(kind)` takes no `course_id` and carries no student data, so it
@@ -355,6 +355,8 @@ compact. Client and model token treatment varies:
   transport error. Clients must inspect `ok`; the MCP envelope itself remains successful.
 - Results are minified JSON (the server serializes itself rather than letting FastMCP
   pretty-print).
+- Differentiated push results include only exact source and bridge references; grade-projection
+  results add aggregate counts and content-free step states, never per-student score rows.
 - Tabular result sections use `{"columns": [...], "rows": [[...]]}` instead of repeated
   per-row JSON keys; some list tools return arrays instead.
 - `get_submissions` supports narrowing: `include_text=false` returns status/scores only;

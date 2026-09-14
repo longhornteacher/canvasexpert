@@ -237,14 +237,16 @@
 <section class="ce-panel ce-settings-panel" id="tier-tags-card">
   <h2>Differentiation tags</h2>
   <p class="ce-hint">
-    Optional labels saved for <strong>Support, Core, Accelerate, and Extend</strong>. You
-    decide whether students see readiness names or other labels. Assignment and quiz titles
-    come from the authored files; saving a tag here does not rename them.
+    Public Canvas title tags for <strong>Support, Core, Accelerate, and Extend</strong>.
+    Every tier used in a differentiated delivery needs a unique tag. Canvas Expert appends
+    it to the real assignment or quiz title, then creates one unsuffixed no-submission bridge
+    as the only family item in the selected module. Review the family in Canvas Live; you
+    decide when to run Canvas Grade Sync.
   </p>
   <form id="tier-tags-form">
     <div class="settings-grid ce-settings-tier-grid">
       {% for name in ["Support", "Core", "Accelerate", "Extend"] %}
-      <label>{{ name }} tag <small class="lbl-hint">(optional)</small>
+      <label>{{ name }} tag <small class="lbl-hint">(required when used)</small>
         <input type="text" class="tier-tag-input" data-tier="{{ name }}"
                value="{{ tier_tags[name] }}" placeholder="e.g. {{ {'Support':'Red','Core':'Blue','Accelerate':'Silver','Extend':'White'}[name] }}"
                autocomplete="off">

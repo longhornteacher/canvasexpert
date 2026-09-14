@@ -51,7 +51,8 @@ The retired roster tier-scheme HTTP endpoints have no scoring-UI dependency.
 | `GET /api/push-variants/stream` | Typed operation-ledger prepare/apply | Same |
 | `GET /api/push-multi/stream` | Typed operation-ledger prepare/apply | Same |
 
-**Retained:** `POST /api/push/preview` dry-run — moved to `push_validation.py`. Direct CLI (`qf_pusher.py`, `push_tiers.py`) remains a supported manual teacher path.
+**Retained:** `POST /api/push/preview` dry-run — moved to `push_validation.py`.
+`qf_pusher.py` remains a planning/whole-quiz owner; the differentiated direct CLI is retired.
 
 **Changes:** 4 route entries removed from `test_route_contract.py::EXPECTED`; 4 literal-string assertions removed from `test_webui_template_contracts.py`. All reference docs updated to identify typed operations as the sole browser live-write path.
 
