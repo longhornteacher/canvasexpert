@@ -22,12 +22,16 @@ def _session(**overrides):
     return session
 
 
-def _canvas_get(scored=()):
+def _canvas_get(scored=(), *, workflow_state="graded"):
     """Fake submission reads. ``scored`` names user_ids Canvas already scored."""
     def get(path, params=None, timeout=20):
         user_id = path.rstrip("/").split("/")[-1]
-        return ({"score": 3 if user_id in scored else None,
-                 "submission_comments": [], "comments_available": True}, None)
+        scored_row = user_id in scored
+        return ({
+            "score": 3 if scored_row else None,
+            "workflow_state": workflow_state if scored_row else "submitted",
+            "submission_comments": [], "comments_available": True,
+        }, None)
     return get
 
 
@@ -113,6 +117,13 @@ def test_existing_canvas_score_is_raised():
 
     question = next(q for q in plan["questions"] if q["kind"] == "overwrites_existing_score")
     assert question["user_ids"] == ["9002"]
+
+
+def test_leftover_score_on_ungraded_work_is_not_an_overwrite():
+    plan = scoring_apply.build_plan(
+        _session(), canvas_get=_canvas_get(scored={"9002"}, workflow_state="pending_review"))
+
+    assert all(q["kind"] != "overwrites_existing_score" for q in plan["questions"])
 
 
 def test_feedback_with_no_score_is_raised():

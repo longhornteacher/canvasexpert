@@ -156,6 +156,22 @@ def test_new_quiz_missing_score_holds_instead_of_offering_comment_only(
     assert resolved["skip_pseudonyms"] == {PSEUDONYM}
 
 
+def test_new_quiz_ungraded_item_score_is_not_an_overwrite(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses, new_quiz=True)
+    session["students"][0]["new_quiz_items"] = [{
+        "item_id": "item-1", "earned_score": 0, "status": "NotGraded",
+    }]
+    vault, error = tools._open_vault()
+    assert error is None
+
+    questions = tools._new_quiz_scoring_questions(
+        session, _result(), bundle, {REAL_ID: PSEUDONYM}, [], vault,
+    )
+    assert all(question["kind"] != "overwrites_existing_score" for question in questions)
+
+
 def test_question_blocks_write_then_matching_digest_and_answer_submit_same_results(
     monkeypatch, tmp_path, _set_active_courses,
 ):

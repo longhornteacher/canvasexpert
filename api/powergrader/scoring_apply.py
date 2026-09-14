@@ -166,7 +166,13 @@ def build_plan(session: dict, *, canvas_get=None, pseudonyms=()) -> dict:
             if error:
                 return {"ok": False, "code": error,
                         "error": "Could not read the current Canvas state for this session."}
-            if baseline.get("score") is not None:
+            # A leftover or auto-derived score on work Canvas still marks
+            # submitted/pending_review is the reason this row is in the
+            # session. Asking to overwrite it treats unfinished SpeedGrader
+            # work as a finished grade.
+            state = str(baseline.get("workflow_state") or "").strip().casefold()
+            if baseline.get("score") is not None and state not in {
+                    "submitted", "pending_review"}:
                 overwrites.append(user_id)
 
     receives_nothing = [str(s["user_id"]) for s in students

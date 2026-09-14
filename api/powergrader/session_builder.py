@@ -64,7 +64,10 @@ def build_students(
         new_quiz_items = []
         for item in (s.get("new_quiz_items") or []):
             new_quiz_items.append({
-                key: item.get(key) for key in ("item_id", "type", "prompt", "possible", "earned_score", "files")
+                key: item.get(key) for key in (
+                    "item_id", "type", "prompt", "possible", "earned_score",
+                    "status", "files",
+                )
                 if key in item
             })
         expected_count = s.get("expected_attachment_count")

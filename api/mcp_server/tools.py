@@ -38,6 +38,7 @@ import math
 import re
 import secrets
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta, timezone
 
 from api import content_push, course_scope, feedback_scrub, gradebook_queries, gradebook_snapshot, learning_objectives, operational_log, roster_context, roster_service, sis_grade_bridge
@@ -59,6 +60,8 @@ from api.dailywriting.store.repo import Repository as DailyWritingRepository
 from api.dailywriting.store.repo import StoreError as DailyWritingStoreError
 
 from . import contract, pseudonym
+
+_NEW_QUIZ_HTTP: ContextVar[object | None] = ContextVar("ce_new_quiz_http", default=None)
 
 
 # Compatibility seams retained for existing route-style tests; the bound
@@ -3177,16 +3180,17 @@ def submit_scoring_results(scoring_session_id: str, results: list,
             if target:
                 target["ai_item_results"] = item_by_uid.get(str(uid), [])
         session_store.save_session(current)
-    preview = _prepare_new_quiz_finalization(child_session_id)
-    if not preview.get("ok"):
-        return _record_scoring_root_result(
-            scoring_session_id, child_session_id,
-            pseudonym.gate({"ok": False, "code": "new_quiz_preflight_failed",
-                "error": "Canvas could not safely prepare New Quiz item finalization.",
-                "counts": {"finalized": 0, "already_applied": 0,
-                           "held": max(0, len(session.get("students") or []) - len(by_uid)),
-                           "failed": 1}}, vault))
-    applied = _finalize_new_quiz_results(preview["operation_id"], preview["review_digest"])
+    with _new_quiz_http_scope():
+        preview = _prepare_new_quiz_finalization(child_session_id)
+        if not preview.get("ok"):
+            return _record_scoring_root_result(
+                scoring_session_id, child_session_id,
+                pseudonym.gate({"ok": False, "code": "new_quiz_preflight_failed",
+                    "error": "Canvas could not safely prepare New Quiz item finalization.",
+                    "counts": {"finalized": 0, "already_applied": 0,
+                               "held": max(0, len(session.get("students") or []) - len(by_uid)),
+                               "failed": 1}}, vault))
+        applied = _finalize_new_quiz_results(preview["operation_id"], preview["review_digest"])
     applied.pop("operation_id", None)
     applied.pop("next", None)
     applied_counts = applied.get("counts") or {}
@@ -3273,8 +3277,14 @@ def _new_quiz_scoring_questions(session: dict, rows: list[dict], bundle: dict,
         for student in session.get("students") or []:
             if str(student.get("user_id") or "") != uid:
                 continue
-            if any(str(item.get("item_id") or "") == str(row.get("item_id") or "")
-                   and item.get("earned_score") is not None for item in student.get("new_quiz_items") or []):
+            if any(
+                str(item.get("item_id") or "") == str(row.get("item_id") or "")
+                and item.get("earned_score") is not None
+                and str(item.get("status") or "").strip().casefold() not in {
+                    "", "notgraded", "not_graded", "ungraded",
+                }
+                for item in student.get("new_quiz_items") or []
+            ):
                 overwrites.add(uid)
     sessions = {str(st.get("user_id")): st for st in session.get("students") or []}
     held = {reverse.get(pseudonym_value, "") for pseudonym_value, _item_id
@@ -3380,7 +3390,7 @@ def _new_quiz_preflight(session: dict, student: dict, decisions: list[dict]) -> 
     return new_quiz_grader.preflight(
         canvas_base=config.get_canvas_base(), token=config.get_token(),
         assignment_id=str(session["assignment_id"]), user_id=str(student["user_id"]),
-        decisions=decisions,
+        decisions=decisions, http_session=_new_quiz_http_session(),
     )
 
 
@@ -3390,8 +3400,26 @@ def _new_quiz_apply(session: dict, student: dict, decisions: list[dict], pending
     return new_quiz_grader.apply(
         canvas_base=config.get_canvas_base(), token=config.get_token(),
         assignment_id=str(session["assignment_id"]), user_id=str(student["user_id"]),
-        decisions=decisions, baseline=pending,
+        decisions=decisions, baseline=pending, http_session=_new_quiz_http_session(),
     )
+
+
+@contextmanager
+def _new_quiz_http_scope():
+    """Keep one teacher web session for every student in one Scoring Session write."""
+    import requests
+
+    http = requests.Session()
+    token = _NEW_QUIZ_HTTP.set(http)
+    try:
+        yield http
+    finally:
+        _NEW_QUIZ_HTTP.reset(token)
+        http.close()
+
+
+def _new_quiz_http_session():
+    return _NEW_QUIZ_HTTP.get()
 
 
 # finalize_new_quiz's own apply(...) exception path already refuses to retry

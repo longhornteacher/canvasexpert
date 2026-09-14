@@ -213,17 +213,26 @@ def compose_feedback(teacher_feedback: str, ta_block: str) -> str:
     return f"MY FEEDBACK\n\n{teacher}\n\n-------\n\n{attribute(ta)}"
 
 
-def _signed_context(*, canvas_base: str, token: str, assignment_id: str, user_id: str, http_session=None):
-    session = http_session or requests.Session()
-    base = str(canvas_base or "").rstrip("/")
-    if not base or not token:
-        raise GraderError("capability_unavailable")
-    web = _require(session.get(f"{base}/login/session_token", headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT), "web_session")
+def _ensure_web_session(session, *, canvas_base: str, token: str):
+    """Reuse one teacher web session for every student in a Scoring Session."""
+    if getattr(session, "_ce_web_session", False):
+        return session
+    web = _require(session.get(f"{canvas_base}/login/session_token", headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT), "web_session")
     web_data = _json(web) or {}
     session_url = web_data.get("session_url") or web_data.get("url")
     if not session_url:
         raise GraderError("web_session_shape")
     _require(session.get(str(session_url), timeout=TIMEOUT), "web_session_launch")
+    session._ce_web_session = True
+    return session
+
+
+def _signed_context(*, canvas_base: str, token: str, assignment_id: str, user_id: str, http_session=None):
+    session = http_session or requests.Session()
+    base = str(canvas_base or "").rstrip("/")
+    if not base or not token:
+        raise GraderError("capability_unavailable")
+    _ensure_web_session(session, canvas_base=base, token=token)
     graph = _require(session.post(
         f"{base}/api/graphql",
         data={"query": GRAPHQL_PREVIEW, "variables[assignmentId]": str(assignment_id), "variables[userId]": str(user_id)},

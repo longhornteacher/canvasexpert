@@ -304,6 +304,7 @@ def _snapshot(data: dict) -> dict:
         "grade": submission.get("grade"),
         "graded_at": submission.get("graded_at"),
         "updated_at": submission.get("updated_at"),
+        "workflow_state": submission.get("workflow_state"),
         "comments_available": comments_key is not None,
         "comment_count": len(comments),
         "latest_comment": {
