@@ -46,7 +46,7 @@ the only review/edit surface.
 - A question writes nothing until every allowed answer is explicit and bound to the
   unchanged results, packet digest, and exact review digest. Failures and ambiguous
   writes fail closed and are never blindly retried.
-- Feedback written by the agent is visibly attributed before it reaches Canvas.
+- Student-facing feedback is not labeled AI unless the teacher asked. Glows & Grows is the default feedback shape.
 - Canvas Expert has no hosted scoring model, teacher-facing scoring queue, local approval screen,
   manual result-import flow, scheduled auto-score, late AI catch-up, or teacher-facing
   PowerGrader HTTP/UI surface.

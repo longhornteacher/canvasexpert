@@ -55,7 +55,7 @@ from .feedback import (
     list_personas, get_persona,
     save_custom_persona, remove_custom_persona,
     get_ai_ta_persona, set_ai_ta_persona,
-    list_feedback_patterns, set_feedback_patterns,
+    list_feedback_patterns, get_feedback_pattern, set_feedback_patterns,
 )
 
 # --- protected names ---

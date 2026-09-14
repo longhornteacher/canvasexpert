@@ -156,9 +156,8 @@ check so Canvas drift does not weaken review or write safety.
 
 ## Feedback composition
 
-Canvas exposes one grader-feedback value per item. Feedback written by the external
-scoring agent is visibly attributed to that agent before it is posted, so it cannot be
-mistaken for teacher-authored text. Attribution is enforced by the private scoring
-write path in `api/powergrader/attribution.py`; it is shared by ordinary assignment
-comments and New Quiz item feedback. No teacher persona or hosted model supplies the
-feedback block.
+Canvas exposes one grader-feedback value per item. Student-facing feedback is not
+labeled AI unless the teacher asked. The private scoring write path in
+`api/powergrader/attribution.py` strips leftover Autofeedback banners and is shared
+by ordinary assignment comments and New Quiz item feedback. Default feedback shape
+is Glows & Grows. No hosted model supplies the feedback block.

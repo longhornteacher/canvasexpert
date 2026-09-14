@@ -1,9 +1,9 @@
-"""The attribution law: assistant words never post as the teacher's own.
+"""The attribution law: student-facing feedback is not labeled AI by default.
 
 Feedback reaches Canvas under the teacher's name, because it is their token and
-their gradebook. Marking the assistant's half is the only thing standing between
-a student and the belief that their teacher wrote it, so it is pinned here at
-the rule rather than only through the three callers that use it.
+their gradebook. Whether to tell a student that an assistant drafted the words
+is a teacher choice. The agent may ask. This pins the default at the rule:
+no invented AI label, and leftover banners are stripped.
 """
 from __future__ import annotations
 
@@ -15,17 +15,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from api.powergrader import attribution
 
 
-def test_assistant_feedback_is_marked():
+def test_assistant_feedback_is_not_labeled_ai():
     marked = attribution.attribute("You supported the claim with two quotes.")
-    assert marked.startswith("Autofeedback from an automated assistant:")
-    assert "You supported the claim with two quotes." in marked
+    assert marked == "You supported the claim with two quotes."
+    assert "Autofeedback" not in marked
+    assert "(AI)" not in marked
 
 
-def test_marking_is_idempotent():
-    """A session file round-trip must not stack banners on a student."""
-    once = attribution.attribute("Nice work.")
-    assert attribution.attribute(once) == once
-    assert once.count("Autofeedback from an automated assistant:") == 1
+def test_leftover_banner_is_stripped():
+    leftover = "Autofeedback from an automated assistant:\n\nNice work."
+    assert attribution.attribute(leftover) == "Nice work."
+    assert attribution.attribute(attribution.attribute(leftover)) == "Nice work."
 
 
 def test_empty_feedback_stays_empty():

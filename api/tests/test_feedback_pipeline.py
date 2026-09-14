@@ -373,16 +373,13 @@ def test_build_contract_text_inlines_rubric():
     assert "3 pts: uses a loop" not in without
 
 
-def test_build_contract_text_uses_persona_signoff_when_configured():
-    contract = fp.build_contract_text(
-        persona={
-            "name": "Sage",
-            "signoff_policy": "ai_disclosure",
-            "signoff_text": "Drafted by {name} (AI), reviewed by your teacher.",
-        }
-    )
-    assert "Drafted by Sage (AI), reviewed by your teacher." in contract
-    assert "End each `feedback` value with it exactly once" in contract
+def test_build_contract_text_defaults_to_glows_and_grows_without_ai_label():
+    contract = fp.build_contract_text(persona={"name": "Sage", "signoff_policy": "none"})
+    assert "Glows & Grows" in contract
+    assert "2-3 glows" in contract
+    assert "Drafted by Sage (AI)" not in contract
+    assert "Autofeedback" not in contract
+    assert "End each `feedback` value with it exactly once" not in contract
 
 
 def test_write_safe_and_private_inlines_rubric_into_how_to_score(tmp_path):

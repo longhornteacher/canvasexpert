@@ -398,6 +398,7 @@ def run_start_session(
         parent_scoring_session_id=parent_scoring_session_id,
     )
     session["writing_timeline_tracked"] = writing_timeline_tracked
+    session["feedback_pattern_id"] = str(feedback_pattern_id or "").strip() or "basic"
     if scoring_session:
         session["scoring_basis"] = scoring_basis
         session["scoring_rubric_text"] = rubric_text_override

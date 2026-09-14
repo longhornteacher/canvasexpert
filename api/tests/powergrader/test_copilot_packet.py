@@ -146,8 +146,8 @@ def test_batch_student_work_carries_only_available_aggregate_timeline(tmp_path):
 def test_scoring_output_contract_is_shared_by_packet_and_batch_surfaces():
     persona = {
         "name": "Sage",
-        "signoff_policy": "ai_disclosure",
-        "signoff_text": "Drafted by {name} (AI), reviewed by your teacher.",
+        "signoff_policy": "none",
+        "signoff_text": "",
     }
     surfaces = [
         feedback_contract.build_contract_text("Sage", rubric_text="Score evidence.", persona=persona),
@@ -165,7 +165,9 @@ def test_scoring_output_contract_is_shared_by_packet_and_batch_surfaces():
         assert "observational, teacher-only" in text
         assert "integrity conclusion, probability, or penalty recommendation" in text
         assert "must not change the score or the student-facing `feedback`" in text
-        assert "Drafted by Sage (AI), reviewed by your teacher." in text
+        assert "Glows & Grows" in text
+        assert "Drafted by Sage (AI)" not in text
+        assert "Autofeedback" not in text
 
 
 def test_oral_reading_packet_and_batch_require_digest_envelope(tmp_path):

@@ -1,30 +1,27 @@
-"""Attribution for feedback an assistant wrote rather than the teacher.
+"""Student-facing feedback is not labeled AI unless the teacher asked.
 
 Feedback posted through PowerGrader arrives in Canvas under the teacher's own
-name, because it is their token and their gradebook. That is correct for words
-they wrote and wrong for words an assistant drafted: a student reading it has
-no way to tell the difference, and neither does the teacher six weeks later.
+name, because it is their token and their gradebook. Whether to tell a student
+that an assistant drafted the words is a teacher choice. The agent may ask.
+This module never invents that label.
 
-Every outbound path that can carry assistant-authored prose runs it through
-``attribute`` first, so the wording lives in exactly one place and cannot drift
-between the reviewed assignment push, automatic posting, and New Quiz item
-finalization.
+Outbound paths still run text through ``attribute`` so a leftover banner from
+an older session cannot reappear on a student.
 """
 
 AUTOFEEDBACK_PREFIX = "Autofeedback from an automated assistant:"
 
 
 def attribute(text: str) -> str:
-    """Mark assistant-authored feedback. Idempotent, and leaves empty text alone.
+    """Return student-facing feedback with no invented AI label.
 
     Empty stays empty so a caller can keep using falsiness to decide whether to
-    send a comment at all. Re-prefixing is a no-op so a value that round-trips
-    through a session file cannot accumulate banners.
+    send a comment at all. A leftover Autofeedback banner is stripped once.
     """
     body = str(text or "").strip()
-    if not body or body.startswith(AUTOFEEDBACK_PREFIX):
-        return body
-    return f"{AUTOFEEDBACK_PREFIX}\n\n{body}"
+    if body.startswith(AUTOFEEDBACK_PREFIX):
+        body = body[len(AUTOFEEDBACK_PREFIX):].lstrip()
+    return body
 
 
 def _normalize(text: str) -> str:

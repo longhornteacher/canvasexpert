@@ -198,19 +198,19 @@ def _serialize_result_rows(rows: object, *, edited_feedback: dict | None = None,
 
 
 def compose_feedback(teacher_feedback: str, ta_block: str) -> str:
-    """Compose one item's grader feedback, marking the assistant's half.
+    """Compose one item's grader feedback without inventing an AI label.
 
     Canvas exposes a single grader-feedback value per item, so the teacher's
-    words and the assistant's arrive together under the teacher's name. The
-    assistant's block is labelled so a student can tell which is which.
+    words and the assistant's arrive together. Disclosure is a teacher choice,
+    not a default of this path.
     """
     teacher = str(teacher_feedback or "").strip()
-    ta = str(ta_block or "").strip()
+    ta = attribute(str(ta_block or "").strip())
     if not ta:
         raise GraderError("missing_ta_feedback")
     if not teacher:
-        return attribute(ta)
-    return f"MY FEEDBACK\n\n{teacher}\n\n-------\n\n{attribute(ta)}"
+        return ta
+    return f"MY FEEDBACK\n\n{teacher}\n\n-------\n\n{ta}"
 
 
 def _ensure_web_session(session, *, canvas_base: str, token: str):

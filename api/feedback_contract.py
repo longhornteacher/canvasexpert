@@ -13,6 +13,31 @@ from engine.utils.text_utils import safe_filename_component
 CONTRACT_VERSION = "1.0"
 REVIEW_NOTE = ("Pseudonymized for privacy. Review the response text for any "
                 "self-identifying details (names, places) before sending to an LLM.")
+_DEFAULT_FEEDBACK_PATTERN = {
+    "id": "basic",
+    "name": "Glows & Grows (Basic)",
+    "glows": {"min": 2, "max": 3},
+    "grows": {"min": 1, "max": 2},
+    "strategy_sentences": {"min": 2, "max": 3},
+}
+
+
+def feedback_pattern_hint(pattern: dict | None = None) -> str:
+    """Student-facing feedback shape. Glows & Grows is the default."""
+    pattern = pattern or _DEFAULT_FEEDBACK_PATTERN
+    glows = pattern.get("glows") or _DEFAULT_FEEDBACK_PATTERN["glows"]
+    grows = pattern.get("grows") or _DEFAULT_FEEDBACK_PATTERN["grows"]
+    strategy = (
+        pattern.get("strategy_sentences")
+        or _DEFAULT_FEEDBACK_PATTERN["strategy_sentences"]
+    )
+    name = str(pattern.get("name") or "Glows & Grows").strip()
+    return (
+        f"{name}: {glows.get('min')}-{glows.get('max')} glows (what worked); "
+        f"{grows.get('min')}-{grows.get('max')} grows (what to improve); "
+        f"{strategy.get('min')}-{strategy.get('max')} strategy sentences "
+        "for the next attempt."
+    )
 
 
 def safe(name, max_len=80):
@@ -30,8 +55,6 @@ def persona_signoff(persona: dict | None = None,
     if policy in {"none", "off", "no_signoff"}:
         return ""
     template = str(persona.get("signoff_text") or "").strip()
-    if not template and policy == "ai_disclosure":
-        template = "Drafted by {name} (AI), reviewed by your teacher."
     if not template:
         return ""
     return template.replace("{name}", name)
@@ -44,14 +67,15 @@ def scoring_output_contract(
         identity_source: str = "the bundle",
         pseudonym: str = "<copy>",
         item_id: str = "<copy>",
-        feedback_hint: str = "Brief rubric-based feedback.",
+        feedback_hint: str = "",
+        feedback_pattern: dict | None = None,
         include_signoff_in_feedback: bool = False,
         packet_digest: str = "",
 ) -> dict:
     """Return the shared scoring output contract and its JSON example."""
     persona = persona or {}
     signoff = persona_signoff(persona, ai_ta_name)
-    feedback = feedback_hint.strip() or "Brief rubric-based feedback."
+    feedback = feedback_hint.strip() or feedback_pattern_hint(feedback_pattern)
     if signoff and include_signoff_in_feedback:
         feedback = f"{feedback} End with the persona signoff exactly once. {signoff}"
     sample = {
@@ -78,6 +102,7 @@ def scoring_output_contract(
         "Use the full score range; `possible` gives each item's maximum.",
         "When a response includes `oral_reading`, use only the supplied passage, transcript, metrics, uncertainty, and candidate differences.",
         "Do not infer pronunciation, expression, prosody, identity, disability, effort, intent, cheating, or diagnosis; low ASR confidence is not a reading error.",
+        f"Write student-facing `feedback` in this shape: {feedback}",
     ]
     if signoff:
         rules.extend([
@@ -87,8 +112,9 @@ def scoring_output_contract(
         ])
     else:
         rules.extend([
-            "Do not invent a separate signature or disclosure beyond the selected persona.",
-            "`disclosure` is optional metadata; leave it empty if the persona has no signoff.",
+            "Do not add an AI disclosure, 'Drafted by', autofeedback banner, or similar label unless the teacher asked for one.",
+            "Do not invent a separate signature or disclosure.",
+            "`disclosure` is optional metadata; leave it empty unless the teacher asked for a signoff.",
         ])
     if signoff:
         sample["disclosure"] = signoff
@@ -115,7 +141,8 @@ def scoring_output_contract(
 
 def build_contract_text(ai_ta_name: str = "your teaching assistant",
                         rubric_text: str = "",
-                        persona: dict | None = None) -> str:
+                        persona: dict | None = None,
+                        feedback_pattern: dict | None = None) -> str:
     """Instructions the teacher pastes into their LLM alongside the bundle.
 
     When `rubric_text` is provided it is inlined below so the file is self-contained
@@ -131,6 +158,7 @@ def build_contract_text(ai_ta_name: str = "your teaching assistant",
     contract = scoring_output_contract(
         persona=persona,
         ai_ta_name=ai_ta_name,
+        feedback_pattern=feedback_pattern,
         identity_source="the bundle",
         pseudonym="<copy>",
         item_id="<copy>",

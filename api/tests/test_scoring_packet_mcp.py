@@ -190,6 +190,9 @@ def test_build_packet_happy_path():
     assert "next_offset" not in result
     assert result["included_context"] is True
     assert "contract" in result
+    assert "Glows & Grows" in result["contract"]
+    assert "Autofeedback from an automated assistant" not in result["contract"]
+    assert "Drafted by Sage" not in result["contract"]
     assert len(result["items"]) == 2
     assert len(result["students"]) == 6
 
@@ -556,8 +559,8 @@ def test_get_scoring_packet_resolves_declared_rubric_and_persona(monkeypatch, tm
         "get_persona",
         lambda persona_id: {
             "name": "Packet TA",
-            "signoff_policy": "ai_disclosure",
-            "signoff_text": "Drafted by {name} (AI), reviewed by your teacher.",
+            "signoff_policy": "none",
+            "signoff_text": "",
         },
     )
 
@@ -571,7 +574,9 @@ def test_get_scoring_packet_resolves_declared_rubric_and_persona(monkeypatch, tm
     assert result["rubric"] == {"label": "Test Rubric", "included": True}
     assert "3 pts: uses a loop" in result["contract"]
     assert "your teaching assistant" in result["contract"]
+    assert "Glows & Grows" in result["contract"]
     assert "Drafted by Packet TA" not in result["contract"]
+    assert "Autofeedback" not in result["contract"]
 
 
 def test_get_scoring_packet_reports_missing_declared_rubric(monkeypatch, tmp_path):
@@ -608,8 +613,8 @@ def test_get_scoring_packet_preserves_legacy_inline_context(monkeypatch, tmp_pat
     session["rubric_text"] = "Legacy rubric text"
     session["persona"] = {
         "name": "Legacy TA",
-        "signoff_policy": "ai_disclosure",
-        "signoff_text": "Drafted by {name} (AI), reviewed by your teacher.",
+        "signoff_policy": "none",
+        "signoff_text": "",
     }
     _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
     _bind_session_store(monkeypatch, {"s1": session})

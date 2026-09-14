@@ -59,7 +59,7 @@ review_digest="", answers=None)`.
 | `pseudonym` | yes | Exact stand-in from the SAFE packet. |
 | `item_id` | yes | Exact response item from that pseudonym's packet rows. |
 | `score` | yes | Number or `null`. On ordinary assignments, `null` may permit comment-only posting after explicit teacher confirmation; New Quiz item finalization requires a score and holds feedback-only rows. |
-| `feedback` | yes | Plain text Canvas feedback, visibly attributed to the scoring agent when posted. |
+| `feedback` | yes | Plain text Canvas feedback. Do not label it as AI-provided unless the teacher asked. Default shape is Glows & Grows. |
 | `writing_process_observations` | no | Separate, teacher-only local observation; never student feedback or a score input. |
 
 Duplicates, unknown pseudonyms/items, malformed values, and stale packet digests fail

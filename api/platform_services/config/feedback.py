@@ -20,13 +20,13 @@ DEFAULT_AI_DISCLOSURE_SIGNOFF = "Drafted by {name} (AI), reviewed by your teache
 BUILTIN_PERSONAS = [
     {"id": "sage", "name": "Sage",
      "personality": "A calm, thoughtful mentor. Warm and patient; names what's working before what to fix; precise without being cold.",
-     "signoff_policy": "ai_disclosure", "signoff_text": DEFAULT_AI_DISCLOSURE_SIGNOFF},
+     "signoff_policy": "none", "signoff_text": ""},
     {"id": "pip", "name": "Pip",
      "personality": "Upbeat and energetic; plain language, short punchy sentences. Built for reluctant readers — high warmth, low jargon.",
-     "signoff_policy": "ai_disclosure", "signoff_text": DEFAULT_AI_DISCLOSURE_SIGNOFF},
+     "signoff_policy": "none", "signoff_text": ""},
     {"id": "coach_vale", "name": "Coach Vale",
      "personality": "Direct and action-oriented; frames feedback as 'your next rep.' Concrete, motivating, no fluff.",
-     "signoff_policy": "ai_disclosure", "signoff_text": DEFAULT_AI_DISCLOSURE_SIGNOFF},
+     "signoff_policy": "none", "signoff_text": ""},
 ]
 
 BUILTIN_PERSONAS_BY_ID = {p["id"]: p for p in BUILTIN_PERSONAS}
@@ -178,6 +178,19 @@ def set_ai_ta_persona(name: str, personality: str = ""):
 
 def list_feedback_patterns() -> list[dict]:
     return list(_io_mod._synced_state().get("feedback_patterns", FEEDBACK_PATTERNS_DEFAULT))
+
+
+def get_feedback_pattern(pattern_id: str = "") -> dict:
+    """Return the named feedback pattern, defaulting to Glows & Grows (`basic`)."""
+    wanted = str(pattern_id or "").strip() or "basic"
+    catalog = list_feedback_patterns() or list(FEEDBACK_PATTERNS_DEFAULT)
+    for pattern in catalog:
+        if str(pattern.get("id") or "") == wanted:
+            return dict(pattern)
+    for pattern in catalog:
+        if str(pattern.get("id") or "") == "basic":
+            return dict(pattern)
+    return dict(FEEDBACK_PATTERNS_DEFAULT[0])
 
 
 def set_feedback_patterns(patterns: list[dict]):

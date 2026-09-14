@@ -334,9 +334,9 @@ def test_native_file_transport_joins_same_attempt_and_drops_signed_url(tmp_path,
 
 
 def test_new_quiz_feedback_composition_keeps_teacher_and_ta_separate():
-    assert new_quiz_grader.compose_feedback("", "TA block") == "Autofeedback from an automated assistant:\n\nTA block"
+    assert new_quiz_grader.compose_feedback("", "TA block") == "TA block"
     combined = new_quiz_grader.compose_feedback("My note", "TA block")
-    assert combined == "MY FEEDBACK\n\nMy note\n\n-------\n\nAutofeedback from an automated assistant:\n\nTA block"
+    assert combined == "MY FEEDBACK\n\nMy note\n\n-------\n\nTA block"
 
 
 def test_csv_fallback_session_keeps_digest_and_minimum_private_provenance():
@@ -523,7 +523,7 @@ def _final_decisions():
 
 def test_new_quiz_adapter_writes_complete_collection_and_verifies(monkeypatch):
     before = _grader_state()
-    composed = "MY FEEDBACK\n\nTeacher note\n\n-------\n\nAutofeedback from an automated assistant:\n\nTA draft"
+    composed = "MY FEEDBACK\n\nTeacher note\n\n-------\n\nTA draft"
     expected_essay_feedback = {"grader_feedback": {"content": composed}}
     after = _grader_state("result-2", 3.0,
                           expected_essay_feedback, 5.0)
@@ -650,7 +650,7 @@ def test_new_quiz_adapter_fails_closed_on_item_mismatch_and_drift(monkeypatch):
 def test_new_quiz_adapter_marks_ambiguous_write_without_retry(monkeypatch):
     before = _grader_state()
     expected_essay_feedback = {"grader_feedback": {
-        "content": "MY FEEDBACK\n\nTeacher note\n\n-------\n\nAutofeedback from an automated assistant:\n\nTA draft"
+        "content": "MY FEEDBACK\n\nTeacher note\n\n-------\n\nTA draft"
     }}
     after = _grader_state("result-2", 3.0, expected_essay_feedback, 5.0)
     http = _WriteSession(status=500)
