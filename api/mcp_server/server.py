@@ -17,6 +17,7 @@ Wire character counts are a transport measure, not a per-turn token promise.
 from __future__ import annotations
 
 import json
+from typing import NotRequired, TypedDict
 
 from mcp.server.fastmcp import FastMCP
 
@@ -46,8 +47,9 @@ _SERVER_INSTRUCTIONS = (
     "scoring guidance. If empty, report nothing_to_grade. Disclose held work; item/catalog "
     "or evidence gaps do not mean the assignment is empty. Read every SAFE page "
     "with get_scoring_packet, including first-page contract and rubric. Score only "
-    "those pseudonymized responses; submit_scoring_results with its packet digest. "
-    "Valid results post to Canvas immediately. For needs_teacher_input, ask only its listed "
+    "those pseudonymized responses; submit_scoring_results with expected_packet_digest. "
+    "Each result needs pseudonym, item_id, score, and feedback; valid rows post to Canvas. "
+    "For needs_teacher_input, ask only its listed "
     "questions and resubmit the same results with the review digest and answers. "
     "After each terminal submit, continue with the same root id until complete, "
     "teacher input, a blocker, or the teacher stops. Authorization covers only the "
@@ -64,6 +66,16 @@ _SERVER_INSTRUCTIONS = (
 )
 
 mcp = FastMCP("canvas-expert", instructions=_SERVER_INSTRUCTIONS)
+
+
+class ScoringResult(TypedDict):
+    """One SAFE packet row posted by submit_scoring_results."""
+
+    pseudonym: str
+    item_id: str
+    score: float | None
+    feedback: str
+    writing_process_observations: NotRequired[str]
 
 
 def run_stdio() -> None:
@@ -486,12 +498,16 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
 
 
 @mcp.tool(structured_output=False)
-def submit_scoring_results(scoring_session_id: str, results: list,
-                           expected_packet_digest: str, review_digest: str = "",
-                           answers: dict | None = None) -> str:
-    """Validate SAFE pseudonym/item results and post eligible scores to Canvas.
-    If teacher judgment is needed, return pseudonym-only questions; resubmit the
-    unchanged results and packet digest with that review_digest and explicit answers."""
+def submit_scoring_results(
+    scoring_session_id: str,
+    results: list[ScoringResult],
+    expected_packet_digest: str,
+    review_digest: str = "",
+    answers: dict[str, str] | None = None,
+) -> str:
+    """Post one score and feedback per SAFE packet row to Canvas.
+    Each results item needs pseudonym, item_id, score, and feedback from get_scoring_packet.
+    If teacher judgment is needed, resubmit the same results with review_digest and answers."""
     return _compact(tools.submit_scoring_results(
         scoring_session_id, results, expected_packet_digest, review_digest, answers))
 
@@ -516,18 +532,25 @@ def _strip_generated_schema_titles(mcp_server) -> int:
     contract version moves. Runs once at import, after every tool is
     registered.
     """
+    def _strip(node) -> int:
+        stripped = 0
+        if isinstance(node, dict):
+            if node.pop("title", None) is not None:
+                stripped += 1
+            for value in node.values():
+                stripped += _strip(value)
+        elif isinstance(node, list):
+            for value in node:
+                stripped += _strip(value)
+        return stripped
+
     removed = 0
     registry = getattr(getattr(mcp_server, "_tool_manager", None), "_tools", {}) or {}
     for tool in registry.values():
         for attribute in ("parameters", "output_schema"):
             schema = getattr(tool, attribute, None)
-            if not isinstance(schema, dict):
-                continue
-            if schema.pop("title", None) is not None:
-                removed += 1
-            for prop in (schema.get("properties") or {}).values():
-                if isinstance(prop, dict) and prop.pop("title", None) is not None:
-                    removed += 1
+            if isinstance(schema, dict):
+                removed += _strip(schema)
     return removed
 
 

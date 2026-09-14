@@ -21,6 +21,23 @@ from api.powergrader.helpers import (
     build_start_success_payload,
 )
 
+MAX_TEACHER_SCORING_GUIDANCE_CHARS = 12000
+
+
+def scoring_guidance_length_error(scoring_basis: dict | None, rubric_text: str) -> dict | None:
+    if (scoring_basis or {}).get("source") != "teacher_guidance":
+        return None
+    if len(str(rubric_text or "")) <= MAX_TEACHER_SCORING_GUIDANCE_CHARS:
+        return None
+    return {
+        "ok": False,
+        "error": (
+            "Scoring guidance is too long; provide at most "
+            f"{MAX_TEACHER_SCORING_GUIDANCE_CHARS:,} characters."
+        ),
+        "code": "scoring_guidance_too_long",
+    }
+
 
 def build_extra_time_map(extra_time_list: list[dict]) -> dict:
     return {str(entry["id"]): entry.get("days", 0) for entry in extra_time_list}
@@ -244,10 +261,11 @@ def run_start_session(
                 "error": "No usable Canvas rubric is attached. Choose a Canvas Expert rubric or provide scoring guidance.",
                 "assignment_name": str(assignment_name),
                 "rubric_labels": labels}}
-        if len(str(rubric_text_override or "")) > 12000:
-            return {"ok": False, "payload": {"ok": False,
-                "error": "Scoring guidance is too long; provide at most 12,000 characters.",
-                "code": "scoring_guidance_too_long"}}
+        scoring_guidance_error = scoring_guidance_length_error(
+            scoring_basis, rubric_text_override,
+        )
+        if scoring_guidance_error:
+            return {"ok": False, "payload": scoring_guidance_error}
 
     media_submissions = [s for s in submitted if s.get("submission_type") == "media_recording"]
     oral_enabled = str(oral_reading_enabled).lower() in {"1", "true", "yes", "on"}

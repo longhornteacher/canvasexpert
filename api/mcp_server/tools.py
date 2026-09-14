@@ -138,7 +138,9 @@ _NEXT_STEPS = {
     "get_scoring_packet": (
         "Read total as response rows and students_total as people. Keep the scoring "
         "contract and rubric on page zero; use next_offset for later pages. After "
-        "reading every page, submit results with packet_digest."
+        "reading every page, call submit_scoring_results with one "
+        "{pseudonym, item_id, score, feedback} row per packet student row and "
+        "packet_digest as expected_packet_digest."
     ),
     "start_scoring_session": (
         "Call continue_scoring_session with scoring_session_id to prepare the first "

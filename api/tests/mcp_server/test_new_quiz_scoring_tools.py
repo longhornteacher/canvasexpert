@@ -21,3 +21,23 @@ def test_new_quiz_has_no_assignment_type_specific_mcp_tools_or_parameters():
                        for key in properties)
 
     assert callable(tools.submit_scoring_results)
+
+
+def test_submit_scoring_results_schema_names_the_canvas_score_row():
+    submit = next(tool for tool in server.mcp._tool_manager._tools.values()
+                  if tool.name == "submit_scoring_results")
+    schema = submit.parameters
+    result = (schema.get("$defs") or {}).get("ScoringResult") or {}
+    properties = result.get("properties") or {}
+
+    assert schema["properties"]["results"]["items"] == {"$ref": "#/$defs/ScoringResult"}
+    assert set(result.get("required") or []) == {
+        "pseudonym", "item_id", "score", "feedback",
+    }
+    assert properties["pseudonym"]["type"] == "string"
+    assert properties["item_id"]["type"] == "string"
+    assert properties["feedback"]["type"] == "string"
+    assert properties["score"]["anyOf"] == [{"type": "number"}, {"type": "null"}]
+    assert "writing_process_observations" in properties
+    assert "title" not in result
+    assert all("title" not in (prop or {}) for prop in properties.values())

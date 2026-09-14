@@ -68,7 +68,7 @@ def test_chat_scoring_uses_one_assignment_type_neutral_submit_flow():
     assert "start a Scoring Session" in instructions
     assert "get_scoring_packet" in instructions
     assert "submit_scoring_results" in instructions
-    assert "Valid results post to Canvas immediately" in instructions
+    assert "valid rows post to Canvas" in instructions
     assert "PowerGrader" not in instructions
     assert "OpenRouter" not in instructions
 
@@ -168,6 +168,7 @@ def test_first_lines_disclose_preview_and_canvas_write_boundaries():
         assert "local" in first_lines[name]
     for name in ("apply_sis_grade_bridge", "apply_content_push"):
         assert "Canvas" in first_lines[name]
+    assert "Canvas" in first_lines["submit_scoring_results"]
     assert "Canvas membership" in first_lines["apply_roster_student_change"]
     assert "list_courses" in first_lines["list_courses"]
     assert "stand-ins" in first_lines["get_roster"]

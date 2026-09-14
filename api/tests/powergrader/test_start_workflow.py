@@ -2,8 +2,101 @@
 
 import json
 
+import pytest
+
 from api import feedback_artifacts
 from api.powergrader import start_workflow
+
+
+def test_scoring_guidance_length_limit_only_applies_to_teacher_guidance():
+    long_rubric = "x" * (start_workflow.MAX_TEACHER_SCORING_GUIDANCE_CHARS + 1)
+
+    assert start_workflow.scoring_guidance_length_error(
+        {"source": "canvas_expert_rubric"}, long_rubric,
+    ) is None
+    assert start_workflow.scoring_guidance_length_error(
+        {"source": "canvas_rubric"}, long_rubric,
+    ) is None
+    assert start_workflow.scoring_guidance_length_error(
+        {"source": "teacher_guidance"}, long_rubric,
+    ) == {
+        "ok": False,
+        "error": "Scoring guidance is too long; provide at most 12,000 characters.",
+        "code": "scoring_guidance_too_long",
+    }
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_error"),
+    [
+        ("canvas_expert_rubric", False),
+        ("canvas_rubric", False),
+        ("teacher_guidance", True),
+    ],
+)
+def test_run_start_session_applies_length_limit_only_to_teacher_guidance(
+    monkeypatch, tmp_path, source, expected_error,
+):
+    long_text = "x" * (start_workflow.MAX_TEACHER_SCORING_GUIDANCE_CHARS + 1)
+    monkeypatch.setattr(start_workflow.workspace, "workspace_root", lambda: str(tmp_path))
+    monkeypatch.setattr(start_workflow.config, "course_display_name", lambda _course_id: "Course")
+    assignment = {"name": "Argument Essay", "points_possible": 10}
+    rubric_name = ""
+    scoring_guidance = ""
+    if source == "canvas_rubric":
+        assignment["rubric"] = [{"description": long_text, "points": 10}]
+    elif source == "canvas_expert_rubric":
+        rubric_name = "Long Expert Rubric"
+        monkeypatch.setattr(
+            start_workflow.ai_workflow.context, "load_rubric_text", lambda _name: long_text,
+        )
+    else:
+        scoring_guidance = long_text
+
+    monkeypatch.setattr(
+        start_workflow.assignment_refresh,
+        "refresh_assignment",
+        lambda *_args, **_kwargs: (
+            [{"submission_type": "online_text_entry", "workflow_state": "submitted",
+              "submitted_at": "2026-09-12T10:00:00Z"}],
+            assignment,
+            {},
+        ),
+    )
+    ai_rubric_texts = []
+
+    def fail_after_norms_resolved(**kwargs):
+        ai_rubric_texts.append(kwargs["rubric_text_override"])
+        return {"ok": False, "error": "AI workflow reached", "privacy_steps": []}
+
+    monkeypatch.setattr(start_workflow.ai_workflow, "run_ai_workflow", fail_after_norms_resolved)
+
+    result = start_workflow.run_start_session(
+        course_id="course-1", assignment_id="assignment-1", mode="packet",
+        watch_late="false", auto_post="false", rubric_name=rubric_name, persona_id="",
+        feedback_pattern_id="", model_id="", response_kind="scr", source_text="",
+        source_files_json="", source_uploads=None, oral_reading_passage="",
+        oral_reading_enabled="false", save_session=lambda _session: None,
+        scoring_session=True, scoring_guidance=scoring_guidance,
+    )
+
+    if expected_error:
+        assert result == {
+            "ok": False,
+            "payload": {
+                "ok": False,
+                "error": "Scoring guidance is too long; provide at most 12,000 characters.",
+                "code": "scoring_guidance_too_long",
+            },
+        }
+        assert ai_rubric_texts == []
+    else:
+        assert result == {
+            "ok": False,
+            "payload": {"ok": False, "error": "AI workflow reached", "privacy_steps": []},
+        }
+        assert len(ai_rubric_texts) == 1
+        assert len(ai_rubric_texts[0]) > start_workflow.MAX_TEACHER_SCORING_GUIDANCE_CHARS
 
 
 def test_missing_scoring_norms_names_the_resolved_assignment(monkeypatch, tmp_path):
