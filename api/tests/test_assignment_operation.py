@@ -123,14 +123,28 @@ def test_payload_build_accepts_tiers(tmp_path, monkeypatch):
     af_file = tmp_path / "tiered.assignmentforge.json"
     af_file.write_text(
         """<ASSIGNMENTFORGE_JSON>
-{"version":"1.0-json","type":"ASSIGNMENT","title":"Tiered","description":"<p>Hi</p>","tiers":[{"label":"Support","group":"Support"}]}
+{"version":"1.0-json","type":"ASSIGNMENT","title":"Tiered","description":"<p>Hi</p>","tiers":[{"label":"Support","group":"Support"},{"label":"Core","group":"Core"}]}
 </ASSIGNMENTFORGE_JSON>""",
         encoding="utf-8",
     )
+    monkeypatch.setattr("api.platform_services.config.get_tier_tags", lambda: {
+        "Support": "Red", "Core": "Blue",
+    })
+    monkeypatch.setattr("api.platform_services.config.get_canvas_base",
+                        lambda: "https://canvas.invalid")
     adapter = AssignmentAdapter()
-    payload = adapter.build_payload({"path": str(af_file)})
+    payload = adapter.build_payload({
+        "path": str(af_file),
+        "due_at": "2026-09-14T10:00:00-05:00",
+        "module_name": "Week 1",
+    })
     assert payload["tiers"] == [{
-        "label": "Support", "group": "Support", "title": "Tiered",
+        "label": "Support", "group": "Support", "tier": "Support",
+        "tag": "Red", "title": "Tiered - Red",
+        "description": "<p>Hi</p>",
+    }, {
+        "label": "Core", "group": "Core", "tier": "Core",
+        "tag": "Blue", "title": "Tiered - Blue",
         "description": "<p>Hi</p>",
     }]
 
