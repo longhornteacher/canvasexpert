@@ -211,7 +211,11 @@ def test_build_packet_rows_are_dicts_not_a_table():
 
     assert isinstance(result["students"], list)
     assert isinstance(result["students"][0], dict)
-    assert set(result["students"][0]) == {"pseudonym", "item_id", "text"}
+    assert set(result["students"][0]) == {
+        "pseudonym", "item_id", "text", "segment_index", "segment_count"
+    }
+    assert result["students"][0]["segment_index"] == 1
+    assert result["students"][0]["segment_count"] == 1
     assert isinstance(result["items"], list)
     assert isinstance(result["items"][0], dict)
 
@@ -374,8 +378,8 @@ def test_build_packet_keeps_full_text():
     assert result["students"][0]["text"] == long_response
 
 
-def test_build_packet_oversize_guard_suggests_a_workable_limit(monkeypatch):
-    """Over budget the page is refused, and the retry offered has to be smaller."""
+def test_build_packet_required_envelope_oversize_is_explicit(monkeypatch):
+    """A broken estimator cannot be mistaken for successful segmentation."""
     people = [{"pseudonym": f"Learner {_ORDINALS[i]}"} for i in (1, 2, 3)]
     monkeypatch.setattr(
         "api.powergrader.scoring_packet.source_materials.estimate_text_tokens",
@@ -389,8 +393,7 @@ def test_build_packet_oversize_guard_suggests_a_workable_limit(monkeypatch):
 
     message = str(exc.value)
     assert "25,000" in message
-    # 12 * 25000 // 75000 == 4: proportional to the overshoot, not limit - 2.
-    assert "limit=4" in message
+    assert "segment" in message
 
 
 def test_build_packet_oversize_guard_on_a_single_response(monkeypatch):
@@ -407,7 +410,7 @@ def test_build_packet_oversize_guard_on_a_single_response(monkeypatch):
                                     limit=1)
 
     assert "limit=" not in str(exc.value)
-    assert "include_context=false" in str(exc.value)
+    assert "segment" in str(exc.value)
 
 
 def test_packet_digest_is_shared_by_both_sides():
@@ -533,7 +536,9 @@ def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):
     assert result["packet_digest"]
     assert result["included_context"] is True
     # Tabulated on the way out, after the gate has walked the dict rows.
-    assert list(result["students"]["columns"]) == ["pseudonym", "item_id", "text"]
+    assert list(result["students"]["columns"]) == [
+        "pseudonym", "item_id", "text", "segment_index", "segment_count"
+    ]
     assert list(result["items"]["columns"]) == ["item_id", "prompt", "possible"]
     assert len(result["students"]["rows"]) == 6
     assert result["total"] == 6
@@ -672,7 +677,7 @@ def test_get_scoring_packet_gate_sees_student_response_text(monkeypatch, tmp_pat
     assert people[0]["canvas_id"] not in json.dumps(result)
 
 
-def test_get_scoring_packet_refuses_an_oversize_page(monkeypatch, tmp_path):
+def test_get_scoring_packet_reports_unfit_required_segment(monkeypatch, tmp_path):
     people = _seed_vault(monkeypatch, tmp_path, count=3)
     _set_active_courses(monkeypatch, ["111"])
 
@@ -687,4 +692,145 @@ def test_get_scoring_packet_refuses_an_oversize_page(monkeypatch, tmp_path):
     result = tools.get_scoring_packet("s1", limit=6)
 
     assert result["ok"] is False
-    assert "limit=3" in result["error"]
+    assert "segment" in result["error"]
+
+
+def test_build_packet_segments_oversized_response_without_loss_or_duplicate_key():
+    original = ("Paragraph one.\n\n" * 9000) + "final sentence."
+    bundle = _fake_safe_bundle([{"pseudonym": "Pikachu"}], items=1)
+    bundle["students"][0]["responses"][0]["response"] = original
+    session = _fake_session("s1", "c1")
+
+    rows = []
+    offset = 0
+    while True:
+        page = scoring_packet.build_packet(
+            session=session, safe_bundle=bundle, offset=offset, limit=2,
+            include_context=False,
+        )
+        assert page["estimated_tokens"] <= scoring_packet._TOKEN_BUDGET
+        rows.extend(page["students"])
+        if "next_offset" not in page:
+            break
+        offset = page["next_offset"]
+
+    assert len(rows) == rows[0]["segment_count"]
+    assert [row["segment_index"] for row in rows] == list(range(1, len(rows) + 1))
+    assert "".join(row["text"] for row in rows) == original
+    assert {(row["pseudonym"], row["item_id"]) for row in rows} == {("Pikachu", "item-1")}
+
+
+def test_build_packet_compacts_large_shared_context_on_page_zero():
+    bundle = _fake_safe_bundle([{"pseudonym": "Pikachu"}], items=1)
+    bundle["shared_context"] = {
+        "assignment_description": "A short assignment description.",
+        "materials": [{"title": "Large source", "text": "context " * 50000}],
+    }
+    page = scoring_packet.build_packet(
+        session=_fake_session("s1", "c1"), safe_bundle=bundle,
+        include_context=True, limit=1,
+    )
+
+    assert page["estimated_tokens"] <= scoring_packet._TOKEN_BUDGET
+    assert page["contract"]
+    assert page["shared_context_compaction"]["code"] == "shared_context_compacted"
+    assert page["shared_context"]["materials"] == []
+    assert "Large source" in page["shared_context_compaction"]["omitted_materials"]
+
+
+def test_get_scoring_packet_keeps_contract_and_basis_when_context_is_compacted(monkeypatch, tmp_path):
+    people = _seed_vault(monkeypatch, tmp_path, count=1)
+    _set_active_courses(monkeypatch, ["111"])
+    session = _fake_session("s1", "111", people)
+    bundle = _fake_safe_bundle(people, items=1)
+    bundle["shared_context"] = {
+        "assignment_description": "assignment",
+        "materials": [{"title": "Large source", "text": "context " * 50000}],
+    }
+    _attach_bundle(session, tmp_path, bundle)
+    _bind_session_store(monkeypatch, {"s1": session})
+
+    result = tools.get_scoring_packet("s1", include_context=True)
+
+    assert result["ok"] is True
+    assert result["contract"]
+    assert result["rubric"] == {"label": "Test Rubric", "included": True}
+    assert result["shared_context_compaction"]["code"] == "shared_context_compacted"
+    assert result["students"]["columns"][-2:] == ["segment_index", "segment_count"]
+
+
+def test_combined_large_description_materials_and_response_stay_reconstructible(monkeypatch):
+    # Keep the stress fixture quick while exercising the same compaction and
+    # segmentation arithmetic at a smaller deterministic envelope.
+    monkeypatch.setattr(scoring_packet, "_TOKEN_BUDGET", 8_000)
+    monkeypatch.setattr(scoring_packet, "_SEGMENT_RESERVE", 256)
+    original = "response line.\n" * 1000
+    bundle = _fake_safe_bundle([{"pseudonym": "Pikachu"}], items=1)
+    bundle["students"][0]["responses"][0]["response"] = original
+    bundle["shared_context"] = {
+        "assignment_description": "description " * 6000,
+        "materials": [
+            {"title": "Material A", "text": "material " * 6000},
+            {"title": "Material B", "text": "material " * 6000},
+        ],
+    }
+    session = _fake_session("s1", "c1")
+
+    rows = []
+    offset = 0
+    first = True
+    while True:
+        page = scoring_packet.build_packet(
+            session=session, safe_bundle=bundle, offset=offset, limit=1,
+            include_context=True,
+        )
+        assert page["estimated_tokens"] <= scoring_packet._TOKEN_BUDGET
+        if first:
+            assert page["contract"]
+            assert page["shared_context_compaction"]["code"] == "shared_context_compacted"
+            assert page["shared_context_compaction"]["assignment_description_truncated"] is True
+            first = False
+        rows.extend(page["students"])
+        if "next_offset" not in page:
+            break
+        offset = page["next_offset"]
+
+    assert "".join(row["text"] for row in rows) == original
+    assert [row["segment_index"] for row in rows] == list(range(1, len(rows) + 1))
+    assert all(row["segment_count"] == len(rows) for row in rows)
+
+
+def test_packet_digest_does_not_depend_on_page_projection_choices():
+    bundle = _fake_safe_bundle([{"pseudonym": "Pikachu"}], items=1)
+    session = _fake_session("s1", "c1")
+    first = scoring_packet.build_packet(
+        session=session, safe_bundle=bundle, offset=0, limit=1,
+        include_context=True,
+    )
+    later = scoring_packet.build_packet(
+        session=session, safe_bundle=bundle, offset=0, limit=10,
+        include_context=False,
+    )
+    assert first["packet_digest"] == later["packet_digest"]
+
+
+def test_segment_budget_accounts_for_long_public_keys():
+    pseudonym = "P" * 1200
+    item_id = "item-" + ("I" * 1200)
+    bundle = {
+        "students": [{
+            "pseudonym": pseudonym,
+            "responses": [{
+                "item_id": item_id, "prompt": "Question", "possible": 10,
+                "response": "response " * 12000,
+            }],
+        }],
+    }
+    page = scoring_packet.build_packet(
+        session=_fake_session("s1", "c1"), safe_bundle=bundle,
+        include_context=True, limit=1,
+    )
+
+    assert page["estimated_tokens"] <= scoring_packet._TOKEN_BUDGET
+    assert page["students"][0]["pseudonym"] == pseudonym
+    assert page["students"][0]["item_id"] == item_id

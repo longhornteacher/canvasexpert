@@ -296,12 +296,18 @@ true New Quiz returns `new_quiz_writing_requires_assignment` before scoring norm
 creation. If any required mirror scope is missing, stale, malformed, incomplete, or
 ambiguous, continuation names `refresh_mirror(course_id)` for repair.
 
-Paging counts *responses*, not students. A multi-item quiz gives one row per student per item,
-so `offset`, `limit`, `total` and `next_offset` are all measured in rows, and `students_total`
-carries the distinct-student count separately. Walk pages by following `next_offset` until it
-is absent rather than comparing an offset against `total`. Over the 25,000-token budget the
-page is refused rather than trimmed, and the refusal names a smaller `limit` that fits, scaled
-to how far over the page landed.
+Paging counts projected response segments, not students. A multi-item quiz gives one row per
+student per item, and an oversized response may give several complete ordered segments. The
+`segment_index` and `segment_count` columns identify each segment; concatenating its text in
+order reproduces the original response. `total`, `segment_total`, `offset`, `limit`, and
+`next_offset` count projected segment rows, while `source_response_total` counts original
+scorable responses and `students_total` carries the distinct-student count separately. One
+original response still has exactly one `(pseudonym, item_id)` result key for submission.
+Walk pages by following `next_offset` until it is absent rather than comparing an offset
+against `total`. The 25,000-token ceiling remains unchanged: pages pack complete segments to
+fit it, and optional shared assignment context is deterministically compacted or omitted with
+an explicit `shared_context_compaction` marker. The server-authored scoring contract and
+resolved basis remain on page zero.
 
 Packet membership counts are separate: `session_student_count` counts distinct private
 session students, `bundle_student_count` counts distinct SAFE pseudonyms, and

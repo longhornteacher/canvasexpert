@@ -118,7 +118,9 @@ _SCORING_SESSION_COLUMNS = (
     "remaining", "failed",
 )
 _PACKET_ITEM_COLUMNS = ("item_id", "prompt", "possible")
-_PACKET_STUDENT_COLUMNS = ("pseudonym", "item_id", "text")
+_PACKET_STUDENT_COLUMNS = (
+    "pseudonym", "item_id", "text", "segment_index", "segment_count"
+)
 _ASSESSMENT_CONTEXT_COLUMNS = (
     "pseudonym", "assessment_count", "latest_assessment_date",
     "latest_percentage", "weak_standard_codes", "standards",
@@ -2899,9 +2901,12 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     - limit: rows to return (default 10)
     - include_context: if True, include contract text, rubric, shared materials
 
-    Paging walks responses, not students: on a multi-item quiz one student
-    holds several rows, so offset, limit, total and next_offset all count
-    rows. students_total carries the distinct-student count separately.
+    Paging walks projected response segments, not students: on a multi-item
+    quiz one student holds several rows, and an oversized response may hold
+    several ordered segments. offset, limit, total, segment_total and
+    next_offset all count projected rows. source_response_total counts the
+    original scorable responses; students_total carries the distinct-student
+    count separately.
 
     Do not read this ``total`` against list_scoring_sessions' ``total``, which
     counts students in the session instead of scorable rows. A lower number
@@ -2912,8 +2917,10 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     Returns a packet with:
     - packet_digest: bundle identity, required by submit_scoring_results
     - items: {columns, rows} table of prompts, deduplicated by item_id
-    - students: {columns, rows} table of (pseudonym, item_id, text)
-    - total: scorable rows in the whole session
+    - students: {columns, rows} table of (pseudonym, item_id, text,
+      segment_index, segment_count)
+    - total / segment_total: projected segment rows in the whole session
+    - source_response_total: original scorable responses before segmentation
     - students_total: distinct students holding at least one scorable row
     - session_student_count / bundle_student_count: distinct membership counts
     - excluded_student_count: nonnegative session-minus-bundle count gap,
@@ -2926,12 +2933,14 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     - included_context: bool (true if contract/rubric were included)
     - rubric: declared rubric label and whether its text resolved, when context is included
     - estimated_tokens: projected token count for this response
+    - shared_context_compaction: explicit marker when optional shared context
+      was compacted or omitted
 
     Course-gated on the session's course_id. Refuses when:
     - scoring_session_id is not found
     - session has no SAFE bundle
     - teacher's course is not a Current course
-    - the page projects over the token budget (retry with a smaller limit)
+    - the required contract/basis or one response segment cannot fit the token budget
 
     Text-only (no media entries, no attachment filenames). Never raises.
     """
