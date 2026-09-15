@@ -9,7 +9,7 @@ decorator. No imports needed — the helpers listed in `AUTHORING.md` are alread
 - A broken file is skipped (the server prints the error to its console) — it never takes
   the app down.
 - A custom routine that uses the same id as a built-in (`sweep`, `download`, `curve`,
-  `grading_debt`) is ignored.
+  `grading_debt`, `student_reports`, `sis_bridge_sync`) is ignored.
 
 To author one with an LLM, paste `AUTHORING.md` into your assistant and describe what you
 want the routine to check or do.

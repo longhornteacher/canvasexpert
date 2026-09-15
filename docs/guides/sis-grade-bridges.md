@@ -69,22 +69,30 @@ Grade projection is available only after the differentiated content operation ha
 family. An unregistered title fails closed. The tools do not create, adopt, rename, or repair a
 family.
 
+The Routines page also provides **Differentiated bridge grade sync**. It is a built-in Canvas
+write routine, disabled by default, with manual Run and the existing local interval schedule.
+
 ## 6. Which grades move
 
-A final numeric source score copies as the same number of points. A final excused state copies as
-excused. CanvasExpert may preserve an accepted explicit late-policy status with the score.
+A posted final numeric source score copies as the same number of points. Multiple agreeing finals
+resolve to that same value. One or more agreeing posted excused finals excuse the bridge. The
+routine checks every registered source for every active student; the student's tier membership
+does not choose the grade.
 
-Blank, unsubmitted, pending-review, and other non-final rows are skipped; they never become zero.
-Overlapping source membership, stale review facts, changed source structure, a changed bridge
-digest, or incomplete pagination blocks the projection. Comments, rubrics, attempt data,
-submission text, feedback, and New Quiz item scores do not move.
+Differing final values are reported as `conflicting_final_values` and left unchanged. Hidden or
+unposted grades are held without exposing their value. Submitted-but-ungraded work stays blank.
+Before the bridge due time, blank, absent, or unsubmitted work stays blank; after it, the routine
+writes zero with Canvas missing status. It clears a bridge value only when the private ledger
+proves the unchanged value came from an earlier run of this routine. Teacher edits and values
+without that provenance are held. Comments, rubrics, attempts, submission text, feedback, and
+New Quiz item scores do not move.
 
 ## 7. Update all registered families
 
-“Update all grades” is conversational shorthand, not a scheduler or batch transaction. When the
-teacher explicitly requests all registered families, list them and run a separate preview/apply
-cycle for each. Each operation has its own drift check, checkpoints, verification, targeted
-CanvasMirror submissions refresh, and receipt.
+One Routine run visits every registered family in Current courses and performs a separate frozen
+preview/apply cycle for each. Each operation has its own drift check, checkpoints, verification,
+targeted CanvasMirror submissions refresh, and receipt. A blocked or Attention family does not
+prevent another safe family from running.
 
 CanvasExpert writes only to Canvas Live. After the results are verified, review them there. The
 teacher decides when to use Canvas Grade Sync to send grades to the SIS.
@@ -95,6 +103,10 @@ Every outbound mutation has a persisted before-send marker and an exact postcond
 disconnect, or missing returned ID remains `sent_unknown`; never repeat the write by guessing.
 Resume from the existing Operation Ledger operation so exact-ID reconciliation can verify applied
 steps and continue only unfinished work.
+
+Routine lines and the aggregate Last run summary distinguish copied scores, missing zeroes,
+cleared prior routine values, already matching rows, held rows, and conflicting rows. A repeated
+run against unchanged Canvas state performs no grade or status mutation.
 
 Do not create a replacement bridge for an Attention operation. Registration is written only after
 all family postconditions pass, so its absence is not evidence that no Canvas object exists.
@@ -116,3 +128,6 @@ refresh CanvasMirror from CanvasExpert before continuing.
 Implementation changes use the focused gate named by the current direct brief. Tests and reports
 must use synthetic, student-free examples and keep private ledger contents out of terminal and
 chat output.
+
+After a run, review the bridge columns in Canvas Live. CanvasExpert never starts or monitors
+Canvas Grade Sync; the teacher decides when Canvas sends grades to the SIS.

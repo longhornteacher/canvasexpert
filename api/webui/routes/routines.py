@@ -17,6 +17,7 @@ from api.webui import readiness
 from .routines_builtin import (
     _run_routine_sweep, _run_routine_download, _run_routine_curve,
     _run_routine_grading_debt, _run_routine_student_reports,
+    _run_routine_sis_bridge_sync,
 )
 
 
@@ -56,6 +57,11 @@ _ROUTINE_DEFS = {
         "writes": False,
         "default": {"enabled": False, "every_hours": 168,
                     "params": {}},
+    },
+    "sis_bridge_sync": {
+        "label": "Differentiated bridge grade sync",
+        "writes": True,
+        "default": {"enabled": False, "every_hours": 24, "params": {}},
     },
 }
 
@@ -98,6 +104,7 @@ _ROUTINE_RUNNERS = {
     "sweep": _run_routine_sweep, "download": _run_routine_download,
     "curve": _run_routine_curve, "grading_debt": _run_routine_grading_debt,
     "student_reports": _run_routine_student_reports,
+    "sis_bridge_sync": _run_routine_sis_bridge_sync,
 }
 
 

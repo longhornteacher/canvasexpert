@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import copy
 import math
+from datetime import datetime, timezone
 from typing import Any
 
 from api import operational_log
 from api.platform_services import canvas_client, config
 
-from .. import models
+from .. import models, operations
 from . import adapter_support, differentiated_bridge
 
 
@@ -59,6 +60,10 @@ class SisGradeBridgeAdapter:
             "source_titles": [],
             "bridge_assignment_id": None,
             "registered_bridge_digest": None,
+            "write_origin": (
+                "routine" if prepare_request.get("write_origin") == "routine"
+                else "assistant"
+            ),
         }
         if registration:
             if not isinstance(registration, dict):
@@ -102,6 +107,7 @@ class SisGradeBridgeAdapter:
             "due_at": baseline["due_at"],
             "bridge_due_at": baseline["bridge_state"]["due_at"],
             "bridge_description": baseline["bridge_state"]["description"],
+            "write_origin": payload.get("write_origin", "assistant"),
         })
         return frozen
 
@@ -119,6 +125,7 @@ class SisGradeBridgeAdapter:
             "due_at": payload.get("due_at"),
             "bridge_due_at": payload.get("bridge_due_at"),
             "bridge_description": payload.get("bridge_description"),
+            "write_origin": payload.get("write_origin", "assistant"),
         })
 
     def verify_targets(self, payload: dict, targets: list[dict]) -> list[dict]:
@@ -245,19 +252,14 @@ class SisGradeBridgeAdapter:
                 all_members.add(user_id)
                 if user_id in active_ids:
                     memberships_by_student.setdefault(user_id, []).append(source_index)
-        overlaps = {uid: indexes for uid, indexes in memberships_by_student.items()
-                    if len(indexes) > 1}
-        if overlaps:
-            raise _BridgeInvariantError(
-                "overlapping_active_memberships",
-                f"active_overlap_count={len(overlaps)}",
-            )
+        overlaps = {
+            uid: indexes for uid, indexes in memberships_by_student.items()
+            if len(indexes) > 1
+        }
 
-        grade_entries = []
-        pending_review = 0
-        unsubmitted = 0
-        skipped_other = 0
-        submission_counts = 0
+        source_submissions: dict[str, list[dict]] = {
+            user_id: [] for user_id in active_ids
+        }
         for source_index, source in enumerate(source_rows):
             source_id = str(source["id"])
             submissions = _get_all(
@@ -273,72 +275,108 @@ class SisGradeBridgeAdapter:
                     raise _BridgeInvariantError("duplicate_submission_row")
                 by_user[user_id] = submission
 
-            for user_id in source_memberships[source_index]:
-                if user_id not in active_ids:
-                    continue
-                submission_counts += 1
+            for user_id in active_ids:
                 submission = by_user.get(user_id)
-                if not submission:
-                    unsubmitted += 1
-                    continue
-                workflow_state = str(submission.get("workflow_state") or "")
-                if workflow_state == "pending_review":
-                    pending_review += 1
-                    continue
-                if workflow_state == "unsubmitted":
-                    unsubmitted += 1
-                    continue
-                if bool(submission.get("excused")):
-                    grade_entries.append({
-                        "source_index": source_index,
-                        "source_assignment_id": source_id,
-                        "user_id": user_id,
-                        "excused": True,
-                        "score": None,
-                        "late_policy_status": _late_status(submission),
-                    })
-                    continue
-                score = submission.get("score")
-                if workflow_state == "graded" and _is_number(score):
-                    grade_entries.append({
-                        "source_index": source_index,
-                        "source_assignment_id": source_id,
-                        "user_id": user_id,
-                        "excused": False,
-                        "score": float(score),
-                        "late_policy_status": _late_status(submission),
-                    })
-                else:
-                    skipped_other += 1
+                source_submissions[user_id].append(
+                    _source_submission_state(source_index, source_id, user_id, submission)
+                )
 
-        grade_entries.sort(key=lambda row: (row["source_index"], row["user_id"]))
-        assigned_active = len(memberships_by_student)
-        uncovered_active = len(active_ids - set(memberships_by_student))
-        inactive_assignees = len(all_members - active_ids)
+        bridge_rows = _get_all(
+            f"/api/v1/courses/{course_id}/assignments/{bridge_id}/submissions",
+            {"per_page": 100},
+        )
+        bridge_by_user: dict[str, dict] = {}
+        for submission in bridge_rows:
+            user_id = str(submission.get("user_id") or "")
+            if not user_id or user_id not in active_ids:
+                continue
+            if user_id in bridge_by_user:
+                raise _BridgeInvariantError("duplicate_bridge_submission_row")
+            bridge_by_user[user_id] = _bridge_submission_state(user_id, submission)
+        for user_id in active_ids:
+            bridge_by_user.setdefault(user_id, _bridge_submission_state(user_id, None))
+
+        prior_writes = _prior_routine_writes(course_id, payload["family_title"], bridge_id)
+        past_due = _past_due(bridge_due_at)
+        grade_entries: list[dict] = []
         counts = {
             "active_students": len(active_ids),
-            "assigned_active": assigned_active,
-            "uncovered_active": uncovered_active,
-            "overlapping_active": 0,
-            "inactive_assignees": inactive_assignees,
-            "eligible_final": len(grade_entries),
-            "eligible_numeric": sum(not row["excused"] for row in grade_entries),
-            "eligible_excused": sum(bool(row["excused"]) for row in grade_entries),
-            "pending_review": pending_review,
-            "unsubmitted": unsubmitted,
-            "skipped_other": skipped_other,
+            "assigned_active": len(memberships_by_student),
+            "uncovered_active": len(active_ids - set(memberships_by_student)),
+            "overlapping_active": len(overlaps),
+            "inactive_assignees": len(all_members - active_ids),
+            "copied_scores": 0,
+            "copied_excused": 0,
+            "missing_zeroes": 0,
+            "cleared_prior_values": 0,
+            "already_matching": 0,
+            "held": 0,
+            "conflicting_final_values": 0,
+            "planned_changes": 0,
         }
-        if submission_counts != assigned_active:
-            raise _BridgeInvariantError("membership_count_inconsistent")
 
+        for user_id in sorted(active_ids):
+            states = source_submissions[user_id]
+            current = bridge_by_user[user_id]
+            final_rows = [row for row in states if row["final"] and row["posted"]]
+            hidden_final = any(row["final"] and not row["posted"] for row in states)
+            if hidden_final:
+                counts["held"] += 1
+                continue
+
+            target, conflict = _resolve_final_target(user_id, final_rows)
+            if conflict:
+                counts["conflicting_final_values"] += 1
+                continue
+            if target is not None:
+                if _grade_matches(current, target):
+                    counts["already_matching"] += 1
+                else:
+                    grade_entries.append(target)
+                    counts["planned_changes"] += 1
+                    counts["copied_excused" if target["excused"] else "copied_scores"] += 1
+                continue
+
+            submitted_ungraded = any(row["submitted_ungraded"] for row in states)
+            if submitted_ungraded:
+                if _bridge_is_blank(current):
+                    counts["held"] += 1
+                elif _current_matches_prior_write(current, prior_writes.get(user_id)):
+                    grade_entries.append(_clear_entry(user_id))
+                    counts["planned_changes"] += 1
+                    counts["cleared_prior_values"] += 1
+                else:
+                    counts["held"] += 1
+                continue
+
+            if past_due:
+                target = _missing_entry(user_id)
+                if _grade_matches(current, target):
+                    counts["already_matching"] += 1
+                else:
+                    grade_entries.append(target)
+                    counts["planned_changes"] += 1
+                    counts["missing_zeroes"] += 1
+                continue
+
+            if _bridge_is_blank(current):
+                counts["already_matching"] += 1
+            elif _current_matches_prior_write(current, prior_writes.get(user_id)):
+                grade_entries.append(_clear_entry(user_id))
+                counts["planned_changes"] += 1
+                counts["cleared_prior_values"] += 1
+            else:
+                counts["held"] += 1
+
+        grade_entries.sort(key=lambda row: row["user_id"])
         warnings = [
             {"code": code, "count": counts[count_key]}
             for code, count_key in (
                 ("active_students_uncovered", "uncovered_active"),
-                ("pending_review_skipped", "pending_review"),
-                ("unsubmitted_skipped", "unsubmitted"),
+                ("overlapping_membership_ignored", "overlapping_active"),
                 ("inactive_assignees_ignored", "inactive_assignees"),
-                ("other_nonfinal_skipped", "skipped_other"),
+                ("held_source_or_bridge_rows", "held"),
+                ("conflicting_final_values", "conflicting_final_values"),
             )
             if counts[count_key]
         ]
@@ -351,10 +389,13 @@ class SisGradeBridgeAdapter:
             "source_target_evidence": source_target_evidence,
             "source_targeting_kind": next(iter(source_targeting_kinds)),
             "active_student_ids": sorted(active_ids),
+            "source_submissions": source_submissions,
+            "bridge_submissions": bridge_by_user,
             "grade_entries": grade_entries,
             "points_possible": _normalized_number(first.get("points_possible")),
             "assignment_group_id": str(first.get("assignment_group_id")),
             "due_at": effective_due_dates[0],
+            "bridge_due_at": bridge_due_at,
             "bridge_state": bridge_state,
             "counts": counts,
             "warnings": warnings,
@@ -373,10 +414,13 @@ class SisGradeBridgeAdapter:
             "source_target_evidence": source_target_evidence,
             "source_targeting_kind": baseline["source_targeting_kind"],
             "active_student_ids": baseline["active_student_ids"],
+            "source_submissions": source_submissions,
+            "bridge_submissions": bridge_by_user,
             "grade_entries": grade_entries,
             "points_possible": baseline["points_possible"],
             "assignment_group_id": baseline["assignment_group_id"],
             "due_at": baseline["due_at"],
+            "bridge_due_at": bridge_due_at,
             "counts": counts,
         })
         baseline["baseline_digest"] = models.sha256_dict(baseline)
@@ -399,7 +443,9 @@ class SisGradeBridgeAdapter:
             "points_possible": baseline.get("points_possible"),
             "common_assignment_group": True,
             "common_due_date": True,
-            "no_active_overlap": True,
+            "no_active_overlap": not bool(
+                (baseline.get("counts") or {}).get("overlapping_active")
+            ),
             "source_targeting_kind": baseline.get("source_targeting_kind"),
             "counts": copy.deepcopy(baseline.get("counts") or {}),
             "warnings": copy.deepcopy(baseline.get("warnings") or []),
@@ -790,30 +836,206 @@ def _bridge_digest(state: dict) -> str:
     return differentiated_bridge.structural_digest(state)
 
 
-def _grade_request(entry: dict) -> dict:
-    request = {"excuse": True} if entry.get("excused") else {
-        "posted_grade": str(entry.get("score"))
+def _source_submission_state(
+    source_index: int, source_id: str, user_id: str, submission: dict | None,
+) -> dict:
+    if not submission:
+        return {
+            "source_index": source_index,
+            "source_assignment_id": source_id,
+            "user_id": user_id,
+            "workflow_state": "absent",
+            "submitted_at": None,
+            "posted_at": None,
+            "excused": False,
+            "score": None,
+            "final": False,
+            "posted": False,
+            "submitted_ungraded": False,
+        }
+    workflow_state = str(submission.get("workflow_state") or "").strip()
+    excused = submission.get("excused") is True
+    numeric_final = workflow_state == "graded" and _is_number(submission.get("score"))
+    final = excused or numeric_final
+    if final and "posted_at" not in submission:
+        raise _BridgeInvariantError("source_posting_state_missing")
+    return {
+        "source_index": source_index,
+        "source_assignment_id": source_id,
+        "user_id": user_id,
+        "workflow_state": workflow_state,
+        "submitted_at": submission.get("submitted_at"),
+        "graded_at": submission.get("graded_at"),
+        "posted_at": submission.get("posted_at"),
+        "excused": excused,
+        "score": float(submission["score"]) if numeric_final else None,
+        "final": final,
+        "posted": final and bool(submission.get("posted_at")),
+        "submitted_ungraded": (
+            not final and (
+                workflow_state in {"submitted", "pending_review"}
+                or bool(submission.get("submitted_at"))
+            )
+        ),
     }
-    if entry.get("late_policy_status"):
-        request["late_policy_status"] = entry["late_policy_status"]
+
+
+def _bridge_submission_state(user_id: str, submission: dict | None) -> dict:
+    row = submission or {}
+    return {
+        "user_id": user_id,
+        "score": float(row["score"]) if _is_number(row.get("score")) else None,
+        "grade": row.get("grade"),
+        "excused": row.get("excused") is True,
+        "late_policy_status": _late_status(row),
+    }
+
+
+def _resolve_final_target(
+    user_id: str, final_rows: list[dict],
+) -> tuple[dict | None, bool]:
+    if not final_rows:
+        return None, False
+    first = final_rows[0]
+    for row in final_rows[1:]:
+        if bool(row["excused"]) != bool(first["excused"]):
+            return None, True
+        if not row["excused"] and not _numbers_equal(row["score"], first["score"]):
+            return None, True
+    if first["excused"]:
+        return {
+            "user_id": user_id,
+            "action": "excuse",
+            "excused": True,
+            "score": None,
+            "late_policy_status": None,
+        }, False
+    return {
+        "user_id": user_id,
+        "action": "score",
+        "excused": False,
+        "score": _normalized_number(first["score"]),
+        "late_policy_status": None,
+    }, False
+
+
+def _missing_entry(user_id: str) -> dict:
+    return {
+        "user_id": user_id,
+        "action": "missing",
+        "excused": False,
+        "score": 0,
+        "late_policy_status": "missing",
+    }
+
+
+def _clear_entry(user_id: str) -> dict:
+    return {
+        "user_id": user_id,
+        "action": "clear",
+        "excused": False,
+        "score": None,
+        "late_policy_status": None,
+    }
+
+
+def _past_due(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        raise _BridgeInvariantError("bridge_due_at_missing")
+    try:
+        due = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise _BridgeInvariantError("bridge_due_at_invalid") from exc
+    if due.tzinfo is None:
+        raise _BridgeInvariantError("bridge_due_at_invalid")
+    return datetime.now(timezone.utc) > due.astimezone(timezone.utc)
+
+
+def _prior_routine_writes(
+    course_id: str, family_title: str, bridge_id: str,
+) -> dict[str, dict]:
+    latest: dict[str, tuple[str, dict]] = {}
+    for operation in operations.list_operations():
+        if operation.get("kind") != KIND:
+            continue
+        if (operation.get("source_ref") or {}).get("type") != "sis_grade_bridge_routine":
+            continue
+        payload = operation.get("normalized_payload") or {}
+        if (
+            str(payload.get("course_id") or "") != course_id
+            or str(payload.get("family_title") or "") != family_title
+            or str(payload.get("bridge_assignment_id") or "") != bridge_id
+        ):
+            continue
+        stamp = str(operation.get("updated_at") or operation.get("created_at") or "")
+        for target in operation.get("targets") or []:
+            baseline = target.get("baseline") or {}
+            entries = baseline.get("grade_entries") or []
+            for step in target.get("steps") or []:
+                if step.get("state") != "applied":
+                    continue
+                key = str(step.get("step_key") or "")
+                if not key.startswith("copy_grade:"):
+                    continue
+                try:
+                    entry = entries[int(key.split(":", 1)[1])]
+                except (IndexError, TypeError, ValueError):
+                    continue
+                user_id = str(entry.get("user_id") or "")
+                if user_id and (user_id not in latest or stamp > latest[user_id][0]):
+                    latest[user_id] = (stamp, copy.deepcopy(entry))
+    return {user_id: row for user_id, (_stamp, row) in latest.items()}
+
+
+def _current_matches_prior_write(current: dict, prior: dict | None) -> bool:
+    if not prior or prior.get("action") == "clear":
+        return False
+    if not _grade_matches(current, prior):
+        return False
+    return _late_status(current) == _late_status(prior)
+
+
+def _bridge_is_blank(submission: dict) -> bool:
+    return (
+        submission.get("excused") is not True
+        and not _is_number(submission.get("score"))
+        and str(submission.get("grade") or "").strip() == ""
+        and _late_status(submission) is None
+    )
+
+
+def _grade_request(entry: dict) -> dict:
+    if entry.get("action") == "clear":
+        return {
+            "posted_grade": "", "excuse": False,
+            "late_policy_status": "none",
+        }
+    request = {"excuse": True} if entry.get("excused") else {
+        "posted_grade": str(entry.get("score")),
+        "excuse": False,
+        "late_policy_status": entry.get("late_policy_status") or "none",
+    }
     return request
 
 
 def _grade_matches(submission: dict, entry: dict) -> bool:
+    if entry.get("action") == "clear":
+        return _bridge_is_blank(submission)
     if entry.get("excused"):
         if submission.get("excused") is not True:
             return False
     elif not _numbers_equal(submission.get("score"), entry.get("score")):
         return False
-    expected_status = entry.get("late_policy_status")
-    if expected_status and submission.get("late_policy_status") != expected_status:
+    expected_status = _late_status(entry)
+    if _late_status(submission) != expected_status:
         return False
     return True
 
 
 def _late_status(submission: dict) -> str | None:
     value = str(submission.get("late_policy_status") or "").strip()
-    return value or None
+    return None if value in {"", "none"} else value
 
 
 def _bridge_id(payload: dict, target: dict, steps: list[dict]) -> str | None:

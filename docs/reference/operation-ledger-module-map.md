@@ -35,10 +35,10 @@ These are high-risk Canvas write flows.
   quiz creation, item creation, assignment restriction, override creation, assignment
   patch verification, and Assignment-type module attachment.
 - `api/operation_ledger/adapters/sis_grade_bridge.py` — registered-family exact-ID
-  verification, explicit-student or verified Differentiation Tag membership
-  resolution, aggregate review, grade projection, and ambiguous grade-write
-  reconciliation for `gradebook.sis_bridge`. It owns no family discovery,
-  structure repair, registration, or SIS-sync request.
+  verification, all-source posted-final resolution independent of tier membership,
+  bridge comparison, provenance-safe clear planning, aggregate review, grade projection,
+  and ambiguous grade-write reconciliation for `gradebook.sis_bridge`. It owns no family
+  discovery, structure repair, registration, or SIS-sync request.
 
 ## Shared Support
 
@@ -65,8 +65,9 @@ These are high-risk Canvas write flows.
 - Differentiated sources never call module placement. The shared family helper is the
   only differentiated owner allowed to attach the bridge assignment.
 - Grade projection starts from an exact registered family and may only write eligible
-  final submission scores/statuses to that bridge. It cannot change family structure or
-  trigger Canvas Grade Sync.
+  final submission scores/statuses, past-due missing zeroes, or provenance-proven clears
+  to that bridge. Hidden, submitted-ungraded, conflicting, and teacher-changed rows remain
+  held. It cannot change family structure or trigger Canvas Grade Sync.
 - Preserve facade monkeypatch seams when moving code. Existing tests still patch the
   facade modules rather than every leaf helper.
 - No live Canvas verification belongs here. Use mocked adapter tests only.
@@ -83,6 +84,7 @@ These are high-risk Canvas write flows.
 - `api/tests/test_rubric_operation.py`
 - `api/tests/test_operation_ledger.py`
 - `api/tests/test_sis_grade_bridge_operation.py`
+- `api/tests/test_routines_builtin_sis_grade_bridge.py`
 - `api/tests/test_operation_routes.py`
 
 ## Source-size reports

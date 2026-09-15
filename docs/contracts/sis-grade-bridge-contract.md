@@ -82,26 +82,38 @@ Canvas objects and directs the teacher to Canvas Live for review.
 Projection begins from one exact registered family and re-reads live Canvas state inside the
 token-holding app. It verifies the registered source IDs and titles, their overrides and
 safe source settings, the registered bridge ID, its saved structural digest and locked shape,
-and nonoverlapping active-student membership. Drift or incomplete pagination blocks before a
-write.
+every active student, all source submissions, and current bridge submissions. Drift or
+incomplete pagination blocks before a write. Tier membership verifies family structure but
+does not select a grade.
 
-For an assigned active student, CanvasExpert copies a final numeric score exactly as points.
-An excused final source becomes excused on the bridge. An accepted explicit late-policy status
-may accompany the score. Blank, unsubmitted, pending-review, and otherwise non-final source
-rows are skipped and never become zero. Submission content, comments, rubric rows, attempts,
-New Quiz item scores, and feedback are never copied.
+For each active student, one posted final numeric source score copies exactly as points;
+multiple agreeing numeric finals resolve to the same value. One or more agreeing posted
+excused finals excuse the bridge. Differing numeric finals or numeric-versus-excused finals
+are held as `conflicting_final_values`. Hidden or unposted final grades are held and never
+exposed. Submitted-but-ungraded work remains blank.
+
+Before the bridge due time, absent, blank, or unsubmitted work remains blank. After that time,
+it becomes exactly zero with `late_policy_status=missing`. A blank target clears a bridge value
+only when private applied Operation Ledger steps prove that the unchanged current value came
+from an earlier run of the built-in routine. Teacher-changed and provenance-unknown values are
+held. Submission content, comments, rubric rows, attempts, New Quiz item scores, and feedback
+are never copied.
 
 Each eligible write is checkpointed and verified at its exact bridge submission coordinate.
 An uncertain send remains `sent_unknown` and is never resent by guess. Successful writes request
 the existing targeted submissions refresh. No structural write or SIS-sync request is part of
-grade projection.
+grade projection. Plans contain only changed bridge coordinates, so a repeated run against
+unchanged Canvas state sends no mutation.
 
 ## 7. Review, recovery, and receipts
 
 The assistant-facing surface lists registered families, previews one exact registered family,
 and applies the unchanged frozen projection. Preview returns aggregate facts, warnings, and
 opaque review coordinates; it never returns a student identity or per-student score. Apply
-accepts only those coordinates and refuses live drift.
+accepts only those coordinates and refuses live drift. The built-in **Differentiated bridge
+grade sync** Routine runs one separate preview/apply cycle for each registered family in Current
+courses. It is disabled by default; a manual Run or explicit schedule enablement authorizes its
+Canvas writes.
 
 Exact postconditions are the only recovery evidence. A partial operation remains visible in
 Attention and resumes only from verified exact IDs and pending write-ahead steps. Every apply
@@ -115,3 +127,4 @@ aggregate counts, content-free step states, and the registered bridge reference.
 - No percentage scaling, score invention, rubric/comment copying, or New Quiz item-score copy.
 - No generic assistant grade-write tool or batch transaction across several families.
 - No bridge for whole-class delivery and no student-facing source module items.
+- No Canvas Grade Sync trigger, request, polling, credential, or SIS operation.

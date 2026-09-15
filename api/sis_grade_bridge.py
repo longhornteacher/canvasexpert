@@ -60,7 +60,9 @@ def list_sis_grade_bridges(course_id: str) -> dict:
     }
 
 
-def preview_sis_grade_bridge(course_id: str, family_title: str) -> dict:
+def preview_sis_grade_bridge(
+    course_id: str, family_title: str, *, write_origin: str = "assistant",
+) -> dict:
     course_key = str(course_id or "").strip()
     title = str(family_title or "").strip()
     if not course_key or not title:
@@ -75,6 +77,7 @@ def preview_sis_grade_bridge(course_id: str, family_title: str) -> dict:
             "course_id": course_key,
             "family_title": title,
             "registration": registration,
+            "write_origin": write_origin,
         })
         provisional = adapter.verify_targets(
             payload, [{"course_id": course_key}]
@@ -111,7 +114,13 @@ def preview_sis_grade_bridge(course_id: str, family_title: str) -> dict:
         operation = models.new_operation(
             operation_id=operation_id,
             kind=KIND,
-            source_ref={"type": "sis_grade_bridge"},
+            source_ref={
+                "type": (
+                    "sis_grade_bridge_routine"
+                    if write_origin == "routine"
+                    else "sis_grade_bridge"
+                )
+            },
             source_digest=adapter.source_digest(payload),
             normalized_payload=payload,
             targets=[target_record],
@@ -164,6 +173,15 @@ def _result_projection(operation_key: str, result: dict, fallback: dict) -> dict
     stored = operations.get_operation(operation_key) or fallback
     target = (stored.get("targets") or [{}])[0]
     baseline = target.get("baseline") or {}
+    counts = copy.deepcopy(baseline.get("counts") or {})
+    action_counts = {
+        "score": "copied_scores",
+        "excuse": "copied_excused",
+        "missing": "missing_zeroes",
+        "clear": "cleared_prior_values",
+    }
+    for count_key in action_counts.values():
+        counts[count_key] = 0
     step_rows = [
         {
             "step_key": step.get("step_key"),
@@ -172,6 +190,17 @@ def _result_projection(operation_key: str, result: dict, fallback: dict) -> dict
         }
         for step in (target.get("steps") or [])
     ]
+    entries = baseline.get("grade_entries") or []
+    for step in target.get("steps") or []:
+        if step.get("state") != "applied":
+            continue
+        try:
+            entry = entries[int(str(step.get("step_key") or "").split(":", 1)[1])]
+        except (IndexError, TypeError, ValueError):
+            continue
+        count_key = action_counts.get(entry.get("action"))
+        if count_key:
+            counts[count_key] += 1
     receipt_id = None
     for receipt in receipts.list_receipts():
         if receipt.get("subject_id") == operation_key:
@@ -181,7 +210,7 @@ def _result_projection(operation_key: str, result: dict, fallback: dict) -> dict
         "ok": bool(result.get("ok")),
         "operation_id": operation_key,
         "status": result.get("status"),
-        "counts": copy.deepcopy(baseline.get("counts") or {}),
+        "counts": counts,
         "warnings": copy.deepcopy(baseline.get("warnings") or []),
         "bridge_assignment_id": target.get("returned_object_id"),
         "bridge_url": target.get("returned_object_url"),

@@ -13,7 +13,7 @@ from api.platform_services.canvas_client import canvas_get, canvas_get_all, _can
 from ..gradebook_service import _load_curve_events, _save_curve_events, _apply_curve_model
 from ..mirror_reads import students_or_live, submissions_or_live
 from ..schooldays import _school_days_late, parse_iso_local
-from api import operational_log, routine_reads, student_packet
+from api import operational_log, routine_reads, sis_grade_bridge, student_packet
 from api.powergrader import assignment_refresh
 
 from api.nq_report import html_to_text
@@ -154,6 +154,86 @@ def _run_routine_download(params):
     lines.append(f"Focused refresh: {current} current, {incomplete} incomplete, {failed} failed.")
     return {"ok": ok, "lines": lines,
             "summary": f"{total} assignment refresh(es): {current} current, {incomplete} incomplete, {failed} failed"}
+
+
+# --------------------------------------------------------------------------
+# Differentiated bridge grade sync
+# --------------------------------------------------------------------------
+
+def _run_routine_sis_bridge_sync(_params):
+    lines = []
+    ok = True
+    totals = {
+        "families": 0,
+        "copied_scores": 0,
+        "copied_excused": 0,
+        "missing_zeroes": 0,
+        "cleared_prior_values": 0,
+        "already_matching": 0,
+        "held": 0,
+        "conflicting_final_values": 0,
+        "attention_families": 0,
+    }
+    for course in config.active_courses():
+        course_id = str(course.get("id") or "").strip()
+        try:
+            registrations = config.list_sis_grade_bridges(course_id)
+        except Exception:
+            lines.append("✗ registered bridge families could not be read")
+            totals["attention_families"] += 1
+            ok = False
+            continue
+        for registration in registrations:
+            family_title = str(registration.get("family_title") or "").strip()
+            totals["families"] += 1
+            preview = sis_grade_bridge.preview_sis_grade_bridge(
+                course_id, family_title, write_origin="routine"
+            )
+            if not preview.get("ok"):
+                lines.append(f"✗ {family_title}: {preview.get('error', 'preview failed')}")
+                totals["attention_families"] += 1
+                ok = False
+                continue
+            result = sis_grade_bridge.apply_sis_grade_bridge(
+                preview["operation_id"], preview["batch_id"], preview["review_digest"]
+            )
+            counts = result.get("counts") or {}
+            for key in (
+                "copied_scores", "copied_excused", "missing_zeroes",
+                "cleared_prior_values", "already_matching", "held",
+                "conflicting_final_values",
+            ):
+                totals[key] += int(counts.get(key) or 0)
+            attention = bool(
+                counts.get("held") or counts.get("conflicting_final_values")
+                or not result.get("ok")
+            )
+            if attention:
+                totals["attention_families"] += 1
+            if not result.get("ok"):
+                ok = False
+            marker = "⚑" if attention else "✓"
+            lines.append(
+                f"{marker} {family_title}: "
+                f"{int(counts.get('copied_scores') or 0)} copied, "
+                f"{int(counts.get('copied_excused') or 0)} excused, "
+                f"{int(counts.get('missing_zeroes') or 0)} missing zeroes, "
+                f"{int(counts.get('cleared_prior_values') or 0)} cleared, "
+                f"{int(counts.get('already_matching') or 0)} matching, "
+                f"{int(counts.get('held') or 0)} held, "
+                f"{int(counts.get('conflicting_final_values') or 0)} conflicting"
+            )
+    if not totals["families"] and not lines:
+        lines.append("· no registered differentiated families in Current courses")
+    summary = (
+        f"{totals['families']} families: {totals['copied_scores']} copied, "
+        f"{totals['missing_zeroes']} missing zeroes, "
+        f"{totals['cleared_prior_values']} cleared, "
+        f"{totals['already_matching']} matching, "
+        f"{totals['held']} held, "
+        f"{totals['conflicting_final_values']} conflicting"
+    )
+    return {"ok": ok, "lines": lines, "summary": summary, "counts": totals}
 
 
 # --------------------------------------------------------------------------

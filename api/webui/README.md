@@ -215,7 +215,7 @@ Routines are saved automations that run on this machine with no external schedul
 "Daily" therefore means "next time the app is open after 24 h have passed" — that's
 the design, not a bug.
 
-Four routines ship now:
+Six routines ship now:
 
 | id | Label | Writes to Canvas? | Default |
 |---|---|---|---|
@@ -224,6 +224,7 @@ Four routines ship now:
 | `curve` | Auto-curve low assignment averages | flag: no · apply: yes | disabled, 168 h |
 | `grading_debt` | Grading-debt report | No | **enabled**, 24 h |
 | `student_reports` | Refresh monitored-student reports | No | disabled, 168 h |
+| `sis_bridge_sync` | Differentiated bridge grade sync | Yes (idempotent) | disabled, 24 h |
 
 Routine state is stored **machine-locally** (`api/webui/config.json`, `routines` key)
 — NOT synced via the workspace. The synced workspace must not make one machine think
@@ -237,6 +238,13 @@ Activity Log under action `routine`.
 
 **Auto-curve idempotency:** the curve routine skips any assignment that already has a
 non-reverted curve event, so weekly runs don't re-lift grades as new scores come in.
+
+**Differentiated bridge grade sync:** each run visits registered families in Current courses
+and uses one Operation Ledger preview/apply cycle per family. It copies an unambiguous posted
+final from whichever registered source contains it, ignores tier membership as grade authority,
+holds submitted-but-ungraded, hidden, or conflicting work, and writes a missing zero only after
+the bridge due time. It never invokes Canvas Grade Sync; review the bridge in Canvas Live and
+run SIS sync yourself.
 
 **Flag vs. apply mode:** in flag mode (default), the routine lists assignments averaging
 below the floor without touching Canvas. In apply mode, it performs a do-no-harm
@@ -255,7 +263,8 @@ are injected automatically into the file's global scope.
 - Files starting with `_` are **templates** (`_example_missing_work.py`) and are **not**
   loaded — copy to a name without the underscore to activate.
 - A custom `rid` that collides with a built-in (`sweep`, `download`, `curve`,
-  `grading_debt`) is silently skipped; built-ins are authoritative.
+  `grading_debt`, `student_reports`, `sis_bridge_sync`) is silently skipped; built-ins are
+  authoritative.
 - A broken `.py` file is caught per-file (traceback logged to console) — the app never
   crashes from a bad custom routine.
 - Custom routines get the same three triggers (Run now / catch-up on launch / every

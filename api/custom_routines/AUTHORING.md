@@ -31,7 +31,7 @@ def run(params):
 
 | Argument | Description |
 |---|---|
-| `rid` | Unique id — must not collide with built-ins (`sweep`, `download`, `curve`, `grading_debt`) |
+| `rid` | Unique id — must not collide with built-ins (`sweep`, `download`, `curve`, `grading_debt`, `student_reports`, `sis_bridge_sync`) |
 | `label` | Human-readable name shown in the Routines table |
 | `writes` | Set to `True` if the routine calls `canvas_send` (shows the ✎ marker) |
 | `default` | Dict with `enabled`, `every_hours`, and `params` — the user's starting config |

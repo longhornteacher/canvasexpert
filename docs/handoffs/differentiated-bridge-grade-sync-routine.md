@@ -247,4 +247,22 @@ focused gate reveals unexpected coupling.
 
 ## Execution result
 
-Not executed.
+**GREEN**
+
+- Commit: none (implementation left uncommitted for senior acceptance).
+- Changed files: `api/operation_ledger/adapters/sis_grade_bridge.py`,
+  `api/sis_grade_bridge.py`, `api/webui/routes/routines_builtin.py`,
+  `api/webui/routes/routines.py`, the routed API/custom-routine/bridge contract-guide/module-map
+  documentation, `api/tests/test_sis_grade_bridge_operation.py`, and the new
+  `api/tests/test_routines_builtin_sis_grade_bridge.py`.
+- Named gate: 31 passed in 10.28s with `-p no:randomly`; no live Canvas call.
+- Compile gate: passed for all four named runtime owners.
+- `git diff --check`: passed (Git emitted only the repository's CRLF conversion notices).
+- Acceptance: the default-off write Routine uses the existing registry and one frozen
+  `gradebook.sis_bridge` preview/apply cycle per registered Current-course family. Resolution
+  scans every registered source independent of tier membership; agreeing posted finals,
+  conflicts, hidden grades, submitted-ungraded holds, due-time missing zeroes, changed-only
+  plans, private-ledger provenance clears, drift, exact postconditions, uncertain-send
+  non-replay, safe aggregate reporting, and blocked-family continuation are covered.
+- Deviations: none.
+- Unresolved decisions: none.

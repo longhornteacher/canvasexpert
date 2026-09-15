@@ -7,7 +7,7 @@ import pytest
 
 from api import sis_grade_bridge
 from api.operation_ledger import executor, operations, paths, receipts
-from api.operation_ledger.adapters import differentiated_bridge
+from api.operation_ledger.adapters import differentiated_bridge, sis_grade_bridge as bridge_adapter
 from api.platform_services import canvas_client, config
 
 
@@ -49,11 +49,14 @@ class FakeCanvas:
         }
         self.submissions = {
             "source-a": [
-                {"user_id": "student-1", "workflow_state": "graded", "score": 8},
-                {"user_id": "student-2", "workflow_state": "pending_review", "score": 5},
+                {"user_id": "student-1", "workflow_state": "graded", "score": 8,
+                 "posted_at": "2026-09-01T12:00:00Z"},
+                {"user_id": "student-2", "workflow_state": "pending_review", "score": 5,
+                 "submitted_at": "2026-09-01T11:00:00Z"},
             ],
             "source-b": [
-                {"user_id": "student-3", "workflow_state": "graded", "excused": True},
+                {"user_id": "student-3", "workflow_state": "graded", "excused": True,
+                 "posted_at": "2026-09-01T12:00:00Z"},
             ],
         }
         self.bridge_submissions = {}
@@ -76,6 +79,11 @@ class FakeCanvas:
             return copy.deepcopy(self.overrides[assignment_id]), None, True
         if path.endswith("/submissions"):
             assignment_id = path.split("/assignments/")[1].split("/")[0]
+            if assignment_id == "bridge":
+                return [
+                    {"user_id": user_id, **copy.deepcopy(submission)}
+                    for user_id, submission in self.bridge_submissions.items()
+                ], None, True
             return copy.deepcopy(self.submissions[assignment_id]), None, True
         return [], None, True
 
@@ -85,11 +93,23 @@ class FakeCanvas:
             return None, "connection timeout"
         user_id = path.rsplit("/", 1)[-1]
         submission = copy.deepcopy(request["submission"])
-        if submission.get("excuse"):
+        if submission.get("posted_grade") == "":
+            self.bridge_submissions[user_id] = {
+                "excused": False, "score": None, "grade": None,
+                "late_policy_status": (
+                    None if submission.get("late_policy_status") == "none"
+                    else submission.get("late_policy_status")
+                ),
+            }
+        elif submission.get("excuse"):
             self.bridge_submissions[user_id] = {"excused": True, "score": None}
         else:
             self.bridge_submissions[user_id] = {
                 "excused": False, "score": float(submission["posted_grade"]),
+                "late_policy_status": (
+                    None if submission.get("late_policy_status") == "none"
+                    else submission.get("late_policy_status")
+                ),
             }
         return copy.deepcopy(self.bridge_submissions[user_id]), None
 
@@ -131,7 +151,7 @@ def test_registered_projection_example_copies_only_final_numeric_and_excused(bri
     fake = bridge_harness
     preview = _preview()
     assert preview["ok"] is True
-    assert preview["preview"]["counts"]["pending_review"] == 1
+    assert preview["preview"]["counts"]["held"] == 1
 
     result = sis_grade_bridge.apply_sis_grade_bridge(
         preview["operation_id"], preview["batch_id"], preview["review_digest"]
@@ -146,6 +166,229 @@ def test_registered_projection_example_copies_only_final_numeric_and_excused(bri
     assert "student-1" not in json.dumps(result)
     assert result["receipt_id"]
     assert len(receipts.list_receipts()) == 1
+
+
+def test_source_resolution_ignores_tier_membership_and_accepts_agreeing_finals(
+    bridge_harness,
+):
+    fake = bridge_harness
+    fake.overrides["source-b"][0]["student_ids"].append("student-1")
+    fake.submissions["source-b"].append({
+        "user_id": "student-1", "workflow_state": "graded", "score": 8,
+        "posted_at": "2026-09-01T12:00:00Z",
+    })
+
+    preview = _preview()
+
+    assert preview["ok"] is True
+    assert preview["preview"]["counts"]["overlapping_active"] == 1
+    result = sis_grade_bridge.apply_sis_grade_bridge(
+        preview["operation_id"], preview["batch_id"], preview["review_digest"]
+    )
+    assert result["ok"] is True
+    assert fake.bridge_submissions["student-1"]["score"] == 8
+
+
+@pytest.mark.parametrize("other_final", [
+    {"workflow_state": "graded", "score": 7, "excused": False},
+    {"workflow_state": "graded", "score": None, "excused": True},
+])
+def test_conflicting_finals_hold_only_that_bridge_coordinate(
+    bridge_harness, other_final,
+):
+    fake = bridge_harness
+    fake.submissions["source-b"].append({
+        "user_id": "student-1", "posted_at": "2026-09-01T12:00:00Z",
+        **other_final,
+    })
+
+    preview = _preview()
+
+    assert preview["preview"]["counts"]["conflicting_final_values"] == 1
+    result = sis_grade_bridge.apply_sis_grade_bridge(
+        preview["operation_id"], preview["batch_id"], preview["review_digest"]
+    )
+    assert result["ok"] is True
+    assert "student-1" not in fake.bridge_submissions
+    assert fake.bridge_submissions["student-3"]["excused"] is True
+    assert "student-1" not in json.dumps(result)
+
+
+def test_hidden_final_and_submitted_ungraded_are_held_after_due(
+    bridge_harness, monkeypatch,
+):
+    fake = bridge_harness
+    monkeypatch.setattr(bridge_adapter, "_past_due", lambda _due: True)
+    fake.submissions["source-a"][0]["posted_at"] = None
+
+    preview = _preview()
+
+    counts = preview["preview"]["counts"]
+    assert counts["held"] == 2
+    assert counts["missing_zeroes"] == 0
+    result = sis_grade_bridge.apply_sis_grade_bridge(
+        preview["operation_id"], preview["batch_id"], preview["review_digest"]
+    )
+    assert result["ok"] is True
+    assert set(fake.bridge_submissions) == {"student-3"}
+
+
+def test_blank_becomes_missing_zero_only_after_bridge_due(
+    bridge_harness, monkeypatch,
+):
+    fake = bridge_harness
+    fake.submissions["source-a"][1] = {
+        "user_id": "student-2", "workflow_state": "unsubmitted",
+        "submitted_at": None,
+    }
+    monkeypatch.setattr(bridge_adapter, "_past_due", lambda _due: True)
+
+    preview = _preview()
+    assert preview["preview"]["counts"]["missing_zeroes"] == 1
+    result = sis_grade_bridge.apply_sis_grade_bridge(
+        preview["operation_id"], preview["batch_id"], preview["review_digest"]
+    )
+
+    assert result["ok"] is True
+    assert fake.bridge_submissions["student-2"] == {
+        "excused": False, "score": 0.0, "late_policy_status": "missing",
+    }
+    student_2_call = next(call for call in fake.send_calls if call[1].endswith("/student-2"))
+    assert student_2_call[2] == {
+        "submission": {
+            "posted_grade": "0", "excuse": False,
+            "late_policy_status": "missing",
+        }
+    }
+
+
+def test_blank_unsubmitted_remains_blank_before_bridge_due(
+    bridge_harness, monkeypatch,
+):
+    fake = bridge_harness
+    fake.submissions["source-a"][1] = {
+        "user_id": "student-2", "workflow_state": "unsubmitted",
+        "submitted_at": None,
+    }
+    monkeypatch.setattr(bridge_adapter, "_past_due", lambda _due: False)
+
+    preview = _preview()
+    assert preview["preview"]["counts"]["missing_zeroes"] == 0
+    result = sis_grade_bridge.apply_sis_grade_bridge(
+        preview["operation_id"], preview["batch_id"], preview["review_digest"]
+    )
+
+    assert result["ok"] is True
+    assert "student-2" not in fake.bridge_submissions
+
+
+def test_routine_clears_only_its_unchanged_prior_value(
+    bridge_harness, monkeypatch,
+):
+    fake = bridge_harness
+    fake.submissions["source-a"][1] = {
+        "user_id": "student-2", "workflow_state": "unsubmitted",
+        "submitted_at": None,
+    }
+    monkeypatch.setattr(bridge_adapter, "_past_due", lambda _due: True)
+    first = sis_grade_bridge.preview_sis_grade_bridge(
+        "course-1", "Synthetic Family", write_origin="routine"
+    )
+    sis_grade_bridge.apply_sis_grade_bridge(
+        first["operation_id"], first["batch_id"], first["review_digest"]
+    )
+    assert fake.bridge_submissions["student-2"]["score"] == 0
+
+    fake.submissions["source-a"][1] = {
+        "user_id": "student-2", "workflow_state": "submitted",
+        "submitted_at": "2026-09-02T10:00:00Z", "score": None,
+    }
+    second = sis_grade_bridge.preview_sis_grade_bridge(
+        "course-1", "Synthetic Family", write_origin="routine"
+    )
+    assert second["preview"]["counts"]["cleared_prior_values"] == 1
+    result = sis_grade_bridge.apply_sis_grade_bridge(
+        second["operation_id"], second["batch_id"], second["review_digest"]
+    )
+    assert result["ok"] is True
+    assert fake.bridge_submissions["student-2"]["score"] is None
+    student_2_call = next(
+        call for call in reversed(fake.send_calls) if call[1].endswith("/student-2")
+    )
+    assert student_2_call[2] == {
+        "submission": {
+            "posted_grade": "", "excuse": False,
+            "late_policy_status": "none",
+        }
+    }
+
+
+def test_teacher_changed_bridge_value_is_held_instead_of_cleared(
+    bridge_harness, monkeypatch,
+):
+    fake = bridge_harness
+    fake.submissions["source-a"][1] = {
+        "user_id": "student-2", "workflow_state": "unsubmitted",
+        "submitted_at": None,
+    }
+    monkeypatch.setattr(bridge_adapter, "_past_due", lambda _due: True)
+    first = sis_grade_bridge.preview_sis_grade_bridge(
+        "course-1", "Synthetic Family", write_origin="routine"
+    )
+    sis_grade_bridge.apply_sis_grade_bridge(
+        first["operation_id"], first["batch_id"], first["review_digest"]
+    )
+    fake.bridge_submissions["student-2"]["score"] = 4.0
+    fake.submissions["source-a"][1] = {
+        "user_id": "student-2", "workflow_state": "submitted",
+        "submitted_at": "2026-09-02T10:00:00Z", "score": None,
+    }
+    calls_before = len(fake.send_calls)
+
+    second = sis_grade_bridge.preview_sis_grade_bridge(
+        "course-1", "Synthetic Family", write_origin="routine"
+    )
+    assert second["preview"]["counts"]["held"] == 1
+    result = sis_grade_bridge.apply_sis_grade_bridge(
+        second["operation_id"], second["batch_id"], second["review_digest"]
+    )
+
+    assert result["ok"] is True
+    assert fake.bridge_submissions["student-2"]["score"] == 4.0
+    assert len(fake.send_calls) == calls_before
+
+
+def test_repeated_identical_run_has_no_canvas_mutation(bridge_harness):
+    fake = bridge_harness
+    first = _preview()
+    sis_grade_bridge.apply_sis_grade_bridge(
+        first["operation_id"], first["batch_id"], first["review_digest"]
+    )
+    calls_before = len(fake.send_calls)
+
+    second = _preview()
+    assert second["preview"]["counts"]["already_matching"] == 2
+    result = sis_grade_bridge.apply_sis_grade_bridge(
+        second["operation_id"], second["batch_id"], second["review_digest"]
+    )
+
+    assert result["ok"] is True
+    assert len(fake.send_calls) == calls_before
+
+
+def test_bridge_submission_drift_blocks_before_canvas_mutation(bridge_harness):
+    fake = bridge_harness
+    preview = _preview()
+    fake.bridge_submissions["student-1"] = {
+        "excused": False, "score": 3.0, "late_policy_status": None,
+    }
+
+    result = sis_grade_bridge.apply_sis_grade_bridge(
+        preview["operation_id"], preview["batch_id"], preview["review_digest"]
+    )
+
+    assert result["ok"] is False
+    assert fake.send_calls == []
 
 
 def test_unregistered_family_refuses_before_canvas_read(tmp_path, monkeypatch):
@@ -166,7 +409,6 @@ def test_unregistered_family_refuses_before_canvas_read(tmp_path, monkeypatch):
         (lambda fake: fake.assignments["source-a"].update(post_to_sis=True), "source_sis_sync_enabled"),
         (lambda fake: fake.assignments["source-a"].update(omit_from_final_grade=False), "source_counts_toward_final_grade"),
         (lambda fake: fake.assignments["bridge"].update(published=False), "registered_bridge_drift"),
-        (lambda fake: fake.overrides["source-b"][0]["student_ids"].append("student-1"), "overlapping_active_memberships"),
     ],
 )
 def test_registered_family_drift_fails_closed_before_mutation(bridge_harness, mutation, error):
@@ -186,6 +428,7 @@ def test_uncertain_grade_is_never_resent(bridge_harness):
     )
     retry = executor.retry_operation(preview["operation_id"])
     assert first["status"] == "attention"
+    assert first["counts"]["copied_scores"] == 0
     assert retry["status"] == "attention"
     assert len(fake.send_calls) == 1
 

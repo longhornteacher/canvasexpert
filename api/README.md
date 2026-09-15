@@ -117,11 +117,10 @@ local model is unavailable, the affected media evidence remains held. Weights st
 **Full feature reference** (Settings, Dashboard, Push Quiz/Assignment/Page/Module,
   Gradebook tools, Download Assignments, Course Info, Scoring Sessions): **`api/webui/README.md`**.
 
-Assistant-operated SIS grade bridges are documented in the
-[SIS Grade Bridges guide](../docs/guides/sis-grade-bridges.md). They are separate from the
-Gradebook web UI and use the reviewed Operation Ledger preview/apply/recovery path. They
-copy verified Canvas scores only within Canvas Live. The teacher reviews there and owns
-Canvas Grade Sync.
+Differentiated bridge grade sync is available as a default-off built-in Routine and through
+the assistant tools documented in the [SIS Grade Bridges guide](../docs/guides/sis-grade-bridges.md).
+Each family uses the reviewed Operation Ledger preview/apply/recovery path and writes only
+changed bridge grades in Canvas Live. The teacher reviews there and owns Canvas Grade Sync.
 
 ## What each push does automatically
 
