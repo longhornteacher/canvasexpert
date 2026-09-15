@@ -1,6 +1,6 @@
 # DataForge grouping proposal transport resilience
 
-Status: READY FOR EXECUTION
+Status: ABANDONED
 Owner: one implementation executor
 Batch: one bounded MCP grouping-proposal vertical
 
@@ -177,3 +177,7 @@ focused gate or required test fixtures are unavailable; do not broaden into asse
 context or UI work.
 
 ## Execution result
+
+Traffic light: ABANDONED. The user clarified that DataForge is out of scope for the
+current work. All uncommitted grouping implementation and test/doc edits were discarded;
+no implementation was retained and no push occurred. Earlier committed work was preserved.
