@@ -86,7 +86,7 @@ ID, existing feature class, or `data-ce-hook`.
 
 The enforcement registry is `api/tests/test_presentation_contracts.py`. It is the
 source of truth for route, template, layout, variant, rail count, and migration state.
-CanvasAgent and Assessments use `workspace/full`; Create uses `workspace/three`;
+CanvasAgent uses `workspace/full`; Create uses `workspace/three`;
 Gradebook, Students, and Settings use `workspace/left-main`;
 Routines, Course Info, and About use `document/wide`; AI Expert uses
 `document/standard`; and Welcome uses `wizard`. Student reports is not a route

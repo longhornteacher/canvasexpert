@@ -43,8 +43,7 @@ _SERVER_INSTRUCTIONS = (
     "listed courses and retry. The queue is frozen; later work needs a later session. "
     "Never ask the teacher to choose a scoring transport or use assignment type. "
     "Call continue_scoring_session to prepare the first item. For needs_scoring_norms, "
-    "ask its question, then continue with a returned rubric label or bounded "
-    "scoring guidance. If empty, report nothing_to_grade. Disclose held work; item/catalog "
+    "ask its question, then continue with bounded scoring guidance. If empty, report nothing_to_grade. Disclose held work; item/catalog "
     "or evidence gaps do not mean the assignment is empty. Read every SAFE page "
     "with get_scoring_packet, including first-page contract and rubric. Score only "
     "those pseudonymized responses; submit_scoring_results with expected_packet_digest. "
@@ -272,41 +271,6 @@ def get_product_guide(topic: str = "") -> str:
 
 
 @mcp.tool(structured_output=False)
-def get_standards_profile() -> str:
-    """Read the published offline DataForge standards profile as pseudonymized student data.
-    No course_id or Canvas call; Identity Vault access is required."""
-    return _compact(tools.get_standards_profile())
-
-
-@mcp.tool(structured_output=False)
-def get_assessment_context(course_id: str, pseudonyms: str = "") -> str:
-    """Read Current-roster assessment context for exact student pseudonyms.
-    This bounded local evidence is observational, never a placement or judgment."""
-    return _compact(tools.get_assessment_context(course_id, pseudonyms))
-
-
-@mcp.tool(structured_output=False)
-def get_assessment_grouping_proposal(
-    course_id: str,
-    snapshot_id: str,
-    method: str = "overall_pct",
-    cutoffs: str = "",
-    no_data_group: str = "",
-    group_set_label: str = "",
-) -> str:
-    """Propose read-only student groups using an exact teacher-safe group-set label.
-    No Canvas apply path."""
-    return _compact(tools.get_assessment_grouping_proposal(
-        course_id,
-        snapshot_id,
-        method=method,
-        cutoffs=cutoffs,
-        no_data_group=no_data_group,
-        group_set_label=group_set_label,
-    ))
-
-
-@mcp.tool(structured_output=False)
 def list_staged_content(kind: str = "") -> str:
     """List drafts currently staged in the teacher's local review Inbox.
     Pass kind to filter or omit it for all drafts. No student data."""
@@ -327,7 +291,7 @@ def preview_content_push(
     post_to_sis: bool = False,
 ) -> str:
     """Persist a local frozen review of one staged draft before anything reaches Canvas.
-    kind is quiz/assignment/page/rubric; label comes from list_staged_content. Quizzes take
+    kind is quiz/assignment/page; label comes from list_staged_content. Quizzes take
     differentiated grouping options; assignments take ordinary grading-category options,
     and pages take module_name. A kind refuses an option it cannot carry. Dates are ISO 8601."""
     return _compact(tools.preview_content_push(
@@ -391,7 +355,7 @@ def apply_assignment_update(operation_id: str, batch_id: str, review_digest: str
 @mcp.tool(structured_output=False)
 def stage_content(kind: str, label: str, content: str) -> str:
     """Stage one authored draft in the teacher's review Inbox.
-    kind is quiz/assignment/page/rubric; content is the completed envelope
+    kind is quiz/assignment/page; content is the completed envelope
     from get_authoring_contract. No Canvas write."""
     return _compact(tools.stage_content(kind, label, content))
 
@@ -461,11 +425,11 @@ def start_scoring_session(course_id: str = "", assignment_id: str = "") -> str:
 
 
 @mcp.tool(structured_output=False)
-def continue_scoring_session(scoring_session_id: str, rubric_name: str = "",
+def continue_scoring_session(scoring_session_id: str,
                              scoring_guidance: str = "") -> str:
     """Prepare or resume the active assignment in a frozen Scoring Session queue."""
     return _compact(tools.continue_scoring_session(
-        scoring_session_id, rubric_name, scoring_guidance))
+        scoring_session_id, scoring_guidance))
 
 
 @mcp.tool(structured_output=False)

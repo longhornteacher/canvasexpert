@@ -8,9 +8,9 @@ File categories:
 - START HERE - CanvasAgent: what CanvasExpert is and how an assistant should
   work with it. Paste the whole file into a chat, or just its CORE block into a
   custom-instructions box if yours has a length limit. Read this one first.
-- Authoring skills: one file each for QuizForge, AssignmentForge, PageForge, RubricForge,
+- Authoring skills: one file each for QuizForge, AssignmentForge, and PageForge,
   plus files for a Class Schedule and a Learning Objective.
-- Scoring skills: one file per valid rubric in the default rubric library.
+- Scoring uses the reviewed rubric attached to each Canvas assignment.
 - Reference: supporting material some authoring skills point to.
 - Writing Record and Writing Timeline: longitudinal history and tracked-assignment guidance.
 - MagicSchool Toolkit: setup recipes for building these as reusable custom tools in MagicSchool.ai.

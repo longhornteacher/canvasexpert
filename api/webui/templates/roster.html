@@ -6,7 +6,6 @@
 {% block head_extra %}
 <link rel="stylesheet" href="/static/roster_workbench.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/pages/student_reports.css?v={{ asset_v }}">
-<link rel="stylesheet" href="/static/roster/assessment_groups.css?v={{ asset_v }}">
 {% endblock %}
 {% block left_rail %}
 {% call rail('left', 'Student views') %}
@@ -95,66 +94,6 @@
           <button type="button" id="roster-add-groups" class="small">Add to selected group set</button>
           <span id="roster-group-builder-status" class="hint"></span>
         </div>
-      </div>
-    </details>
-
-    <details class="ce-panel roster-v2-details roster-assessment-grouping" id="roster-assessment-grouping">
-      <summary><strong>Group from assessment data</strong></summary>
-      <div class="roster-assessment-grouping-body">
-        <p class="hint">Build a complete placement proposal from an offline assessment snapshot, review it, then apply it through the existing Canvas group action.</p>
-        <div class="roster-assessment-controls">
-          <label>Assessment
-            <select id="roster-assessment-snapshot" disabled>
-              <option value="">— select an assessment —</option>
-            </select>
-          </label>
-          <label>Tier by
-            <select id="roster-assessment-method">
-              <option value="overall_pct">Overall %</option>
-              <option value="staar_bands">STAAR bands</option>
-              <option value="quartiles">Quartiles</option>
-            </select>
-          </label>
-          <label>Group set
-            <select id="roster-assessment-group-set" disabled>
-              <option value="">— select a group set —</option>
-            </select>
-          </label>
-        </div>
-        <div class="roster-assessment-cutoffs" id="roster-assessment-cutoffs">
-          <label>Support &lt; <input id="roster-assessment-cutoff-support" type="number" min="0" max="100" step="0.1" value="60"></label>
-          <label>Core &lt; <input id="roster-assessment-cutoff-core" type="number" min="0" max="100" step="0.1" value="75"></label>
-          <label>Accelerate &lt; <input id="roster-assessment-cutoff-accelerate" type="number" min="0" max="100" step="0.1" value="90"></label>
-        </div>
-        <div class="roster-assessment-no-data">
-          <label>Students without a score go to
-            <select id="roster-assessment-no-data-group" required>
-              <option value="">— choose required placement —</option>
-              <option value="Support">Support</option>
-              <option value="Core">Core</option>
-              <option value="Accelerate">Accelerate</option>
-              <option value="Extend">Extend</option>
-            </select>
-          </label>
-          <button type="button" id="roster-assessment-preview" class="primary small">Preview placement</button>
-          <span id="roster-assessment-status" class="hint" aria-live="polite"></span>
-        </div>
-        <section id="roster-assessment-proposal" class="roster-assessment-proposal" hidden aria-labelledby="roster-assessment-proposal-title">
-          <div class="roster-assessment-proposal-heading">
-            <div>
-              <h3 id="roster-assessment-proposal-title">Placement preview</h3>
-              <p id="roster-assessment-proposal-summary" class="hint"></p>
-            </div>
-            <button type="button" id="roster-assessment-apply" class="primary small" disabled>Apply reviewed placement</button>
-          </div>
-          <div id="roster-assessment-tier-summary" class="roster-assessment-tier-summary"></div>
-          <div class="roster-assessment-table-wrap">
-            <table class="roster-assessment-table">
-              <thead><tr><th>Student</th><th>Score</th><th>Status</th><th>Placement</th></tr></thead>
-              <tbody id="roster-assessment-preview-rows"></tbody>
-            </table>
-          </div>
-        </section>
       </div>
     </details>
 
@@ -346,7 +285,6 @@
 <script src="/static/roster/inline_edit.js?v={{ asset_v }}"></script>
 <script src="/static/roster/group_state.js?v={{ asset_v }}"></script>
 <script src="/static/roster/bulk.js?v={{ asset_v }}"></script>
-<script src="/static/roster/assessment_groups.js?v={{ asset_v }}"></script>
 <script src="/static/roster/groups.js?v={{ asset_v }}"></script>
 <script src="/static/roster/safety.js?v={{ asset_v }}"></script>
 <script src="/static/roster/scores.js?v={{ asset_v }}"></script>

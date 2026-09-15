@@ -82,7 +82,7 @@ This is a pre-launch clean break:
   patch shape use `pseudonym: string`.
 - Scrubbing maps the full real name, every real-name token, and each nickname to the same
   full one-word pseudonym. IDs continue to map to the neutral ID placeholder.
-- SAFE artifacts, PowerGrader, DataForge, Daily Writing, CanvasMirror projections, and MCP
+- SAFE artifacts, PowerGrader, Daily Writing, CanvasMirror projections, and MCP
   payloads carry the same stored string. None owns a second pseudonym vocabulary or schema.
 - Re-identification remains local and exact through the private vault reverse index.
 

@@ -28,18 +28,16 @@ from api.operation_ledger.adapters.assignment import KIND as ASSIGNMENT_KIND
 from api.operation_ledger.adapters.assignment_update import KIND as ASSIGNMENT_UPDATE_KIND
 from api.operation_ledger.adapters.page import KIND as PAGE_KIND
 from api.operation_ledger.adapters.quiz import KIND as QUIZ_KIND
-from api.operation_ledger.adapters.rubric import KIND as RUBRIC_KIND
 from api.platform_services import config
 from api.webui import deps
 
-# Teacher-facing kind -> ledger operation kind. These are the four kinds that
+# Teacher-facing kind -> ledger operation kind. These are the three kinds that
 # have an Inbox, an authoring contract, and a push tab; they stay in step with
 # ``mcp_server.tools._STAGED_CONTRACT_KINDS``.
 _LEDGER_KINDS = {
     "quiz": QUIZ_KIND,
     "assignment": ASSIGNMENT_KIND,
     "page": PAGE_KIND,
-    "rubric": RUBRIC_KIND,
 }
 
 # Delivery options each kind can actually carry. Naming one a kind does not
@@ -52,7 +50,6 @@ _KIND_OPTIONS = {
     "assignment": ("published", "module_name", "assignment_group_name",
                    "post_to_sis", *_SCHEDULE_OPTIONS),
     "page": ("published", "module_name"),
-    "rubric": ("published",),
 }
 
 _TEXT_OPTIONS = ("module_name", "assignment_group_name", *_SCHEDULE_OPTIONS)

@@ -17,11 +17,6 @@ invalidates nothing. Two kinds are payload-sensitive:
   touches Canvas module structure at all (see ``PageAdapter.execute``), so
   it must not mark ``catalog.modules`` stale, while a page attached to a
   module does.
-- ``content.rubric`` creates a Canvas page only when the payload carries a
-  ``student_page_title`` (see ``RubricAdapter.execute`` step 2), so it marks
-  ``catalog.pages`` stale in that case and nothing otherwise. The rubric
-  itself is a Course-level bookkeeping object with no catalog scope.
-
 See ``docs/reference/mutation-reconciliation-map.md`` family 2.
 """
 from api import course_catalog
@@ -38,7 +33,6 @@ _KIND_TO_CATALOG_SCOPES: dict[str, frozenset[str]] = {
 }
 
 _PAGE_KIND = "content.page"
-_RUBRIC_KIND = "content.rubric"
 
 
 def _scopes_for(kind: str, payload: dict | None) -> frozenset[str]:
@@ -48,10 +42,6 @@ def _scopes_for(kind: str, payload: dict | None) -> frozenset[str]:
         if payload.get("module_name"):
             scopes.add("modules")
         return frozenset(scopes)
-    if kind == _RUBRIC_KIND:
-        if payload.get("student_page_title"):
-            return frozenset({"pages"})
-        return frozenset()
     return _KIND_TO_CATALOG_SCOPES.get(kind, frozenset())
 
 

@@ -4,8 +4,8 @@
   // Slice D of author-and-stage: shows assistant-staged Inbox drafts (Slice C's
   // marker-gated per-kind folders) as a distinct "pending review" section on
   // each push tab. Fetches /api/inbox-files?kind=<kind> (pre-validated by the
-  // same validators the existing /api/validate, /api/af/validate, /api/pf/validate,
-  // /api/rf/validate routes use), then "Use this draft" hands a valid draft's
+  // same validators the existing /api/validate, /api/af/validate, /api/pf/validate
+  // routes use), then "Use this draft" hands a valid draft's
   // path to the matching <select>'s existing file_sources.js seam
   // (wrapper.ceFileSource.setTempOption/setMode) so the teacher runs the
   // existing Validate / Push controls unchanged.

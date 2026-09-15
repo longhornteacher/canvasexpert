@@ -67,7 +67,6 @@ def course_expert_page(request: Request):
             "quiz":       _authoring_skill(skills, "Author a Quiz"),
             "assignment": _authoring_skill(skills, "Author an Assignment"),
             "page":       _authoring_skill(skills, "Author a Page"),
-            "rubric":     _authoring_skill(skills, "Author a Rubric"),
         },
     })
 
@@ -102,9 +101,11 @@ def ai_expert_page(request: Request):
     toolkit_dir = os.path.join(ai_ta_dir, "MagicSchool Toolkit")
     toolkit_files = []
     if os.path.isdir(toolkit_dir):
+        canonical_toolkit_dir = os.path.join(REPO_ROOT, "api", "default_docs", "AI Authoring", "MagicSchool Toolkit")
         toolkit_files = sorted(
             os.path.basename(p)
             for p in glob.glob(os.path.join(toolkit_dir, "*.txt"))
+            if os.path.isfile(os.path.join(canonical_toolkit_dir, os.path.basename(p)))
         )
     return templates.TemplateResponse(request, "ai_expert.html", {
         "nav_section":    "help",
@@ -249,7 +250,6 @@ def settings_page(request: Request):
         "workspace_root": root,
         "workspace_files": [
             {"name": "Library / AI Authoring", "path": workspace.library_folder("AI Authoring")},
-            {"name": "Library / Rubrics", "path": workspace.library_folder("Rubrics")},
             {"name": "Library / Quizzes", "path": workspace.library_folder("Quizzes")},
             {"name": "Library / Assignments", "path": workspace.library_folder("Assignments")},
             {"name": "Library / Pages", "path": workspace.library_folder("Pages")},

@@ -2,8 +2,8 @@
 
 Lists Slice C's marker-gated Inbox drafts (``deps.list_inbox_files``) for one
 kind and runs each through the same validator its push tab already uses
-(``push_validation.py``'s /api/validate, /api/af/validate, /api/pf/validate,
-/api/rf/validate), attaching ok/problems so the push tabs can show a "pending
+(``push_validation.py``'s /api/validate, /api/af/validate, /api/pf/validate),
+attaching ok/problems so the push tabs can show a "pending
 review" section without reimplementing any validation.
 """
 from __future__ import annotations

@@ -262,9 +262,9 @@ def test_backlog_session_pauses_submits_advances_and_completes_after_reload(
 
     def run_start(**kwargs):
         start_calls.append(kwargs)
-        if kwargs["assignment_id"] == "assignment-1" and not kwargs["rubric_name"]:
+        if kwargs["assignment_id"] == "assignment-1" and not kwargs["scoring_guidance"]:
             return {"ok": False, "payload": {
-                "code": "needs_scoring_norms", "rubric_labels": ["Writing"],
+                "code": "needs_scoring_norms",
             }}
         child_id = f"child-{kwargs['assignment_id']}"
         kwargs["save_session"]({
@@ -272,7 +272,7 @@ def test_backlog_session_pauses_submits_advances_and_completes_after_reload(
             "parent_scoring_session_id": root_id,
             "course_id": kwargs["course_id"], "assignment_id": kwargs["assignment_id"],
             "assignment_name": kwargs["assignment_id"], "mode": "packet",
-            "scoring_basis": {"source": "local_rubric", "label": "Writing"},
+                "scoring_basis": {"source": "teacher_guidance", "label": "Teacher guidance"},
             "privacy_artifacts": {"safe_bundle": str(bundle_path)},
             "students": [{"user_id": REAL_ID, "status": "pending"}],
         })
@@ -294,7 +294,7 @@ def test_backlog_session_pauses_submits_advances_and_completes_after_reload(
 
     paused = tools.continue_scoring_session(root_id)
     assert paused["status"] == "needs_teacher_input"
-    first_ready = tools.continue_scoring_session(root_id, rubric_name="Writing")
+    first_ready = tools.continue_scoring_session(root_id, scoring_guidance="Writing")
     first_packet = tools.get_scoring_packet(root_id)
     assert first_packet["ok"] is True, first_packet
     first_submit = tools.submit_scoring_results(root_id, _result(), first_packet["packet_digest"])

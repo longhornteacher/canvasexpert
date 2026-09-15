@@ -12,72 +12,28 @@ def test_workspace_paths_are_resolved_at_call_time(tmp_path, monkeypatch):
     from api.webui import ai_ta, deps
     from api.webui.routes import library
 
-    roots = {
-        "current": tmp_path / "one",
-    }
+    roots = {"current": tmp_path / "one"}
     for label in ("one", "two"):
         root = tmp_path / label
-        (root / "Library" / "Rubrics").mkdir(parents=True)
         (root / "Library" / "AI Authoring").mkdir(parents=True)
-        (root / "Library" / "Rubrics" / f"{label}-rubric.txt").write_text(
-            f"{label} rubric marker\n", encoding="utf-8"
-        )
-        (root / "Library" / "AI Authoring" / f"{label}-ai-authoring.txt").write_text(
+        (root / "Library" / "AI Authoring" / "Author a Quiz (QuizForge).txt").write_text(
             f"{label} AI Authoring marker\n", encoding="utf-8"
         )
 
-    monkeypatch.setattr(
-        workspace, "workspace_root", lambda: str(roots["current"])
-    )
-
-    first_rubrics = deps.list_rubric_files()
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(roots["current"]))
     first_ai_ta = deps.list_ai_ta_files()
-    assert any(str(tmp_path / "one") in item["path"] for item in first_rubrics)
     assert any(str(tmp_path / "one") in item["path"] for item in first_ai_ta)
 
     roots["current"] = tmp_path / "two"
-    second_rubrics = deps.list_rubric_files()
     second_ai_ta = deps.list_ai_ta_files()
-    assert any(str(tmp_path / "two") in item["path"] for item in second_rubrics)
-    assert all(str(tmp_path / "one") not in item["path"] for item in second_rubrics)
     assert any(str(tmp_path / "two") in item["path"] for item in second_ai_ta)
     assert all(str(tmp_path / "one") not in item["path"] for item in second_ai_ta)
 
-    def fake_parse(path):
-        if str(tmp_path / "two" / "Library" / "Rubrics") in str(path):
-            return {"title": "Workspace Two Marker", "total_points": 10, "criteria": []}, []
-        return None, ["not a workspace sentinel"]
-
-    monkeypatch.setattr(ai_ta.rf, "parse_file", fake_parse)
-
-    def seed_stale_score_file():
-        # The retired per-rubric scoring-skill generator used to write files
-        # shaped like this one. _sweep_retired_scoring_skills only recognizes
-        # it as an untouched leftover by re-parsing the rubric that produced
-        # it, so seeding it here and asserting it gets swept proves
-        # build_library consulted workspace TWO's Rubrics folder for this
-        # call, not a stale cached one.
-        path = tmp_path / "two" / "Library" / "AI Authoring" / "Score with - Workspace Two Marker.txt"
-        path.write_text(
-            ai_ta._legacy_rubric_score_text(
-                {"title": "Workspace Two Marker", "total_points": 10, "criteria": []}
-            ),
-            encoding="utf-8",
-        )
-        return path
-
-    stale = seed_stale_score_file()
-    built = ai_ta.build_library(runtime_paths.ai_ta_dir(), rubric_folders=None)
-    assert not stale.exists()
+    built = ai_ta.build_library(runtime_paths.ai_ta_dir())
     assert all(Path(path).is_relative_to(tmp_path / "two") for path in built)
 
-    # Same proof again, this time through the HTTP route, which resolves both
-    # the target dir and the rubric folder internally rather than taking them
-    # as explicit arguments.
-    stale = seed_stale_score_file()
     rebuilt = json.loads(library.api_ai_ta_rebuild().body)
     assert rebuilt["ok"] is True
-    assert not stale.exists()
     assert not hasattr(config, "RUBRIC_" + "FOLDERS")
 
     cwd = tmp_path / "unrelated-cwd"
@@ -88,32 +44,6 @@ def test_workspace_paths_are_resolved_at_call_time(tmp_path, monkeypatch):
     assert runtime_paths.app_root() == repo_root
     assert runtime_paths.mcp_entrypoint() == repo_root / "api" / "mcp_server" / "__main__.py"
     assert runtime_paths.python_executable() == Path(sys.executable).resolve()
-
-
-def test_rubric_picker_has_no_repo_fallback_and_labels_by_file_name(tmp_path, monkeypatch):
-    """D1 (feature-freeze hardening initiative): the rubric picker looks only
-    in the synced Library/Rubrics folder. No workspace configured must yield
-    an empty list, never a silent fallback to the bundled repo copies; and a
-    file's label is its own name, not a path relative to the repo root."""
-    from api import runtime_paths
-    from api.platform_services import workspace
-    from api.webui import deps
-
-    monkeypatch.setattr(workspace, "workspace_root", lambda: None)
-    assert deps.list_rubric_files() == []
-
-    root = tmp_path / "workspace"
-    (root / "Library" / "Rubrics").mkdir(parents=True)
-    (root / "Library" / "Rubrics" / "ELA_STAAR_ECR_Rubric.txt").write_text(
-        "rubric marker\n", encoding="utf-8"
-    )
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
-
-    files = deps.list_rubric_files()
-    assert [f["label"] for f in files] == ["ELA_STAAR_ECR_Rubric.txt"]
-    assert all(
-        str(runtime_paths.api_root() / "rubrics") not in f["path"] for f in files
-    )
 
 
 def test_all_content_pickers_use_only_the_synced_library(tmp_path, monkeypatch):
@@ -131,7 +61,6 @@ def test_all_content_pickers_use_only_the_synced_library(tmp_path, monkeypatch):
         "quiz": deps.list_quiz_files,
         "assignment": deps.list_assignment_files,
         "page": deps.list_page_files,
-        "rubric": deps.list_rubric_files,
     }
     for kind, picker in pickers.items():
         monkeypatch.setattr(workspace, "workspace_root", lambda: None)
@@ -147,7 +76,7 @@ def test_all_content_pickers_use_only_the_synced_library(tmp_path, monkeypatch):
         assert all("bundled-example.txt" not in item["path"] for item in files)
 
 
-def test_txt_file_labels_disambiguate_only_on_a_name_collision(tmp_path, monkeypatch):
+def test_txt_file_labels_disambiguate_only_on_a_name_collision(tmp_path):
     """Two files sharing a basename across different folders must each show
     their own folder in the label; a lone file just shows its name."""
     from api.webui import deps

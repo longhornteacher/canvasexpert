@@ -28,7 +28,6 @@ python-multipart>=0.0.9
 python-docx>=1.2.0      # DOCX generation for Student Reports (already used by the engine)
 Pillow>=10.0            # embed photos/images into portfolio DOCX (python-docx add_picture)
 pypdf>=4.0             # extract text from PDF assignment uploads (lazy-imported)
-openpyxl>=3.1,<4        # DataForge XLSX parsing (eagerly imported at app startup)
 # Physical paper render layer (local-only; lazy-imported). PDF engine = installed
 # Microsoft Edge via Playwright over WeasyPrint (needed GTK/Pango).
 playwright>=1.40        # html -> PDF via the system Microsoft Edge install

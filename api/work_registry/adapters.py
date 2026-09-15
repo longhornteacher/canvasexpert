@@ -19,7 +19,6 @@ _FORGE_FOLDERS = {
     "Quizzes": "quiz",
     "Assignments": "assignment",
     "Pages": "page",
-    "Rubrics": "rubric",
 }
 
 

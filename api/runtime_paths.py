@@ -104,7 +104,6 @@ _KIND_WORKSPACE_NAMES = {
     "quiz": "Quizzes",
     "assignment": "Assignments",
     "page": "Pages",
-    "rubric": "Rubrics",
 }
 
 
@@ -131,7 +130,7 @@ def inbox_folder(kind: str) -> Path | None:
     draft for the teacher to review and push.
 
     Distinct from the teacher's own library folders returned by
-    ``content_folders`` (Library/Quizzes, Assignments, Pages, Rubrics): this is
+    ``content_folders`` (Library/Quizzes, Assignments, Pages): this is
     a separate, marker-gated pickup surface -- see
     ``webui.deps.list_inbox_files``. Not included in ``content_folders``'s
     plain glob, since that glob has no marker gate and would surface a
@@ -156,7 +155,3 @@ def inbox_folder(kind: str) -> Path | None:
 
 def ai_ta_dir() -> Path:
     return library_folder("AI Authoring") or (app_root() / "AI Authoring")
-
-
-def rubric_folders() -> list[Path]:
-    return content_folders("rubric")

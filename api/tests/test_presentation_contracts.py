@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from api.webui.server import app
 from api.webui.routes import connections as connection_routes, pages
-from api.dataforge import paths as dataforge_paths
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,7 +31,6 @@ EXPECTED_PRESENTATION = {
     "/course": ("course.html", "document", "wide", 0),
     "/about": ("about.html", "document", "wide", 0),
     "/ai-expert": ("ai_expert.html", "document", "standard", 0),
-    "/assessments": ("assessments.html", "workspace", "full", 0),
     "/welcome": ("welcome.html", "wizard", "", 0),
 }
 FEATURE_CSS = (
@@ -40,7 +38,6 @@ FEATURE_CSS = (
     "api/webui/static/pages/course_expert.css",
     "api/webui/static/pages/gradebook.css",
     "api/webui/static/roster_workbench.css",
-    "api/webui/static/roster/assessment_groups.css",
     "api/webui/static/pages/settings.css",
     "api/webui/static/pages/calendar.css",
     "api/webui/static/pages/routines.css",
@@ -48,7 +45,6 @@ FEATURE_CSS = (
     "api/webui/static/pages/course.css",
     "api/webui/static/pages/about.css",
     "api/webui/static/pages/ai_expert.css",
-    "api/webui/static/pages/assessments.css",
     "api/webui/static/pages/welcome.css",
 )
 VISUAL_LITERAL_RE = re.compile(r"font-family:|#[0-9a-fA-F]{3,8}|rgb\(|hsl\(|border-radius:|box-shadow:")
@@ -122,7 +118,7 @@ def _configure_fictional(monkeypatch):
 
 
 def test_registry_is_the_full_program_route_map():
-    assert len(EXPECTED_PRESENTATION) == 12
+    assert len(EXPECTED_PRESENTATION) == 11
 
 
 def test_all_live_templates_use_layouts_and_no_inline_styles():
@@ -175,14 +171,6 @@ def test_shared_component_classes_are_not_javascript_hooks():
 def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_path):
     _configure_fictional(monkeypatch)
     root = tmp_path / "CanvasExpert"
-    monkeypatch.setattr(dataforge_paths, "get_paths", lambda ensure=True: dataforge_paths.Paths(
-        data_dir=root / "Student Work" / "DataForge",
-        input_dir=root / "Student Work" / "DataForge" / "input",
-        output_dir=root / "Student Work" / "Reports" / "DataForge",
-        upload_dir=tmp_path / "uploads",
-        history_dir=root / "_System" / "DataForge" / "history",
-        anon_map=root / "_System" / "DataForge" / "anonymize_map.csv",
-    ))
     routes = {
         "/": "/",
         "/course-expert": "/course-expert",
@@ -194,7 +182,6 @@ def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_pat
         "/course": "/course",
         "/about": "/about",
         "/ai-expert": "/ai-expert",
-        "/assessments": "/assessments",
         "/welcome": "/welcome",
     }
     client = _client()

@@ -5,11 +5,10 @@
     <a class="{% if request.url.path == '/' %}ce-app-nav--active{% endif %}" href="/"{% if request.url.path == '/' %} aria-current="page"{% endif %}>CanvasAgent</a>
     <a class="{% if nav_section == 'calendar' %}ce-app-nav--active{% endif %}" href="/calendar"{% if nav_section == 'calendar' %} aria-current="page"{% endif %}>Calendar</a>
     <details class="ce-nav-more" id="ce-nav-more">
-      <summary class="{% if nav_section in ['manage', 'automate', 'assessments'] %}ce-app-nav--active{% endif %}">More <span class="ce-nav-more__caret">▾</span></summary>
+      <summary class="{% if nav_section in ['manage', 'automate'] %}ce-app-nav--active{% endif %}">More <span class="ce-nav-more__caret">▾</span></summary>
       <div class="ce-nav-more__pop">
         <a href="/roster"{% if nav_section == 'manage' %} aria-current="page"{% endif %}>Students</a>
         <a href="/routines"{% if nav_section == 'automate' %} aria-current="page"{% endif %}>Routines</a>
-        <a href="/assessments"{% if nav_section == 'assessments' %} aria-current="page"{% endif %}>Assessments</a>
       </div>
     </details>
     <a class="{% if nav_section == 'settings' %}ce-app-nav--active{% endif %}" href="/settings"{% if nav_section == 'settings' %} aria-current="page"{% endif %}>Settings</a>

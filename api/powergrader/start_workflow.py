@@ -395,13 +395,6 @@ def run_start_session(
             rubric_name = "Canvas rubric"
             rubric_text_override = canvas_rubric
             scoring_basis = {"source": "canvas_rubric", "label": "Canvas rubric"}
-        elif rubric_name:
-            rubric_text_override = ai_workflow.context.load_rubric_text(rubric_name)
-            if not rubric_text_override.strip():
-                return {"ok": False, "payload": {"ok": False,
-                    "error": "The selected Canvas Expert rubric is unavailable. Choose a listed rubric or provide scoring guidance.",
-                    "code": "rubric_unavailable"}}
-            scoring_basis = {"source": "canvas_expert_rubric", "label": rubric_name}
         elif scoring_guidance.strip():
             complete_scoring_rubric_text = scoring_guidance.strip()
             rubric_text_override, scoring_guidance_projection = project_teacher_scoring_guidance(
@@ -410,14 +403,11 @@ def run_start_session(
             rubric_name = "Teacher scoring guidance"
             scoring_basis = {"source": "teacher_guidance", "label": "Teacher scoring guidance"}
         else:
-            from api.webui.deps import list_rubric_files
-            labels = [str(item.get("label") or "") for item in list_rubric_files()
-                      if str(item.get("label") or "").strip()]
             return {"ok": False, "payload": {"ok": False,
                 "code": "needs_scoring_norms",
-                "error": "No usable Canvas rubric is attached. Choose a Canvas Expert rubric or provide scoring guidance.",
+                "error": "No usable Canvas rubric is attached. Provide bounded scoring guidance for this assignment.",
                 "assignment_name": str(assignment_name),
-                "rubric_labels": labels}}
+                }}
     media_submissions = [s for s in submitted if s.get("submission_type") == "media_recording"]
     oral_enabled = str(oral_reading_enabled).lower() in {"1", "true", "yes", "on"}
     if oral_enabled and not media_submissions:

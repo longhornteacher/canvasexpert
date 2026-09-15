@@ -114,13 +114,6 @@ def update_student(
 
     renaming = "pseudonym" in data or bool(data.get("regenerate_pseudonym"))
     old_pseudonym = pseudonym_rename.current_pseudonym(vault, user_id) if renaming else ""
-    if renaming:
-        # Before the rename, while the old pseudonym still resolves through the
-        # vault. See api/pseudonym_rename.py for why the order matters.
-        blocked = pseudonym_rename.backfill_assessment_history()
-        if blocked:
-            return {"ok": False, "error": blocked}
-
     try:
         with vault.transaction():
             if "nicknames" in nickname_values:
@@ -141,9 +134,8 @@ def update_student(
     if renaming:
         incomplete = pseudonym_rename.rewrite_writing_spans(
             old_pseudonym, pseudonym_rename.current_pseudonym(vault, user_id))
-        stale = pseudonym_rename.refresh_published_profile()
-        if incomplete or stale:
-            return {"ok": False, "error": incomplete or stale}
+        if incomplete:
+            return {"ok": False, "error": incomplete}
 
     if extra_time is not None:
         et = extra_time

@@ -88,7 +88,7 @@ essays ~15 pts; `PointsPossible` 100. So the block count and per-item points are
   chosen option texts across students (the CSV supports this directly).
 - **Constructed-response extraction** — pull essay/short-answer responses
   (HTML → text) for rubric-based scoring (MagicSchool / Copilot / LLM scorer),
-  matching the existing RubricForge / Essay-Scorer flow.
+  matching the existing Scoring Session flow.
 
 ## PowerGrader note
 

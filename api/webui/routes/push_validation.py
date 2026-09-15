@@ -6,7 +6,7 @@ from fastapi import File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
 from api.platform_services import config
-from .. import af, pf, rf, runner
+from .. import af, pf, runner
 from api import operational_log, runtime_paths
 from ..deps import TEMP_DIR, REPO_ROOT
 
@@ -151,7 +151,6 @@ def register_validation_routes(
             }
         return JSONResponse({"ok": data is not None and not problems,
                              "problems": problems, "summary": summary})
-
     @router.post("/api/pf/validate")
     def api_pf_validate(path: str = Form(...)):
         """Validate a <PAGEFORGE_JSON> file and summarize what it would push."""
@@ -165,15 +164,5 @@ def register_validation_routes(
                     f"{k}:{v.strip()}" for k, v in
                     pf.PLACEHOLDER_RE.findall(str(data.get("body", ""))))),
             }
-        return JSONResponse({"ok": data is not None and not problems,
-                             "problems": problems, "summary": summary})
-
-    @router.post("/api/rf/validate")
-    def api_rf_validate(path: str = Form(...)):
-        """Validate a <RUBRICFORGE_JSON> file and summarize what it would push."""
-        data, problems = rf.parse_file(path)
-        summary = None
-        if data is not None:
-            summary = rf.summary(data)
         return JSONResponse({"ok": data is not None and not problems,
                              "problems": problems, "summary": summary})

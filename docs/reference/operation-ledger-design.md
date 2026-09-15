@@ -294,7 +294,7 @@ Retry creates a **new attempt** for unresolved targets only. The executor:
 
 The single `content.page` pilot that this design was first written against has been
 superseded by the full shipped adapter set under `api/operation_ledger/adapters/`
-(page, quiz, assignment, module-placement, rubric, and sweep families).
+(page, quiz, assignment, module-placement, and sweep families).
 For per-kind behavior, route contracts, and the current invariants, treat
 `docs/contracts/operation-ledger-contract.md` and the adapter modules as authoritative;
 this document remains the durable explainer for the storage schema, state machine,

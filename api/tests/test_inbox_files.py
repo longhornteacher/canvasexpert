@@ -55,10 +55,10 @@ def test_inbox_folder_resolves_under_workspace_inbox_and_creates_it(tmp_path):
 
 def test_inbox_folder_distinct_per_kind():
     names = {kind: runtime_paths.inbox_folder(kind).name
-             for kind in ("quiz", "assignment", "page", "rubric")}
+             for kind in ("quiz", "assignment", "page")}
     assert names == {
         "quiz": "Quizzes", "assignment": "Assignments",
-        "page": "Pages", "rubric": "Rubrics",
+        "page": "Pages",
     }
 
 
@@ -138,10 +138,10 @@ def test_list_inbox_files_skips_when_marker_size_mismatches():
 
 
 def test_list_inbox_files_skips_when_marker_is_malformed():
-    folder = runtime_paths.inbox_folder("rubric")
+    folder = runtime_paths.inbox_folder("page")
     _drop(folder, "draft4", "some content", marker="not-a-number")
 
-    assert deps.list_inbox_files("rubric") == []
+    assert deps.list_inbox_files("page") == []
 
 
 def test_list_inbox_files_skips_when_marker_is_empty_string():

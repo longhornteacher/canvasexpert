@@ -35,7 +35,7 @@ while CanvasExpert keeps sole custody of the Canvas PAT and almost every write p
 
 ## Tools
 
-Tool schema version 46 (44 tools).
+Tool schema version 47 (41 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -51,11 +51,8 @@ Tool schema version 46 (44 tools).
 | `preview_learning_objective(course_id, objective, effective_start, effective_end, source_refs, replaces?)` | Exact reviewed create or replacement preview grounded in current local module, assignment, or page records | No |
 | `apply_learning_objective(course_id, preview, preview_digest, expected_revision)` | Applies only the exact reviewed create or replacement preview after catalog/source/revision checks; replacement identity comes from the digest-protected preview | No |
 | `delete_learning_objective(course_id, entry_id, expected_revision)` | Directly deletes one selected reviewed objective with revision protection | No |
-| `get_authoring_contract(kind)` | Canonical authoring contract for Forge (`quiz`, `assignment`, `page`, `rubric`) from `api/default_docs/AI Authoring/` | No |
+| `get_authoring_contract(kind)` | Canonical authoring contract for Forge (`quiz`, `assignment`, `page`) from `api/default_docs/AI Authoring/` | No |
 | `get_product_guide(topic="")` | CanvasExpert product knowledge; omit `topic` for the overview, use the annotated topic map to choose detail, or select `tools` for the complete generated inventory | No |
-| `get_standards_profile()` | Published offline DataForge standards profile; no `course_id` or Canvas call, with Identity Vault access required | Yes, pseudonymized |
-| `get_assessment_context(course_id, pseudonyms="")` | Bounded local assessment evidence for exact Current-roster pseudonyms; observational only | Yes, pseudonymized |
-| `get_assessment_grouping_proposal(course_id, snapshot_id, method="overall_pct", cutoffs="", no_data_group="", group_set_label="")` | Read-only grouping proposal using an exact teacher-safe group-set label; no Canvas apply path | Yes, pseudonymized |
 | `stage_content(kind, label, content)` | Writes one authored draft and its `.done` marker into the per-kind review Inbox; refuses an existing label rather than overwriting | No |
 | `list_staged_content(kind="")` | Drafts in the local review Inbox; pass `kind` to filter or omit it for all drafts | No |
 | `preview_content_push(course_id, kind, label, published=false, module_name="", assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=false)` | Persists a local frozen review of one staged draft for one Current course; `next` carries the confirm-then-apply handoff | No |
@@ -79,7 +76,7 @@ Tool schema version 46 (44 tools).
 | `get_teacher_schedule()` | The teacher's local versioned schedule blocks | No |
 | `get_school_calendar(date_from="", date_to="")` | Canonical School Calendar readiness, or a bounded range when both dates are given | No |
 | `start_scoring_session(course_id="", assignment_id="")` | Freeze a mirror-backed queue for every Current course, one Current course, or one exact assignment in a Current course | No |
-| `continue_scoring_session(scoring_session_id, rubric_name="", scoring_guidance="")` | Prepare or resume the active queue item; missing norms pause the same root session for teacher input | No |
+| `continue_scoring_session(scoring_session_id, scoring_guidance="")` | Prepare or resume the active queue item; missing norms pause the same root session for teacher input | No |
 | `list_scoring_sessions()` | One identity-free row per root Scoring Session with aggregate queue progress | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
 | `submit_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None)` | Post valid SAFE-packet results to Canvas, or return pseudonym-only questions for an explicit conversational answer and retry | Yes, pseudonymized |
@@ -170,7 +167,7 @@ Attention recovery. The linked contract,
 not the guide, remains the normative behavior authority.
 
 `get_authoring_contract(kind)` takes no `course_id` and carries no student data, so it
-needs no course gate, no identity vault, and no safety scan. Forge kinds (`quiz`, `assignment`, `page`, `rubric`) read the same
+needs no course gate, no identity vault, and no safety scan. Forge kinds (`quiz`, `assignment`, `page`) read the same
 `api/default_docs/AI Authoring/` file the web UI's `/api/download-contract` route serves,
 then receive the Forge-only staging appendix.
 
@@ -191,10 +188,10 @@ calendar; it does not create or retarget events.
 
 `get_product_guide(topic="")` closes the gap between what the tool list implies and what
 the app actually does. Every successful response returns an ordered object that annotates
-all eleven topics with one-line summaries. `overview` serves Appendix B; the other named
-CanvasAgent sections serve their exact Appendix A-G slices; `full` serves the entire file;
+all ten topics with one-line summaries. `overview` serves Appendix B; the other named
+CanvasAgent sections serve their exact Appendix A-F slices; `full` serves the entire file;
 and the two writing topics serve their own canonical files. `tools` is generated from the
-frozen schema-v45 contract and groups all 45 tools exactly once by teacher-facing job.
+frozen schema-v47 contract and groups all 41 tools exactly once by teacher-facing job.
 Topic matching trims surrounding whitespace and ignores case. The download route's
 CanvasAgent bytes equal `topic="full"`; section topics are extracted from those same bytes.
 Results are text-only MCP content: the server returns one minified JSON text block and
@@ -202,47 +199,11 @@ advertises no structured output schema or structured result. Same gate posture a
 `get_authoring_contract`: no `course_id`, no vault, no safety scan. The always-on server
 instructions point here rather than restating any of it.
 
-`get_standards_profile()` reads the one published local
-`For AI/DataForge/standards-profile.json` artifact. It is offline and has no
-`course_id`, but it is still student data: the Identity Vault and the same
-outbound safety scan are required before the pseudonymized profile leaves the
-process. A missing, malformed, unsupported, or unsafe artifact is withheld with
-a structured error. It does not generate a profile, call Canvas, or apply a
-grouping; the teacher reviews the profile and uses the Assessments coverage and
-Students grouping surfaces for any later local review/apply step.
-
-`get_assessment_context(course_id, pseudonyms="")` first requires a current local
-mirror roster, then joins only its canonical pseudonyms to the published profile.
-The roster source is labeled `local_mirror`; the assessment source is labeled
-`local_longitudinal_history` with the profile's `generated`, `grain`, and
-`snapshots_used` metadata. The result reports four coverage counts: current-roster
-students with and without history, requested pseudonyms outside the current roster,
-and published-profile students outside the current roster. It returns at most 25
-students, at most 32 standards per student, and at most 8 `assessed_in` labels per
-standard; a limit refusal never truncates evidence. Missing, stale, malformed, or
-inconsistent roster state returns no rows with `action: "refresh_mirror"`. The tool
-reports percentages and standards as source facts; it does not encode placement,
-capability, integrity, remediation, or other judgment labels.
-
-`get_assessment_grouping_proposal(course_id, snapshot_id, method="overall_pct", cutoffs="", no_data_group="", group_set_label="")`
-requires a Current course, a current local roster mirror, and a current local group mirror.
-The snapshot identifier is the exact trimmed local history ID. `group_set_label` is matched
-after trim and case-folding against the teacher-facing Canvas group-category label; missing
-or duplicate labels are blocking errors, and raw category/group IDs are never accepted from
-or returned to the assistant. The proposal reuses the Students page's
-`api.dataforge.canvas_join.build_coverage_report` and
-`api.dataforge.grouping.build_grouping_proposal` seams, so method, cutoffs, No Data placement,
-counts, tier membership, and the existing `proposal_digest` remain the UI proposal's facts.
-The returned groups and placements contain pseudonyms only. Missing, stale, malformed, or
-ambiguous local sources return no proposal rows and no live Canvas fallback. The tool is
-read-only: the teacher reviews and applies a digest-protected change in Students; the
-assistant must never imply that a Canvas group change was applied.
-
 `list_staged_content(kind="")` also takes no `course_id` and carries no student data, so
 it likewise needs no course gate, no identity vault, and no safety scan. It reuses
 `webui.deps.list_inbox_files` (the same marker-gated To Review listing the push tabs use) and
 returns only each draft's label, never its absolute path. Pass `kind` to narrow to one of
-`quiz`, `assignment`, `page`, or `rubric`; omit it to see everything staged across all four.
+`quiz`, `assignment`, or `page`; omit it to see everything staged across all three.
 
 **Scoring Session workflow.** `start_scoring_session(course_id="", assignment_id="")`
 freezes an ordered queue from fresh Current-course mirror gradebook snapshots. Empty
@@ -260,10 +221,10 @@ Canvas workflow state is authoritative: a numeric score or teacher comment does 
 `submitted` or `pending_review` work. The assistant never asks for an assignment type or
 scoring transport.
 
-`continue_scoring_session(scoring_session_id, rubric_name="", scoring_guidance="")`
+`continue_scoring_session(scoring_session_id, scoring_guidance="")`
 prepares or resumes exactly one active assignment. If it lacks a usable Canvas rubric, it
-returns `needs_teacher_input`, the same root id, available rubric labels, and a concise
-question. Ask the teacher to choose one or provide scoring guidance, then continue
+returns `needs_teacher_input`, the same root id, and a concise question requesting bounded
+scoring guidance. Ask the teacher for that guidance, then continue
 that same root. A Canvas rubric remains authoritative for each assignment. If a just-in-time
 refresh finds no grading work, continuation records `nothing_to_grade` and advances without
 creating a packet. `list_scoring_sessions()` returns one identity-free row per root session
@@ -388,13 +349,6 @@ compact. Client and model token treatment varies:
   a submission timestamp and graded records with a score, respectively. Manual grades
   without a submission count toward `has_grade` and averages. Their difference is not an
   ungraded-work count: `total_ungraded` sums the returned students' submitted or pending-review
-  work awaiting grading. Excused and unpublished work is omitted from these counts.
-- `get_assessment_context` accepts the same comma-separated, trimmed, case-insensitive
-  pseudonym filter and returns compact student rows with bounded standards evidence;
-  omit the filter for the current roster (up to 25 students), or name only the students
-  needed for the question. It refuses rather than silently truncating students or
-  standards, and a missing/stale mirror requires `refresh_mirror` before retrying.
-- `get_assessment_grouping_proposal` returns at most 25 current-roster placements and
   refuses rather than truncating when the compact result exceeds 20,000 serialized
   characters. It reports the method, cutoffs, group-set label, No Data group, coverage,
   group counts/membership, and proposal digest. Use the Students UI for review and apply.

@@ -49,7 +49,7 @@ no group names, counts, member or student IDs, bridge, family, or module fields.
 ## Non-goals
 
 - QuizForge differentiated delivery remains group-restricted and bridge-based.
-- DataForge grouping, roster tools, grade projection, and SIS bridge semantics are unchanged.
+- Roster tools, grade projection, and SIS bridge semantics are unchanged.
 - AssignmentForge does not create module items, differentiated bridge/family tails, or
   automatic grade synchronization.
 - Ordinary whole-class AssignmentForge delivery remains unchanged.

@@ -34,7 +34,7 @@
   <!-- ── Authoring skills ────────────────────────────────────────────────── -->
   <div class="ai-section" id="authoring">
     <h2>Authoring skills</h2>
-    {% set authoring_prefixes = ["Author a Quiz", "Author an Assignment", "Author a Page", "Author a Rubric"] %}
+    {% set authoring_prefixes = ["Author a Quiz", "Author an Assignment", "Author a Page"] %}
     {% for prefix in authoring_prefixes %}
     {% for f in ai_ta_files %}{% if f.label.startswith(prefix) %}
     <div class="ai-skill-row">
@@ -44,7 +44,6 @@
           {% if "Quiz" in f.label %}Tell your AI what quiz you need — it will produce a valid QuizForge JSON file you can push.
           {% elif "Assignment" in f.label %}Describe an assignment — the AI will produce an AssignmentForge file with HTML description and optional tiers.
           {% elif "Page" in f.label %}Ask for a unit hub or resource page — the AI will produce a PageForge file with full HTML body.
-          {% elif "Rubric" in f.label %}Describe your scoring criteria — the AI will produce a RubricForge file with student explainer and scoring prompt.
           {% endif %}
         </p>
       </div>

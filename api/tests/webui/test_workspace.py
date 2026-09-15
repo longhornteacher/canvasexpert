@@ -25,14 +25,14 @@ def test_onedrive_root_prefers_commercial(monkeypatch):
     assert workspace.onedrive_root() is None
 
 
-def test_ensure_workspace_creates_and_seeds_rubrics(tmp_path, monkeypatch):
+def test_ensure_workspace_creates_and_seeds_authoring_library(tmp_path, monkeypatch):
     onedrive = tmp_path / "OneDrive"
     root = onedrive / "CanvasExpert"
     source_api = tmp_path / "api"
-    source_rubrics = source_api / "default_docs" / "Rubrics"
-    source_rubrics.mkdir(parents=True)
-    (source_rubrics / "ELA7_Classroom_Writing_Rubric.txt").write_text("default v1", encoding="utf-8")
-    (source_rubrics / "New_Default_Rubric.txt").write_text("new default", encoding="utf-8")
+    source_authoring = source_api / "default_docs" / "AI Authoring"
+    source_authoring.mkdir(parents=True)
+    (source_authoring / "Author a Quiz (QuizForge).txt").write_text("default v1", encoding="utf-8")
+    (source_authoring / "Author a Page (PageForge).txt").write_text("new default", encoding="utf-8")
 
     monkeypatch.setenv("OneDrive", str(onedrive))
     monkeypatch.delenv("OneDriveCommercial", raising=False)
@@ -44,24 +44,25 @@ def test_ensure_workspace_creates_and_seeds_rubrics(tmp_path, monkeypatch):
     monkeypatch.setattr(workspace, "LEGACY_CONFIG_PATH", str(tmp_path / "no-legacy-config.json"))
     monkeypatch.setattr(workspace, "DEFAULT_DOCS_DIR", str(source_api / "default_docs"))
 
-    seeded = root / "Library" / "Rubrics" / "ELA7_Classroom_Writing_Rubric.txt"
+    seeded = root / "Library" / "AI Authoring" / "Author a Quiz (QuizForge).txt"
     seeded.parent.mkdir(parents=True, exist_ok=True)
     seeded.write_text("user edited version", encoding="utf-8")
 
     resolved = workspace.ensure_workspace()
     assert resolved == str(root)
 
-    for folder in ["AI Authoring", "Rubrics", "Quizzes", "Assignments", "Pages", "Calendars", "Source Materials"]:
+    for folder in ["AI Authoring", "Quizzes", "Assignments", "Pages", "Calendars", "Source Materials"]:
         assert (root / "Library" / folder).is_dir()
+    assert not (root / "Library" / "Rubrics").exists()
     for folder in ["Printables", "Canvas Uploads", "To Review", "Student Work", "For AI", "_System"]:
         assert (root / folder).is_dir()
 
     assert seeded.read_text(encoding="utf-8") == "user edited version"
-    assert (root / "Library" / "Rubrics" / "New_Default_Rubric.txt").read_text(encoding="utf-8") == "new default"
+    assert (root / "Library" / "AI Authoring" / "Author a Page (PageForge).txt").read_text(encoding="utf-8") == "new default"
 
-    (source_rubrics / "Later_Default_Rubric.txt").write_text("later default", encoding="utf-8")
+    (source_authoring / "Author an Assignment (AssignmentForge).txt").write_text("later default", encoding="utf-8")
     workspace.ensure_workspace()
-    assert (root / "Library" / "Rubrics" / "Later_Default_Rubric.txt").read_text(encoding="utf-8") == "later default"
+    assert (root / "Library" / "AI Authoring" / "Author an Assignment (AssignmentForge).txt").read_text(encoding="utf-8") == "later default"
 
 
 def test_config_split_writes_workspace_settings_when_available(tmp_path, monkeypatch):

@@ -309,7 +309,7 @@ teacher-selected object or write workflow. “Deferred” means do not add merel
 | Assignments and quiz classification | Required; shared acquisition | Catalog + private slim projection | Home, Create, Gradebook, PowerGrader, reports, MCP | One fetch, separate allowlists |
 | Modules and module-item outlines | Required | Student-free catalog | Create, Course Info, PowerGrader | No page bodies implied |
 | Assignment-group definitions and weights | Required | Student-free gradebook/structure scope | Create pickers, Gradebook, reports | Execution resolves live before writes |
-| Rubric index/definitions used by pickers and display | Required when current picker/display consumes it | Student-free structure scope | Create, PowerGrader setup | Embedded assignment rubrics may remain catalog records |
+| Attached assignment rubric data | Focused when scoring needs it | Assignment/PowerGrader focused evidence | PowerGrader | No separate Create picker or rubric index |
 | Canvas late policy and relevant gradebook course settings | Required | Student-free gradebook-config scope | Gradebook display and operation preparation | Apply/verify remains live |
 | Canvas grading periods | Conditional required | Student-free gradebook-config scope | Gradebook only when course uses them | Distinct from local academic calendars |
 | Students and sections | Required; already present | Private roster projection | Students, Gradebook, reports, Work, MCP | No email/avatar by default |
@@ -456,7 +456,7 @@ routing law.
 | Surface | Local spine | Canvas live / focused | After write |
 |---|---|---|---|
 | Home / Work | course context, assignments, submissions, comments, roster, groups, derived attention/work rows | bounded comment reconcile on focus; explicit retry for a failed scope | actions enter the owning operation/PowerGrader path; no writes from discovery |
-| Create / Course Expert | course context, modules, module items, assignment groups, assignment/rubric search records, capability | operation-ledger baseline, collision/drift checks, create/update, file upload, module placement, overrides, verification | refresh exact structure scopes (assignment → both projections; placement → modules; rubric → index) |
+| Create / Course Expert | course context, modules, module items, assignment groups, capability | operation-ledger baseline, collision/drift checks, create/update, file upload, module placement, overrides, verification | refresh exact structure scopes (assignment → both projections; placement → modules) |
 | Course Info | course context, students, sections, groups/memberships, modules, assignments | explicit course-list refresh; any non-persisted field (e.g. email) only if that feature remains | targeted refresh of the touched scope |
 | Grade / PowerGrader | picker data, rubric context, text-entry rows, attempts, comment context, cached NQ metadata/response snapshots | exact assignment state/submissions when the delta cannot satisfy; evidence; Student Analysis report; native NQ evidence; late-catch-up polling; grade/comment/NQ-finalization writes | refresh exact submission/student or NQ response scope, then invalidate grading-debt/attention views; never whole-course `sync_now`; never unrelated NQ metadata |
 | Gradebook Expert | students, assignments, submissions, personalized due facts, assignment groups/weights, late-policy display, grading settings, optional grading periods, derived snapshots | curve baselines feeding a write, sweep final recompute, extensions/overrides, late-policy apply/verify, every grade/status mutation | refresh only affected gradebook-config/assignment/submission/due-fact scopes |
@@ -465,7 +465,7 @@ routing law.
 | Automations / Routines | detection/count/report-only routines whose scope is fresh enough | final compute/preflight and execute of any mutating routine | targeted refresh of scopes the routine mutated |
 | MCP | roster, assignments, submissions, grades/status, allowed derived views (local pseudonymization + source labeling) | bounded, explicitly authorized fallback only when no projection exists; never an accidental all-course first sync | newly mirrored fields need an outbound allowlist + scrub review before entering payloads |
 | Settings / Connections | course context, last-known lifecycle/capability, sync state, sanitized diagnostics | connection test, `/users/self`, course discovery, capability diagnostic | course discovery teaches the course-context scope; status pages read local envelopes |
-| Operation Ledger | course/module/assignment-group/rubric pickers | prepare baselines, execute, drift detection, reconcile, verify (live even when local equivalents exist) | each adapter declares the scopes it invalidates/refreshes; no shadow cache |
+| Operation Ledger | course/module/assignment-group pickers | prepare baselines, execute, drift detection, reconcile, verify (live even when local equivalents exist) | each adapter declares the scopes it invalidates/refreshes; no shadow cache |
 | AI Expert | local only — no Canvas read requirement | — | not routed through CanvasMirror for symmetry |
 | Diagnostics / support | sanitized local metrics: scope, state, request counts, durations, bytes, retry/circuit state, stable error code | live health tests are explicit user actions | support bundles exclude student rows, response bodies, tokens, signed URLs, and private paths |
 
@@ -492,7 +492,7 @@ This table states the end-state owner, not permission to change every caller at 
 | Assignment detail | Local assignment view when display-only | PowerGrader/operation focused preflight | Intent decides source |
 | Modules/items | Catalog structure acquisition | Operation adapters for placement/reconcile | Pickers local, writes live |
 | Assignment groups | Structure/gradebook-config scope | Operation resolution/preflight | Picker/report local, execution live |
-| Rubrics | Student-free rubric/assignment catalog | Rubric operation adapter | Add only fields consumed by current UI |
+| Rubrics | Student-free assignment rubric facts | Focused assignment/PowerGrader reads | Add only fields consumed by current scoring flow |
 | Users/students/sections | Private roster scope | Focused explicit field request | Routine roster local |
 | Group categories/groups/memberships | Private groups scope | Roster and operation adapters | Remove N+1 display reads |
 | Course submissions | Private submission delta/reconcile | Focused assignment and write preflight | No duplicate surface fetches |

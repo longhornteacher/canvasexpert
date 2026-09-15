@@ -5,12 +5,11 @@ from .assignment_update import AssignmentUpdateAdapter
 from .page import PageAdapter
 from .quick_assignment import QuickAssignmentAdapter
 from .quiz import QuizAdapter
-from .rubric import RubricAdapter
 from .sis_grade_bridge import SisGradeBridgeAdapter
 from .sweep import SweepAdapter
 
 __all__ = [
     "AssignmentAdapter", "AssignmentUpdateAdapter", "PageAdapter",
-    "QuickAssignmentAdapter", "QuizAdapter", "RubricAdapter",
+    "QuickAssignmentAdapter", "QuizAdapter",
     "SisGradeBridgeAdapter", "SweepAdapter",
 ]

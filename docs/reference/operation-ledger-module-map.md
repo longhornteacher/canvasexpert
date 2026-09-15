@@ -17,7 +17,6 @@ These are high-risk Canvas write flows.
 - `api/operation_ledger/adapters/page.py` — page create/reconcile facade; still owns
   Page-specific module-item behavior because Canvas page module attachment semantics
   differ from Assignment-type items.
-- `api/operation_ledger/adapters/rubric.py` — rubric create/student-page facade.
 - `api/operation_ledger/adapters/quick_assignment.py` — quick-assignment create/reconcile facade.
 
 ## Execution Owners
@@ -81,7 +80,6 @@ These are high-risk Canvas write flows.
 - `api/tests/test_quiz_tier_operation.py`
 - `api/tests/test_page_operation.py`
 - `api/tests/test_quick_assignment_operation.py`
-- `api/tests/test_rubric_operation.py`
 - `api/tests/test_operation_ledger.py`
 - `api/tests/test_sis_grade_bridge_operation.py`
 - `api/tests/test_routines_builtin_sis_grade_bridge.py`

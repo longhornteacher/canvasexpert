@@ -71,7 +71,7 @@ def _fake_session(session_id: str, course_id: str, people: list[dict] | None = N
         "assignment_name": assignment_name,
         "assignment_id": "700010",
         "created": "2026-01-01T08:00:00",
-        "scoring_basis": {"source": "canvas_expert_rubric", "label": "Test Rubric"},
+        "scoring_basis": {"source": "canvas_rubric", "label": "Test Rubric"},
         "students": [{"user_id": p["canvas_id"], "status": "pending"} for p in people],
         "privacy_artifacts": {},
     }
@@ -83,10 +83,6 @@ def _stub_declared_context(monkeypatch):
         tools.config,
         "get_persona",
         lambda _persona_id: {"name": "Test TA", "signoff_policy": "none"},
-    )
-    monkeypatch.setattr(
-        "api.powergrader.context.load_rubric_text",
-        lambda _rubric_name: "Grade strictly by this rubric.",
     )
 
 
@@ -552,38 +548,6 @@ def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):
     assert "rubric" not in without_context
 
 
-def test_get_scoring_packet_resolves_declared_rubric_and_persona(monkeypatch, tmp_path):
-    people = _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-    monkeypatch.setattr(
-        "api.powergrader.context.load_rubric_text",
-        lambda name: "3 pts: uses a loop" if name == "Test Rubric" else "",
-    )
-    monkeypatch.setattr(
-        tools.config,
-        "get_persona",
-        lambda persona_id: {
-            "name": "Packet TA",
-            "signoff_policy": "none",
-            "signoff_text": "",
-        },
-    )
-
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
-    _bind_session_store(monkeypatch, {"s1": session})
-
-    result = tools.get_scoring_packet("s1")
-
-    assert result["ok"] is True
-    assert result["rubric"] == {"label": "Test Rubric", "included": True}
-    assert "3 pts: uses a loop" in result["contract"]
-    assert "your teaching assistant" in result["contract"]
-    assert "Glows & Grows" in result["contract"]
-    assert "Drafted by Packet TA" not in result["contract"]
-    assert "Autofeedback" not in result["contract"]
-
-
 def test_get_scoring_packet_uses_effective_guidance_and_exposes_projection(monkeypatch, tmp_path):
     people = _seed_vault(monkeypatch, tmp_path, count=1)
     _set_active_courses(monkeypatch, ["111"])
@@ -595,6 +559,7 @@ def test_get_scoring_packet_uses_effective_guidance_and_exposes_projection(monke
         "omitted_units": 1,
     }
     session = _fake_session("s1", "111", people)
+    session["scoring_rubric_text"] = "Grade responses against the attached Canvas rubric."
     session.update({
         "scoring_basis": {"source": "teacher_guidance", "label": "Teacher scoring guidance"},
         "scoring_rubric_text": complete,
@@ -614,54 +579,6 @@ def test_get_scoring_packet_uses_effective_guidance_and_exposes_projection(monke
     later = tools.get_scoring_packet("s1", offset=1, include_context=False)
     assert later["ok"] is True
     assert "scoring_guidance_projection" not in later
-
-
-def test_get_scoring_packet_reports_missing_declared_rubric(monkeypatch, tmp_path):
-    people = _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-    monkeypatch.setattr("api.powergrader.context.load_rubric_text", lambda _name: "")
-
-    session = _fake_session("s1", "111", people)
-    _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
-    _bind_session_store(monkeypatch, {"s1": session})
-
-    result = tools.get_scoring_packet("s1")
-
-    assert result["ok"] is True
-    assert result["rubric"] == {"label": "Test Rubric", "included": False}
-    assert "attached as Knowledge" not in result["contract"]
-    assert "No scoring rubric was provided" in result["contract"]
-
-
-def test_get_scoring_packet_preserves_legacy_inline_context(monkeypatch, tmp_path):
-    people = _seed_vault(monkeypatch, tmp_path, count=1)
-    _set_active_courses(monkeypatch, ["111"])
-    monkeypatch.setattr(
-        "api.powergrader.context.load_rubric_text",
-        lambda _name: pytest.fail("legacy rubric should not be resolved"),
-    )
-    monkeypatch.setattr(
-        tools.config,
-        "get_persona",
-        lambda _persona_id: pytest.fail("legacy persona should not be resolved"),
-    )
-
-    session = _fake_session("s1", "111", people)
-    session["rubric_text"] = "Legacy rubric text"
-    session["persona"] = {
-        "name": "Legacy TA",
-        "signoff_policy": "none",
-        "signoff_text": "",
-    }
-    _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
-    _bind_session_store(monkeypatch, {"s1": session})
-
-    result = tools.get_scoring_packet("s1")
-
-    assert result["ok"] is True
-    assert result["rubric"] == {"label": "Test Rubric", "included": True}
-    assert "Legacy rubric text" in result["contract"]
-    assert "Legacy TA" not in result["contract"]
 
 
 def test_session_builder_keeps_rubric_read_time_only():
@@ -774,6 +691,7 @@ def test_get_scoring_packet_keeps_contract_and_basis_when_context_is_compacted(m
     people = _seed_vault(monkeypatch, tmp_path, count=1)
     _set_active_courses(monkeypatch, ["111"])
     session = _fake_session("s1", "111", people)
+    session["scoring_rubric_text"] = "Grade responses against the attached Canvas rubric."
     bundle = _fake_safe_bundle(people, items=1)
     bundle["shared_context"] = {
         "assignment_description": "assignment",

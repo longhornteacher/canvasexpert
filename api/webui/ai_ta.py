@@ -7,21 +7,12 @@ paste-ready text a teacher pastes into an AI assistant. This module never
 regenerates that text; it only seeds it into a teacher's workspace (once, never
 overwriting an edit).
 
-It also sweeps unedited "Score with - ..." files left behind by the retired
-per-rubric scoring-skill generator; see _sweep_retired_scoring_skills below.
-
 Pure module: builds plain-text output files only. The web UI / server owns the
 HTTP routes and startup hook.
 """
 import hashlib
-import json
 import os
 import shutil
-
-from . import rf
-
-from api import runtime_paths
-from engine.utils.text_utils import safe_filename_component
 
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -159,129 +150,6 @@ def _retire_superseded(target_dir):
     return removed
 
 
-def _legacy_rubric_score_text(data):
-    """Reproduce the text the retired per-rubric scoring generator used to write.
-
-    build_library used to add one "Score with - <rubric>.txt" file per rubric on
-    file, built from rf.scoring_prompt. That generator is retired: it told a
-    teacher to paste real student writing into a chat with no pseudonymization,
-    and its output carried no pseudonym/item_id, so it could never be imported
-    into a PowerGrader session. rf.scoring_prompt went with it, since nothing
-    else called it.
-
-    This is a frozen, private duplicate of what that function produced, kept
-    only so _sweep_retired_scoring_skills can recognize a file an earlier
-    rebuild wrote and nobody has touched since. Do not evolve this to track
-    rf.py or rubric-shape changes -- doing so would break the match against
-    files already sitting in a teacher's workspace, which is the only reason
-    it still exists.
-    """
-    def _text(value):
-        return str(value or "").strip()
-
-    total = data.get("total_points")
-    lines = [
-        "You are an experienced teacher scoring student writing with the rubric below.",
-        "Score each criterion independently and honestly — a response can be excellent in",
-        "one criterion and weak in another. Use the full range. Quote briefly from the",
-        "student's work to justify every score.",
-        "",
-        f"RUBRIC: {_text(data.get('title'))} ({total} points)",
-        "",
-    ]
-
-    for i, criterion in enumerate(data.get("criteria") or []):
-        lines.append(f"CRITERION {i + 1}: {_text(criterion.get('name'))} — {_text(criterion.get('points'))} points")
-        cq = _text(criterion.get("core_question"))
-        if cq:
-            lines.append(f"Core question: {cq}")
-        for rating in criterion.get("ratings") or []:
-            range_min = rating.get("range_min")
-            band = f" (band {range_min}-{rating.get('points')})" if range_min is not None else ""
-            lines.append(f"  [{rating.get('points')} pts{band}] {_text(rating.get('label'))}: {_text(rating.get('description'))}")
-        lines.append("")
-
-    guidance = data.get("scoring_guidance") or {}
-    if guidance:
-        lines.append("SCORING PRINCIPLES")
-        for item in guidance.get("design_principles") or []:
-            lines.append(f"- {_text(item)}")
-        for item in guidance.get("consistency_tips") or []:
-            lines.append(f"- {_text(item)}")
-        scr_scaling = _text(guidance.get("scr_scaling"))
-        if scr_scaling:
-            lines.append(scr_scaling)
-        lines.append("")
-
-        output_template = guidance.get("output_template")
-        if output_template is not None:
-            lines.append("Return your evaluation as JSON in exactly this structure, then a short")
-            lines.append("plain-English summary a student could read:")
-            lines.append(json.dumps(output_template, indent=2))
-            lines.append("")
-
-    lines.append("I will paste one student response at a time. Wait for it.")
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _sweep_retired_scoring_skills(target_dir, rubric_folders):
-    """Delete a "Score with - ..." file only if it still matches what the
-    retired generator would produce from the matching rubric today.
-
-    RETIRED_FILES above cannot reach these files: it is keyed on an exact
-    filename plus a frozenset of shipped-content hashes, and here both the
-    filename and the contents come from each teacher's own rubric titles, not
-    from anything this repo ships. There is no shippable name list and no
-    shippable hash.
-
-    What we do have is the rubric itself, so this recomputes the old output
-    from the rubric currently on file and deletes the on-disk file only when
-    it still matches byte for byte. A file whose rubric was edited, renamed, or
-    removed since generation no longer matches and is left alone, and so is a
-    file the teacher edited directly -- this only ever deletes what it can
-    prove is an untouched leftover.
-    """
-    removed = []
-    try:
-        on_disk = {
-            name for name in os.listdir(target_dir)
-            if name.startswith("Score with - ") and name.lower().endswith(".txt")
-        }
-    except OSError:
-        return removed
-    if not on_disk:
-        return removed
-
-    for folder in rubric_folders:
-        if not os.path.isdir(folder):
-            continue
-        for path in sorted(os.listdir(folder)):
-            if not path.lower().endswith(".txt"):
-                continue
-            data, problems = rf.parse_file(os.path.join(folder, path))
-            if data is None or problems:
-                continue
-            safe_title = _sanitize_filename(str(data.get("title", "Rubric")))
-            filename = f"Score with - {safe_title}.txt"
-            if filename not in on_disk:
-                continue
-            out_path = os.path.join(target_dir, filename)
-            try:
-                with open(out_path, "rb") as f:
-                    current_raw = f.read()
-            except OSError:
-                continue
-            expected_raw = _legacy_rubric_score_text(data).encode("utf-8")
-            if _shipped_hash(current_raw) != _shipped_hash(expected_raw):
-                continue
-            try:
-                os.remove(out_path)
-            except OSError:
-                continue
-            removed.append(out_path)
-    return removed
-
-
 def _write_text_if_missing(path, text):
     """Seed a file once and preserve teacher edits on later runs."""
     if os.path.exists(path):
@@ -310,15 +178,8 @@ def _copy_tree_if_missing(source_dir, dest_dir):
     return written
 
 
-def _sanitize_filename(text):
-    return safe_filename_component(text, fallback="Rubric")
-
-
-def build_library(target_dir, rubric_folders=None):
+def build_library(target_dir):
     """Seed the AI Authoring library, then retire files superseded by newer ones."""
-    if rubric_folders is None:
-        rubric_folders = runtime_paths.rubric_folders()
     os.makedirs(target_dir, exist_ok=True)
     _retire_superseded(target_dir)
-    _sweep_retired_scoring_skills(target_dir, rubric_folders)
     return _copy_tree_if_missing(DEFAULT_AI_TA_DIR, target_dir)

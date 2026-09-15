@@ -47,7 +47,7 @@ Source tests never substitute for rendered verification.
 | Route | Page | JS |
 |---|---|---|
 | `/` | **CanvasAgent** — local MCP, Canvas account, CanvasMirror, and privacy health | `canvasagent.html` + `canvasagent.js` |
-| `/course-expert` | **Create** — quiz, assignment, page, rubric, and quick-column tools | `push.js` + `push/*.js`, `course_expert/*.js` |
+| `/course-expert` | **Create** — quiz, assignment, page, and quick-column tools | `push.js` + `push/*.js`, `course_expert/*.js` |
 | `/students/reports` | **Student reports** — packet and portfolio tools under Students | `student_reports.html` + `course_expert/student_reports.js` + `course_expert/portfolio.js` |
 | `/gradebook` | **Gradebook tools** — single-course grade operations | `gradebook.js` + `gradebook/*.js` |
 | `/roster` | **Rosters** — student-level Canvas-group and local settings console | `roster.js`, `roster/*.js` |
@@ -57,7 +57,6 @@ Source tests never substitute for rendered verification.
 | `/settings` | Settings | `settings.js` |
 | `/calendar` | **Calendar** — school dates, Bell Schedules, Teacher Schedule | `pages/calendar.js` |
 | `/routines` | **Routines** — local automation control surface | inline / route-driven |
-| `/assessments` | **Assessments** — local Eduphoria import, reports, dashboard, history, and read-only roster coverage | route-driven |
 | `/about` | What-is-Canvas-Expert explainer | — |
 
 CanvasAgent's secondary Canvas refresh queues local read-only coordinator work and polls its
@@ -68,8 +67,8 @@ opaque plan status. It does not scan or refresh retired Home work cards.
 Create is split for low-token debugging.
 
 - Page/template owner: `course_expert.html`
-- Shared browser files: `push/core.js`, `push/file_sources.js`, `push/delivery.js`, `push/rubrics.js`, `push/course_picker.js`, `push.js`
-- Feature files: `push/quiz.js`, `push/assignment.js`, `push/page.js`, `push/rubric.js`
+- Shared browser files: `push/core.js`, `push/file_sources.js`, `push/delivery.js`, `push/course_picker.js`, `push.js`
+- Feature files: `push/quiz.js`, `push/assignment.js`, `push/page.js`
 - Work tools page files: `course_expert/tabs.js`, `course_expert/student_reports.js`, `course_expert/portfolio.js`, `course_expert/quick_assignment.js`
 - Backend push routes: `routes/push.py`, `routes/push_validation.py`
 - Source-material facade/extractors: `source_materials.py`, `source_material_extractors.py`
@@ -113,13 +112,6 @@ primary-nav page, not in Settings.
 - Teacher Schedule/Bell Schedule read-write: `api/webui/routes/schedule.py`, `api/webui/schedule_setup.py`
 
 For the full contract, see `docs/contracts/canonical-school-calendar-contract.md`.
-
-### Assessments module routing
-
-Assessments is a local-only DataForge surface. The route adapter owns HTTP responses and
-upload staging; `api/dataforge/` owns parsing, report generation, dashboard aggregation,
-history, downloads, and the read-only local-ID-to-CanvasMirror coverage report. It never
-refreshes Canvas, writes groups, or calls the AI provider.
 
 ### Scoring Sessions
 
@@ -330,11 +322,6 @@ association is not part of this operation path.
 Pick a `<PAGEFORGE_JSON>` file, then **Validate** / **Push page…**. Module placement
 + publish. `{{file:…}}` / `{{page:…}}` placeholders resolve per course at push time.
 
-### Rubric tab
-Pick a `<RUBRICFORGE_JSON>` file, then **Validate** / **Push rubric…**. After the
-teacher reviews the frozen operation, it creates the course rubric and, when the
-file requests one, a student explainer page.
-
 ### Assignment evidence refresh
 Downloads student work from the **focused** course. Load assignments, filter by
 type and due-date range (All / Fall / Spring / 30d / 90d presets), select, download
@@ -439,7 +426,7 @@ Equips the teacher's LLM (MagicSchool, Copilot, …) with paste-ready plain-text
 skill files, served from the Library/AI Authoring folder (`/api/ai-ta/file?name=…`):
 
 - **Start here** — orients any LLM to Canvas Expert.
-- **Authoring skills** — Author a Quiz / Assignment / Page / Rubric (the Forge
+- **Authoring skills** — Author a Quiz / Assignment / Page (the Forge
   contracts as skills). These same files power the Work tools inline
   "Forge one with your LLM" copy buttons.
 - **MagicSchool Toolkit** — setup recipes for building dedicated MagicSchool tools.
@@ -461,7 +448,7 @@ modules, assignments, Canvas quick-links, download folder path.
 Quiz planning may delegate to the existing CLI helpers as a subprocess. Live writes
 run through the Operation Ledger adapters. Assignment evidence refreshes are focused
 reads used by the private Scoring Session packet builder.
-Assignment / page / rubric / quick-assignment creation plus gradebook and
+Assignment / page / quick-assignment creation plus gradebook and
 course-info reads are direct Canvas REST calls through split Web UI routes
 (`/api/gradebook`, `/api/course-detail`).
 

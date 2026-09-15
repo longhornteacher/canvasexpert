@@ -35,7 +35,8 @@ def _serve_from(monkeypatch, tmp_path, route):
 @pytest.mark.parametrize("route", _ROUTES)
 def test_download_carries_the_real_filename_with_spaces_and_parens(monkeypatch, tmp_path, route):
     directory = _serve_from(monkeypatch, tmp_path, route)
-    name = "Author a Quiz (QuizForge).txt"
+    name = ("Quiz Author — SETUP.txt" if route.endswith("toolkit-file")
+            else "Author a Quiz (QuizForge).txt")
     (directory / name).write_text("quiz forge contract", encoding="utf-8")
 
     response = _client().get(route, params={"name": name})
@@ -43,29 +44,25 @@ def test_download_carries_the_real_filename_with_spaces_and_parens(monkeypatch, 
     assert response.status_code == 200
     assert response.text == "quiz forge contract"
     assert response.headers["content-type"] == "text/plain; charset=utf-8"
-    assert response.headers["content-disposition"] == (
+    expected = (
+        'attachment; filename="Quiz Author ? SETUP.txt"; '
+        "filename*=UTF-8''Quiz%20Author%20%E2%80%94%20SETUP.txt"
+        if route.endswith("toolkit-file") else
         'attachment; filename="Author a Quiz (QuizForge).txt"; '
         "filename*=UTF-8''Author%20a%20Quiz%20%28QuizForge%29.txt"
     )
+    assert response.headers["content-disposition"] == expected
 
 
 @pytest.mark.parametrize("route", _ROUTES)
-def test_download_non_ascii_name_emits_the_rfc5987_form(monkeypatch, tmp_path, route):
+def test_download_rejects_non_canonical_name(monkeypatch, tmp_path, route):
     directory = _serve_from(monkeypatch, tmp_path, route)
     name = "Ünïcode Café.txt"
     (directory / name).write_text("accented contract", encoding="utf-8")
 
     response = _client().get(route, params={"name": name})
 
-    assert response.status_code == 200
-    assert response.text == "accented contract"
-    disposition = response.headers["content-disposition"]
-    assert "filename*=UTF-8''%C3%9Cn%C3%AFcode%20Caf%C3%A9.txt" in disposition
-    # The plain filename parameter is the fallback for clients that do not
-    # understand filename* -- it must stay ASCII (Starlette encodes header
-    # values as Latin-1, so raw multi-byte characters there would crash the
-    # response) rather than carry the real bytes.
-    assert 'filename="?n?code Caf?.txt"' in disposition
+    assert response.status_code == 404
 
 
 @pytest.mark.parametrize("route", _ROUTES)

@@ -1,9 +1,8 @@
 """Library and AI-TA file routes for Canvas Expert.
 
-One APIRouter; 8 routes for file listing, AI-TA management, validation, and downloads.
+One APIRouter; 7 routes for file listing, AI-TA management, validation, and downloads.
 
 Routes: GET  /api/files
-        GET  /api/rf/files
         GET  /api/inbox-files
         GET  /api/ai-ta/files
         GET  /api/ai-ta/file
@@ -17,26 +16,21 @@ from urllib.parse import quote
 from fastapi import APIRouter, Form, Request, UploadFile, File
 from fastapi.responses import JSONResponse, PlainTextResponse, FileResponse
 
-from .. import af, ai_ta, pf, rf
+from .. import af, ai_ta, pf
 from api import runtime_paths
-from ..deps import REPO_ROOT, list_ai_ta_files, list_inbox_files, list_quiz_files, list_rubric_files
+from ..deps import REPO_ROOT, list_ai_ta_files, list_inbox_files, list_quiz_files
 
 router = APIRouter(tags=["library"])
 
 # Kinds Slice C's per-kind Inbox and this route both understand -- keeps the
 # unknown-kind rejection explicit rather than leaking a ValueError from
 # runtime_paths.inbox_folder.
-_INBOX_KINDS = ("quiz", "assignment", "page", "rubric")
+_INBOX_KINDS = ("quiz", "assignment", "page")
 
 
 @router.get("/api/files")
 def api_files():
     return JSONResponse({"files": list_quiz_files()})
-
-
-@router.get("/api/rf/files")
-def api_rf_files():
-    return JSONResponse({"files": list_rubric_files()})
 
 
 def _validate_inbox_entry(kind: str, path: str):
@@ -58,9 +52,6 @@ def _validate_inbox_entry(kind: str, path: str):
             return data is not None and not problems, problems
         if kind == "page":
             data, problems = pf.parse_file(path)
-            return data is not None and not problems, problems
-        if kind == "rubric":
-            data, problems = rf.parse_file(path)
             return data is not None and not problems, problems
     except FileNotFoundError:
         return False, [f"file not found: {path}"]
@@ -120,6 +111,9 @@ def api_ai_ta_file(name: str):
     Validates the name is within the current AI-TA directory to prevent path traversal."""
     if not name or os.sep in name or "/" in name or ".." in name:
         return JSONResponse({"error": "invalid name"}, status_code=400)
+    canonical = os.path.join(REPO_ROOT, "api", "default_docs", "AI Authoring", name)
+    if not os.path.isfile(canonical):
+        return JSONResponse({"error": "file not found"}, status_code=404)
     ai_ta_dir = runtime_paths.ai_ta_dir()
     path = os.path.join(ai_ta_dir, name)
     if not os.path.isfile(path) or not os.path.abspath(path).startswith(
@@ -135,6 +129,9 @@ def api_ai_ta_toolkit_file(name: str):
     """Return content of one MagicSchool Toolkit file by basename."""
     if not name or os.sep in name or "/" in name or ".." in name:
         return JSONResponse({"error": "invalid name"}, status_code=400)
+    canonical = os.path.join(REPO_ROOT, "api", "default_docs", "AI Authoring", "MagicSchool Toolkit", name)
+    if not os.path.isfile(canonical):
+        return JSONResponse({"error": "file not found"}, status_code=404)
     toolkit_dir = os.path.join(runtime_paths.ai_ta_dir(), "MagicSchool Toolkit")
     path = os.path.join(toolkit_dir, name)
     if not os.path.isfile(path) or not os.path.abspath(path).startswith(
@@ -148,7 +145,7 @@ def api_ai_ta_toolkit_file(name: str):
 @router.post("/api/ai-ta/rebuild")
 def api_ai_ta_rebuild():
     try:
-        files = ai_ta.build_library(runtime_paths.ai_ta_dir(), rubric_folders=None)
+        files = ai_ta.build_library(runtime_paths.ai_ta_dir())
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
     return JSONResponse({"ok": True, "files": [os.path.basename(p) for p in files]})
@@ -158,7 +155,6 @@ _CONTRACT_FILE_MAP = {
     "AssignmentForge_Base": "Author an Assignment (AssignmentForge).txt",
     "PageForge_Base": "Author a Page (PageForge).txt",
     "QuizForge_Base": "Author a Quiz (QuizForge).txt",
-    "RubricForge_Base": "Author a Rubric (RubricForge).txt",
     # Not Forge contracts, but the same "hand this text to an AI" delivery and
     # the same canonical source, so they reuse this route rather than adding
     # one. Both are also served by the MCP get_product_guide tool, so a pasted

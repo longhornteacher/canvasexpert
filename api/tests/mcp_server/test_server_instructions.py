@@ -190,7 +190,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 45
+    assert len(listed) == 41
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -237,10 +237,6 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
     )
     monkeypatch.setattr(tools, "_visible_scoring_sessions", lambda: [])
     monkeypatch.setattr(
-        "api.powergrader.context.load_rubric_text",
-        lambda _label: "Award credit for a correct explanation.",
-    )
-    monkeypatch.setattr(
         tools.config,
         "get_persona",
         lambda _persona_id: {"name": "Test TA", "signoff_policy": "none"},
@@ -253,7 +249,8 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
         "assignment_name": "Quiz",
         "assignment_id": "assignment-1",
         "created": "2026-01-01T08:00:00",
-        "scoring_basis": {"source": "canvas_expert_rubric", "label": "Test Rubric"},
+        "scoring_basis": {"source": "canvas_rubric", "label": "Test Rubric"},
+        "scoring_rubric_text": "Award credit for a correct explanation.",
         "students": [{"user_id": "900001", "status": "pending"}],
         "privacy_artifacts": {"safe_bundle": str(tmp_path / "bundle.json")},
     }
@@ -313,9 +310,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 45
-    assert len(_synthetic_mcp["calls"]) == 45
-    assert len(_synthetic_mcp["gated"]) == 45
+    assert len(results) == 41
+    assert len(_synthetic_mcp["calls"]) == 41
+    assert len(_synthetic_mcp["gated"]) == 41
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

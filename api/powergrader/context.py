@@ -1,5 +1,4 @@
-"""Context helpers for PowerGrader — vault, rubric loading, source materials, shared context.
-"""
+"""Context helpers for PowerGrader — vault, source materials, and shared context."""
 
 import os
 
@@ -7,7 +6,6 @@ from api import feedback_vault
 
 from api.platform_services import workspace
 from api.webui import source_materials
-from api.webui.deps import list_rubric_files
 
 
 def vault():
@@ -19,19 +17,6 @@ def vault():
     fallback = os.path.join(root or ".", "_System", "Identity Vault")
     os.makedirs(fallback, exist_ok=True)
     return feedback_vault.Vault(os.path.join(fallback, "vault.json"))
-
-
-def load_rubric_text(rubric_name: str) -> str:
-    if not rubric_name:
-        return ""
-    for r in list_rubric_files():
-        if r["label"] == rubric_name or os.path.basename(r["path"]) == rubric_name:
-            try:
-                with open(r["path"], encoding="utf-8") as f:
-                    return f.read()
-            except Exception:
-                return ""
-    return ""
 
 
 def folder_file_names(source_files_json: str) -> list[str]:

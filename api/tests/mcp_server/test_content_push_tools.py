@@ -330,14 +330,6 @@ def test_a_quiz_carries_its_options_as_push_settings(_adapter):
     }
 
 
-def test_a_draft_stays_unpublished_unless_asked(_adapter):
-    _stage("rubric", "essay-rubric")
-
-    content_push.preview_content_push("course-x", "rubric", "essay-rubric")
-
-    assert _adapter.requests[0]["published"] is False
-
-
 # --- apply ---------------------------------------------------------------------
 
 def test_apply_lands_only_a_content_operation(monkeypatch):

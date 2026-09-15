@@ -30,13 +30,11 @@ def test_operation_gateway_aliases_and_no_direct_legacy_calls():
         "quick": "content.quick_assignment",
         "af": "content.assignment",
         "pf": "content.page",
-        "rf": "content.rubric",
     }.items():
         assert f'{alias}: "{kind}"' in core
     for rel in (
         "api/webui/static/push/assignment.js",
         "api/webui/static/push/page.js",
-        "api/webui/static/push/rubric.js",
         "api/webui/static/course_expert/quick_assignment.js",
     ):
         assert "/api/content/push" not in _slurp(rel)
@@ -130,11 +128,11 @@ global.fetch = async (url, options) => {
 };
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const log = {hidden: true, textContent: "", scrollTop: 0, scrollHeight: 0};
-for (const alias of ["quick", "af", "pf", "rf"]) {
+for (const alias of ["quick", "af", "pf"]) {
   await window.CE_PUSH.pushContent(alias, {name: "Test"}, log, null, {disabled: false}, "Review Test");
 }
 if (calls.some(c => c.url === "/api/content/push" || c.url.includes("/apply"))) process.exit(2);
-if (calls.filter(c => c.url.includes("/prepare")).length !== 4) process.exit(3);
+if (calls.filter(c => c.url.includes("/prepare")).length !== 3) process.exit(3);
 if (calls.filter(c => c.url.includes("/prepare")).some(c => JSON.parse(c.body).targets[0].course_id !== "101")) process.exit(4);
 '''
     result = subprocess.run(

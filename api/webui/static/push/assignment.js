@@ -8,13 +8,8 @@
     "hideBanner",
     "moduleChoice",
     "pushContent",
-    "syncRubricControls",
   ].every(function (name) { return typeof push[name] === "function"; }) &&
     typeof window.localToISO === "function";
-
-  var afRubricSel = document.getElementById("af-rubric");
-  var afRubricMode = document.getElementById("af-rubric-mode");
-  var afRubricLink = document.getElementById("af-rubric-link");
 
   function requireReady() {
     if (ready) return true;
@@ -29,11 +24,6 @@
   function getBanner() {
     return document.getElementById("af-banner");
   }
-
-  afRubricSel?.addEventListener("change", function () {
-    if (!requireReady()) return;
-    push.syncRubricControls();
-  });
 
   document.getElementById("btn-af-validate")?.addEventListener("click", function () {
     if (!requireReady()) return;
@@ -75,11 +65,6 @@
       post_to_sis: document.getElementById("af-sis")?.checked,
       published: document.getElementById("af-publish")?.checked,
     };
-    if (afRubricSel?.value) {
-      payload.rubric_path = afRubricSel.value;
-      payload.rubric_mode = afRubricMode?.value || "grading";
-      payload.rubric_link_page = afRubricLink?.checked !== false;
-    }
     var due = window.localToISO(document.getElementById("af-due")?.value);
     var unlock = window.localToISO(document.getElementById("af-unlock")?.value);
     var lock = window.localToISO(document.getElementById("af-lock")?.value);

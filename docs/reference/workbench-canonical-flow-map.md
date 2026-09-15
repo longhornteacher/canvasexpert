@@ -78,7 +78,7 @@ No additional grading UI retirement candidates are queued.
 |---|---|
 | `GET/POST /api/tier-tags` | Active Settings consumer: `settings.html` lines 155-177 render a tier-tags form; inline JS at line 392-402 calls `fetch("/api/tier-tags", { method: "POST", ... })` on save. `pages.py` line 254 supplies `tier_tags` template data via `config.get_tier_tags()`. This is a live Settings feature, not legacy overlap. |
 | Gradebook extra-time tab | Active convenience view within gradebook; has live JS callers (`gradebook/extra_time.js`); reads same config as Roster |
-| `push/core.js` legacy globals | Still consumed by `push/quiz.js`, `push/assignment.js`, `push/page.js`, `push/rubric.js`, `course_expert/quick_assignment.js` |
+| `push/core.js` legacy globals | Still consumed by `push/quiz.js`, `push/assignment.js`, `push/page.js`, and `course_expert/quick_assignment.js` |
 | `/api/push/preview` (dry-run POST) | Still called by `push/quiz.js` for QuizForge dry-run preview |
 | `gradebook_service.py` curve migration | Data migration, not a surface; no teacher-visible behavior |
 | `app_context.js` localStorage migration | One-time data migration, not a surface |

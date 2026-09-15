@@ -83,10 +83,7 @@ def run_ai_workflow(
             if not verdict["green"] else "No hard identity matches were found before the final scrub.",
         ))
 
-    rubric_text = (
-        rubric_text_override if rubric_text_override is not None
-        else context.load_rubric_text(rubric_name)
-    )
+    rubric_text = rubric_text_override or ""
     persona = config.get_persona(persona_id) if persona_id else {
         "name": "", "personality": "", "signoff_policy": "none", "signoff_text": "",
     }

@@ -23,16 +23,15 @@ no Canvas write and does not resolve scoring norms. The returned root
 `scoring_session_id` authorizes valid results only for the frozen queue; later
 assignments require a later Scoring Session.
 
-`continue_scoring_session(scoring_session_id, rubric_name="",
-scoring_guidance="")` prepares or resumes the active assignment. A usable Canvas
-assignment rubric always wins. Otherwise the teacher must choose a returned Canvas
-Expert rubric label or provide scoring guidance. Teacher guidance is retained privately
+`continue_scoring_session(scoring_session_id, scoring_guidance="")` prepares or
+resumes the active assignment. A usable Canvas assignment rubric always wins.
+Otherwise the teacher provides bounded scoring guidance. Teacher guidance is retained privately
 in full; when it exceeds the effective transport ceiling, the model and SAFE packet use
 a deterministic compacted projection with an explicit marker and original/effective/
 omitted character and unit counts. No basis returns a
 successful conversation state with `ok: true`, `status: "needs_teacher_input"`, code
-`needs_scoring_norms`, the same root `scoring_session_id`, assignment name, available
-rubric labels, and a concise question. The agent asks and continues the same root
+`needs_scoring_norms`, the same root `scoring_session_id`, assignment name, and a
+concise question. The agent asks and continues the same root
 session. Page zero from `get_scoring_packet` includes the server-authored feedback
 contract and resolved basis.
 Later pages may omit context. Optional shared assignment materials may be compacted or

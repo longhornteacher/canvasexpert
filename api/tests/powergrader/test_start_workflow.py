@@ -174,11 +174,6 @@ def test_missing_scoring_norms_names_the_resolved_assignment(monkeypatch, tmp_pa
             {},
         ),
     )
-    monkeypatch.setattr(
-        "api.webui.deps.list_rubric_files",
-        lambda: [{"label": "Argument Writing"}],
-    )
-
     result = start_workflow.run_start_session(
         course_id="course-1",
         assignment_id="assignment-1",
@@ -205,11 +200,10 @@ def test_missing_scoring_norms_names_the_resolved_assignment(monkeypatch, tmp_pa
         "ok": False,
         "code": "needs_scoring_norms",
         "error": (
-            "No usable Canvas rubric is attached. Choose a Canvas Expert rubric "
-            "or provide scoring guidance."
+            "No usable Canvas rubric is attached. Provide bounded scoring guidance "
+            "for this assignment."
         ),
         "assignment_name": "Argument Essay",
-        "rubric_labels": ["Argument Writing"],
     }
 
 
@@ -228,11 +222,6 @@ def test_refreshed_graded_only_assignment_returns_nothing_to_grade_before_norms(
             {},
         ),
     )
-    monkeypatch.setattr(
-        "api.webui.deps.list_rubric_files",
-        lambda: (_ for _ in ()).throw(AssertionError("scoring norms must not be requested")),
-    )
-
     result = start_workflow.run_start_session(
         course_id="course-1", assignment_id="assignment-1", mode="packet",
         watch_late="false", auto_post="false", rubric_name="", persona_id="",
@@ -312,10 +301,6 @@ def test_new_quiz_writing_stops_before_norms_packet_or_write(monkeypatch, tmp_pa
             },
             {"status": "ok"},
         ),
-    )
-    monkeypatch.setattr(
-        "api.webui.deps.list_rubric_files",
-        lambda: (_ for _ in ()).throw(AssertionError("scoring norms must not be requested")),
     )
     monkeypatch.setattr(
         start_workflow.ai_workflow,

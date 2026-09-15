@@ -146,14 +146,14 @@ def test_continue_pauses_for_norms_then_resumes_same_root_idempotently(
         attempts.append(kwargs)
         if len(attempts) == 1:
             return {"ok": False, "payload": {
-                "code": "needs_scoring_norms", "rubric_labels": ["Writing"],
+                "code": "needs_scoring_norms",
             }}
         child_id = "child-1"
         kwargs["save_session"]({
             "session_id": child_id, "session_kind": "assignment_run",
             "parent_scoring_session_id": root_id, "course_id": "c1",
             "assignment_id": "a1", "assignment_name": "Essay", "mode": "packet",
-            "scoring_basis": {"source": "local_rubric", "label": "Writing"},
+            "scoring_basis": {"source": "teacher_guidance", "label": "Teacher guidance"},
             "students": [], "privacy_artifacts": {"safe_bundle": str(bundle_path)},
         })
         return {"ok": True, "session_id": child_id, "payload": {"ok": True}}
@@ -162,7 +162,7 @@ def test_continue_pauses_for_norms_then_resumes_same_root_idempotently(
 
     paused = tools.continue_scoring_session(root_id)
     root_after_pause = sessions[root_id]
-    resumed = tools.continue_scoring_session(root_id, rubric_name="Writing")
+    resumed = tools.continue_scoring_session(root_id, scoring_guidance="Writing")
     repeated = tools.continue_scoring_session(root_id)
 
     assert paused["status"] == "needs_teacher_input"
@@ -173,7 +173,7 @@ def test_continue_pauses_for_norms_then_resumes_same_root_idempotently(
     assert repeated["status"] == "ready"
     assert len(attempts) == 2
     assert attempts[1]["parent_scoring_session_id"] == root_id
-    assert attempts[1]["scoring_guidance"] == ""
+    assert attempts[1]["scoring_guidance"] == "Writing"
     assert sessions[root_id]["queue"][0]["child_session_id"] == "child-1"
 
 
@@ -187,7 +187,7 @@ def test_continue_forwards_teacher_guidance_unchanged(monkeypatch):
     def run_start(**kwargs):
         captured.append(kwargs)
         return {"ok": False, "payload": {
-            "code": "needs_scoring_norms", "rubric_labels": [],
+            "code": "needs_scoring_norms",
         }}
 
     monkeypatch.setattr("api.powergrader.start_workflow.run_start_session", run_start)

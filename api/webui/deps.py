@@ -309,10 +309,6 @@ def list_page_files():
     return _list_txt_files(runtime_paths.content_folders("page"))
 
 
-def list_rubric_files():
-    return _list_txt_files(runtime_paths.rubric_folders())
-
-
 def _inbox_marker_size(marker_path: str):
     """Parse a `<name>.txt.done` marker's decimal byte-length payload.
 
@@ -373,9 +369,12 @@ def list_inbox_files(kind: str):
 def list_ai_ta_files():
     found = []
     ai_ta_dir = runtime_paths.ai_ta_dir()
+    canonical_dir = os.path.join(REPO_ROOT, "api", "default_docs", "AI Authoring")
     if not os.path.isdir(ai_ta_dir):
         return found
     for path in sorted(_glob.glob(os.path.join(ai_ta_dir, "*.txt"))):
+        if not os.path.isfile(os.path.join(canonical_dir, os.path.basename(path))):
+            continue
         found.append({
             "label": os.path.basename(path),
             "path": os.path.abspath(path),

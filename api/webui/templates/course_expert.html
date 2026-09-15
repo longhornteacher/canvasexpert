@@ -16,7 +16,6 @@
           <button type="button" class="ce-work-rail-item" data-rail-tab="quiz">Quiz</button>
           <button type="button" class="ce-work-rail-item" data-rail-tab="assignment">Assignment</button>
           <button type="button" class="ce-work-rail-item" data-rail-tab="page">Page</button>
-          <button type="button" class="ce-work-rail-item" data-rail-tab="rubric">Rubric</button>
           <button type="button" class="ce-work-rail-item" data-rail-tab="quick">Quick column</button>
         </div>
       </div>
@@ -33,7 +32,7 @@
 {% endif %}
 {% endblock %}
 
-{% block workspace_header %}{{ page_header('Create', 'Build a quiz, assignment, page, or rubric, then send it to Canvas.') }}{% endblock %}
+{% block workspace_header %}{{ page_header('Create', 'Build a quiz, assignment, page, or quick assignment, then send it to Canvas.') }}{% endblock %}
 
 {% block primary %}
 {% if not token_is_set %}
@@ -54,7 +53,7 @@
     <li>
       <span>Copy or download the instructions for what you are making.</span>
       <span class="ce-forge-skills">
-        {% for kind, label in [('quiz', 'Quiz'), ('assignment', 'Assignment'), ('page', 'Page'), ('rubric', 'Rubric')] %}
+        {% for kind, label in [('quiz', 'Quiz'), ('assignment', 'Assignment'), ('page', 'Page')] %}
         <span class="ce-forge-skill">
           <strong>{{ label }}</strong>
           {% if authoring_skills[kind] %}
@@ -80,7 +79,6 @@
       <button type="button" id="ce-tab-button-quiz" class="ce-tab active" data-ce-hook="course-tab" data-tab="quiz" role="tab" aria-selected="true" aria-controls="ce-tab-quiz" tabindex="0">Quiz</button>
       <button type="button" id="ce-tab-button-assignment" class="ce-tab" data-ce-hook="course-tab" data-tab="assignment" role="tab" aria-selected="false" aria-controls="ce-tab-assignment" tabindex="-1">Assignment</button>
       <button type="button" id="ce-tab-button-page" class="ce-tab" data-ce-hook="course-tab" data-tab="page" role="tab" aria-selected="false" aria-controls="ce-tab-page" tabindex="-1">Page</button>
-      <button type="button" id="ce-tab-button-rubric" class="ce-tab" data-ce-hook="course-tab" data-tab="rubric" role="tab" aria-selected="false" aria-controls="ce-tab-rubric" tabindex="-1">Rubric</button>
       <button type="button" id="ce-tab-button-quick" class="ce-tab ce-tab--alt" data-ce-hook="course-tab" data-tab="quick" role="tab" aria-selected="false" aria-controls="ce-tab-quick" tabindex="-1"><em>Quick Assignment</em></button>
     </div>
   </aside>
@@ -331,27 +329,6 @@
           <textarea class="file-src-paste" placeholder="Paste your &lt;ASSIGNMENTFORGE_JSON&gt;…"></textarea>
           <p class="file-src-hint ce-initially-hidden"></p>
         </div>
-        <label class="ce-u-mt-3">RubricForge file
-          <select id="af-rubric">
-            <option value="">No rubric</option>
-          </select>
-        </label>
-        <div id="af-rubric-controls" hidden>
-          <div class="settings-grid ce-grid-two ce-u-mt-3">
-            <label>Rubric mode
-              <select id="af-rubric-mode">
-                <option value="grading">Grade with rubric (points match rubric)</option>
-                <option value="feedback">Feedback only (keep assignment points)</option>
-              </select>
-            </label>
-            <label class="opt-check ce-u-mt-5">
-              <input type="checkbox" id="af-rubric-link" checked> Link the student explainer page in the description
-            </label>
-          </div>
-          <div class="ce-actions ce-u-mt-3">
-            <span id="af-rubric-status" class="hint ce-u-align-center"></span>
-          </div>
-        </div>
         <div class="settings-grid ce-u-mt-3">
           <label>Due date <small class="lbl-hint">(optional)</small>
             <input type="datetime-local" id="af-due">
@@ -452,50 +429,6 @@
 
   </div><!-- /#ce-tab-page -->
 
-  <!-- ── Rubric tab ─────────────────────────────────────────────────────── -->
-  <div id="ce-tab-rubric" class="ce-panel" data-ce-hook="course-tab-panel" role="tabpanel" aria-labelledby="ce-tab-button-rubric" hidden>
-
-    <div id="rubric">
-      <h2 class="section-heading">Push rubric</h2>
-      <div class="ce-panel">
-        <h2 class="ce-u-mb-2">From RubricForge file</h2>
-        <p class="hint ce-u-mb-3">
-          Push a <code>&lt;RUBRICFORGE_JSON&gt;</code> file to every checked course.
-          Canvas Expert creates (or reuses) the course rubric and updates the student explainer page.
-        </p>
-        <div class="inbox-pending" hidden data-inbox-kind="rubric" data-inbox-select="rf-file">
-          <div class="inbox-pending-head">
-            <h3>Staged by your assistant (pending review)</h3>
-            <button type="button" class="small inbox-pending-refresh">Refresh</button>
-          </div>
-          <div class="inbox-pending-list"></div>
-        </div>
-        <label>RubricForge file</label>
-        <div class="file-source">
-          <select id="rf-file" class="ce-initially-hidden">
-            <option value="">— select —</option>
-          </select>
-          <div class="file-source-row">
-            <button type="button" class="file-src-btn" data-src="select">Library</button>
-            <button type="button" class="file-src-btn active" data-src="paste">Paste JSON</button>
-            <button type="button" class="file-src-btn" data-src="upload">Upload…</button>
-            <input type="file" class="file-src-input ce-initially-hidden" accept=".json,.txt,.md">
-          </div>
-          <textarea class="file-src-paste" placeholder="Paste your &lt;RUBRICFORGE_JSON&gt;…"></textarea>
-          <p class="file-src-hint ce-initially-hidden"></p>
-        </div>
-        <div class="ce-actions">
-          <button id="btn-rf-validate">Validate</button>
-          <button id="btn-rf-push" class="primary">Push rubric…</button>
-        </div>
-        <div class="course-scope-summary" data-course-scope="rubric" aria-live="polite"></div>
-        <pre id="rf-log" class="log" hidden></pre>
-        <div id="rf-banner" class="push-banner" hidden></div>
-      </div>
-    </div>
-
-  </div><!-- /#ce-tab-rubric -->
-
   <!-- ── Quick tab ─────────────────────────────────────────────────────── -->
   <div id="ce-tab-quick" class="ce-panel" data-ce-hook="course-tab-panel" role="tabpanel" aria-labelledby="ce-tab-button-quick" hidden>
     <div id="quick">
@@ -578,7 +511,6 @@
 {% include "_push_common_scripts.html" %}
 <script src="/static/push/quiz.js?v={{ asset_v }}"></script>
 <script src="/static/push/page.js?v={{ asset_v }}"></script>
-<script src="/static/push/rubric.js?v={{ asset_v }}"></script>
 <script src="/static/push/assignment.js?v={{ asset_v }}"></script>
 <script src="/static/course_expert/tabs.js?v={{ asset_v }}"></script>
 <script src="/static/course_expert/quick_assignment.js?v={{ asset_v }}"></script>

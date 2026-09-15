@@ -103,27 +103,12 @@ at `invalidate` on a `catalog.*` scope, two of them added on 2026-09-07 for
 scope, projected to teachers through the `get_course_pages` MCP tool and the
 web UI, and `course_catalog.INVALIDATABLE_SCOPES` accepts it. Earlier
 revisions of this document recorded page bodies as having *no* catalog scope,
-which was true of the pre-v3 vocabulary and stale afterwards. In the gap that left,
-a page created in Canvas by `PageAdapter.execute` (or the student explainer
-page created by `RubricAdapter.execute`) never marked the local pages scope
-stale, so `get_course_pages` kept reporting the pre-push record set, with a
-`current` freshness state and no stale note, until a teacher refreshed the
-catalog by hand. Both call owners are now scope `catalog.pages`,
-reconciliation `invalidate`. `content.page` invalidates `catalog.pages`
-unconditionally; `content.rubric` invalidates it only when the payload
-carries a `student_page_title`, which is the exact condition under which its
-`execute` creates a page. Both push routes reach this through the same
-post-apply hook; nothing in the push paths themselves changed.
-
-**Still no catalog scope (by design, not a gap):** the
-`RubricAdapter.execute` create-rubric call is scope `none`: a 2026-07-19
-audit corrected it from a misleading `catalog.assignments` tag, because
-`rf.canvas_rubric_payload` builds a Course-level bookkeeping association
-(`association_type: "Course"`, no assignment linkage — assignment
-association is deferred to the `content.assignment` adapter), so a rubric
-create alters no assignments-catalog data. The rubric library itself has no
-catalog projection at all, so a rubric with no student page still
-invalidates nothing.
+which was true of the pre-v3 vocabulary and stale afterwards. A page created
+in Canvas by `PageAdapter.execute` now marks the local pages scope stale, so
+`get_course_pages` does not keep reporting a pre-push record set until a
+teacher refreshes the catalog by hand. `content.page` invalidates
+`catalog.pages` unconditionally and reaches this through the same post-apply
+hook; nothing in the push path itself changed.
 
 The `gradebook.sis_bridge` adapter is also covered: bridge create plus the
 source/bridge publish, exclusion, and SIS-flag patches map conservatively to
@@ -247,8 +232,8 @@ Canvas content. They remain classified `canvas_read_acquisition`, reconciliation
 2. **Catalog structure** (family 2): **covered 2026-07-19** for
    `catalog.assignments` and `catalog.modules` by the central ledger post-apply
    stale-mark hook (ten `none` → `invalidate` contract transitions), and
-   extended to `catalog.pages` on 2026-09-07 (two more). Rubric library and
-   `new_quiz.metadata` reconciliation remain outside this unit; a per-record
+   extended to `catalog.pages` on 2026-09-07 (two more). `new_quiz.metadata`
+   reconciliation remains outside this unit; a per-record
    merge remains a later refinement, not Batch 7 work.
 3. **Per-student assignment facts** (family 3): **decided 2026-07-19 — deferred
    as a bounded, documented limitation, not an open gap.** Overrides/extensions

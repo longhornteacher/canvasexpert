@@ -6,7 +6,6 @@ pushes content to live courses via the REST and New Quizzes APIs:
 - **Push Quizzes** (QuizForge JSON → live New Quizzes)
 - **Push Assignments** (AssignmentForge JSON → live whole-class assignments)
 - **Push Pages** (PageForge JSON → live pages)
-- **Push Rubrics** (RubricForge JSON → live course rubrics with an optional student explainer page)
 - **Printable outputs** (QuizForge JSON → local DOCX + PDF files)
 - **Gradebook tools** — late policy sweep, student extensions, curves
 - **Scoring Sessions** — MCP-connected agent works through one frozen Current-course
@@ -38,7 +37,6 @@ execution remains local stdio; no hosted or tunnel setup is offered.
 | **QuizForge** | `default_docs/AI Authoring/Author a Quiz (QuizForge).txt` (v3.0-json) | Quiz authoring: 12 question types, rationales, tiers |
 | **AssignmentForge** | `default_docs/AI Authoring/Author an Assignment (AssignmentForge).txt` (v1.0-json) | Assignment authoring: submissions, scaffolding tiers |
 | **PageForge** | `default_docs/AI Authoring/Author a Page (PageForge).txt` (v1.0-json) | Page authoring: unit hubs, placeholders |
-| **RubricForge** | `default_docs/AI Authoring/Author a Rubric (RubricForge).txt` (v1.0-json) | Rubric authoring: criteria, explainer page, scoring prompt |
 
 Each contract is canonical in `default_docs/AI Authoring/` — this backend consumes, never forks.
 Token security: the repo is **private**; a `pre-commit` hook blocks the token pattern;
@@ -53,7 +51,7 @@ automation/headless use.
 ### Web UI (CanvasAgent and Canvas Expert work pages)
 
 1. Launch: `py qf_ui.py` (opens http://127.0.0.1:8765)
-2. Author a Forge file (QuizForge/AssignmentForge/PageForge/RubricForge JSON) — each
+2. Author a Forge file (QuizForge/AssignmentForge/PageForge JSON) — each
    push box has an inline "Forge one with your LLM" helper, or use the embedded
    QuizForge web editor.
 3. **Validate** the file in the Web UI (summarizes what will push, spots errors)
@@ -92,14 +90,13 @@ lives in `api/webui/config.json` (gitignored).
 ## Workspace & multi-PC
 
 When OneDrive is available, teacher-authored content lives in
-`OneDrive\CanvasExpert\` with `Library\AI Authoring\`, `Library\Rubrics\`,
-`Library\Quizzes\`, `Library\Assignments\`, `Library\Pages\`, `Printables\`,
+`OneDrive\CanvasExpert\` with `Library\AI Authoring\`, `Library\Quizzes\`,
+`Library\Assignments\`, `Library\Pages\`, `Printables\`,
 `Canvas Uploads\`, and synced `settings.json`. Human-facing student work is
 canonical under `Student Work\Submissions\<Course>\Assignments\<Assignment>\`;
 pseudonymized artifacts live under `For AI\`, derived output under
 `Student Work\Reports\`, and vault/session/audit state under `_System\`.
-Default rubric files are seeded into `Library\Rubrics\` only when the filename
-is missing, so user edits win forever. `Student Work\` and `_System\` are
+`Student Work\` and `_System\` are
 PRIVATE; review every pseudonymized packet before sharing because it is not
 guaranteed anonymous.
 
@@ -166,12 +163,6 @@ grade options; CanvasExpert does not assign or publish them for the teacher.
 - Resolves course-resource placeholders (`{{file:…}}`, `{{page:…}}` per course).
 - Creates page with rich HTML body, optional module placement.
 - No tiers (pages are reference content, not submitted).
-
-### Rubrics (RubricForge)
-- Extracts JSON from the `<RUBRICFORGE_JSON>` envelope.
-- Creates or reuses a course rubric by title, then creates/updates the student explainer page.
-- When attached to an assignment for grading, assignment points default to the rubric total.
-- AssignmentForge pushes can link the explainer page in the description and copy a scoring prompt for MagicSchool or Copilot.
 
 ## Files
 

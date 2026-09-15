@@ -40,13 +40,13 @@ LIBRARY_NAME = "Library"
 AI_AUTHORING_SUBFOLDER = "AI Authoring"
 LEARNING_OBJECTIVES_SUBFOLDER = "Learning Objectives"
 LIBRARY_SUBFOLDERS = [
-    AI_AUTHORING_SUBFOLDER, "Rubrics", "Quizzes", "Assignments", "Pages",
+    AI_AUTHORING_SUBFOLDER, "Quizzes", "Assignments", "Pages",
     "Calendars", "Source Materials", LEARNING_OBJECTIVES_SUBFOLDER,
 ]
 
 # Assistant-staged drafts waiting for the teacher to push to Canvas.
 TO_REVIEW_NAME = "To Review"
-TO_REVIEW_SUBFOLDERS = ["Quizzes", "Assignments", "Pages", "Rubrics"]
+TO_REVIEW_SUBFOLDERS = ["Quizzes", "Assignments", "Pages"]
 
 # Outputs to print/photocopy vs. Canvas import packages -- the old flat
 # "Exports" split by teacher verb.
@@ -677,13 +677,6 @@ def _ensure_dir(path):
     return path
 
 
-def _default_rubric_files():
-    source_dir = os.path.join(DEFAULT_DOCS_DIR, "Rubrics")
-    if os.path.isdir(source_dir):
-        return sorted(glob.glob(os.path.join(source_dir, "*.txt")))
-    return sorted(glob.glob(os.path.join(API_DIR, "rubrics", "*.txt")))
-
-
 def _seed_folder_if_missing(source_dir, target_dir):
     if not os.path.isdir(source_dir):
         return
@@ -714,7 +707,7 @@ def _seed_workspace_readme(root):
             "For AI/ is the pseudonymized counterpart -- safe to hand to an external AI.\n"
             "Review every file before sharing; pseudonyms do not guarantee anonymity and\n"
             "visible content may still identify a student.\n\n"
-            "Library/ holds the reusable material you author or keep (quizzes, rubrics,\n"
+            "Library/ holds the reusable material you author or keep (quizzes,\n"
             "assignments, pages, calendars, source materials, AI Authoring instructions).\n\n"
             "To Review/ holds pending assistant drafts. Forge drafts wait for Canvas review and push.\n\n"
             "Printables/ is for PDF/DOCX output to print or photocopy.\n"
@@ -752,11 +745,6 @@ def ensure_workspace():
     os.makedirs(os.path.join(root, SYSTEM_NAME, "PowerGrader", "Sessions"), exist_ok=True)
     os.makedirs(os.path.join(root, SYSTEM_NAME, "PowerGrader", "Jobs"), exist_ok=True)
 
-    rubric_dir = os.path.join(root, LIBRARY_NAME, "Rubrics")
-    for source in _default_rubric_files():
-        target = os.path.join(rubric_dir, os.path.basename(source))
-        if not os.path.exists(target):
-            shutil.copy2(source, target)
     _seed_workspace_readme(root)
     return root
 

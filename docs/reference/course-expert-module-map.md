@@ -36,7 +36,6 @@ Shared modules own:
 - `push/delivery.js` - datetime conversion, QuizForge delivery settings, module
   selection, module loading, and assignment group loading; still provides
   `localToISO`
-- `push/rubrics.js` - RubricForge file list loading and assignment rubric controls
 - `push/course_picker.js` - target-course multi-select, focused course, course
   folder lookup, and all-courses expansion; still provides `targetCourses`
 - `push.js` - tiny compatibility bootstrap that runs shared initialization
@@ -61,7 +60,6 @@ Shared push scripts still own the core push cards:
   teacher controls but browser-observed membership IDs are not sent for preparation
 - `push/assignment.js` - AssignmentForge validation/push card behavior
 - `push/page.js` - PageForge validation/push card behavior
-- `push/rubric.js` - RubricForge validation/prompt/push card behavior
 
 `course_expert.html` now contains markup plus script includes. Standalone legacy
 push pages load `_push_common_scripts.html` before their feature script; Course
@@ -75,10 +73,9 @@ Expert loads that bundle first, then the shared push cards, then the page-specif
 `routes/push_validation.py` owns:
 
 - `/api/temp-upload`
-- `/api/validate`, `/api/af/validate`, `/api/pf/validate`, `/api/rf/validate`
+- `/api/validate`, `/api/af/validate`, `/api/pf/validate`
 - `/api/physical/quiz`
 - `/api/push/preview` (dry-run QuizForge preview)
-- RubricForge scoring prompt route
 
 `routes/operations.py` owns Course Expert's live content-operation boundary:
 
@@ -91,7 +88,7 @@ Expert loads that bundle first, then the shared push cards, then the page-specif
   `qf_pusher.py` remains a whole-quiz/planning owner. The unsafe differentiated
   `push_tiers.py` live CLI is retired; differentiated writes must use the reviewed
   Operation Ledger family path.
-- Assignment/Page/Rubric printable path ownership lives in `api/operation_ledger/adapters/assignment.py`.
+- Assignment/Page printable path ownership lives in `api/operation_ledger/adapters/assignment.py`.
 
 ## First Places To Look By Symptom
 
@@ -108,7 +105,7 @@ Expert loads that bundle first, then the shared push cards, then the page-specif
 - Differentiated public suffix, bridge, bridge-only module placement, and family
   registration: `operation_ledger/adapters/differentiated_bridge.py`, reached through
   the assignment or quiz adapter
-- Assignment/Page/Rubric card behavior: matching `push/*.js`,
+- Assignment/Page card behavior: matching `push/*.js`,
   `routes/push_validation.py`
 - file paste/upload issues: `push/file_sources.js`, `routes/push_validation.py`
 - printable output failures: `push/core.js`, `routes/push_validation.py`,

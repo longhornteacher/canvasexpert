@@ -694,11 +694,6 @@ def test_recovery_apply_invalidates_catalog_scopes(tmp_path, monkeypatch):
         # module scope stays payload-sensitive (a bare page touches no module).
         ("content.page", {}, {"pages"}),
         ("content.page", {"module_name": "Unit 1"}, {"pages", "modules"}),
-        # A rubric is a Course-level bookkeeping object with no catalog scope,
-        # but its optional student explainer page is a real Canvas page.
-        ("content.rubric", {}, set()),
-        ("content.rubric", {"student_page_title": "How this is graded"}, {"pages"}),
-        ("content.rubric", {"student_page_title": ""}, set()),
         # An unmapped kind still invalidates nothing.
         ("content.not_a_real_kind", {"module_name": "Unit 1"}, set()),
     ],
@@ -747,63 +742,16 @@ def test_page_apply_invalidates_the_pages_catalog_scope(tmp_path, monkeypatch):
     assert set(calls) == {("404", "pages")}
 
 
-def test_rubric_with_a_student_page_invalidates_pages_on_the_recovery_path(
-    tmp_path, monkeypatch,
-):
-    """RubricAdapter.execute creates a Canvas page whenever the payload carries
-    a student_page_title, on the crash-recovery apply seam as much as the
-    normal one."""
-    _root(tmp_path, monkeypatch)
-    from api.operation_ledger import recovery
-    calls = _spy_invalidate_scope(monkeypatch)
-
-    target = models.new_target(
-        target_key="tk-recover-rubric", idempotency_key="ik-recover-rubric",
-        course_id="505")
-    target["state"] = "sent_unknown"
-    target["attempt_id"] = "attempt-old"
-    op = _make_operation("op-recover-rubric", targets=[target])
-    op["kind"] = "content.rubric"
-    op["normalized_payload"] = {
-        "title": "Essay rubric", "student_page_title": "How this is graded",
-    }
-    operations.create_operation(op)
-
-    claim = models.new_claim(
-        claim_id="tk-recover-rubric:attempt-old",
-        target_key="tk-recover-rubric",
-        operation_id="op-recover-rubric",
-        attempt_id="attempt-old",
-        owner_pid=99999,
-        owner_started_at="2020-01-01T00:00:00+00:00",
-        payload_digest="digest")
-    claim["lease_expires_at"] = "2020-01-01T00:00:01+00:00"
-    storage.upsert_claim(claim)
-    claims.detect_expired_claims()
-
-    class FakeAdapter:
-        kind = "content.rubric"
-        def reconcile(self, payload, target, baseline):
-            return {"state": "applied", "returned_object_id": "rubric-1"}
-    monkeypatch.setattr(registry, "get_adapter", lambda kind: FakeAdapter())
-
-    summary = recovery.recover_pending_operations()
-
-    assert summary["recovered"] == 1
-    assert set(calls) == {("505", "pages")}
-
-
 def test_every_scope_the_hook_can_emit_is_a_real_invalidatable_scope():
     """Vocabulary-drift guard. The hook names scopes as bare strings; a scope
     that `course_catalog` does not accept would raise at apply time, and a real
     scope the hook never names is a silent staleness gap (which is exactly how
     `pages` was missed when the v3 catalog added it)."""
     kinds = set(_catalog_reconcile._KIND_TO_CATALOG_SCOPES) | {
-        _catalog_reconcile._PAGE_KIND, _catalog_reconcile._RUBRIC_KIND}
+        _catalog_reconcile._PAGE_KIND}
     scopes = set()
     for kind in kinds:
-        for payload in ({}, {"module_name": "Unit 1"},
-                        {"student_page_title": "How this is graded"}):
+        for payload in ({}, {"module_name": "Unit 1"}):
             scopes |= set(_catalog_reconcile._scopes_for(kind, payload))
 
     assert scopes <= course_catalog.INVALIDATABLE_SCOPES, (

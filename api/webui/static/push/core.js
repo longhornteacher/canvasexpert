@@ -141,7 +141,6 @@
     quick: "content.quick_assignment",
     af: "content.assignment",
     pf: "content.page",
-    rf: "content.rubric",
   };
 
   function csrfToken() {
@@ -184,10 +183,7 @@
     var warnings = [];
     if (first.assignment_name) details.push("Assignment: " + first.assignment_name);
     if (first.page_title) details.push("Page: " + first.page_title);
-    if (first.rubric_title) details.push("Rubric: " + first.rubric_title);
     if (first.points != null) details.push("Points: " + first.points);
-    if (first.rubric_title && first.total_points != null) details.push("Rubric points: " + first.total_points);
-    if (first.criteria_count != null) details.push("Criteria: " + first.criteria_count);
     if (!first.mode && first.due_at) details.push("Due: " + first.due_at);
     if (!first.mode && first.module_name) details.push("Module: " + first.module_name);
     if (first.student_page_title) details.push("Student page: " + first.student_page_title);

@@ -50,8 +50,6 @@ class AssignmentAdapter:
             "label": str(row.get("label") or "").strip(),
             "description": str(row.get("description") or ""),
         } for row in tier_rows]
-        if tiers and prepare_request.get("rubric_path"):
-            raise ValueError("Rubric association is not supported for tiered assignments")
         if tiers and prepare_request.get("printable_path"):
             raise ValueError("Printable attachments are not supported for tiered assignments")
 

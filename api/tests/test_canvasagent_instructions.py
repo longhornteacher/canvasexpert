@@ -100,8 +100,7 @@ def test_core_carries_the_tracked_choice(core):
 
 def test_core_names_every_envelope_tag(core):
     """An assistant that guesses a tag produces a file that cannot validate."""
-    for tag in ("QUIZFORGE_JSON", "ASSIGNMENTFORGE_JSON",
-                "PAGEFORGE_JSON", "RUBRICFORGE_JSON"):
+    for tag in ("QUIZFORGE_JSON", "ASSIGNMENTFORGE_JSON", "PAGEFORGE_JSON"):
         assert tag in core, f"CORE does not name {tag}"
 
 
@@ -370,7 +369,7 @@ def test_build_library_replaces_a_stale_copy_with_the_new_one(tmp_path):
     original = ai_ta.RETIRED_FILES
     try:
         ai_ta.RETIRED_FILES = {stale_name: frozenset({known})}
-        ai_ta.build_library(str(tmp_path), rubric_folders=[])
+        ai_ta.build_library(str(tmp_path))
     finally:
         ai_ta.RETIRED_FILES = original
     assert not stale.exists(), "stale explainer survived"
