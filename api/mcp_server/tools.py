@@ -2975,7 +2975,8 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
 
     basis = session.get("scoring_basis") or {}
     rubric_name = str(basis.get("label") or session.get("rubric_name") or "")
-    rubric_text = (session.get("scoring_rubric_text")
+    rubric_text = (session.get("effective_scoring_rubric_text")
+                   or session.get("scoring_rubric_text")
                    or session.get("rubric_text")
                    or context.load_rubric_text(rubric_name))
     persona = None
@@ -3005,6 +3006,9 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
                 "label": rubric_name,
                 "included": bool(str(rubric_text or "").strip()),
             }
+            projection = session.get("scoring_guidance_projection")
+            if isinstance(projection, dict):
+                result["scoring_guidance_projection"] = projection
         result["items"] = _tabulate(result["items"], _PACKET_ITEM_COLUMNS)
         result["students"] = _tabulate(result["students"], _PACKET_STUDENT_COLUMNS)
         result = _with_next("get_scoring_packet", result)

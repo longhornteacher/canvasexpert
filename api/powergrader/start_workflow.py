@@ -1,6 +1,7 @@
 """PowerGrader start-workflow helpers shared by route orchestration."""
 
 import uuid
+import re
 from datetime import datetime
 
 from api import gradebook_snapshot
@@ -24,19 +25,150 @@ from api.powergrader.helpers import (
 MAX_TEACHER_SCORING_GUIDANCE_CHARS = 12000
 
 
-def scoring_guidance_length_error(scoring_basis: dict | None, rubric_text: str) -> dict | None:
-    if (scoring_basis or {}).get("source") != "teacher_guidance":
-        return None
-    if len(str(rubric_text or "")) <= MAX_TEACHER_SCORING_GUIDANCE_CHARS:
-        return None
-    return {
-        "ok": False,
-        "error": (
-            "Scoring guidance is too long; provide at most "
-            f"{MAX_TEACHER_SCORING_GUIDANCE_CHARS:,} characters."
-        ),
-        "code": "scoring_guidance_too_long",
+_GUIDANCE_DIRECTIVE_RE = re.compile(
+    r"\b(?:scor(?:e|ing|ed)|rubric|criteria|criterion|points?|evidence|"
+    r"feedback|grade|grades|graded|grading|level|levels|scale|weight(?:ed|ing)?|"
+    r"must|should|do[- ]not)\b",
+    re.IGNORECASE,
+)
+
+
+def _guidance_units(text: str) -> list[str]:
+    return [unit.strip() for unit in re.split(r"(?:\r?\n){1,2}", text) if unit.strip()]
+
+
+def _guidance_snippet(
+    unit: str, budget: int, *, tail: bool = False, directive: bool = False,
+) -> str:
+    if len(unit) <= budget:
+        return unit
+    if budget <= 1:
+        return unit[-budget:] if tail else unit[:budget]
+    if directive:
+        match = _GUIDANCE_DIRECTIVE_RE.search(unit)
+        tokens = list(re.finditer(r"\S+", unit))
+        if match and tokens:
+            anchor = next((i for i, token in enumerate(tokens)
+                           if token.start() <= match.start() < token.end()), 0)
+            if tokens[anchor].end() - tokens[anchor].start() > budget:
+                return unit[match.start():match.end()][:budget]
+            left = right = anchor
+            next_side = "left"
+            while True:
+                candidates = []
+                if left > 0:
+                    candidates.append((tokens[left - 1].start(), tokens[right].end(), "left"))
+                if right + 1 < len(tokens):
+                    candidates.append((tokens[left].start(), tokens[right + 1].end(), "right"))
+                preferred = next((candidate for candidate in candidates
+                                  if candidate[2] == next_side and
+                                  candidate[1] - candidate[0] <= budget), None)
+                alternate_side = "right" if next_side == "left" else "left"
+                alternate = next((candidate for candidate in candidates
+                                  if candidate[2] == alternate_side and
+                                  candidate[1] - candidate[0] <= budget), None)
+                candidate = preferred or alternate
+                if candidate is None:
+                    break
+                _start, _end, side = candidate
+                if side == "left":
+                    left -= 1
+                else:
+                    right += 1
+                next_side = alternate_side
+            return unit[tokens[left].start():tokens[right].end()]
+    snippet = unit[-budget:] if tail else unit[:budget]
+    if tail:
+        boundary = re.search(r"\s", snippet)
+        if boundary:
+            snippet = snippet[boundary.end():]
+    else:
+        boundary = list(re.finditer(r"\s", snippet))[-1] if re.search(r"\s", snippet) else None
+        if boundary:
+            snippet = snippet[:boundary.start()]
+    return snippet or (unit[-budget:] if tail else unit[:budget])
+
+
+def project_teacher_scoring_guidance(text: str) -> tuple[str, dict]:
+    """Return the complete guidance's deterministic model/packet projection."""
+    text = str(text or "").strip()
+    original_chars = len(text)
+    if original_chars <= MAX_TEACHER_SCORING_GUIDANCE_CHARS:
+        return text, {
+            "compacted": False,
+            "original_chars": original_chars,
+            "effective_chars": original_chars,
+            "omitted_chars": 0,
+            "omitted_units": 0,
+        }
+
+    units = _guidance_units(text) or [text]
+    boundary_count = 1 if len(units) < 8 else (2 if len(units) < 20 else 3)
+    first = list(range(min(boundary_count, len(units))))
+    last = list(range(max(0, len(units) - boundary_count), len(units)))
+    middle = [i for i, unit in enumerate(units)
+              if i not in first and i not in last and _GUIDANCE_DIRECTIVE_RE.search(unit)]
+    middle = middle[:10]
+    selected = sorted(set(first + middle + last))
+    marker_template = (
+        "[Teacher scoring guidance compacted: original_chars={original}; "
+        "effective_chars={effective}; omitted_chars={omitted}; "
+        "omitted_units={units}]"
+    )
+    reserve = len(marker_template.format(original=original_chars, effective=12000,
+                                         omitted=original_chars, units=len(units))) + 2
+    content_budget = max(1, MAX_TEACHER_SCORING_GUIDANCE_CHARS - reserve)
+    if len(units) == 1:
+        separators = 2
+        per_unit = max(1, (content_budget - separators) // 2)
+        snippets = [_guidance_snippet(units[0], per_unit),
+                    _guidance_snippet(units[0], per_unit, tail=True)]
+    else:
+        separators = max(0, len(selected) - 1) * 2
+        per_unit = max(1, (content_budget - separators) // max(1, len(selected)))
+        snippets = []
+        for index in selected:
+            snippets.append(_guidance_snippet(
+                units[index], per_unit,
+                tail=index in last and index not in first,
+                directive=index in middle,
+            ))
+    content = "\n\n".join(snippets)
+    omitted_units = len(units) - len(selected)
+    if len(units) == 1:
+        omitted_units = 0
+    def _compose(current_content: str) -> tuple[str, int]:
+        effective_length = len(current_content) + 1 + len(marker_template.format(
+            original=original_chars, effective=0, omitted=original_chars,
+            units=omitted_units,
+        ))
+        for _ in range(8):
+            marker = marker_template.format(
+                original=original_chars,
+                effective=effective_length,
+                omitted=original_chars - effective_length,
+                units=omitted_units,
+            )
+            actual_length = len(marker) + 1 + len(current_content)
+            if actual_length == effective_length:
+                return marker, actual_length
+            effective_length = actual_length
+        return marker, effective_length
+
+    marker, effective_length = _compose(content)
+    if effective_length > MAX_TEACHER_SCORING_GUIDANCE_CHARS:
+        content = content[:max(0, len(content) - (effective_length - MAX_TEACHER_SCORING_GUIDANCE_CHARS))].rstrip()
+        marker, effective_length = _compose(content)
+    effective = marker + "\n" + content
+    effective_chars = len(effective)
+    metadata = {
+        "compacted": True,
+        "original_chars": original_chars,
+        "effective_chars": effective_chars,
+        "omitted_chars": original_chars - effective_chars,
+        "omitted_units": len(units) - len(selected),
     }
+    return effective, metadata
 
 
 def build_extra_time_map(extra_time_list: list[dict]) -> dict:
@@ -254,6 +386,8 @@ def run_start_session(
             "assignment_name": str(assignment_name),
         }}
     rubric_text_override = None
+    complete_scoring_rubric_text = None
+    scoring_guidance_projection = None
     scoring_basis = None
     if scoring_session:
         canvas_rubric = scoring_rubric_text(adata.get("rubric"))
@@ -269,7 +403,10 @@ def run_start_session(
                     "code": "rubric_unavailable"}}
             scoring_basis = {"source": "canvas_expert_rubric", "label": rubric_name}
         elif scoring_guidance.strip():
-            rubric_text_override = scoring_guidance.strip()
+            complete_scoring_rubric_text = scoring_guidance.strip()
+            rubric_text_override, scoring_guidance_projection = project_teacher_scoring_guidance(
+                complete_scoring_rubric_text,
+            )
             rubric_name = "Teacher scoring guidance"
             scoring_basis = {"source": "teacher_guidance", "label": "Teacher scoring guidance"}
         else:
@@ -281,12 +418,6 @@ def run_start_session(
                 "error": "No usable Canvas rubric is attached. Choose a Canvas Expert rubric or provide scoring guidance.",
                 "assignment_name": str(assignment_name),
                 "rubric_labels": labels}}
-        scoring_guidance_error = scoring_guidance_length_error(
-            scoring_basis, rubric_text_override,
-        )
-        if scoring_guidance_error:
-            return {"ok": False, "payload": scoring_guidance_error}
-
     media_submissions = [s for s in submitted if s.get("submission_type") == "media_recording"]
     oral_enabled = str(oral_reading_enabled).lower() in {"1", "true", "yes", "on"}
     if oral_enabled and not media_submissions:
@@ -418,7 +549,13 @@ def run_start_session(
     session["feedback_pattern_id"] = str(feedback_pattern_id or "").strip() or "basic"
     if scoring_session:
         session["scoring_basis"] = scoring_basis
-        session["scoring_rubric_text"] = rubric_text_override
+        session["scoring_rubric_text"] = (
+            complete_scoring_rubric_text
+            if complete_scoring_rubric_text is not None else rubric_text_override
+        )
+        if scoring_guidance_projection is not None:
+            session["effective_scoring_rubric_text"] = rubric_text_override
+            session["scoring_guidance_projection"] = scoring_guidance_projection
     save_session(session)
 
     payload = build_start_success_payload(

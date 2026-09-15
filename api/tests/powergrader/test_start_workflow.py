@@ -33,95 +33,132 @@ def _mirror_scopes(monkeypatch, *, assignment, current, roster=None,
                         }}})
 
 
-def test_scoring_guidance_length_limit_only_applies_to_teacher_guidance():
-    long_rubric = "x" * (start_workflow.MAX_TEACHER_SCORING_GUIDANCE_CHARS + 1)
+def test_teacher_guidance_projection_is_deterministic_and_explicit():
+    long_text = "Beginning direction.\n\n" + (
+        "Background material.\n\n" * 700
+    ) + "Middle scoring directive: teachers must use the rubric criteria and evidence.\n\n" + (
+        "More background.\n\n" * 700
+    ) + "Ending direction."
 
-    assert start_workflow.scoring_guidance_length_error(
-        {"source": "canvas_expert_rubric"}, long_rubric,
-    ) is None
-    assert start_workflow.scoring_guidance_length_error(
-        {"source": "canvas_rubric"}, long_rubric,
-    ) is None
-    assert start_workflow.scoring_guidance_length_error(
-        {"source": "teacher_guidance"}, long_rubric,
-    ) == {
-        "ok": False,
-        "error": "Scoring guidance is too long; provide at most 12,000 characters.",
-        "code": "scoring_guidance_too_long",
+    first_text, first_meta = start_workflow.project_teacher_scoring_guidance(long_text)
+    second_text, second_meta = start_workflow.project_teacher_scoring_guidance(long_text)
+
+    assert first_text == second_text
+    assert first_meta == second_meta
+    assert first_meta["compacted"] is True
+    assert len(first_text) <= start_workflow.MAX_TEACHER_SCORING_GUIDANCE_CHARS
+    assert "compacted" in first_text
+    assert first_meta["effective_chars"] == len(first_text)
+    assert first_meta["omitted_chars"] == len(long_text) - len(first_text)
+    assert first_meta["omitted_units"] > 0
+    assert "Beginning direction." in first_text
+    assert "Ending direction." in first_text
+    assert "must use the rubric criteria" in first_text
+
+
+def test_teacher_guidance_projection_keeps_directive_near_end_of_middle_unit():
+    middle = ("middle context " * 2500) + "teachers must assign points using the rubric criteria"
+    text = "Beginning direction.\n\n" + middle + "\n\nEnding direction."
+
+    effective, metadata = start_workflow.project_teacher_scoring_guidance(text)
+
+    assert metadata["compacted"] is True
+    assert len(effective) <= start_workflow.MAX_TEACHER_SCORING_GUIDANCE_CHARS
+    assert "teachers must assign points using the rubric criteria" in effective
+
+
+def test_short_teacher_guidance_projection_is_identity():
+    text = "Score evidence clearly."
+    effective, metadata = start_workflow.project_teacher_scoring_guidance(text)
+    assert effective == text
+    assert metadata == {
+        "compacted": False,
+        "original_chars": len(text),
+        "effective_chars": len(text),
+        "omitted_chars": 0,
+        "omitted_units": 0,
     }
 
 
-@pytest.mark.parametrize(
-    ("source", "expected_error"),
-    [
-        ("canvas_expert_rubric", False),
-        ("canvas_rubric", False),
-        ("teacher_guidance", True),
-    ],
-)
-def test_run_start_session_applies_length_limit_only_to_teacher_guidance(
-    monkeypatch, tmp_path, source, expected_error,
-):
-    long_text = "x" * (start_workflow.MAX_TEACHER_SCORING_GUIDANCE_CHARS + 1)
+def test_oversized_teacher_guidance_reaches_ai_with_bounded_projection(monkeypatch, tmp_path):
+    long_text = ("Beginning direction.\n\n" + "Background.\n\n" * 900 +
+                 "Middle rubric directive: must score evidence.\n\n" +
+                 "Ending direction.")
     monkeypatch.setattr(start_workflow.workspace, "workspace_root", lambda: str(tmp_path))
     monkeypatch.setattr(start_workflow.config, "course_display_name", lambda _course_id: "Course")
-    assignment = {"name": "Argument Essay", "points_possible": 10}
-    rubric_name = ""
-    scoring_guidance = ""
-    if source == "canvas_rubric":
-        assignment["rubric"] = [{"description": long_text, "points": 10}]
-    elif source == "canvas_expert_rubric":
-        rubric_name = "Long Expert Rubric"
-        monkeypatch.setattr(
-            start_workflow.ai_workflow.context, "load_rubric_text", lambda _name: long_text,
-        )
-    else:
-        scoring_guidance = long_text
-
     monkeypatch.setattr(
-        start_workflow.assignment_refresh,
-        "refresh_assignment",
+        start_workflow.assignment_refresh, "refresh_assignment",
         lambda *_args, **_kwargs: (
             [{"submission_type": "online_text_entry", "workflow_state": "submitted",
               "submitted_at": "2026-09-12T10:00:00Z"}],
-            assignment,
-            {},
+            {"name": "Argument Essay", "points_possible": 10}, {},
         ),
     )
-    ai_rubric_texts = []
-
-    def fail_after_norms_resolved(**kwargs):
-        ai_rubric_texts.append(kwargs["rubric_text_override"])
-        return {"ok": False, "error": "AI workflow reached", "privacy_steps": []}
-
-    monkeypatch.setattr(start_workflow.ai_workflow, "run_ai_workflow", fail_after_norms_resolved)
+    captured = []
+    monkeypatch.setattr(
+        start_workflow.ai_workflow, "run_ai_workflow",
+        lambda **kwargs: (captured.append(kwargs["rubric_text_override"]) or
+                          {"ok": False, "error": "AI workflow reached", "privacy_steps": []}),
+    )
 
     result = start_workflow.run_start_session(
         course_id="course-1", assignment_id="assignment-1", mode="packet",
-        watch_late="false", auto_post="false", rubric_name=rubric_name, persona_id="",
+        watch_late="false", auto_post="false", rubric_name="", persona_id="",
         feedback_pattern_id="", model_id="", response_kind="scr", source_text="",
         source_files_json="", source_uploads=None, oral_reading_passage="",
         oral_reading_enabled="false", save_session=lambda _session: None,
-        scoring_session=True, scoring_guidance=scoring_guidance,
+        scoring_session=True, scoring_guidance=long_text,
     )
 
-    if expected_error:
-        assert result == {
-            "ok": False,
-            "payload": {
-                "ok": False,
-                "error": "Scoring guidance is too long; provide at most 12,000 characters.",
-                "code": "scoring_guidance_too_long",
-            },
-        }
-        assert ai_rubric_texts == []
-    else:
-        assert result == {
-            "ok": False,
-            "payload": {"ok": False, "error": "AI workflow reached", "privacy_steps": []},
-        }
-        assert len(ai_rubric_texts) == 1
-        assert len(ai_rubric_texts[0]) > start_workflow.MAX_TEACHER_SCORING_GUIDANCE_CHARS
+    assert result["payload"]["error"] == "AI workflow reached"
+    assert len(captured) == 1
+    assert len(captured[0]) <= start_workflow.MAX_TEACHER_SCORING_GUIDANCE_CHARS
+    assert "scoring_guidance_too_long" not in str(result)
+
+
+def test_oversized_teacher_guidance_keeps_complete_session_copy(monkeypatch, tmp_path):
+    long_text = "BEGIN\n\n" + ("background\n\n" * 1000) + "MIDDLE must score rubric evidence\n\nEND"
+    monkeypatch.setattr(start_workflow.workspace, "workspace_root", lambda: str(tmp_path))
+    monkeypatch.setattr(start_workflow.config, "course_display_name", lambda _course_id: "Course")
+    monkeypatch.setattr(
+        start_workflow.assignment_refresh, "refresh_assignment",
+        lambda *_args, **_kwargs: (
+            [{"user_id": "u1", "submission_type": "online_text_entry",
+              "workflow_state": "submitted", "submitted_at": "2026-09-12T10:00:00Z"}],
+            {"name": "Argument Essay", "points_possible": 10}, {},
+        ),
+    )
+    monkeypatch.setattr(start_workflow.ai_workflow, "run_ai_workflow", lambda **_kwargs: {
+        "ok": True, "privacy_steps": [], "privacy_artifacts": {}, "ai_by_uid": {},
+        "ai_item_by_uid": {}, "ai_failures": {}, "copilot_packet": None,
+    })
+    monkeypatch.setattr(start_workflow.config, "get_roster_student_settings", lambda _id: {})
+    monkeypatch.setattr(start_workflow.config, "roster_tier_by_id", lambda _id: {})
+    monkeypatch.setattr(start_workflow.config, "get_monitored_students", lambda: {})
+    monkeypatch.setattr(start_workflow.config, "get_extra_time", lambda _id: [])
+    monkeypatch.setattr(start_workflow.session_builder, "build_students", lambda **_kwargs: [])
+    monkeypatch.setattr(start_workflow, "build_start_success_payload", lambda **_kwargs: {"ok": True})
+    saved = {}
+    monkeypatch.setattr(start_workflow, "build_start_session", lambda **kwargs: {
+        "session_id": kwargs["session_id"], "students": [],
+    })
+
+    result = start_workflow.run_start_session(
+        course_id="course-1", assignment_id="assignment-1", mode="packet",
+        watch_late="false", auto_post="false", rubric_name="", persona_id="",
+        feedback_pattern_id="", model_id="", response_kind="scr", source_text="",
+        source_files_json="", source_uploads=None, oral_reading_passage="",
+        oral_reading_enabled="false", save_session=lambda session: saved.update(session),
+        scoring_session=True, scoring_guidance=long_text,
+    )
+
+    assert result["ok"] is True
+    assert saved["scoring_rubric_text"] == long_text
+    assert saved["effective_scoring_rubric_text"] != long_text
+    projection = saved["scoring_guidance_projection"]
+    assert projection["compacted"] is True
+    assert projection["effective_chars"] == len(saved["effective_scoring_rubric_text"])
+    assert projection["omitted_chars"] == len(long_text) - projection["effective_chars"]
 
 
 def test_missing_scoring_norms_names_the_resolved_assignment(monkeypatch, tmp_path):

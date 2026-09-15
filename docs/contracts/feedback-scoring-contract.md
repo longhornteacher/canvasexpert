@@ -26,7 +26,10 @@ assignments require a later Scoring Session.
 `continue_scoring_session(scoring_session_id, rubric_name="",
 scoring_guidance="")` prepares or resumes the active assignment. A usable Canvas
 assignment rubric always wins. Otherwise the teacher must choose a returned Canvas
-Expert rubric label or provide bounded scoring guidance. No basis returns a
+Expert rubric label or provide scoring guidance. Teacher guidance is retained privately
+in full; when it exceeds the effective transport ceiling, the model and SAFE packet use
+a deterministic compacted projection with an explicit marker and original/effective/
+omitted character and unit counts. No basis returns a
 successful conversation state with `ok: true`, `status: "needs_teacher_input"`, code
 `needs_scoring_norms`, the same root `scoring_session_id`, assignment name, available
 rubric labels, and a concise question. The agent asks and continues the same root
@@ -83,7 +86,10 @@ then resubmits the unchanged results and packet digest with every explicit answe
 the exact review digest. A changed review plan or invalid answer fails closed.
 ## Session consumption and write safety
 
-Ordinary assignments use the public start -> continue -> packet -> submit flow and retain the
+Teacher guidance remains available privately in full for the session record. When oversized,
+its effective model and packet projection carries the compaction marker and counts above;
+those counts are the signal that effective text was omitted. Ordinary assignments use the
+public start -> continue -> packet -> submit flow and retain the
 frozen baseline, drift check, per-student idempotency, verification, and content-
 minimized receipt lane. Existing New Quizzes with writing return the identity-safe
 unsupported code before scoring norms, SAFE packet generation, or Canvas mutation. New Quiz

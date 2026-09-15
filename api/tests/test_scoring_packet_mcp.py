@@ -584,6 +584,38 @@ def test_get_scoring_packet_resolves_declared_rubric_and_persona(monkeypatch, tm
     assert "Autofeedback" not in result["contract"]
 
 
+def test_get_scoring_packet_uses_effective_guidance_and_exposes_projection(monkeypatch, tmp_path):
+    people = _seed_vault(monkeypatch, tmp_path, count=1)
+    _set_active_courses(monkeypatch, ["111"])
+    complete = "Private complete guidance omitted from transport. " * 10
+    effective = "[Teacher scoring guidance compacted: original_chars=480; effective_chars=132; omitted_chars=348; omitted_units=1]\nUse scoring criteria."
+    projection = {
+        "compacted": True, "original_chars": len(complete),
+        "effective_chars": len(effective), "omitted_chars": len(complete) - len(effective),
+        "omitted_units": 1,
+    }
+    session = _fake_session("s1", "111", people)
+    session.update({
+        "scoring_basis": {"source": "teacher_guidance", "label": "Teacher scoring guidance"},
+        "scoring_rubric_text": complete,
+        "effective_scoring_rubric_text": effective,
+        "scoring_guidance_projection": projection,
+    })
+    _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
+    _bind_session_store(monkeypatch, {"s1": session})
+
+    result = tools.get_scoring_packet("s1")
+
+    assert result["ok"] is True
+    assert effective in result["contract"]
+    assert complete not in result["contract"]
+    assert result["scoring_guidance_projection"] == projection
+
+    later = tools.get_scoring_packet("s1", offset=1, include_context=False)
+    assert later["ok"] is True
+    assert "scoring_guidance_projection" not in later
+
+
 def test_get_scoring_packet_reports_missing_declared_rubric(monkeypatch, tmp_path):
     people = _seed_vault(monkeypatch, tmp_path, count=1)
     _set_active_courses(monkeypatch, ["111"])

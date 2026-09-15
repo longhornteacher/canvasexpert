@@ -174,3 +174,22 @@ public contract/architecture must change. Stop and return YELLOW if the focused 
 required environment dependency is unavailable; do not broaden the batch.
 
 ## Execution result
+
+GREEN
+
+- Implemented the deterministic teacher-guidance projection at the start-workflow seam.
+- Complete normalized guidance remains in `scoring_rubric_text`; effective bounded text and
+  `scoring_guidance_projection` metadata are saved for teacher-guidance sessions.
+- AI workflow and first packet page consume the effective projection; page zero exposes only
+  the non-student compaction metadata. Canvas and Canvas Expert rubric precedence is unchanged.
+- Updated the two routed contract documents and added start/session/packet coverage.
+- Acceptance gate: `py -m pytest -p no:randomly api/tests/powergrader/test_start_workflow.py
+  api/tests/mcp_server/test_start_scoring_session.py api/tests/test_scoring_packet_mcp.py`
+  — 60 passed, including an adversarial middle-unit directive near the paragraph end.
+- Additional checks: `py -m compileall -q api/powergrader/start_workflow.py
+  api/mcp_server/tools.py`; `git diff --check` clean.
+- Changed files: `api/powergrader/start_workflow.py`, `api/mcp_server/tools.py`,
+  `api/tests/powergrader/test_start_workflow.py`, `api/tests/mcp_server/test_start_scoring_session.py`,
+  `api/tests/test_scoring_packet_mcp.py`, `docs/contracts/feedback-scoring-contract.md`,
+  `docs/mcp-server.md`.
+- No commit or push performed. No deviations or unresolved decisions.

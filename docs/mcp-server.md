@@ -263,11 +263,16 @@ scoring transport.
 `continue_scoring_session(scoring_session_id, rubric_name="", scoring_guidance="")`
 prepares or resumes exactly one active assignment. If it lacks a usable Canvas rubric, it
 returns `needs_teacher_input`, the same root id, available rubric labels, and a concise
-question. Ask the teacher to choose one or provide bounded scoring guidance, then continue
+question. Ask the teacher to choose one or provide scoring guidance, then continue
 that same root. A Canvas rubric remains authoritative for each assignment. If a just-in-time
 refresh finds no grading work, continuation records `nothing_to_grade` and advances without
 creating a packet. `list_scoring_sessions()` returns one identity-free row per root session
 and aggregate progress.
+
+Teacher guidance is retained privately in full. If it exceeds the effective transport
+ceiling, continuation deterministically compacts it for model and packet use; page zero
+exposes the compacted projection's marker and original/effective/omitted character and unit
+counts so omission is explicit.
 
 `get_scoring_packet()` retrieves pseudonymized response rows for exactly the active
 assignment, with full text (no silent truncation) and a packet digest bound to the root,

@@ -173,4 +173,27 @@ def test_continue_pauses_for_norms_then_resumes_same_root_idempotently(
     assert repeated["status"] == "ready"
     assert len(attempts) == 2
     assert attempts[1]["parent_scoring_session_id"] == root_id
+    assert attempts[1]["scoring_guidance"] == ""
     assert sessions[root_id]["queue"][0]["child_session_id"] == "child-1"
+
+
+def test_continue_forwards_teacher_guidance_unchanged(monkeypatch):
+    _bind_courses(monkeypatch, [{"id": "c1", "name": "Course One"}])
+    _bind_snapshots(monkeypatch, {"c1": (_snapshot(_assignment("a1", "Essay", 1)), None)})
+    sessions = _bind_session_store(monkeypatch)
+    root_id = tools.start_scoring_session("c1")["scoring_session_id"]
+    captured = []
+
+    def run_start(**kwargs):
+        captured.append(kwargs)
+        return {"ok": False, "payload": {
+            "code": "needs_scoring_norms", "rubric_labels": [],
+        }}
+
+    monkeypatch.setattr("api.powergrader.start_workflow.run_start_session", run_start)
+    guidance = "Teacher guidance with scoring criteria."
+    result = tools.continue_scoring_session(root_id, scoring_guidance=guidance)
+
+    assert result["status"] == "needs_teacher_input"
+    assert captured[0]["scoring_guidance"] == guidance
+    assert sessions[root_id]["queue"][0]["status"] == "needs_teacher_input"
