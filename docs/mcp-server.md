@@ -280,9 +280,10 @@ pseudonym-only questions, allowed answers, and a review digest without writing; 
 asks the teacher, then retries the same tool with the unchanged results and explicit answers.
 After every terminal submit, the assistant calls `continue_scoring_session` with the same
 root id and keeps going until the queue is complete, teacher input is required, a blocker
-occurs, or the teacher asks it to stop. New Quizzes use the same public call and privately
-retain item-preserving preflight, drift, verification, and receipt behavior. No transport
-type, operation token, or private assignment-run id crosses the MCP boundary. A stale packet,
+occurs, or the teacher asks it to stop. Existing New Quizzes with writing stop before a
+packet with `new_quiz_writing_requires_assignment`; the teacher grades them in Canvas and
+uses separate 100-point assignments for future writing portions. No transport type,
+operation token, or private assignment-run id crosses the MCP boundary. A stale packet,
 changed review plan, invalid answer, or ambiguous write fails closed. Review and editing
 happen in Canvas Live; the teacher request authorizes only the frozen queue, not later work.
 
@@ -307,18 +308,15 @@ The safety scan walks dict keys, so it cannot see into `{columns, rows}` tables.
 that returns student text therefore gates the dict-row payload first and tabulates only after
 the gate has passed it, `get_scoring_packet` included.
 
-**Scoring Session writes.** `submit_scoring_results()` dispatches the active assignment's ordinary and
-New Quiz rows through their private existing write lanes. New Quiz finalization preserves
-auto-graded and untouched items, freezes and verifies each student's complete result, and
-continues after a per-student refusal without retrying an ambiguous write. Both transports
-return only aggregate counts and pseudonym-keyed outcomes. A teacher who asked to start this
+**Scoring Session writes.** `submit_scoring_results()` sends ordinary assignment scores and
+comments through the frozen, drift-checked, verified assignment write lane. Canvas Expert
+does not write New Quiz item scores, per-item feedback, assignment totals, or fallback
+comments. Results return only aggregate counts and pseudonym-keyed outcomes. A teacher who asked to start this
 session has authorized valid results for its frozen queue to post; the assistant reports
 what landed, calls `continue_scoring_session` after terminal outcomes, and directs review or
 edits to Canvas Live. Authorization never carries to later assignments, another session,
 SIS action, or arbitrary grade edit.
-New Quiz results without a score cannot post comment-only feedback: the tool offers only
-an explicit skip that holds the affected student's result. Ordinary assignments may offer
-comment-only posting after the teacher answers its question.
+Ordinary assignments may offer comment-only posting after the teacher answers its question.
 
 `get_roster`, `get_submissions`, and `get_gradebook_snapshot` only read the local
 CanvasMirror. None fall back to

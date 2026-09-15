@@ -11,11 +11,13 @@ UnicodeEncodeError inside the child. The push came back as the bare words
 These tests run the real subprocess, so they hold that boundary.
 """
 import os
+import json
 import subprocess
 
 import pytest
 
 from api.webui import runner
+from api import qf_pusher
 
 # Tracked QuizForge sample with per-choice rationales, so the plan carries the
 # glyphs the renderer adds rather than any character the author typed.
@@ -98,6 +100,41 @@ def test_planner_failure_carries_its_reason_without_local_paths():
     assert message.startswith("planner failed: ")
     assert "plan error" in message
     assert runner.API_DIR not in message
+
+
+@pytest.mark.parametrize("item_type", ["ESSAY", "FILEUPLOAD"])
+def test_live_planner_rejects_writing_before_preparation_or_transform(
+    monkeypatch, tmp_path, item_type,
+):
+    path = tmp_path / "writing-quiz.txt"
+    path.write_text(
+        "<QUIZFORGE_JSON>\n" + json.dumps({
+            "version": "3.0-json",
+            "title": "Major - Questions",
+            "items": [{"id": "writing-1", "type": item_type, "prompt": "Write."}],
+            "rationales": [],
+        }) + "\n</QUIZFORGE_JSON>\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        qf_pusher, "prepare_items",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("writing reached item preparation")
+        ),
+    )
+    monkeypatch.setattr(
+        qf_pusher.transform, "build_item",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("writing reached transformation")
+        ),
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        qf_pusher.build_push_plan(path)
+
+    assert item_type in str(excinfo.value)
+    assert "separate AssignmentForge assignment" in str(excinfo.value)
+    assert "100 points" in str(excinfo.value)
 
 
 @pytest.mark.parametrize("line, expected", [

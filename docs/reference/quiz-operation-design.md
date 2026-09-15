@@ -13,6 +13,10 @@ prepare/review/apply path. `qf_pusher.py` remains the local plan and whole-quiz 
 consumed by the adapter. The former `push_tiers.py` direct differentiated CLI is retired; it
 cannot bypass the reviewed family operation.
 
+The live planner accepts auto-graded QuizForge types only. `ESSAY` and `FILEUPLOAD` are
+rejected immediately after local parse and before preparation, transformation, or Canvas;
+each writing portion belongs in a separate 100-point AssignmentForge artifact.
+
 ## Confirmed Canvas objects
 
 Canvas New Quiz create returns a quiz backed by a Canvas assignment. Item create returns an exact

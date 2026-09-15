@@ -63,13 +63,6 @@
       "options": ["for", "print", "input"],
       "case_sensitive": false
     },
-    {
-      "id": "essay_explain",
-      "type": "ESSAY",
-      "prompt": "<p>Finish the sentence in your own words: <em>A for loop is useful because it lets you ______ without ______.</em></p>",
-      "length_guidance": "1-2 sentences",
-      "rubric_hint": "Any reasonable idea about repeating an action without retyping it."
-    },
     { "id": "stim_for_end", "type": "STIMULUS_END", "prompt": "" }
   ],
   "rationales": [
@@ -92,8 +85,7 @@
         { "id": "D", "correct": false, "rationale": "A valid Python name can never contain a space, since Python would read it as two separate words. my var has a space in the middle, so it is not a valid variable name." }
       ]
     },
-    { "item_id": "fitb_keyword", "rationale": "In Python, a for loop repeats its body once for each value in a sequence. The keyword that starts this kind of loop, and belongs in the blank, is for." },
-    { "item_id": "essay_explain", "rationale": "A for loop is useful because it lets you repeat the same action many times without typing the same line of code over and over." }
+    { "item_id": "fitb_keyword", "rationale": "In Python, a for loop repeats its body once for each value in a sequence. The keyword that starts this kind of loop, and belongs in the blank, is for." }
   ]
 }
 </QUIZFORGE_JSON>

@@ -1,4 +1,4 @@
-"""The public New Quiz path is the ordinary Scoring Session submit contract."""
+"""New Quiz writing is unsupported by the scoring write surface."""
 from api.mcp_server import server, tools
 
 
@@ -21,6 +21,19 @@ def test_new_quiz_has_no_assignment_type_specific_mcp_tools_or_parameters():
                        for key in properties)
 
     assert callable(tools.submit_scoring_results)
+
+
+def test_signed_new_quiz_finalization_members_are_retired():
+    for name in (
+        "_prepare_new_quiz_finalization",
+        "_finalize_new_quiz_results",
+        "_new_quiz_http_scope",
+        "_new_quiz_preflight",
+        "_new_quiz_apply",
+        "_new_quiz_scoring_questions",
+        "_new_quiz_public_questions",
+    ):
+        assert not hasattr(tools, name)
 
 
 def test_submit_scoring_results_schema_names_the_canvas_score_row():

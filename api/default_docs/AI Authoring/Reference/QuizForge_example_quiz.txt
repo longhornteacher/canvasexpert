@@ -67,21 +67,6 @@
       "case_sensitive": false
     },
     {
-      "id": "essay_fieldnotes",
-      "type": "ESSAY",
-      "prompt": "Read the field note, then respond:\n```prose\nThe restoration crew noticed that salinity spiked after a windstorm pushed seawater inland. They also observed that taller grasses blocked spray from reaching new seedlings.\n```\nExplain how combining field observations with sensor data helps the team decide next steps in the restoration.",
-      "length_guidance": "6-8 sentences",
-      "rubric_hint": "Connects observations to data trends; proposes at least one actionable adjustment."
-    },
-    {
-      "id": "fileupload_monitor",
-      "type": "FILEUPLOAD",
-      "prompt": "Upload a short field report with one annotated photo showing where salinity sensors are placed.",
-      "requirements": "Highlight placement rationale and note any obstacles that could affect readings.",
-      "accepted_formats": [".pdf", ".docx", ".jpg", ".png"],
-      "max_file_size_mb": 10
-    },
-    {
       "id": "matching_terms",
       "type": "MATCHING",
       "prompt": "Match each restoration term with its description.",
@@ -158,14 +143,6 @@
     {
       "item_id": "fitb_phasechange",
       "rationale": "Evaporation is the phase change where a liquid absorbs energy and turns into a gas. Water starts as a liquid and evaporates into a gas before condensing in clouds, so 'liquid' and 'gas' are the two blanks."
-    },
-    {
-      "item_id": "essay_fieldnotes",
-      "rationale": "Field notes and sensor data work best together because each one fills in what the other misses. The crew noticed that salinity spiked after the windstorm, but the sensors show exactly how high it went and how long it stayed high. The crew also saw that taller grasses blocked spray from reaching new seedlings, which helps explain a pattern the sensors alone would not reveal. Putting the two together, the team can tell whether a spike is just a one-time storm effect or a sign the whole marsh is getting saltier. That matters for deciding what to do next: if the spike is temporary the team can keep watching, but if readings stay high near unprotected seedlings, the team should plant more tall grasses or add wind breaks there. Using both the story from the field and the numbers from the sensors gives the team a reason for its next move instead of a guess."
-    },
-    {
-      "item_id": "fileupload_monitor",
-      "rationale": "My photo shows the sensor placed at the marker stake closest to the tidal channel, about two meters from where the tall grasses start. I picked that spot because it floods first when the tide comes in, so it should catch salinity changes before the rest of the plot does. One obstacle is that the tall grasses next to the sensor block some of the wind and spray, which could make my readings a little lower than the rest of the marsh experiences. I noted that in my report so anyone comparing sensors understands why the numbers might differ."
     },
     {
       "item_id": "matching_terms",

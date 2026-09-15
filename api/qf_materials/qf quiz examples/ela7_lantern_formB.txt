@@ -53,14 +53,6 @@
       ],
       "distractors": ["The turning point of the plot"]
     },
-    {
-      "id": "essay_simile",
-      "type": "ESSAY",
-      "stimulus_id": "stim_lantern",
-      "prompt": "<p>The passage compares the boats watching for the light to <em>travelers watching for a familiar face</em>. Explain what this comparison suggests about how the boats felt about the light.</p>",
-      "length_guidance": "3-4 sentences",
-      "rubric_hint": "Interprets the simile as comfort, safety, or trust in something familiar."
-    },
     { "id": "stim_lantern_end", "type": "STIMULUS_END", "prompt": "" }
   ],
   "rationales": [
@@ -82,8 +74,7 @@
         { "id": "D", "correct": false, "rationale": "Evidence for a character trait must show that trait through an actual action or choice made. The boats' distance only describes the scene; it shows no effort by the keeper." }
       ]
     },
-    { "item_id": "match_lit_terms", "rationale": "Literary terms each name a different part of how a story is built and how it feels. Here setting means where/when, simile means a like/as comparison, mood means the reader's feeling, and turning point is the unmatched distractor." },
-    { "item_id": "essay_simile", "rationale": "This comparison suggests that the boats felt comforted and safe when they saw the light, the same way a traveler feels relieved to spot a familiar face in a crowd. A familiar face means you are not lost and someone you trust is nearby. In the same way, the light meant the boats were not alone out on the water and could find their way home." }
+    { "item_id": "match_lit_terms", "rationale": "Literary terms each name a different part of how a story is built and how it feels. Here setting means where/when, simile means a like/as comparison, mood means the reader's feeling, and turning point is the unmatched distractor." }
   ]
 }
 </QUIZFORGE_JSON>

@@ -1,20 +1,25 @@
 # QuizForge Quiz Examples — Test Fixtures
 
-QuizForge_Base-compliant quizzes (strict `<QUIZFORGE_JSON>` envelope, v3.0-json).
-These are the **input** to the future QuizForge → Canvas API pipeline. Every file
-validates with `py validate_qf.py` (run from the project root).
+The live examples are QuizForge_Base-compliant, auto-graded quizzes (strict
+`<QUIZFORGE_JSON>` envelope, v3.0-json). They are inputs to the QuizForge → Canvas API
+pipeline and validate with `py validate_qf.py` (run from the project root).
+
+Files prefixed `nq_pull_` are read-only Canvas response-shape evidence. They are not
+valid QuizForge authoring inputs, are excluded from live-example validation, and must
+never be pushed. They may retain ESSAY or FILEUPLOAD items solely to document the
+student-response shapes returned by Canvas for existing New Quizzes.
 
 ## The fixtures
 
 | File | Group | Variant | Purpose |
 |---|---|---|---|
 | `cs_loops_checkpoint_support.txt` | `cs_loops_checkpoint` | Support | Differentiation set: **same standard, the 4 product tiers** Support/Core/Accelerate/Extend. Titles and visible labels are teacher-chosen; the readiness tier also lives in `metadata.variant_label`. |
-| `cs_loops_checkpoint_core.txt` | `cs_loops_checkpoint` | Core | Support scaffolds the *same* trace as Core (word-bank FITB, defined terms, sentence-starter essay) — it does not lower the standard. |
+| `cs_loops_checkpoint_core.txt` | `cs_loops_checkpoint` | Core | Support scaffolds the *same* trace as Core (word-bank FITB and defined terms) — it does not lower the standard. |
 | `cs_loops_checkpoint_accelerate.txt` | `cs_loops_checkpoint` | Accelerate | Accelerate raises rigor on the same standard (start/step ranges, required reasoning). |
-| `cs_loops_checkpoint_extend.txt` | `cs_loops_checkpoint` | Extend | Extend pushes furthest (accumulator trace, categorization, justify-with-evidence). |
+| `cs_loops_checkpoint_extend.txt` | `cs_loops_checkpoint` | Extend | Extend pushes furthest (accumulator trace and categorization). |
 | `ela7_lantern_formA.txt` | `ela7_lantern` | Form A | Differentiation set: **same passage, two parallel forms** (anti-copying / A-B grouping). |
 | `ela7_lantern_formB.txt` | `ela7_lantern` | Form B | |
-| `all_types_sampler.txt` | `all_types_sampler` | Coverage fixture | One of **every** QF type — the transformer smoke test. |
+| `all_types_sampler.txt` | `all_types_sampler` | Coverage fixture | One of every live auto-graded QF type — the transformer smoke test. |
 | `nq_pull_01_constructed_response_basics.txt` | `nq_pull_basics` | Whole class | New Quizzes Student Analysis response-pull probe for essays, line breaks, punctuation, and a simple FITB anchor. |
 | `nq_pull_02_red_group_text_probe.txt` | `nq_pull_group_text_probe` | Red | Red group-only variant for visibility and constructed-response pull testing. |
 | `nq_pull_02_blue_group_text_probe.txt` | `nq_pull_group_text_probe` | Blue | Blue group-only variant for visibility and constructed-response pull testing. |
@@ -26,8 +31,9 @@ validates with `py validate_qf.py` (run from the project root).
 alternatives for the *same* learning target. The pipeline assigns each variant to
 a different set of students via assignment overrides → "only some kids get this one."
 
-All 12 QF item types appear across the set: STIMULUS, STIMULUS_END, MC, MA, TF,
-MATCHING, FITB, ESSAY, FILEUPLOAD, ORDERING, CATEGORIZATION, NUMERICAL.
+All 10 live QF item types appear across the live set: STIMULUS, STIMULUS_END, MC,
+MA, TF, MATCHING, FITB, ORDERING, CATEGORIZATION, and NUMERICAL. Author writing
+portions as separate 100-point AssignmentForge assignments.
 
 ## QuizForge → Canvas API transform map (verified in the sandbox)
 
@@ -44,8 +50,6 @@ item. Mapping and the **gotchas we confirmed live**:
 | CATEGORIZATION | `categorization` | categories + items → uuid maps; per-category `AllOrNothing`. |
 | FITB | `rich-fill-blank` | `[blank]` tokens → `working_item_body` with backtick-wrapped blanks; **`edit_distance` must be ≥ 1** (0 → HTTP 422). |
 | NUMERICAL | `numeric` | `scoring_algorithm` MUST be **`"Numeric"`** (not `Equivalence`); `scoring_data.value` is an **array** of response objects, e.g. `[{"id":<uuid>,"type":"exactResponse","value":"8"}]`. With `Equivalence` the array is rejected AND the student's response won't grade/display. |
-| ESSAY | `essay` | word-limit flags live in `properties`, not `interaction_data`. |
-| FILEUPLOAD | `file-upload` | `accepted_formats` → `properties.allowed_types`. |
 | **STIMULUS** | *(none — not API-creatable)* | `entry_type:"Stimulus"` → HTTP 400. **Embed/​link instead** (see below). |
 | STIMULUS_END | *(none)* | structural marker only; dropped on the API path. |
 

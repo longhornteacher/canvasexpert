@@ -125,9 +125,10 @@ refreshes Canvas, writes groups, or calls the AI provider.
 
 Scoring Sessions are available through MCP only. The agent starts one frozen
 Current-course backlog session and continues across assignments, while every SAFE
-pseudonymized packet and result submission remains assignment-bounded. Canvas Expert
-privately selects the ordinary assignment or New Quiz write lane; Canvas Live is the
-only review/edit surface. See
+pseudonymized packet and result submission remains assignment-bounded. Ordinary assignment
+scores and comments use the reviewed write lane; New Quiz writing stops with
+`new_quiz_writing_requires_assignment` and is graded in Canvas. Canvas Live is the only
+review/edit surface. See
 `docs/guides/scoring-sessions.md` and `docs/reference/powergrader-scoring-map.md`.
 
 ### Gradebook module routing
@@ -366,15 +367,11 @@ packets for just this cohort, skipping courses whose data hasn't changed (dedupe
 into any packet.
 
 **New Quizzes status:** Enrollment-gated personal access tokens can retrieve constructed
-responses through the Student Analysis JSON report. The private Scoring Session
-item-finalization lane uses Canvas's first-party, short-lived signed grader launch to write
-item scores and per-item grader feedback; it does not use the ordinary assignment-total
-`PUT`. Active/current instructor enrollment is the prerequisite, not PAT-versus-OAuth;
-concluded, closed, past-enrollment, or otherwise restricted courses may return `403`. The
-lane preserves preflight freeze, result-version drift detection, idempotency, post-write
-verification, receipt, and fail-closed SpeedGrader fallback. Student Reports does not yet
-consume the response path. New Quiz scores still appear in the Submissions API and are
-reported in the Info document. See `docs/reference/new-quizzes-grading-transport.md`.
+responses through the Student Analysis JSON report. That path is read-only. Canvas Expert
+does not write New Quiz item scores, per-item feedback, assignment totals, or fallback
+comments. Existing writing is graded in Canvas; future writing portions use separate
+100-point AssignmentForge assignments. Student Reports does not yet consume the response
+path. New Quiz scores still appear in the Submissions API and are reported in the Info document.
 
 ---
 

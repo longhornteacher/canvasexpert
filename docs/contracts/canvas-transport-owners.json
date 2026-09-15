@@ -434,39 +434,6 @@
       "reason": "The unified MCP Scoring Session submit path calls scoring_apply.apply_plan, which reaches this frozen, drift-checked, receipt-backed grade writer and triggers a narrow mirror refresh after a verified push."
     },
     {
-      "path": "api/powergrader/new_quiz_grader.py",
-      "symbol": "_signed_context",
-      "detector": "attr:post",
-      "call_index": 1,
-      "call_form": "session.post(<graphql_preview_url>, ...) [GraphQL submission preview query]",
-      "classification": "canvas_read_acquisition",
-      "scopes": ["focused_evidence"],
-      "reconciliation": "n/a",
-      "reason": "Read-only GraphQL preview query that is part of the native grader launch handshake; issues no content change."
-    },
-    {
-      "path": "api/powergrader/new_quiz_grader.py",
-      "symbol": "_signed_context",
-      "detector": "attr:post",
-      "call_index": 2,
-      "call_form": "session.post(<signed_launch_url>, data=form.values, ...) [signed launch form submit]",
-      "classification": "canvas_read_acquisition",
-      "scopes": ["focused_evidence"],
-      "reconciliation": "n/a",
-      "reason": "Signed-launch handshake step of the native grader session bootstrap; no content change."
-    },
-    {
-      "path": "api/powergrader/new_quiz_grader.py",
-      "symbol": "apply",
-      "detector": "attr:post",
-      "call_index": 1,
-      "call_form": "context[0].post(f\"{host}/api/quiz_sessions/{quiz_session_id}/results\", json=payload, ...)",
-      "classification": "canvas_mutation_native",
-      "scopes": ["new_quiz.responses", "private.submissions"],
-      "reconciliation": "targeted",
-      "reason": "The specialized native New Quiz item-score/feedback transport (spine 11.x). api/webui/routes/powergrader.py's _converge_new_quiz_after_finalize calls both new_quizzes.invalidate_responses (whole-scope stale-mark on new_quiz.responses) and _notify_write_through (targeted per-course submissions delta refresh on private.submissions) after a verified finalize. Recorded as 'targeted' for the dominant/most-complete convergence leg; the new_quiz.responses leg is an 'invalidate', not a precise merge."
-    },
-    {
       "path": "api/powergrader/new_quiz_fetch.py",
       "symbol": "_create_report",
       "detector": "attr:post",

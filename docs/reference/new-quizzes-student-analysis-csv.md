@@ -98,8 +98,7 @@ and parser reference; it is not used by the PowerGrader fetch path.
 
 ## Shipped parser
 
-The importer is built: `api/nq_report.py::parse_student_analysis` (and
-`parse_student_analysis_file`) does the positional 5-column-block parsing described above,
-and `api/powergrader/new_quiz_csv.py` is the PowerGrader-facing consumer. Both run offline
-against synthetic fixtures — no live Canvas, no PII. This document is the format reference
-those modules implement.
+The read-only parser is built: `api/nq_report.py::parse_student_analysis` (and
+`parse_student_analysis_file`) does the positional 5-column-block parsing described above.
+It runs offline against synthetic fixtures — no live Canvas, no PII. Canvas Expert does
+not use this CSV to write New Quiz item scores or per-item feedback.

@@ -63,13 +63,6 @@
       "answer_mode": "open_entry",
       "case_sensitive": false
     },
-    {
-      "id": "essay_explain",
-      "type": "ESSAY",
-      "prompt": "<p>In 2-3 sentences, explain what a <code>for</code> loop does and give one example of when you would use one.</p>",
-      "length_guidance": "2-3 sentences",
-      "rubric_hint": "Mentions repetition over a sequence/range and a reasonable use case."
-    },
     { "id": "stim_for_end", "type": "STIMULUS_END", "prompt": "" }
   ],
   "rationales": [
@@ -93,8 +86,7 @@
         { "id": "D", "correct": false, "rationale": "A valid Python name can never contain a space, since Python would read it as two separate words. my var has a space in the middle, so it is not a valid variable name." }
       ]
     },
-    { "item_id": "fitb_keyword", "rationale": "In Python, a for loop repeats its body once for each value in a sequence. The keyword that starts this kind of loop, and belongs in the blank, is for." },
-    { "item_id": "essay_explain", "rationale": "A for loop lets a program repeat a block of code once for each item in a sequence, like each number in a range or each item in a list. For example, I could use a for loop to print every student's name on a class roster instead of writing a separate print statement for each one. That way the same instructions run automatically for every item without me retyping them." }
+    { "item_id": "fitb_keyword", "rationale": "In Python, a for loop repeats its body once for each value in a sequence. The keyword that starts this kind of loop, and belongs in the blank, is for." }
   ]
 }
 </QUIZFORGE_JSON>

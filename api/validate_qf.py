@@ -14,14 +14,12 @@ import re
 FOLDER = os.path.join("qf_materials", "qf quiz examples")
 
 ALL_TYPES = {"STIMULUS", "STIMULUS_END", "MC", "MA", "TF", "MATCHING", "FITB",
-             "ESSAY", "FILEUPLOAD", "ORDERING", "CATEGORIZATION", "NUMERICAL"}
+             "ORDERING", "CATEGORIZATION", "NUMERICAL"}
+WRITING_TYPES = {"ESSAY", "FILEUPLOAD"}
 SCORED_SINGLE_RATIONALE = {"TF", "FITB", "MATCHING", "ORDERING", "NUMERICAL",
-                            "CATEGORIZATION", "ESSAY", "FILEUPLOAD"}
+                            "CATEGORIZATION"}
 PER_CHOICE_RATIONALE = {"MC", "MA"}
 NO_RATIONALE = {"STIMULUS", "STIMULUS_END"}
-# ESSAY and FILEUPLOAD carry a student-facing exemplar rather than a two-sentence
-# concept-plus-choice explanation, so the advisory shape checks do not apply to them.
-OPEN_RESPONSE = {"ESSAY", "FILEUPLOAD"}
 
 ENVELOPE = re.compile(r"<QUIZFORGE_JSON>(.*?)</QUIZFORGE_JSON>", re.DOTALL)
 _HTML_TAG = re.compile(r"<[^>]+>")
@@ -77,6 +75,13 @@ def validate(path, seen_types):
     for idx, it in enumerate(items, 1):
         t = it.get("type")
         seen_types.add(t)
+        if t in WRITING_TYPES:
+            problems.append(
+                f"{name}: {t} item {it.get('id')!r} cannot be pushed as a Canvas New Quiz. "
+                "Author each writing portion as a separate AssignmentForge assignment "
+                "worth 100 points (for example, a matching ' - ECR' assignment)."
+            )
+            continue
         if t not in ALL_TYPES:
             problems.append(f"{name}: unknown type {t!r}")
             continue
@@ -110,13 +115,7 @@ def validate(path, seen_types):
 
         entry = rationale_by_id.get(iid)
         if entry is None:
-            if t in OPEN_RESPONSE:
-                problems.append(
-                    f"{name}: {t} item {iid!r} has no rationales entry. Add one "
-                    f"holding a student-facing exemplar showing what a strong "
-                    f"response looks like."
-                )
-            elif t in PER_CHOICE_RATIONALE:
+            if t in PER_CHOICE_RATIONALE:
                 problems.append(
                     f"{name}: {t} item {iid!r} has no rationales entry. Add one "
                     f"with a \"choices\" array explaining the correct answer and "
@@ -247,17 +246,11 @@ def _check_per_choice(name, t, iid, item, entry):
 def _check_single(name, t, iid, entry):
     """Hard-fail depth check for one single-rationale entry.
 
-    Covers TF/FITB/MATCHING/ORDERING/NUMERICAL/CATEGORIZATION (explain why the
-    correct answer is correct) and ESSAY/FILEUPLOAD (a student-facing exemplar).
+    Covers TF/FITB/MATCHING/ORDERING/NUMERICAL/CATEGORIZATION.
     """
     text = str(entry.get("rationale", ""))
     if text.strip():
         return []
-    if t in OPEN_RESPONSE:
-        return [
-            f"{name}: {t} item {iid!r} rationale is empty. Add a short "
-            f"student-facing exemplar showing what a strong response looks like."
-        ]
     return [
         f"{name}: {t} item {iid!r} rationale is empty. Add an explanation of "
         f"why the correct answer is correct."
@@ -321,9 +314,7 @@ def _advise_text(label, text, advisories):
 def advise(data):
     """Return style suggestions for auto-graded rationales. Never blocks a push.
 
-    Exemplars on ESSAY and FILEUPLOAD items are exempt: they are short
-    student-facing model responses, not two-sentence concept-plus-choice
-    explanations, so none of the shape heuristics apply to them.
+    Writing items are rejected by ``validate`` and never reach this advisory path.
     """
     advisories = []
     if not data:
@@ -336,8 +327,6 @@ def advise(data):
 
     for it in data.get("items", []):
         t = it.get("type")
-        if t in OPEN_RESPONSE:
-            continue
         iid = it.get("id")
         entry = rationale_by_id.get(iid) if iid else None
         if not entry:
@@ -360,7 +349,12 @@ def advise(data):
 
 
 def main():
-    paths = sorted(glob.glob(os.path.join(FOLDER, "*.txt")))
+    excluded_prefixes = ("af_", "nq_pull_", "pf_")
+    paths = sorted(
+        path
+        for path in glob.glob(os.path.join(FOLDER, "*.txt"))
+        if not os.path.basename(path).startswith(excluded_prefixes)
+    )
     if not paths:
         print(f"No .txt fixtures found in {FOLDER}")
         return
@@ -381,7 +375,7 @@ def main():
     if missing:
         print(f"  MISSING types across all fixtures: {sorted(missing)}")
     else:
-        print("  All 12 QuizForge types are represented across the set.")
+        print("  All 10 live QuizForge types are represented across the set.")
     print()
     if all_problems:
         print(f"COMPLIANCE ISSUES ({len(all_problems)}):")

@@ -181,7 +181,7 @@ the teacher's Canvas Grade Sync.
 | File | Role |
 |---|---|
 | `canvas.py` | API client (core REST + New Quizzes surfaces), reads `.env` |
-| `transform.py` | QuizForge item → Canvas item (all types, feedback composition) |
+| `transform.py` | Auto-graded QuizForge item → Canvas item (feedback composition) |
 | `codefmt.py` | VSCode-style code highlighting (Pygments → inline styles) |
 | `teks.py` | TEKS coverage report + visible labels |
 | `qf_pusher.py` | Driver: envelope → live quiz (points, settings, stimulus, TEKS) |
@@ -190,7 +190,7 @@ the teacher's Canvas Grade Sync.
 | `validate_qf.py` | QuizForge compliance checker |
 | `qf_ui.py` | Launches the local web UI (see "Web UI" above) |
 | `../engine/rendering/physical/` | Local printable DOCX/PDF render stack (Edge via Playwright for PDF, Pandoc for DOCX) |
-| `powergrader/` | Legacy-named private scoring engine: Canvas acquisition, SAFE bundle/session assembly, feedback contract, ordinary assignment and New Quiz write safeguards |
+| `powergrader/` | Legacy-named private scoring engine: Canvas acquisition, SAFE bundle/session assembly, feedback contract, ordinary assignment write safeguards, and read-only New Quiz evidence |
 | `mcp_server/` | Local MCP tool registry, contracts, pseudonymized reads, and teacher-owned write tools |
 | `mirror/` | CanvasMirror storage, freshness envelopes, sync coordinator, and disk-only query services |
 | `operation_ledger/` | High-risk operation checkpoints, claims, receipts, and recovery coordination |
@@ -217,8 +217,10 @@ ANTHROPIC_KEY=
 ## Confirmed Canvas API facts / limits (from live probes)
 
 - A New Quiz's `assignment_id` **equals** its quiz `id`.
-- The contract has **12 item types** including `stimulus`. **11 are API-creatable** —
-  `stimulus` is not; embed its content as HTML instead (see `api/transform.py`).
+- Live QuizForge has **10 auto-graded/structural item types**. `STIMULUS` is inlined as
+  HTML and `STIMULUS_END` is dropped; the remaining eight types create Canvas items.
+  `ESSAY` and `FILEUPLOAD` are rejected before transformation or Canvas. Author each
+  writing portion as a separate 100-point AssignmentForge artifact.
 - `numeric` needs `scoring_algorithm:"Numeric"` + a `scoring_data.value` array;
   `rich-fill-blank` needs `edit_distance ≥ 1`.
 - Per-student / per-group **assignment overrides work** (drives differentiation).
@@ -260,15 +262,6 @@ ANTHROPIC_KEY=
   PAT limitation. Use `py diagnose_newquizzes.py --course <id> [--assignment <nq_id>]`
   (see `api/diagnose_newquizzes.py`) to check any course; it reads 401 (missing scope —
   admin can grant), 403 (concluded enrollment, or missing scope), and transient 5xx apart.
-- **Per-item manual grading is also available, but not as an ordinary PAT REST call.**
-  Canvas's first-party grader uses `/login/session_token`, the signed LTI submission launch,
-  and short-lived participant/result credentials to read and write the authoritative New
-  Quiz item-result collection. A live dummy-data probe verified independent item score and
-  grader-feedback writes. Each accepted update creates a new authoritative result ID, so
-  post-write verification must re-fetch the quiz session before reading item results. This
-  transport is not documented as a stable public grading API; isolate it, fail closed on
-  drift, and fall back to SpeedGrader. See
-  `docs/reference/new-quizzes-grading-transport.md`.
 - **The Reports API (student/item analysis) is the response-content path, but the gateway
   is flaky.** `POST /api/quiz/v1/courses/:course_id/quizzes/:assignment_id/reports`
   (`report_type=student_analysis|item_analysis`, `format=csv|json`) enqueues a report and
@@ -281,11 +274,11 @@ ANTHROPIC_KEY=
   Regardless of the API, the **Student Analysis CSV downloads fine from the New Quizzes UI**
   (full responses included) — the always-available manual fallback, and the only option for
   courses where your enrollment has concluded.
-- **Scoring Sessions support New Quizzes through the same MCP flow as assignments.** The
-  private item-finalization lane preserves auto-graded and untouched values, preflights
-  the complete current result, checks drift/idempotency, verifies the write, and records a
-  minimized receipt. Concluded or restricted enrollment may return `403`. Canvas Live is
-  the only review/edit surface; Canvas Expert has no hosted grader or local scoring queue.
+- **Scoring Sessions do not score New Quiz writing.** Preparation returns
+  `new_quiz_writing_requires_assignment` before scoring norms or packet work. Grade existing
+  writing in Canvas; use a separate 100-point AssignmentForge artifact for each future
+  writing portion. Canvas Expert never writes New Quiz item scores, per-item feedback,
+  assignment totals, or fallback comments.
 - **Common Cartridge import is the zero-auth power path** (Settings → Import Course
   Content). Vanilla CC 1.x carries only the portable common subset, but a **Canvas-flavored
   export package** (CC + Canvas extensions: `canvas_export.txt`, `course_settings/*.xml`)

@@ -44,9 +44,9 @@ If refreshed rows contain no such submission, continuation records
 `nothing_to_grade` for that queue item and moves to the next one without creating
 a packet. A genuinely empty acquisition remains an error rather than being
 recast as completed grading.
-For New Quizzes, SAFE includes essay responses and uploads only after complete local text
-extraction; auto-scored and unsupported response types remain private rather than being
-sent for agent scoring.
+Existing New Quizzes with writing stop before SAFE packet creation with
+`new_quiz_writing_requires_assignment`. The teacher grades that writing in Canvas and
+authors future writing portions as separate 100-point AssignmentForge assignments.
 
 ## Direction 2 - Results (agent -> Canvas Expert)
 
@@ -58,7 +58,7 @@ review_digest="", answers=None)`.
 |---|---:|---|
 | `pseudonym` | yes | Exact stand-in from the SAFE packet. |
 | `item_id` | yes | Exact response item from that pseudonym's packet rows. |
-| `score` | yes | Number or `null`. On ordinary assignments, `null` may permit comment-only posting after explicit teacher confirmation; New Quiz item finalization requires a score and holds feedback-only rows. |
+| `score` | yes | Number or `null`. On ordinary assignments, `null` may permit comment-only posting after explicit teacher confirmation. |
 | `feedback` | yes | Plain text Canvas feedback. Do not label it as AI-provided unless the teacher asked. Default shape is Glows & Grows. |
 | `writing_process_observations` | no | Separate, teacher-only local observation; never student feedback or a score input. |
 
@@ -73,22 +73,13 @@ receiving nothing), the tool returns `needs_teacher_input`, pseudonym-only quest
 the allowed answers, and a review digest without writing. The agent asks the teacher,
 then resubmits the unchanged results and packet digest with every explicit answer and
 the exact review digest. A changed review plan or invalid answer fails closed.
-For New Quizzes, feedback without a score cannot use the ordinary-assignment
-comment-only lane: the question offers only `skip_those`, which holds that student's
-New Quiz result without posting the feedback.
-
 ## Session consumption and write safety
 
-Ordinary assignments and New Quizzes use the same public start -> continue ->
-packet -> submit flow. The server selects the transport privately. Ordinary assignments retain the
+Ordinary assignments use the public start -> continue -> packet -> submit flow and retain the
 frozen baseline, drift check, per-student idempotency, verification, and content-
-minimized receipt lane. New Quizzes use item-preserving finalization with complete-
-result preflight, result-version drift detection, verification, and receipts; see
-`docs/reference/new-quizzes-grading-transport.md`. A failure for one student cannot
-write, retry, or invalidate another student's result. Ambiguous writes are never
-retried blindly.
-Narrowing the SAFE projection never narrows the private New Quiz item collection used by
-that complete-result preflight; auto-graded and untouched values remain preserved exactly.
+minimized receipt lane. Existing New Quizzes with writing return the identity-safe
+unsupported code before scoring norms, SAFE packet generation, or Canvas mutation. New Quiz
+assignment totals and assignment-level comments are not scoring fallbacks.
 
 The teacher's request authorizes valid results only for the exact course/assignment
 queue frozen in that root session. Each result set and write remains bound to its
@@ -97,6 +88,6 @@ Scoring Session, SIS action, or arbitrary grade edit. The assistant continues af
 each terminal submit until the queue is complete, teacher input is required, a
 blocker occurs, or the teacher asks it to stop. Canvas Live is the review/edit
 surface. Canvas Expert has no local approval
-queue, import workflow, or second blanket confirmation. No feedback is posted without
-visible attribution to the agent; writing-process observations never enter Canvas
+queue, import workflow, or second blanket confirmation. Student feedback is not labeled
+as AI unless the teacher explicitly chose a signoff; writing-process observations never enter Canvas
 feedback, scores, or receipts.

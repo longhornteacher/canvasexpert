@@ -11,7 +11,6 @@ from api.powergrader import scoring_apply, session_actions
 def _session(**overrides):
     session = {
         "session_id": "session-1", "course_id": "course-1", "assignment_id": "assignment-1",
-        "canvas_writeback_supported": True,
         "assignment": {"points_possible": 10},
         "students": [
             {"user_id": "9001", "ai_score": 8, "ai_feedback": "Clear evidence."},

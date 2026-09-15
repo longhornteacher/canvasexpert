@@ -199,24 +199,16 @@ ledger adapter `operation_ledger/adapters/late_policy.py LatePolicyAdapter`
 KIND. The live path is the direct route above, which already reconciles via
 `invalidate`. The dead adapter file and its contract and test entries have been removed.
 
-### 6. New Quiz native grading (`new_quiz.responses`, `focused_evidence`)
+### 6. New Quiz responses (`new_quiz.responses`, `focused_evidence`)
 
-**Covered (targeted/invalidate mix):** the specialized native item
-score/feedback transport (`powergrader/new_quiz_grader.py apply`) converges
-through `powergrader.py _converge_new_quiz_after_finalize`, which calls both
-`new_quizzes.invalidate_responses` (`new_quiz.responses`, whole-scope
-stale-mark) and `_notify_write_through` (`private.submissions`, targeted
-delta refresh). This is the only native-mutation owner and it is the only
-`canvas_mutation_native` classification in the contract.
+Canvas Expert has no New Quiz item score or per-item feedback mutation. Existing
+New Quizzes that need writing scores stop before packet creation, and future writing
+portions use separate 100-point assignments.
 
-**Read-acquisition, not mutation (by design):** the GraphQL preview and
-signed-launch handshake calls in `new_quiz_grader.py _signed_context`, the
-Student Analysis report-create call in `new_quiz_fetch.py _create_report`,
-and the native-file-resolution JWT/launch exchange in
-`new_quiz_fetch.py _native_file_transport` all issue HTTP POST but change no
-Canvas content — spine 14.3 explicitly protects the report-create call as a
-"read acquisition with a Canvas-side generated artifact." Classified
-`canvas_read_acquisition`, reconciliation `n/a`, not gaps.
+**Read-acquisition, not mutation (by design):** the Student Analysis report-create
+call in `new_quiz_fetch.py _create_report` and the native-file-resolution JWT/launch
+exchange in `new_quiz_fetch.py _native_file_transport` issue HTTP POST but change no
+Canvas content. They remain classified `canvas_read_acquisition`, reconciliation `n/a`.
 
 ### 7. Uploads, diagnostics, external, and generic transport (expected `none`/`n/a`)
 

@@ -1,6 +1,6 @@
 # Private scoring engine route card
 
-Routing scope: read this card only for the internal assignment/New Quiz scoring
+Routing scope: read this card only for the internal assignment scoring
 engine. `api/powergrader/` is a legacy package path, not a teacher-facing surface.
 The public flow is MCP `start_scoring_session` -> `continue_scoring_session` ->
 `get_scoring_packet` -> `submit_scoring_results`. One root session owns a frozen
@@ -22,9 +22,8 @@ the only review/edit surface.
   without exposing transport type or private identifiers.
 - `scoring_apply.py` owns ordinary-assignment questions, frozen review, drift,
   idempotency, verification, and receipt flow through `session_actions.py`.
-- `new_quiz_grader.py` and `session_actions.py` own New Quiz complete-result
-  preflight, item-preserving finalization, result-version drift, verification, and
-  content-minimized receipts. No assignment-total substitute is allowed.
+- `start_workflow.py` stops existing New Quizzes that need writing scores with
+  `new_quiz_writing_requires_assignment` before scoring norms or SAFE packet work.
 - `feedback_vault.py`, `feedback_safety.py`, and `pseudonym.py` own local identity
   mapping and outbound privacy checks. SAFE is pseudonymized and scrubbed, not
   guaranteed anonymous.
@@ -40,9 +39,8 @@ the only review/edit surface.
   queue in that root session. It never extends to later-discovered work, another
   Scoring Session, arbitrary grade edit, or SIS action.
 - Ordinary assignments retain a fresh baseline, question digest, drift check,
-  per-student idempotency, verification, and minimized receipt. New Quizzes retain
-  full-result preflight, item-level preservation, result-version drift, verification,
-  and receipt behavior.
+  per-student idempotency, verification, and minimized receipt. Canvas Expert does not
+  write New Quiz item scores, per-item feedback, assignment totals, or fallback comments.
 - A question writes nothing until every allowed answer is explicit and bound to the
   unchanged results, packet digest, and exact review digest. Failures and ambiguous
   writes fail closed and are never blindly retried.
@@ -57,5 +55,5 @@ Start with `api/tests/powergrader/test_scoring_queue.py`,
 `api/tests/mcp_server/test_start_scoring_session.py`,
 `test_scoring_sessions.py`, `test_scoring_apply_tools.py`,
 `test_new_quiz_scoring_tools.py`, `api/tests/powergrader/test_scoring_packet.py`,
-`test_scoring_apply.py`, and `test_new_quiz_grader.py`. Verify affected browser
+and `test_scoring_apply.py`. Verify affected browser
 routes separately; source-text checks do not establish rendered behavior.

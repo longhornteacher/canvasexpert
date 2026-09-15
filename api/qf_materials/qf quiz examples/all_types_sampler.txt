@@ -100,21 +100,6 @@
         { "label": "+", "category": "Operator" },
         { "label": "==", "category": "Operator" }
       ]
-    },
-    {
-      "id": "essay_describe",
-      "type": "ESSAY",
-      "prompt": "<p>Describe, in your own words, the difference between <code>=</code> and <code>==</code> in Python.</p>",
-      "length_guidance": "2-3 sentences",
-      "rubric_hint": "= assigns a value; == compares two values and results in True or False."
-    },
-    {
-      "id": "upload_project",
-      "type": "FILEUPLOAD",
-      "prompt": "<p>Upload your finished Python program for this unit.</p>",
-      "requirements": "Submit a single .py file that runs without errors.",
-      "accepted_formats": [".py"],
-      "max_file_size_mb": 5
     }
   ],
   "rationales": [
@@ -140,9 +125,7 @@
     { "item_id": "fitb_variable", "rationale": "A variable is a named container that stores a value so a program can use it later. The blank names exactly that idea, so the correct word to fill in is variable." },
     { "item_id": "num_modulo", "rationale": "The % operator, called modulo, returns the remainder left over after one number divides another. Dividing 7 by 3 goes in twice with 1 left over, so the answer is 1." },
     { "item_id": "order_steps", "rationale": "Running a program follows a fixed order: you cannot see output before the code has actually run. Here that order is write the code, save the file, run the program, then read the output." },
-    { "item_id": "cat_tokens", "rationale": "Python code is built from keywords that control structure and operators that act on values. Here for and if are keywords, while + and == are operators, matching each group correctly." },
-    { "item_id": "essay_describe", "rationale": "= is the assignment operator. I use it to give a variable a value, like when I write x = 5 to store the number 5 in x. == is the comparison operator. I use it to ask whether two values are equal, like x == 5, which gives back True or False instead of changing anything. So = changes something, and == just asks a question about it." },
-    { "item_id": "upload_project", "rationale": "My file is named project.py. It has a short comment at the top explaining what the program does, uses clear variable names, and prints a final result so I can check it worked. Before uploading, I ran it myself from start to finish to make sure it finishes with no errors, then attached the single .py file as required." }
+    { "item_id": "cat_tokens", "rationale": "Python code is built from keywords that control structure and operators that act on values. Here for and if are keywords, while + and == are operators, matching each group correctly." }
   ]
 }
 </QUIZFORGE_JSON>

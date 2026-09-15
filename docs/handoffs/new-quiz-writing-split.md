@@ -1,6 +1,6 @@
 # New Quiz writing split and item-writer retirement
 
-Status: Ready for execution
+Status: Executed - GREEN
 
 ## Objective
 
@@ -157,10 +157,18 @@ code, current contracts, tools, examples, and tests must not preserve compatibil
 - `docs/reference/new-quizzes-grading-transport.md` for deletion
 - `docs/reference/mutation-reconciliation-map.md`, `docs/mcp-server.md`, and directly linked
   route cards/README references that describe the retired lane
+- `docs/mirror.md` only for the current-behavior sentence that claims signed New Quiz item
+  write preflight is mandatory; do not change acquisition or freshness behavior
+- `docs/reference/canvasmirror-1.0beta-information-spine.md` section 23 only, to replace the
+  stale `New Quiz authoritative write` starting-point row with the current read-only response
+  acquisition owner; no other vision text may change
 - `docs/contracts/canvas-transport-owners.json`
 
 Tests may change only where they directly specify these boundaries. Replace retired writer
 examples with one law/contract/example per the repository taxonomy; do not keep dead tests.
+The named `test_quiz_operation.py` fixtures may also receive the bounded baseline repair
+approved during execution: mocked post-patch assignments must echo the existing plan's
+`due_at`, `published`, and `post_to_sis` fields so the current verifier can check them.
 
 ## Required references
 
@@ -174,6 +182,7 @@ The executor reads this brief, then only:
 - `docs/contracts/feedback-scoring-contract.md` — **Direction 1**, **Direction 2**, and
   **Session consumption and write safety**;
 - `docs/mcp-server.md` — current Scoring Session and content-authoring paragraphs;
+- `docs/reference/canvasmirror-1.0beta-information-spine.md` — section 23 only;
 - the three canonical authoring files named in scope, limited to item types, validation,
   connected-agent workflow, scoring, and delivery sections;
 - current runtime owners and their direct tests named below as needed.
@@ -226,5 +235,31 @@ or engine suite unless focused failures show unexpected coupling.
 
 ## Execution result
 
-Pending. Replace with GREEN/YELLOW/RED, changed files, commands/counts, deviations,
-unresolved decisions, and commit hash if any. Return the same compact report in chat.
+**GREEN.** All twelve acceptance criteria hold. No commit was created; the worktree is
+based on `a6b49e2` on `dev`.
+
+- Runtime: `api/validate_qf.py`, `qf_pusher.py`, `transform.py`,
+  `powergrader/{start_workflow,session_builder,session_actions}.py`, and
+  `mcp_server/tools.py`; deleted `powergrader/{new_quiz_grader,new_quiz_csv}.py`.
+- Contracts and routing: `AGENTS.md`, `api/README.md`, `api/webui/README.md`, the three
+  canonical AI Authoring files, their QuizForge reference example, the directly routed
+  scoring/MCP/mirror/mutation/QuizForge documents, and
+  `docs/contracts/canvas-transport-owners.json`; deleted
+  `docs/reference/new-quizzes-grading-transport.md`. Section 23 of the CanvasMirror
+  information spine now routes New Quiz response acquisition to the current read-only
+  owner, `api/powergrader/new_quiz_fetch.py`.
+- Examples: the QuizForge example README and seven live `.txt` examples now contain only
+  the ten supported types; clearly named `nq_pull_*` read-only evidence remains excluded
+  from live validation.
+- Tests: the named validator/planner/operation/transform/scoring/transport/CanvasAgent
+  files were updated; retired writer tests were removed. The senior-authorized bounded
+  baseline repair added `due_at` and `post_to_sis` to three existing assignment-verification
+  mocks, with no production change.
+- Verification: named gate `226 passed`; live-example validator `7` files, `10/10` type
+  coverage, no issues or advisories; `py -m compileall -q api` passed; `git diff --check`
+  passed. Contract searches found no current production finalization member or
+  `/login/session_token` caller; the remaining `session_item_results` endpoint is the
+  existing read-only acquisition GET.
+- Authorized deviations: the senior added the narrow `docs/mirror.md` sentence update and
+  authorized the three-mock baseline repair. No browser or live Canvas call was run, as
+  required. No unresolved decisions remain.

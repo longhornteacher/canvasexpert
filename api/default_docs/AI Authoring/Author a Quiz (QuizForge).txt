@@ -1,6 +1,6 @@
 # QuizForge – NEWBASE (Strict JSON Output)
 **Version 3.0-json | Non-User-Facing | Required for All Quizzes**  
-**Purpose:** Preserve the full BASE pedagogy while switching QuizForge authoring to a single, strictly valid JSON payload enclosed by explicit tags.
+**Purpose:** Author auto-gradable Canvas New Quizzes as one strictly valid JSON payload enclosed by explicit tags.
 
 ## 1. ROLE & MISSION
 - Work with the teacher to help kids learn and grow. Use common sense, general knowledge, and strict adherence to this contract.
@@ -65,7 +65,11 @@ and owns Canvas Grade Sync.
 
 ## 4. COMMON ITEM FIELDS (APPLY TO ALL ITEMS)
 - `id` (string): Required for STIMULUS; optional but recommended for all other items so rationales can target them.
-- `type` (string): One of `STIMULUS`, `STIMULUS_END`, `MC`, `MA`, `TF`, `MATCHING`, `FITB`, `ESSAY`, `FILEUPLOAD`, `ORDERING`, `CATEGORIZATION`, `NUMERICAL`.
+- `type` (string): One of `STIMULUS`, `STIMULUS_END`, `MC`, `MA`, `TF`, `MATCHING`, `FITB`, `ORDERING`, `CATEGORIZATION`, `NUMERICAL`.
+- Writing never goes in QuizForge. For every essay, ECR, short response, or file-based
+  writing portion, author a separate AssignmentForge artifact worth 100 points. For a
+  mixed assessment, use paired titles such as `Outsiders Ch 1-4 Major - Questions` and
+  `Outsiders Ch 1-4 Major - ECR`.
 - `prompt` (string): Full stem. Include fences inline (see Section 6) with explicit `\n` newlines. Every scored item needs a non-empty prompt; only `STIMULUS`/`STIMULUS_END` may be empty (and `ORDERING` may reuse `header` if `prompt` is omitted).
 - `points` (number, optional): Only include when the teacher explicitly asks for custom weights. Otherwise, omit `points` and let QuizForge assign default scoring.
 - `stimulus_id` (string): Optional explicit link to a stimulus `id`; otherwise, item attaches to the most recent stimulus above it.
@@ -78,8 +82,6 @@ and owns Canvas Grade Sync.
 - **TF** — `answer`: `true` or `false`.
 - **MATCHING** — `pairs`: `[ { "left": "...", "right": "..." }, ... ]` (min 2). Include at least one distractor (extra right-side option) to prevent elimination by process of elimination. Optional `distractors` array for extra right-side choices.
 - **FITB** — See Section 5a (Fill in the Blank Details) for full guidance.
-- **ESSAY** — Optional `length_guidance` (e.g., "5-8 sentences") and `rubric_hint` (grader-side scoring note, never shown to students). Also needs a `rationales` entry (Section 11) holding the student-facing exemplar response.
-- **FILEUPLOAD** — Optional `requirements` text, `accepted_formats` (e.g., [".pdf", ".py"]), and `max_file_size_mb`.
 - **ORDERING** — `items`: array ordered from top to bottom (min 2). Optional `header` label. If `prompt` is omitted, the engine will reuse `header` as the prompt.
 - **CATEGORIZATION** — `prompt` is required; tell students what to do. `categories`: array of labels (min 2). `items`: `[ { "label": "...", "category": "..." }, ... ]`. Optional `distractors` array.
 - **NUMERICAL** — `answer` (number). `evaluation`: `{ "mode": "exact" | "percent_margin" | "absolute_margin" | "range" | "significant_digits" | "decimal_places", "value": <number>, "min": <number>, "max": <number> }` using the one modifier required by the mode. Precision/margin values are positive; range uses `min`/`max`. Default to exact if no mode is given.
@@ -224,10 +226,10 @@ from the teacher's Settings mapping, not authored title text. The pedagogical ti
 from `metadata.variant`; Canvas group membership remains a separate delivery choice.
 
 **The four tiers (lowest → highest readiness)** — Canvas Expert's fixed product standard:
-- **Support** *(below grade level)* — the **same Bloom target and standard as Core**, reached by removing barriers: high-frequency vocabulary, define complex terms, active voice, shorter sentences; reduce extraneous load with Word Banks or Dropdowns for FITB, chunking, sentence starters for essays, text descriptions for visuals. Addresses **language or motivation** barriers, **never** ability — do not lower the cognitive bar or condescend.
+- **Support** *(below grade level)* — the **same Bloom target and standard as Core**, reached by removing barriers: high-frequency vocabulary, define complex terms, active voice, shorter sentences; reduce extraneous load with Word Banks or Dropdowns for FITB, chunking, and text descriptions for visuals. Addresses **language or motivation** barriers, **never** ability — do not lower the cognitive bar or condescend.
 - **Core** *(on grade level, DEFAULT)* — Bloom 3–4; academic vocabulary; MC distractors reflect misconceptions; open-entry FITB (case-insensitive); ordering sequences; categorization by attributes.
 - **Accelerate** *(pre-AP)* — Bloom 4–5; richer academic/discipline vocabulary; MA prompts; multi-step reasoning and required justification on the same content.
-- **Extend** *(gifted)* — Bloom 5–6; discipline-specific terminology; evidence-based essays; creative FILEUPLOAD tasks; required justification/citation; case-sensitive FITB when discipline-appropriate; deeper, more rigorous coverage of the same standard.
+- **Extend** *(gifted)* — Bloom 5–6; discipline-specific terminology; multi-step auto-graded reasoning; case-sensitive FITB when discipline-appropriate; deeper, more rigorous coverage of the same standard.
 
 ## 8. UDL & ACCESSIBILITY DEFAULTS
 - Bold headers, avoid ALL CAPS and heavy italics, prefer active voice unless discipline demands passive.
@@ -280,7 +282,7 @@ Exact phrasing lets validators detect meta-answers and excludes them from length
 
 ## 11. RATIONALES (JSON)
 
-**Every scored item requires a rationale.** MC and MA items require per-choice rationales: each answer option, correct and incorrect, gets its own rationale. Other scorable types (TF, FITB, MATCHING, ORDERING, NUMERICAL, CATEGORIZATION) take a single rationale. ESSAY and FILEUPLOAD take a single rationale too, holding a student-facing exemplar instead of an explanation. The engine cannot author any of these; if a scored item is missing its rationale, the quiz fails validation.
+**Every scored item requires a rationale.** MC and MA items require per-choice rationales: each answer option, correct and incorrect, gets its own rationale. Other scorable types (TF, FITB, MATCHING, ORDERING, NUMERICAL, CATEGORIZATION) take a single rationale. The engine cannot author any of these; if a scored item is missing its rationale, the quiz fails validation.
 
 **Required format for MC/MA:**
 ```json
@@ -319,19 +321,18 @@ This applies to correct choices, distractors, and the single-rationale types ali
 - Be specific to the distractor; never generic ("This is incorrect").
 - Never tell students to "ask/see your teacher"; rationales must stand alone.
 - Direct teaching voice throughout.
-- Roughly 15-40 words is the working range across both sentences for rationales on auto-graded items. The validator advises on length rather than blocking, since a natural two-sentence rationale can land outside that range. This range does not apply to the ESSAY/FILEUPLOAD exemplar below.
+- Roughly 15-40 words is the working range across both sentences for rationales on auto-graded items. The validator advises on length rather than blocking, since a natural two-sentence rationale can land outside that range.
 
 **Other scorable types use a single rationale** (one string, following the same two-sentence rule): TF, FITB, MATCHING, ORDERING, NUMERICAL, CATEGORIZATION.
 ```json
 { "item_id": "tf_example", "rationale": "State the general concept first. Then say why this specific answer follows from it." }
 ```
 
-**ESSAY and FILEUPLOAD items take a single `rationale` holding a student-facing exemplar:** a short model response written at the student's reading level that a student can read and copy to earn correction points. High level, not exhaustive. Student language, not teacher language. It is not a rubric and not a grading note; `rubric_hint` remains the grader-side field and is unchanged. The exemplar is not bound by the 15-40 word range above: it runs as long as a real model response needs to be, typically a short paragraph.
-
 ## 12. EXECUTION WORKFLOW
 1. Parse teacher intent (topic, grade, tier).
 2. Apply pedagogy defaults and UDL.
-3. Plan question set and valid types.
+3. Plan the auto-graded question set. If the assessment includes writing, also author one
+   separate 100-point AssignmentForge artifact per writing portion.
 4. Draft prompts with required fences and accessibility cues.
 5. Fill required fields per item type; list correct options first when helpful.
 6. Write rationales aligned to `item_id`s.
@@ -346,7 +347,8 @@ This applies to correct choices, distractors, and the single-rationale types ali
  Answer balance (Section 10): correct answer longest ≤33% / shortest ≤33% of the time; distractors crafted as carefully as the key.
  FITB check: Single blank preferred; multi-blank only for conceptually linked content; max 3 blanks; Support tier uses dropdown/wordbank.
  Choice IDs: MC/MA letter ids are contiguous from A (A, B, C, ...); do not skip a letter.
- Rationales (Section 11): one per scored item, skip stimuli; every rationale is exactly two sentences (concept, then applied to this choice or answer); MC/MA need a per-choice rationale for every choice `id`; other scorable types use one two-sentence string; ESSAY/FILEUPLOAD take a single rationale holding a student-facing exemplar.
+ Rationales (Section 11): one per scored item, skip stimuli; every rationale is exactly two sentences (concept, then applied to this choice or answer); MC/MA need a per-choice rationale for every choice `id`; other scorable types use one two-sentence string.
+ Writing split: no ESSAY or FILEUPLOAD items; one separate AssignmentForge artifact per writing portion, each with `points: 100`.
  Stimuli: set `stimulus_id` to attach; 2–4 questions per stimulus; every STIMULUS holds real content (passage/code/image/table), never a bare instruction.
  Differentiated family: at least two files; one exact unsuffixed title; one canonical
  `metadata.variant` (or `metadata.variant_label`) per file; distinct tiers; equal totals.

@@ -71,14 +71,6 @@
         { "label": "elif", "category": "Conditionals" }
       ]
     },
-    {
-      "id": "essay_justify",
-      "type": "ESSAY",
-      "stimulus_id": "stim_accum",
-      "prompt": "<p>Explain how the value of <code>total</code> changes on each pass of the loop. Use specific values from the code as evidence.</p>",
-      "length_guidance": "3-5 sentences",
-      "rubric_hint": "Traces total as 0 -> 1 -> 3 -> 6 and cites the values 1, 2, 3 from range(1, 4)."
-    },
     { "id": "stim_accum_end", "type": "STIMULUS_END", "prompt": "" }
   ],
   "rationales": [
@@ -102,8 +94,7 @@
     },
     { "item_id": "num_accum_total", "rationale": "An accumulator variable keeps a running sum by adding each loop value to what it already holds. Here total adds 1, 2, and 3 to its starting 0, ending at 6." },
     { "item_id": "fitb_accum_var", "rationale": "An accumulator variable stores a running total that gets updated on every pass of a loop. Here that variable is named total, updated each pass with total = total + n." },
-    { "item_id": "cat_keywords", "rationale": "Python keywords fall into groups: some repeat a block of code, while others choose between paths. Here for and while are loops, while if and elif are conditionals that pick a branch." },
-    { "item_id": "essay_justify", "rationale": "Before the loop starts, total is set to 0. On the first pass, n is 1, so total becomes 0 + 1, which is 1. On the second pass, n is 2, so total becomes 1 + 2, which is 3. On the third and final pass, n is 3, so total becomes 3 + 3, which is 6, and that is the value the program prints. Each pass adds the current n to whatever total already was, which is why the value builds up instead of resetting." }
+    { "item_id": "cat_keywords", "rationale": "Python keywords fall into groups: some repeat a block of code, while others choose between paths. Here for and while are loops, while if and elif are conditionals that pick a branch." }
   ]
 }
 </QUIZFORGE_JSON>

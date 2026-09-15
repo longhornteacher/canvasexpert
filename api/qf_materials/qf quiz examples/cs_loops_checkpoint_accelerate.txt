@@ -58,14 +58,6 @@
       "answer_mode": "open_entry",
       "case_sensitive": false
     },
-    {
-      "id": "essay_step",
-      "type": "ESSAY",
-      "stimulus_id": "stim_step",
-      "prompt": "<p>Explain how changing the step from 2 to 3 would change what the loop prints. Use specific values as evidence.</p>",
-      "length_guidance": "2-4 sentences",
-      "rubric_hint": "Traces that a step of 3 would print 1, then 4 (stopping before 6), and reasons from the start value and step."
-    },
     { "id": "stim_step_end", "type": "STIMULUS_END", "prompt": "" }
   ],
   "rationales": [
@@ -88,8 +80,7 @@
       ]
     },
     { "item_id": "num_step_runs", "rationale": "In Python, range(start, stop, step) produces one value per step, and the body runs once per value. Here range(2, 10, 2) produces four values, 2, 4, 6, 8, so the body runs four times." },
-    { "item_id": "fitb_step_arg", "rationale": "In range(start, stop, step), the third argument controls how much the counter changes on each pass. The word that names this third argument, and belongs in the blank, is step." },
-    { "item_id": "essay_step", "rationale": "Right now the loop uses range(1, 6, 2), so it starts at 1 and adds 2 each time, printing 1, 3, 5. If I changed the step to 3, the loop would start at 1 again but add 3 each time instead of 2. That would give 1, then 4, and then it would stop, because the next value, 7, is past the stop value of 6. So changing the step from 2 to 3 means fewer numbers get printed, and they land farther apart." }
+    { "item_id": "fitb_step_arg", "rationale": "In range(start, stop, step), the third argument controls how much the counter changes on each pass. The word that names this third argument, and belongs in the blank, is step." }
   ]
 }
 </QUIZFORGE_JSON>

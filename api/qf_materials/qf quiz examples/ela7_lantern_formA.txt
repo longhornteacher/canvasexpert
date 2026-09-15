@@ -51,14 +51,6 @@
       "answer_mode": "open_entry",
       "case_sensitive": false
     },
-    {
-      "id": "essay_theme_support",
-      "type": "ESSAY",
-      "stimulus_id": "stim_lantern",
-      "prompt": "<p>What does the keeper's behavior reveal about his character? Support your answer with one detail from the passage.</p>",
-      "length_guidance": "3-4 sentences",
-      "rubric_hint": "Names a trait (dedication, reliability) and cites a detail such as he never missed a night."
-    },
     { "id": "stim_lantern_end", "type": "STIMULUS_END", "prompt": "" }
   ],
   "rationales": [
@@ -80,8 +72,7 @@
         { "id": "D", "correct": false, "rationale": "A descriptive phrase's meaning comes from the details around it, not from reading each word literally. The color of ash compares the sky to gray light, not to literal fire or flame." }
       ]
     },
-    { "item_id": "fitb_setting", "rationale": "A story's setting is the place and time where its events actually happen. Here the keeper climbs the lighthouse stair every night, so the blank answer is lighthouse." },
-    { "item_id": "essay_theme_support", "rationale": "The keeper's behavior shows that he is dedicated and reliable. The passage says he never missed a night, even when the storms were fierce and the climb hurt his hands. That detail proves he takes his job seriously and keeps his promise to the town no matter how hard it gets." }
+    { "item_id": "fitb_setting", "rationale": "A story's setting is the place and time where its events actually happen. Here the keeper climbs the lighthouse stair every night, so the blank answer is lighthouse." }
   ]
 }
 </QUIZFORGE_JSON>

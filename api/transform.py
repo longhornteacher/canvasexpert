@@ -397,38 +397,9 @@ def t_categorization(item, pos):
     return _wrap(entry, pos)
 
 
-def t_essay(item, pos):
-    entry = {
-        "title": item.get("id", "ESSAY"),
-        "item_body": item["prompt"],
-        "interaction_type_slug": "essay",
-        "interaction_data": {"rce": True, "word_count": True, "file_upload": False},
-        "scoring_data": {"value": item.get("rubric_hint", "")},
-        "scoring_algorithm": "None",
-        "feedback": _neutral_feedback(item),
-    }
-    return _wrap(entry, pos)
-
-
-def t_fileupload(item, pos):
-    fmts = ",".join(item.get("accepted_formats", []))
-    entry = {
-        "title": item.get("id", "UPLOAD"),
-        "item_body": item["prompt"],
-        "interaction_type_slug": "file-upload",
-        "interaction_data": {"files_count": "1", "restrict_count": True},
-        "properties": {"allowed_types": fmts, "restrict_types": bool(fmts)},
-        "scoring_data": {"value": ""},
-        "scoring_algorithm": "None",
-        "feedback": _neutral_feedback(item),
-    }
-    return _wrap(entry, pos)
-
-
 BUILDERS = {
     "MC": t_mc, "MA": t_ma, "TF": t_tf, "NUMERICAL": t_numeric, "FITB": t_fitb,
     "MATCHING": t_matching, "ORDERING": t_ordering, "CATEGORIZATION": t_categorization,
-    "ESSAY": t_essay, "FILEUPLOAD": t_fileupload,
 }
 
 

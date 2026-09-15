@@ -122,9 +122,6 @@ def build_start_session(
     mode_label: str,
     copilot_packet: dict | None,
     late_watch: dict,
-    canvas_writeback_supported: bool = True,
-    comment_writeback_supported: bool = False,
-    new_quiz_item_finalization_supported: bool = False,
     evidence_manifest: str | None = None,
     evidence_status: str = "unknown",
     auto_post_enabled: bool = False,
@@ -149,9 +146,6 @@ def build_start_session(
         mode_label=mode_label,
         copilot_packet=copilot_packet,
         late_watch=late_watch,
-        canvas_writeback_supported=canvas_writeback_supported,
-        comment_writeback_supported=comment_writeback_supported,
-        new_quiz_item_finalization_supported=new_quiz_item_finalization_supported,
         evidence_manifest=evidence_manifest,
         evidence_status=evidence_status,
         oral_reading_passage=oral_reading_passage,
@@ -230,6 +224,16 @@ def run_start_session(
         return {"ok": False, "payload": {
             "ok": False,
             "code": "nothing_to_grade",
+            "assignment_name": str(assignment_name),
+        }}
+    if is_new_quiz:
+        return {"ok": False, "payload": {
+            "ok": False,
+            "code": "new_quiz_writing_requires_assignment",
+            "error": (
+                "Grade this New Quiz writing in Canvas. For future assessments, "
+                "author each writing portion as a separate 100-point AssignmentForge assignment."
+            ),
             "assignment_name": str(assignment_name),
         }}
 
@@ -388,9 +392,6 @@ def run_start_session(
         mode_label=session_store.mode_label(mode),
         copilot_packet=ai_result.get("copilot_packet"),
         late_watch=late_watch,
-        canvas_writeback_supported=not is_new_quiz,
-        comment_writeback_supported=is_new_quiz,
-        new_quiz_item_finalization_supported=is_new_quiz,
         evidence_manifest=refresh.get("manifest_path"),
         evidence_status=refresh.get("status", "unknown"),
         auto_post_enabled=auto_post_enabled,

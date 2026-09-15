@@ -44,7 +44,6 @@ ALLOWED_DIRECT_HTTP = {
     # Specialized New Quiz / PowerGrader native transports (documented owners)
     "api/powergrader/canvas_fetch.py",   # specialized PowerGrader fetch transport
     "api/powergrader/new_quiz_fetch.py", # specialized native New Quiz file/evidence transport
-    "api/powergrader/new_quiz_grader.py",# specialized native New Quiz grader transport
     # File-upload second leg (Canvas-issued storage URL; owned in the mutation contract)
     "api/operation_ledger/adapters/assignment_whole.py",
     # Deliberate live reads / fallbacks (tracked; not accidental)

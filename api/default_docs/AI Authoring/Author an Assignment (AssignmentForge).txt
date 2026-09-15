@@ -43,6 +43,15 @@
 - `metadata` (optional): free-form notes (subject, grade, `teks` standard codes). Students never see metadata; tools may ignore unknown keys.
 - `tiers` (optional, array): differentiation tiers — see Section 5. Omit entirely for a whole-class assignment.
 
+### Writing portions split from New Quizzes
+
+AssignmentForge is the live authoring contract for every writing portion. Author one
+separate artifact per portion with `points: 100`; valid scores span the full numeric range
+from 0 through 100. When an assessment also has objective questions, pair artifacts such as
+`Outsiders Ch 1-4 Major - Questions` (QuizForge) and
+`Outsiders Ch 1-4 Major - ECR` (AssignmentForge). Use the ordinary submission shape the
+teacher chooses, including the tracked/not-tracked choice below.
+
 ## 4. SUBMISSION
 ```json
 "submission": {

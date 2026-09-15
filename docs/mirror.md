@@ -334,9 +334,8 @@ read whatever Canvas Expert wrote to disk.
   last-good submission files. This slice is read-service-only: no Home/Work
   consumer, report fallback, or write-triggered invalidation is wired to it yet.
 - **Attachment downloads** (names only, in attempt records).
-- New Quiz item-level grading or feedback writes. Mirror snapshots are
-  read-only; the existing live/native grader preflight remains mandatory before
-  any write.
+- New Quiz item-level grading or feedback writes. Mirror snapshots are read-only,
+  and Canvas Expert does not write New Quiz item scores or per-item feedback.
 - Multi-machine conflict smarts beyond disposability. (`vault.json` — not a
   mirror file — remains the one cross-machine-conflict-sensitive artifact.)
 - Startup-item registration (separate slice; per-user Startup folder,

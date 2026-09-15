@@ -54,7 +54,7 @@ SAMPLE_PLAN = {
         {
             "index": 2,
             "source_item_id": "q2",
-            "source_type": "ESSAY",
+            "source_type": "TF",
             "payload": {"item": {"entry_type": "Item", "position": 2, "points_possible": 50.0}},
         },
     ],
@@ -331,7 +331,7 @@ def test_review_freezes_per_target_summaries(tmp_path, monkeypatch):
     assert frozen[0]["mode"] == "whole"
     assert frozen[0]["item_count"] == 2
     assert frozen[0]["item_types"]["MC"] == 1
-    assert frozen[0]["item_types"]["ESSAY"] == 1
+    assert frozen[0]["item_types"]["TF"] == 1
     assert frozen[0]["total_points"] == 100.0
     assert frozen[0]["due_at"] == "2026-08-01T23:59:00Z"
     assert frozen[0]["published"] is True
@@ -409,7 +409,8 @@ def test_apply_creates_quiz_and_items(tmp_path, monkeypatch):
         ([], None),  # setup capture_baseline (assignments search)
         ([], None),  # apply-time capture_baseline (assignments search)
         # Assignment verify after patch for course 101
-        ({"id": "1001", "name": "Algebra Quiz 1", "published": True}, None),
+        ({"id": "1001", "name": "Algebra Quiz 1", "published": True,
+          "due_at": "2026-08-01T23:59:00Z", "post_to_sis": False}, None),
     ])
     _mockcanvas_get_all(monkeypatch, [
         ([{"id": 10, "name": "Unit 1"}], None),  # module lookup
@@ -479,7 +480,8 @@ def test_apply_without_module(tmp_path, monkeypatch):
     _mockcanvas_get(monkeypatch, [
         ([], None),  # setup capture_baseline
         ([], None),  # apply-time capture_baseline
-        ({"id": "1001", "name": "Algebra Quiz 1", "published": True}, None),  # verify after patch
+        ({"id": "1001", "name": "Algebra Quiz 1", "published": True,
+          "due_at": "2026-08-01T23:59:00Z", "post_to_sis": False}, None),  # verify after patch
     ])
     send_calls = _mock_canvas_send(monkeypatch, [
         ({"id": 1001}, None),  # create_quiz:0
@@ -756,7 +758,8 @@ def test_apply_retry_resumes_unfinished_item(tmp_path, monkeypatch):
         ([], None),  # apply-time capture_baseline
         ({"id": 1001, "title": "Algebra Quiz 1"}, None),  # verify existing quiz
         ({"id": 2001}, None),  # verify item 1
-        ({"id": "1001", "name": "Algebra Quiz 1", "published": True}, None),  # verify after patch
+        ({"id": "1001", "name": "Algebra Quiz 1", "published": True,
+          "due_at": "2026-08-01T23:59:00Z", "post_to_sis": False}, None),  # verify after patch
     ])
     _mockcanvas_get_all(monkeypatch, [
         ([{"id": 10, "name": "Unit 1"}], None),  # module lookup

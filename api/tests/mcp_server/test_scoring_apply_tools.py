@@ -1,6 +1,5 @@
 """Synthetic tests for the single chat-facing Scoring Session submit call."""
 from __future__ import annotations
-
 import json
 from contextlib import nullcontext
 
@@ -14,7 +13,7 @@ REAL_NAME = "Ada Lovelace"
 PSEUDONYM = "Pikachu"
 
 
-def _wire(monkeypatch, tmp_path, _set_active_courses, *, new_quiz=False, two_items=False):
+def _wire(monkeypatch, tmp_path, _set_active_courses, *, two_items=False):
     _set_active_courses(["course-1"])
     from api.powergrader import session_store
 
@@ -40,7 +39,6 @@ def _wire(monkeypatch, tmp_path, _set_active_courses, *, new_quiz=False, two_ite
         "assignment_id": "assignment-1", "assignment_name": "Essay",
         "scoring_basis": {"source": "canvas_rubric", "label": "Canvas rubric"},
         "privacy_artifacts": {"safe_bundle": str(bundle_path)},
-        "new_quiz_item_finalization_supported": new_quiz,
         "assignment": {"points_possible": 10},
         "students": [{"user_id": REAL_ID, "new_quiz_items": []}],
     }
@@ -128,48 +126,6 @@ def test_ordinary_results_submit_once_without_exposing_private_identity(
     assert result["results"] == [{"pseudonym": PSEUDONYM, "status": "finalized"}]
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
     assert session["students"][0]["ai_score"] == 8
-
-
-def test_new_quiz_missing_score_holds_instead_of_offering_comment_only(
-    monkeypatch, tmp_path, _set_active_courses,
-):
-    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses, new_quiz=True)
-    vault, error = tools._open_vault()
-    assert error is None
-
-    questions = tools._new_quiz_scoring_questions(
-        session,
-        [{"pseudonym": PSEUDONYM, "item_id": "item-1", "score": None,
-          "feedback": "Useful feedback."}],
-        bundle, {REAL_ID: PSEUDONYM}, [], vault,
-    )
-    [question] = questions
-    [public_question] = tools._new_quiz_public_questions(questions, {REAL_ID: PSEUDONYM})
-
-    assert question["kind"] == "missing_score"
-    assert public_question["answer_with"] == ["skip_those"]
-    assert "comment-only posting is unavailable" in public_question["detail"].lower()
-    assert tools._resolve_scoring_answers(questions, {"missing_score": "comment_only"}) == {
-        "ok": False, "code": "invalid_answer",
-    }
-    resolved = tools._resolve_scoring_answers(questions, {"missing_score": "skip_those"})
-    assert resolved["skip_pseudonyms"] == {PSEUDONYM}
-
-
-def test_new_quiz_ungraded_item_score_is_not_an_overwrite(
-    monkeypatch, tmp_path, _set_active_courses,
-):
-    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses, new_quiz=True)
-    session["students"][0]["new_quiz_items"] = [{
-        "item_id": "item-1", "earned_score": 0, "status": "NotGraded",
-    }]
-    vault, error = tools._open_vault()
-    assert error is None
-
-    questions = tools._new_quiz_scoring_questions(
-        session, _result(), bundle, {REAL_ID: PSEUDONYM}, [], vault,
-    )
-    assert all(question["kind"] != "overwrites_existing_score" for question in questions)
 
 
 def test_question_blocks_write_then_matching_digest_and_answer_submit_same_results(
@@ -317,7 +273,6 @@ def test_backlog_session_pauses_submits_advances_and_completes_after_reload(
             "course_id": kwargs["course_id"], "assignment_id": kwargs["assignment_id"],
             "assignment_name": kwargs["assignment_id"], "mode": "packet",
             "scoring_basis": {"source": "local_rubric", "label": "Writing"},
-            "new_quiz_item_finalization_supported": False,
             "privacy_artifacts": {"safe_bundle": str(bundle_path)},
             "students": [{"user_id": REAL_ID, "status": "pending"}],
         })
@@ -364,32 +319,3 @@ def test_backlog_session_pauses_submits_advances_and_completes_after_reload(
     ]
     assert apply_calls == ["child-assignment-1", "child-assignment-2"]
     assert "child-assignment-1" not in json.dumps(first_submit)
-
-
-def test_new_quiz_uses_same_submit_and_hides_internal_finalize_coordinates(
-    monkeypatch, tmp_path, _set_active_courses,
-):
-    _wire(monkeypatch, tmp_path, _set_active_courses, new_quiz=True)
-    calls = []
-
-    def preview(session_id):
-        calls.append(("review", session_id))
-        return {"ok": True, "operation_id": "private-operation", "review_digest": "private-digest"}
-
-    def apply(operation_id, review_digest):
-        calls.append(("finalize", operation_id, review_digest))
-        return {"ok": True, "operation_id": operation_id,
-                "counts": {"finalized": 1, "already_applied": 0, "failed": 0},
-                "results": [{"pseudonym": PSEUDONYM, "status": "finalized"}]}
-
-    monkeypatch.setattr(tools, "_prepare_new_quiz_finalization", preview)
-    monkeypatch.setattr(tools, "_finalize_new_quiz_results", apply)
-    bundle = json.loads((tmp_path / "safe-bundle.json").read_text(encoding="utf-8"))
-
-    result = tools.submit_scoring_results("session-1", _result(), _digest(bundle))
-
-    assert calls == [("review", "session-1-assignment-run"),
-                     ("finalize", "private-operation", "private-digest")]
-    assert result["counts"]["finalized"] == 1
-    assert "operation_id" not in result and "private-operation" not in _blob(result)
-    assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)

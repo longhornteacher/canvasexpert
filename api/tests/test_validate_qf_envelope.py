@@ -126,8 +126,8 @@ def _tf_item(item_id):
     return {"id": item_id, "type": "TF", "prompt": "<p>Sky is blue?</p>", "answer": True}
 
 
-def _essay_item(item_id):
-    return {"id": item_id, "type": "ESSAY", "prompt": "<p>Discuss.</p>"}
+def _writing_item(item_id, item_type):
+    return {"id": item_id, "type": item_type, "prompt": "<p>Discuss.</p>"}
 
 
 def _per_choice_rationale(item_id, rationale_texts):
@@ -151,8 +151,7 @@ def _quiz(items, rationales):
 # --- Depth checks: ported from engine/tests/unit/test_rationale_rules.py ---
 #
 # All 9 original cases, ported onto the new gate before that file (and the rule
-# set it tested) is deleted. The two ESSAY cases already encode the new D7
-# behavior: ESSAY now requires an exemplar instead of taking no rationale.
+# set it tested) is deleted.
 
 def test_ported_mc_full_coverage_passes(tmp_path):
     payload = _quiz([_mc_item("q1", 4)], [_per_choice_rationale("q1", ["a", "b", "c", "d"])])
@@ -189,16 +188,14 @@ def test_ported_tf_without_rationale_fails(tmp_path):
     assert any("no rationales entry" in p and "why the correct answer is correct" in p for p in problems), problems
 
 
-def test_ported_essay_with_exemplar_passes(tmp_path):
-    payload = _quiz([_essay_item("e1")],
-                     [_single_rationale("e1", "A strong response connects evidence to a claim.")])
-    assert validate_qf.validate(_envelope(tmp_path, payload), set()) == []
-
-
-def test_ported_essay_without_exemplar_fails(tmp_path):
-    payload = _quiz([_essay_item("e1")], [])
+@pytest.mark.parametrize("item_type", ["ESSAY", "FILEUPLOAD"])
+def test_writing_items_are_routed_to_separate_assignments(tmp_path, item_type):
+    payload = _quiz([_writing_item("writing-1", item_type)], [])
     problems = validate_qf.validate(_envelope(tmp_path, payload), set())
-    assert any("no rationales entry" in p and "exemplar" in p for p in problems), problems
+    [problem] = problems
+    assert item_type in problem
+    assert "separate AssignmentForge assignment" in problem
+    assert "100 points" in problem
 
 
 def test_ported_missing_id_fails(tmp_path):
@@ -310,12 +307,6 @@ def test_advise_flags_ask_the_teacher_language(tmp_path):
     _, data, _ = validate_qf._load(_envelope(tmp_path, payload))
     advisories = validate_qf.advise(data)
     assert any("ask or see the" in a for a in advisories), advisories
-
-
-def test_advise_exempts_essay_exemplars(tmp_path):
-    payload = _quiz([_essay_item("e1")], [_single_rationale("e1", "Short.")])
-    _, data, _ = validate_qf._load(_envelope(tmp_path, payload))
-    assert validate_qf.advise(data) == []
 
 
 def test_advise_is_empty_for_a_clean_two_sentence_rationale(tmp_path):

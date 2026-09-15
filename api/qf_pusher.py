@@ -35,6 +35,7 @@ QUIZ_SETTINGS = {
 }
 
 TOTAL_POINTS = 100  # QuizForge requires a 100-point total
+WRITING_TYPES = {"ESSAY", "FILEUPLOAD"}
 
 SETTING_KEYS = (
     "shuffle_answers", "shuffle_questions", "access_code",
@@ -68,6 +69,18 @@ def load_qf(path):
     m = ENVELOPE.search(raw)
     payload = m.group(1).strip() if m else raw  # tolerate bare JSON too
     return json.loads(payload)
+
+
+def _reject_writing_items(data):
+    """Reject writing immediately after parse, before preparation or transport."""
+    for item in data.get("items") or []:
+        item_type = str((item or {}).get("type") or "")
+        if item_type in WRITING_TYPES:
+            raise ValueError(
+                f"{item_type} cannot be pushed as a Canvas New Quiz. Author each "
+                "writing portion as a separate AssignmentForge assignment worth "
+                "100 points (for example, a matching ' - ECR' assignment)."
+            )
 
 
 def prepare_items(data):
@@ -174,6 +187,7 @@ def build_push_plan(path, settings=None):
     """Build the deterministic, JSON-safe no-network QuizForge push plan."""
     push_settings = _normalized_settings(settings or {})
     data = load_qf(path)
+    _reject_writing_items(data)
     title = data.get("title", os.path.basename(path))
     prepared = prepare_items(data)
     points = distribute_points(prepared)
@@ -373,10 +387,10 @@ def push_file(path, dry_run=False):
     _settings_raw = os.environ.get("QF_PUSH_SETTINGS", "").strip()
     push_settings = json.loads(_settings_raw) if _settings_raw else {}
 
+    plan = build_push_plan(path, push_settings)
     data = load_qf(path)
     title = data.get("title", os.path.basename(path))
     items = prepare_items(data)
-    plan = build_push_plan(path, push_settings)
     print(f"\n=== {os.path.basename(path)} -> '{title}'  ({len(items)} items) ===")
     teks.coverage_report(items)  # always: pure-local TEKS tracking
 

@@ -140,64 +140,6 @@ def test_stored_ai_banner_is_removed_from_review_apply_payload():
     }
 
 
-def _new_quiz_session():
-    session = _session()
-    session["canvas_writeback_supported"] = False
-    session["comment_writeback_supported"] = True
-    return session
-
-
-def test_comment_only_push_sends_comments_and_never_scores():
-    """New Quiz sessions post approved feedback as assignment comments only:
-    no submission/posted_grade key may ever reach Canvas."""
-    session = _new_quiz_session()
-    review, _ = session_actions.review_push(
-        "session-1", user_ids="", load_session=lambda _: session,
-        save_session=lambda _: None, canvas_get=canvas_get,
-    )
-    assert review["ok"] is True
-    assert review["writeback_mode"] == "comments_only"
-    # user-1 has feedback; user-2 (score only, no feedback) is not eligible.
-    assert review["user_ids"] == ["user-1"]
-    assert review["targets"][0]["has_score"] is False
-    assert review["targets"][0]["has_feedback"] is True
-
-    calls = []
-    result, code = session_actions.push_grades(
-        "session-1", user_ids=json.dumps(review["user_ids"]), review_token=review["review_token"],
-        load_session=lambda _: session, save_session=lambda _: None,
-        canvas_send=lambda method, path, payload: calls.append((method, path, payload)) or ({}, None),
-        canvas_get=canvas_get,
-    )
-    assert code == 200 and result["ok"] is True and result["pushed"] == 1
-    assert len(calls) == 1
-    method, path, payload = calls[0]
-    assert method == "PUT" and path.endswith("user-1")
-    assert payload == {"comment": {"text_comment": "Good."}}
-    assert "submission" not in payload
-
-
-def test_comment_only_review_rejects_students_without_feedback():
-    session = _new_quiz_session()
-    result, code = session_actions.review_push(
-        "session-1", user_ids='["user-2"]', load_session=lambda _: session,
-        save_session=lambda _: None, canvas_get=canvas_get,
-    )
-    assert code == 200 and result["ok"] is False
-    assert result["code"] == "invalid_selection"
-    assert "feedback" in result["error"]
-
-
-def test_legacy_new_quiz_session_without_comment_flag_stays_blocked():
-    session = _session()
-    session["canvas_writeback_supported"] = False
-    result, code = session_actions.review_push(
-        "session-1", user_ids="", load_session=lambda _: session,
-        save_session=lambda _: None, canvas_get=canvas_get,
-    )
-    assert code == 200 and result["code"] == "canvas_writeback_unsupported"
-
-
 def test_grade_mutation_invalidates_review():
     session = _session()
     session["pending_push_review"] = {"token": "opaque"}
