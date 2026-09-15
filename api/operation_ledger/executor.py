@@ -204,6 +204,7 @@ def _emit_apply(outcome: str, operation: dict | None, started: float,
 def _finish_operation(operation_id: str, target_results: list[dict]) -> dict:
     op = operations.get_operation(operation_id)
     final_status = models.compute_operation_status(op.get("targets", []))
+    variants = _assignment_variants(op)
     operations.set_operation_status(operation_id, final_status)
     receipt = new_receipt(
         subject_type="operation",
@@ -211,6 +212,8 @@ def _finish_operation(operation_id: str, target_results: list[dict]) -> dict:
         kind=op["kind"],
         status=_receipt_status(final_status),
         targets=_receipt_targets(op.get("targets", [])),
+        **({"variants": variants} if variants else {}),
+        **({"teacher_action": "In Canvas, assign each draft to the intended students or groups, then publish the drafts."} if variants else {}),
     )
     create_receipt(receipt)
     return {
@@ -219,6 +222,30 @@ def _finish_operation(operation_id: str, target_results: list[dict]) -> dict:
         "status": final_status,
         "target_results": _project_target_results(target_results),
     }
+
+
+def _assignment_variants(operation: dict) -> list[dict]:
+    """Expose content-only AssignmentForge tier results in the receipt."""
+    if operation.get("kind") != "content.assignment":
+        return []
+    tiers = (operation.get("normalized_payload") or {}).get("tiers") or []
+    output = []
+    for index, tier in enumerate(tiers):
+        step_key = f"create_tier_assignment:{index}"
+        for target in operation.get("targets") or []:
+            step = next((row for row in target.get("steps") or []
+                         if row.get("step_key") == step_key
+                         and row.get("state") in ("applied", "skipped")
+                         and row.get("returned_object_id")), None)
+            if step:
+                output.append({
+                    "label": tier.get("label"),
+                    "assignment_id": step.get("returned_object_id"),
+                    "name": tier.get("title"),
+                    "html_url": step.get("returned_object_url"),
+                })
+                break
+    return output
 
 
 def _execute_target(adapter, operation: dict, payload: dict, target: dict) -> dict:

@@ -24,9 +24,9 @@ These are high-risk Canvas write flows.
 
 - `api/operation_ledger/adapters/assignment_whole.py` — whole-class assignment create,
   printable upload, module attachment, autoscore scheduling, and whole reconcile.
-- `api/operation_ledger/adapters/assignment_tiered.py` — color-suffixed assignment
-  create, override creation, autoscore scheduling, shared family-tail dispatch, and
-  tiered reconcile.
+- `api/operation_ledger/adapters/assignment_tiered.py` — content-only color-suffixed
+  assignment-draft creation and exact-ID tiered reconcile. It performs no roster/group,
+  override, module, or family-tail work.
 - `api/operation_ledger/adapters/quiz_whole.py` — whole-class quiz coordinator and reconcile.
 - `api/operation_ledger/adapters/quiz_differentiated.py` — differentiated quiz
   coordinator, extra-time bucket handling, variant failure-state policy, shared
@@ -49,7 +49,7 @@ These are high-risk Canvas write flows.
 - `api/operation_ledger/adapters/module_placement.py` — shared Canvas Assignment-type
   module find/create/attach behavior for Assignment and Quiz flows only.
 - `api/operation_ledger/adapters/assignment_groups.py` — canonical safe group-resolution
-  helper used by tiered assignments and differentiated quizzes.
+  helper used by differentiated quizzes; AssignmentForge tier delivery does not call it.
 - `api/operation_ledger/adapters/differentiated_bridge.py` — one shared owner for
   public-tag normalization, source/bridge shape verification, end-of-day bridge due
   time, runtime Dashboard instructions, bridge create/activate, bridge-only module

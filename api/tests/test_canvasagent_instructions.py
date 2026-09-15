@@ -139,12 +139,12 @@ def test_scoring_session_flow_is_assignment_type_neutral(text):
     assert "never ask the teacher to choose a scoring transport" in lowered
 
 
-def test_connected_guidance_describes_differentiated_family_ownership(text):
+def test_connected_guidance_describes_differentiated_delivery_ownership(text):
     lowered = text.lower()
     for phrase in (
         "public color tags",
-        "unsuffixed no-submission bridge",
-        "only the bridge in the selected module",
+        "independent unpublished assignment",
+        "the teacher assigns students/groups and publishes them in canvas",
         "canvas live",
         "teacher-owned canvas grade sync",
     ):

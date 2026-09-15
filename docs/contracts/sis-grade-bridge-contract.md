@@ -4,10 +4,11 @@ Status: accepted product and safety contract.
 
 ## 1. Purpose and boundary
 
-A differentiated AssignmentForge or QuizForge delivery is one Canvas family. The
-color-suffixed assignments are the student work surfaces. One unsuffixed no-submission
-assignment is the bridge shown in the selected module and used as the family gradebook
-column.
+A differentiated QuizForge delivery is one Canvas family. AssignmentForge tier delivery is
+content-only and is outside this bridge contract: it creates independent assignment drafts
+and never registers or activates a family. For QuizForge, the color-suffixed assignments
+are the student work surfaces. One unsuffixed no-submission assignment is the bridge shown
+in the selected module and used as the family gradebook column.
 
 CanvasExpert creates and verifies that family in Canvas Live and may later project final
 Canvas scores from the registered source assignments into the registered bridge. The teacher
@@ -22,17 +23,16 @@ of the verified bridge structure. This student-free record may live in synced wo
 settings. It never contains names, student IDs, memberships, submissions, scores, or private
 evidence.
 
-The differentiated content operation creates the family and writes the registration only
+The differentiated QuizForge operation creates the family and writes the registration only
 after it verifies every source, the bridge, and the bridge's exact module item. Later grade
 projection accepts only that registered identity. It never discovers or adopts a family by
 title, creates a bridge, repairs family structure, or changes source or bridge SIS settings.
 
-## 3. Differentiated delivery laws
+## 3. QuizForge differentiated delivery laws
 
 The pedagogical tiers remain `Support`, `Core`, `Accelerate`, and `Extend`. Every used tier
 must resolve through the teacher's Settings to a trimmed, nonempty public Canvas tag, and the
-used tags must be unique after case-folding. AssignmentForge resolves the authored
-`tier.label`; QuizForge declares the tier in `metadata.variant` or
+used tags must be unique after case-folding. QuizForge declares the tier in `metadata.variant` or
 `metadata.variant_label`. The server appends ` - <tag>` to one common exact base title.
 
 Preparation blocks before a Canvas write unless the family has at least two tiers, a
@@ -59,9 +59,9 @@ Exactly one Assignment-type item in the selected module points to that exact bri
 district URL is embedded in source. The bridge's `post_to_sis` flag only enables Canvas's SIS
 Sync setting; it does not authorize or cause CanvasExpert to run a sync.
 
-## 5. Ordered creation protocol
+## 5. QuizForge ordered creation protocol
 
-The reviewed differentiated content operation runs in this order:
+The reviewed differentiated QuizForge operation runs in this order:
 
 1. Revalidate group membership, public tags, title, points and assignment group, due date,
    module, and same-title collisions.

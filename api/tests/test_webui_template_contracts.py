@@ -66,6 +66,20 @@ def test_operation_summary_polling_uses_ordinal_labels_only():
     assert 'window.addEventListener("pagehide"' in core
 
 
+def test_assignment_tier_review_is_content_only():
+    core = _slurp("api/webui/static/push/core.js")
+    start = core.index("if (first.tiered)")
+    first_loop = core.index("    frozen.forEach(function (review)", start)
+    end = core.index("    frozen.forEach(function (review)", first_loop + 1)
+    assignment_review = core[start:end]
+    assert "tier.group" not in assignment_review
+    assert "tier.student_count" not in assignment_review
+    assert "only_visible_to_overrides" not in assignment_review
+    assert "unpublished, unrestricted assignment draft" in assignment_review
+    assert "reviewTeacherAction" in assignment_review
+    assert "assign each draft" in core
+
+
 def test_shared_csrf_meta():
     """base.html must expose the shared CSRF meta tag."""
     base = _slurp("api/webui/templates/base.html")

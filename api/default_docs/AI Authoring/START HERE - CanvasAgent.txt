@@ -117,11 +117,11 @@ tab, or, when CanvasExpert is connected as a tool provider, asks the assistant
 to land one staged draft in one course from the chat. Per-course details are matched by
 name, so one file works across sections. Quizzes can also compile offline into
 a Canvas-importable ZIP plus printable Word and PDF copies. Assignments and
-quizzes can carry differentiation tiers that assign to named Canvas groups, so
-one family delivers scaffolded variants instead of three hand-made copies. Settings
-maps the pedagogical tiers to public color tags. Canvas Expert creates exact
-color-suffixed real assignments plus one unsuffixed no-submission bridge and places
-only the bridge in the selected module.
+quizzes can carry differentiation tiers that produce scaffolded variants instead of three
+hand-made copies. AssignmentForge tiers are content-only: Settings maps pedagogical
+labels to public color tags, and Canvas Expert creates independent unpublished assignment
+drafts. The teacher assigns students/groups and publishes them in Canvas. QuizForge's
+differentiated group and bridge behavior remains in its own path.
 
 If one assessment combines objective questions and writing, author the objective
 portion as an auto-graded QuizForge file and each distinct writing portion as its own
@@ -156,12 +156,12 @@ If continuation returns `new_quiz_writing_requires_assignment`, stop that item,
 tell the teacher to grade its writing in Canvas, and use separate 100-point
 AssignmentForge artifacts for future writing portions.
 
-SIS Grade Bridges. A differentiated Forge delivery automatically registers its
-verified source and bridge assignments. Later, the bridge tools can preview and apply
-grade projection for that exact registered course and family. They copy eligible final
-Canvas scores into the bridge. Canvas Expert never starts SIS sync; report the result and
-send the teacher to Canvas Live for review and teacher-owned Canvas Grade Sync. This is
-a separate workflow from AI scoring.
+SIS Grade Bridges. A differentiated QuizForge delivery registers its verified source and
+bridge assignments. Later, the bridge tools can preview and apply grade projection for
+that exact registered course and family. AssignmentForge tier drafts are content-only and
+never register a bridge or family. They copy no grades. Canvas Expert never starts SIS
+sync; report bridge results and send the teacher to Canvas Live for review and
+teacher-owned Canvas Grade Sync. This is a separate workflow from AI scoring.
 
 Learning Objectives. Reviewed, revision-protected per-course objectives,
 each grounded in current modules, assignments, and pages. A changed source
@@ -334,8 +334,8 @@ what they asked for, not by a default that outranks them:
     unpublished unless you pass published=true, so it is visible to them and
     not yet to students -- they can edit or delete it by hand in Canvas and
     tell you what to change. Report what landed, including the URL it returns.
-    A differentiated assignment or quiz also needs a timezone-aware due date and a
-    module, so use the staged preview/apply path below for it.
+    A differentiated quiz needs a timezone-aware due date and a module, so use the staged
+    preview/apply path below for it. AssignmentForge tiers remain independent drafts.
   * They asked you to prepare it for their review. Call
     stage_content(kind, label, content) and stop there. Tell them it is
     staged; it appears under "Staged by your assistant (pending review)" on
@@ -350,11 +350,10 @@ Delivery options are per kind: a page takes published and module_name, a rubric
 only published, and a quiz or assignment also takes assignment_group_name,
 post_to_sis, and -- on the preview pair only -- ISO 8601 due_at, unlock_at, and
 lock_at. Naming one a kind cannot carry is refused rather than quietly dropped.
-Differentiated assignment and quiz families require due_at and module_name. Their used
-canonical tiers must have unique public tags in Settings. The server owns the safe
-family flags: sources are published, group-only, omitted, SIS-disabled, and absent from
-modules; the unsuffixed bridge is published, counted, SIS-enabled, and the sole module
-item. Report every exact source and bridge URL, then send the teacher to Canvas Live.
+Differentiated quizzes require due_at and module_name, and their used canonical tiers must
+have unique public tags in Settings. AssignmentForge tier drafts use unique public tags,
+are unpublished and unrestricted, and carry no group, bridge, or module placement. Report
+each exact assignment URL and tell the teacher to assign and publish the drafts in Canvas.
 
 Every route stages the draft, so there is always a file the teacher can read
 afterwards, and every route runs the same baseline capture, frozen review, and
@@ -428,9 +427,8 @@ with no correct answer marked, or a scored question missing its rationale.
 A quiz with no questions is rejected on purpose. If you produced an empty
 items list, that is your bug, not the app's.
 
-Names must match. Modules, groups, and grading categories are matched per
-course by name. If a course uses a different name, the name gets fixed in
-Canvas or in the push options.
+Names must match. Modules and grading categories are matched per course by name. If a
+course uses a different name, the name gets fixed in Canvas or in the push options.
 
 A staged draft never appears. The marker file's byte count almost certainly
 disagrees with the file on disk. Re-measure the file after writing it and

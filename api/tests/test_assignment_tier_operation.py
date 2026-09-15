@@ -98,6 +98,7 @@ class FakeCanvas:
         self.modules = {"501": {"id": "501", "name": "Week 1"}}
         self.module_items = {}
         self.sends = []
+        self.reads = []
         self.next_id = 100
 
     def send(self, method, path, body, timeout=30):
@@ -128,6 +129,7 @@ class FakeCanvas:
         raise AssertionError((method, path, body))
 
     def get(self, path, params=None, timeout=20):
+        self.reads.append(path)
         if "/modules/" in path and "/items/" in path:
             module_id, item_id = path.split("/modules/")[1].split("/items/")
             return copy.deepcopy(self.module_items.get((module_id, item_id))), None
@@ -140,6 +142,7 @@ class FakeCanvas:
         return [], None
 
     def get_all(self, path, params=None, timeout=30):
+        self.reads.append(path)
         if path.endswith("/assignment_groups"):
             return [{"id": 77, "name": "Coursework"}], None
         if path.endswith("/modules"):
@@ -170,14 +173,23 @@ def _build(monkeypatch, **request_overrides):
     return AssignmentAdapter().build_payload(request)
 
 
-@pytest.mark.parametrize(("change", "message"), [
-    ({"due_at": ""}, "due_at"),
-    ({"due_at": "2026-09-14T15:30:00"}, "UTC offset"),
-    ({"module_name": ""}, "module_name"),
-])
-def test_prepare_requires_dated_module_delivery(monkeypatch, change, message):
-    with pytest.raises(ValueError, match=message):
-        _build(monkeypatch, **change)
+def test_prepare_accepts_content_only_tiers_without_module_or_due(monkeypatch):
+    payload = _build(monkeypatch, due_at="", module_name="")
+    assert [row["label"] for row in payload["tiers"]] == ["Support", "Extend"]
+    assert all("group" not in row for row in payload["tiers"])
+    assert "module_name" not in payload
+
+
+def test_prepare_preserves_ordinary_dates_for_each_tier(monkeypatch):
+    payload = _build(
+        monkeypatch,
+        due_at="2026-09-14T15:30:00-05:00",
+        unlock_at="2026-09-01T08:00:00-05:00",
+        lock_at="2026-09-30T23:59:00-05:00",
+    )
+    assert payload["due_at"] == "2026-09-14T15:30:00-05:00"
+    assert payload["unlock_at"] == "2026-09-01T08:00:00-05:00"
+    assert payload["lock_at"] == "2026-09-30T23:59:00-05:00"
 
 
 def test_prepare_requires_unique_public_tags(monkeypatch):
@@ -190,36 +202,27 @@ def test_prepare_requires_unique_public_tags(monkeypatch):
         AssignmentAdapter().build_payload({"path": "synthetic.txt", "due_at": "2026-09-14T15:30:00-05:00", "module_name": "Week 1"})
 
 
-def test_differentiated_family_example_is_atomic_and_student_free(monkeypatch):
+def test_differentiated_assignment_drafts_are_independent_and_student_free(monkeypatch):
     payload = _build(monkeypatch)
-    resolved = _resolved()
     fake = FakeCanvas()
-    registrations = {}
-    monkeypatch.setattr("api.operation_ledger.adapters.assignment.resolve_assignment_groups", lambda *args, **kwargs: resolved)
     monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
     monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
     monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
-    monkeypatch.setattr(config, "save_sis_grade_bridge", lambda course, row: registrations.__setitem__((course, row["family_title"]), copy.deepcopy(row)) or copy.deepcopy(row))
-    monkeypatch.setattr(config, "get_sis_grade_bridge", lambda course, title: copy.deepcopy(registrations.get((course, title))))
 
-    baseline = {"group_snapshot": resolved["safe"], "existing_assignments": []}
+    baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
+    assert baseline == {"existing_assignments": []}
     context = Context()
     result = AssignmentAdapter().execute(payload, {"course_id": "42", "steps": []}, baseline, {}, context)
 
     assert result["state"] == "applied"
     sources = [row for row in fake.assignments.values() if row["name"] != "Practice"]
     assert [row["name"] for row in sources] == ["Practice - Red", "Practice - Gold"]
-    assert all(row["published"] and row["only_visible_to_overrides"] and row["omit_from_final_grade"] and not row["post_to_sis"] for row in sources)
-    bridge = next(row for row in fake.assignments.values() if row["name"] == "Practice")
-    assert bridge["submission_types"] == ["none"]
-    assert bridge["due_at"] == "2026-09-14T23:59:00-05:00"
-    assert bridge["published"] and bridge["post_to_sis"]
-    assert not bridge["omit_from_final_grade"] and not bridge["only_visible_to_overrides"]
-    assert 'href="https://canvas.invalid/"' in bridge["description"]
-    assert [str(item["content_id"]) for item in fake.module_items.values()] == [bridge["id"]]
-    registration = registrations[("42", "Practice")]
-    assert registration["source_titles"] == ["Practice - Red", "Practice - Gold"]
-    assert registration["bridge_assignment_id"] == bridge["id"]
+    assert all(not row["published"] and not row["only_visible_to_overrides"] for row in sources)
+    assert all(not rows for rows in fake.overrides.values())
+    assert not fake.module_items
+    assert not any(any(term in path for term in ("group_categories", "/groups/", "/enrollments"))
+                   for path in fake.reads)
+    assert not any("/overrides" in path or "/modules" in path for _method, path, _body in fake.sends)
     assert all(value not in json.dumps(context.steps) for value in ("9001", "9002", "9003"))
 
     sends_before = len(fake.sends)

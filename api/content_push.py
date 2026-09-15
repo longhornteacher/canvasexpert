@@ -620,6 +620,7 @@ def _result_projection(operation: dict, result: dict) -> dict:
     differentiated = (
         normalized.get("mode") == "differentiated" or bool(normalized.get("tiers"))
     )
+    assignment_tiered = bool(normalized.get("tiers")) and operation.get("kind") == ASSIGNMENT_KIND
     variants = normalized.get("variants") or normalized.get("tiers") or []
     for target_index, target in enumerate(result.get("target_results") or []):
         row = {"state": target.get("state")}
@@ -659,12 +660,33 @@ def _result_projection(operation: dict, result: dict) -> dict:
                                     "title": ((variant.get("plan") or {}).get("title")
                                               or variant.get("title")),
                                     "url": step["returned_object_url"]})
-            if created:
+            if assignment_tiered:
+                created = []
+                for index, variant in enumerate(variants):
+                    step = next((step for step in step_source
+                                 if step.get("step_key") == f"create_tier_assignment:{index}"
+                                 and step.get("state") in ("applied", "skipped")
+                                 and step.get("returned_object_id")), None)
+                    if step:
+                        created.append({
+                            "label": variant.get("label"),
+                            "assignment_id": step.get("returned_object_id"),
+                            "name": ((variant.get("plan") or {}).get("title")
+                                     or variant.get("title")),
+                            "html_url": step.get("returned_object_url"),
+                        })
+                if created:
+                    row["created"] = created
+                row["teacher_action"] = (
+                    "In Canvas, assign each draft to the intended students or groups, "
+                    "then publish the drafts."
+                )
+            elif created:
                 row["created"] = created
             bridge_step = next((step for step in step_source
                                 if step.get("step_key") == "create_bridge"
                                 and step.get("returned_object_id")), None)
-            if bridge_step:
+            if bridge_step and not assignment_tiered:
                 row["bridge"] = {
                     "title": normalized.get("base_title"),
                     "url": bridge_step.get("returned_object_url"),

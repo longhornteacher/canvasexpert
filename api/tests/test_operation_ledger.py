@@ -27,6 +27,46 @@ def _root(tmp_path, monkeypatch):
     return root
 
 
+def test_assignment_tier_operation_result_and_receipt_are_content_only(monkeypatch):
+    operation = {
+        "operation_id": "op-tiered",
+        "kind": "content.assignment",
+        "normalized_payload": {"tiers": [
+            {"label": "Support", "title": "Practice - Red"},
+            {"label": "Core", "title": "Practice - Blue"},
+        ]},
+        "targets": [{
+            "target_key": "target-1", "state": "applied",
+            "steps": [
+                {"step_key": "create_tier_assignment:0", "state": "applied",
+                 "returned_object_id": "101", "returned_object_url": "https://canvas.invalid/a/101"},
+                {"step_key": "create_tier_assignment:1", "state": "applied",
+                 "returned_object_id": "102", "returned_object_url": "https://canvas.invalid/a/102"},
+            ],
+        }],
+    }
+    captured = {}
+    monkeypatch.setattr(executor.operations, "get_operation", lambda _id: operation)
+    monkeypatch.setattr(executor.operations, "set_operation_status", lambda _id, status: None)
+    monkeypatch.setattr(executor, "create_receipt", lambda receipt: captured.setdefault("receipt", receipt))
+
+    result = executor._finish_operation("op-tiered", [])
+    receipt = captured["receipt"]
+    assert result["status"] == "applied"
+    assert receipt["teacher_action"].startswith("In Canvas")
+    assert receipt["variants"] == [
+        {"label": "Support", "assignment_id": "101", "name": "Practice - Red",
+         "html_url": "https://canvas.invalid/a/101"},
+        {"label": "Core", "assignment_id": "102", "name": "Practice - Blue",
+         "html_url": "https://canvas.invalid/a/102"},
+    ]
+    serialized = json.dumps(receipt)
+    assert not any(field in serialized for field in (
+        '"group"', '"group_name"', '"student_count"', '"member_ids"',
+        '"student_ids"', '"bridge"', '"family"',
+    ))
+
+
 def _make_operation(operation_id="op-test1", targets=None):
     """Build a minimal valid operation for testing."""
     if targets is None:

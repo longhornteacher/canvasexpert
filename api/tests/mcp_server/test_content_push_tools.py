@@ -390,6 +390,53 @@ def test_apply_reports_what_landed_without_ledger_internals(monkeypatch):
     assert "KeyError" not in server._compact(result)
 
 
+def test_assignment_tier_result_projection_is_content_only_and_actionable():
+    operation = {
+        "kind": "content.assignment",
+        "normalized_payload": {
+            "tiers": [
+                {"label": "Support", "tag": "Red", "title": "Practice - Red"},
+                {"label": "Core", "tag": "Blue", "title": "Practice - Blue"},
+            ],
+        },
+        "targets": [{"steps": []}],
+    }
+    result = {
+        "ok": True,
+        "operation_id": "op-1",
+        "status": "applied",
+        "target_results": [{
+            "state": "applied",
+            "steps": [
+                {"step_key": "create_tier_assignment:0", "state": "applied",
+                 "returned_object_id": "101", "returned_object_url": "https://canvas.invalid/a/101"},
+                {"step_key": "create_tier_assignment:1", "state": "applied",
+                 "returned_object_id": "102", "returned_object_url": "https://canvas.invalid/a/102"},
+            ],
+        }],
+    }
+
+    projected = content_push._result_projection(operation, result)
+    target = projected["targets"][0]
+    assert target["created"] == [
+        {"label": "Support", "assignment_id": "101", "name": "Practice - Red",
+         "html_url": "https://canvas.invalid/a/101"},
+        {"label": "Core", "assignment_id": "102", "name": "Practice - Blue",
+         "html_url": "https://canvas.invalid/a/102"},
+    ]
+    assert "draft" in target["teacher_action"]
+
+    def keys(value):
+        if isinstance(value, dict):
+            return set(value).union(*(keys(item) for item in value.values()))
+        if isinstance(value, list):
+            return set().union(*(keys(item) for item in value))
+        return set()
+
+    assert not keys(target) & {"group", "group_name", "student_count", "student_ids",
+                               "member_ids", "bridge", "family"}
+
+
 def test_apply_surfaces_the_unfinished_step_when_a_push_needs_attention(monkeypatch):
     monkeypatch.setattr(content_push.operations, "get_operation", lambda _id: {
         "operation_id": "op-1", "kind": "content.assignment",

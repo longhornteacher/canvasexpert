@@ -327,9 +327,9 @@ def preview_content_push(
     post_to_sis: bool = False,
 ) -> str:
     """Persist a local frozen review of one staged draft before anything reaches Canvas.
-    kind is quiz/assignment/page/rubric; label comes from list_staged_content. Quizzes and
-    assignments take the scheduling and grouping options, pages take module_name, and a
-    kind refuses an option it cannot carry. Dates are ISO 8601."""
+    kind is quiz/assignment/page/rubric; label comes from list_staged_content. Quizzes take
+    differentiated grouping options; assignments take ordinary grading-category options,
+    and pages take module_name. A kind refuses an option it cannot carry. Dates are ISO 8601."""
     return _compact(tools.preview_content_push(
         course_id, kind, label,
         published=published, module_name=module_name,

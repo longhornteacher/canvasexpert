@@ -77,8 +77,8 @@ def validate(d):
     for i, t in enumerate(tiers):
         if not str(t.get("label", "")).strip():
             problems.append(f"tier {i + 1}: label is required")
-        if not str(t.get("group", "")).strip():
-            problems.append(f"tier {i + 1}: group is required")
+        if "group" in t:
+            problems.append(f"tier {i + 1}: group is not permitted; the teacher assigns drafts in Canvas")
         lbl = str(t.get("label", "")).strip().lower()
         if lbl and lbl in labels:
             problems.append(f"tier label {t.get('label')!r} is duplicated")
@@ -98,14 +98,14 @@ _SCAFFOLD_WRAP = (
 def tier_payloads(d):
     """Compose the per-push payload list.
 
-    Returns [{label, group, title, description}]; a single entry with
-    label/group None when the payload has no tiers (whole-class).
+    Returns [{label, title, description}]; a single entry with label None when
+    the payload has no tiers (whole-class).
     """
     title = str(d.get("title", "")).strip()
     base = str(d.get("description", ""))
     tiers = d.get("tiers") or []
     if not tiers:
-        return [{"label": None, "group": None, "title": title, "description": base}]
+        return [{"label": None, "title": title, "description": base}]
     out = []
     for t in tiers:
         desc = str(t.get("description") or base)
@@ -114,7 +114,6 @@ def tier_payloads(d):
             desc += _SCAFFOLD_WRAP.format(inner=scaffold)
         out.append({
             "label": str(t["label"]).strip(),
-            "group": str(t["group"]).strip(),
             "title": title,
             "description": desc,
         })

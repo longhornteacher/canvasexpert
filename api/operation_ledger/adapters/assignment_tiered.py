@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from .. import models
 from .adapter_support import build_result, ensure_step, find_step
-from . import differentiated_bridge
 from api.platform_services import canvas_client
 
 
@@ -15,27 +14,13 @@ def execute(
     context,
     *,
     ordered_steps,
-    resolve_assignment_groups,
-    group_resolution_error,
     find_assignment_group,
-    read_modules,
 ) -> dict:
     course_id = target["course_id"]
     tiers = payload["tiers"]
     steps = ordered_steps(target)
-    try:
-        resolved = resolve_assignment_groups(course_id, tiers)
-    except group_resolution_error:
-        return build_result("failed", steps=steps, error_code="group_resolution_failed")
-    if resolved["safe"] != baseline.get("group_snapshot"):
-        return build_result("failed", steps=steps, error_code="group_membership_drift")
-
-    safe_by_index = {row["index"]: row for row in resolved["safe"]["tiers"]}
-    transient_ids = resolved["student_ids_by_group"]
-
     for index, tier in enumerate(tiers):
         assignment_key = f"create_tier_assignment:{index}"
-        override_key = f"create_tier_override:{index}"
         assignment_step = ensure_step(steps, assignment_key)
         assignment_id = assignment_step.get("returned_object_id")
         assignment_url = assignment_step.get("returned_object_url")
@@ -51,10 +36,7 @@ def execute(
         elif assignment_step.get("outbound_started_at"):
             return build_result("sent_unknown", steps=steps, error_code="assignment_creation_unresolved")
         else:
-            assignment_data = _assignment_data(
-                payload, tier["title"], tier["description"], course_id,
-                find_assignment_group,
-            )
+            assignment_data = _assignment_data(payload, tier["title"], tier["description"], course_id, find_assignment_group)
             request = {"assignment": assignment_data}
             path = f"/api/v1/courses/{course_id}/assignments"
             marked = context.before_send(
@@ -88,72 +70,17 @@ def execute(
             )
             _replace_local_step(steps, marked)
 
-        override_step = ensure_step(steps, override_key)
-        override_id = override_step.get("returned_object_id")
-        if override_id:
-            existing, error = canvas_client.canvas_get(
-                f"/api/v1/courses/{course_id}/assignments/{assignment_id}/overrides/{override_id}"
-            )
-            if error or not existing:
-                return build_result("sent_unknown", steps=steps, error_code="override_exact_id_unverified")
-            override_step["state"] = "skipped"
-        elif override_step.get("outbound_started_at"):
-            return build_result("sent_unknown", steps=steps, error_code="override_creation_unresolved")
-        else:
-            safe_tier = safe_by_index[index]
-            override_request = {
-                "assignment_override": {
-                    "title": f"{tier['label']} assignment access",
-                    "student_ids": transient_ids[safe_tier["group_id"]],
-                }
-            }
-            for key in ("due_at", "unlock_at", "lock_at"):
-                if payload.get(key):
-                    override_request["assignment_override"][key] = payload[key]
-            path = f"/api/v1/courses/{course_id}/assignments/{assignment_id}/overrides"
-            marked = context.before_send(
-                override_key,
-                models.sha256_dict(
-                    {
-                        "method": "POST",
-                        "path": path,
-                        "membership_digest": safe_tier["membership_digest"],
-                    }
-                ),
-            )
-            _replace_local_step(steps, marked)
-            response, error = canvas_client._canvas_send("POST", path, override_request)
-            if error:
-                state = "sent_unknown" if _is_uncertain(error) else "partial"
-                marked["state"] = state if state == "sent_unknown" else "failed"
-                marked["error_code"] = "timeout_or_disconnect" if state == "sent_unknown" else "override_rejected"
-                marked["private_diagnostic"] = type(error).__name__
-                marked = context.checkpoint_step(marked)
-                _replace_local_step(steps, marked)
-                return build_result(state, steps=steps, error_code=marked["error_code"])
-            override_id = str(response.get("id")) if isinstance(response, dict) and response.get("id") is not None else None
-            if not override_id:
-                marked["state"] = "sent_unknown"
-                marked["error_code"] = "unparseable_response"
-                marked["private_diagnostic"] = "missing override id"
-                marked = context.checkpoint_step(marked)
-                _replace_local_step(steps, marked)
-                return build_result("sent_unknown", steps=steps, error_code="unparseable_response")
-            marked["state"] = "applied"
-            marked = context.checkpoint_step(marked, returned_object_id=override_id)
-            _replace_local_step(steps, marked)
-
-    return differentiated_bridge.execute_family_tail(
-        course_id=course_id,
-        payload=payload,
-        source_ids=[
-            str(find_step(steps, f"create_tier_assignment:{index}").get("returned_object_id"))
-            for index, _tier in enumerate(tiers)
-        ],
-        source_titles=[tier["title"] for tier in tiers],
+    return build_result(
+        "applied",
         steps=steps,
-        context=context,
-        failure_state="partial",
+        returned_object_id=(
+            find_step(steps, "create_tier_assignment:0").get("returned_object_id")
+            if tiers else None
+        ),
+        returned_object_url=(
+            find_step(steps, "create_tier_assignment:0").get("returned_object_url")
+            if tiers else None
+        ),
     )
 
 
@@ -173,30 +100,13 @@ def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
             return _tier_reconcile_result("sent_unknown", projected)
         projected.append(_applied_safe_step(assignment_step, returned_object_url=assignment.get("html_url")))
 
-        override_step = find_step(stored_steps, f"create_tier_override:{index}")
-        override_id = override_step.get("returned_object_id")
-        if not override_id:
-            return _tier_reconcile_unfinished(override_step, projected)
-        override, error = canvas_client.canvas_get(
-            f"/api/v1/courses/{course_id}/assignments/{assignment_id}/overrides/{override_id}"
-        )
-        if error or not override or str(override.get("id")) != str(override_id):
-            return _tier_reconcile_result("sent_unknown", projected)
-        projected.append(_applied_safe_step(override_step))
-
-    return differentiated_bridge.reconcile_family_tail(
-        course_id=course_id,
-        payload=payload,
-        source_ids=[
-            str(find_step(stored_steps, f"create_tier_assignment:{index}").get(
-                "returned_object_id"
-            ))
-            for index, _tier in enumerate(payload.get("tiers") or [])
-        ],
-        source_titles=[tier["title"] for tier in payload.get("tiers") or []],
-        stored_steps=stored_steps,
-        projected=projected,
-    )
+    first = find_step(stored_steps, "create_tier_assignment:0")
+    return {
+        "state": "applied",
+        "steps": projected,
+        "returned_object_id": first.get("returned_object_id") if first else None,
+        "returned_object_url": first.get("returned_object_url") if first else None,
+    }
 
 
 def _tier_reconcile_unfinished(step: dict, projected: list[dict]) -> dict:
@@ -231,10 +141,11 @@ def _assignment_data(
         "name": title,
         "submission_types": payload.get("submission_types", ["online_text_entry"]),
         "grading_type": "points",
-        "only_visible_to_overrides": True,
-        "omit_from_final_grade": True,
-        "post_to_sis": False,
-        "published": True,
+        "only_visible_to_overrides": False,
+        "omit_from_final_grade": bool(payload.get("omit_from_final_grade")),
+        "post_to_sis": bool(payload.get("post_to_sis")),
+        # Tier drafts are always left for the teacher to assign and publish.
+        "published": False,
     }
     if description:
         data["description"] = description

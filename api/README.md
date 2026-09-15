@@ -151,17 +151,15 @@ changed bridge grades in Canvas Live. The teacher reviews there and owns Canvas 
 - Extracts JSON from the `<ASSIGNMENTFORGE_JSON>` envelope.
 - Resolves course-resource placeholders (`{{file:NAME}}`, `{{page:Title}}` per course).
 - Creates assignment(s) with configurable submission types, points, dates, grading category.
-- **Differentiated family**: one file with two or more canonical tiers creates exact
-  `Base - <configured tag>` assignments, each visible only to its Canvas group and each
-  able to carry its own scaffolding. Sources are published, omitted from the final grade,
-  SIS-disabled, and absent from modules. The unsuffixed no-submission bridge is the only
-  family item placed in the required module.
+- **Differentiated content**: one file with two or more canonical tiers creates one
+  independent `Base - <configured tag>` assignment draft per tier, each carrying its own
+  scaffolding. Drafts are unpublished and unrestricted; the teacher assigns students/groups
+  and publishes them in Canvas. No bridge, override, module item, or roster lookup is used.
 
-Differentiated assignment and quiz delivery requires a timezone-aware due timestamp,
-a module, valid unique public tags in Settings, equal points, and one assignment group.
-The bridge is due at 23:59 on the same date and offset, links to the runtime Canvas
-Dashboard, and finishes published, counted, and SIS-enabled. CanvasExpert does not start
-the teacher's Canvas Grade Sync.
+Differentiated quiz delivery retains its timezone-aware due timestamp, module, unique public
+tags, equal points, and assignment-group requirements. AssignmentForge tier drafts preserve
+the ordinary assignment dates, grading category, submission settings, points, and SIS/final-
+grade options; CanvasExpert does not assign or publish them for the teacher.
 
 ### Pages (PageForge)
 - Extracts JSON from the `<PAGEFORGE_JSON>` envelope.

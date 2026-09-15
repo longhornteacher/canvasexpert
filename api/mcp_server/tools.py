@@ -2080,8 +2080,9 @@ def preview_content_push(
     Canvas is read only to capture the baseline apply drift-checks against.
 
     Delivery options are per kind -- a page takes published and module_name, a
-    rubric only published, and a quiz or assignment also takes
-    assignment_group_name, post_to_sis, and ISO 8601 due_at/unlock_at/lock_at.
+    rubric only published, a quiz takes differentiated grouping options, and an
+    assignment takes ordinary grading-category options plus post_to_sis and ISO 8601
+    due_at/unlock_at/lock_at.
     Naming one a kind cannot carry is refused, not dropped. Drafts stay
     unpublished unless published=true.
 

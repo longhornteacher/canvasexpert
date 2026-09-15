@@ -53,7 +53,7 @@
         log("  submission: " + s.submission_types.join(", "));
         if (s.tiers.length) {
           s.tiers.forEach(function (t) {
-            log("  tier " + t.label + ' → group "' + t.group + '"' +
+            log("  tier " + t.label + " (content variant)" +
               (t.scaffolded ? " (scaffolded)" : ""));
           });
         } else {

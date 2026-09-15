@@ -126,6 +126,7 @@ legacy globals (`window.CE_PUSH`, `localToISO`, `pushContent`, `targetCourses`,
 `initFileSource`, `copySkill`) unless all legacy pages and feature scripts are
 updated in the same change.
 
-Differentiated delivery requires Settings-backed public tags, a timezone-aware due
-timestamp, and a module. Only the unsuffixed bridge is module-visible. The teacher reviews
-the completed family in Canvas Live and owns Canvas Grade Sync.
+Differentiated QuizForge delivery requires Settings-backed public tags, a timezone-aware
+due timestamp, and a module; only its unsuffixed bridge is module-visible. AssignmentForge
+tier delivery is content-only and creates independent unpublished, unrestricted drafts;
+the teacher assigns and publishes them in Canvas Live.

@@ -140,7 +140,7 @@ def register_validation_routes(
                 "points": data.get("points", 100),
                 "submission_types": (data.get("submission") or {}).get(
                     "types", ["online_text_entry"]),
-                "tiers": [{"label": t.get("label"), "group": t.get("group"),
+                "tiers": [{"label": t.get("label"),
                            "scaffolded": bool(t.get("scaffolding") or t.get("description"))}
                           for t in tiers],
                 "placeholders": sorted(set(

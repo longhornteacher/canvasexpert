@@ -320,9 +320,11 @@ Microsoft Edge through Playwright; DOCX files are rendered through bundled Pando
 
 ### Assignment tab
 Pick an `<ASSIGNMENTFORGE_JSON>` file, then **Validate** / **Push assignment…**.
-Delivery: dates, grading category, module, SIS, and publish. Authored tiers use the course's
-teacher-selected Roster group set and create one group-visible Canvas assignment
-and gradebook column per tier. Rubric association is not part of this operation path.
+Delivery: dates, grading category, module, SIS, and publish for ordinary assignments.
+Authored tiers are content-only: each becomes an independent unpublished, unrestricted
+Canvas assignment draft with its configured public tag. The teacher assigns students/groups
+and publishes the drafts in Canvas; no Roster group set or bridge is involved. Rubric
+association is not part of this operation path.
 
 ### Page tab
 Pick a `<PAGEFORGE_JSON>` file, then **Validate** / **Push page…**. Module placement

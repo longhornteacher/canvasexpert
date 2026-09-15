@@ -123,7 +123,7 @@ def test_payload_build_accepts_tiers(tmp_path, monkeypatch):
     af_file = tmp_path / "tiered.assignmentforge.json"
     af_file.write_text(
         """<ASSIGNMENTFORGE_JSON>
-{"version":"1.0-json","type":"ASSIGNMENT","title":"Tiered","description":"<p>Hi</p>","tiers":[{"label":"Support","group":"Support"},{"label":"Core","group":"Core"}]}
+{"version":"1.0-json","type":"ASSIGNMENT","title":"Tiered","description":"<p>Hi</p>","tiers":[{"label":"Support"},{"label":"Core"}]}
 </ASSIGNMENTFORGE_JSON>""",
         encoding="utf-8",
     )
@@ -139,11 +139,11 @@ def test_payload_build_accepts_tiers(tmp_path, monkeypatch):
         "module_name": "Week 1",
     })
     assert payload["tiers"] == [{
-        "label": "Support", "group": "Support", "tier": "Support",
+        "label": "Support", "tier": "Support",
         "tag": "Red", "title": "Tiered - Red",
         "description": "<p>Hi</p>",
     }, {
-        "label": "Core", "group": "Core", "tier": "Core",
+        "label": "Core", "tier": "Core",
         "tag": "Blue", "title": "Tiered - Blue",
         "description": "<p>Hi</p>",
     }]

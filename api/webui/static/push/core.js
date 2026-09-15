@@ -197,12 +197,14 @@
     if (first.tiered) {
       frozen.forEach(function (review) {
         (review.tiers || []).forEach(function (tier) {
+          var title = tier.source_title || tier.title || "Assignment draft";
+          var tag = tier.public_tag ? " [" + tier.public_tag + "]" : "";
           details.push((review.course_name || "Course") + " — " + tier.label +
-            ": " + tier.group + " (" + tier.student_count + " students)");
+            ": " + title + tag);
         });
       });
-      warnings.push("Canvas will create one assignment/gradebook column per tier.");
-      warnings.push("Only that group's students can see each assignment (only_visible_to_overrides=true).");
+      warnings.push("Canvas will create one unpublished, unrestricted assignment draft per tier.");
+      warnings.push(reviewTeacherAction(frozen));
     }
     frozen.forEach(function (review) {
       var prefix = review.course_name ? review.course_name + " — " : "";
@@ -262,6 +264,13 @@
       confirmText: "Apply",
       cancelText: "Cancel",
     };
+  }
+
+  function reviewTeacherAction(reviews) {
+    var action = reviews.find(function (review) { return review.teacher_action; });
+    return action && action.teacher_action
+      ? action.teacher_action
+      : "In Canvas, assign each draft to the intended students or groups, then publish the drafts.";
   }
 
   async function reviewAndApply(operationId, logFn, bannerEl, confirmLabel) {

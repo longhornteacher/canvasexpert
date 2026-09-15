@@ -38,3 +38,32 @@ def test_parse_file_on_a_docx_upload_returns_a_readable_problem_instead_of_raisi
     assert len(problems) == 1
     assert "Word document" in problems[0]
     assert "paste the JSON directly" in problems[0]
+
+
+def test_tiered_content_has_no_canvas_placement_field():
+    data = {
+        "version": "1.0-json",
+        "type": "ASSIGNMENT",
+        "title": "Tiered",
+        "description": "body",
+        "tiers": [
+            {"label": "Support", "scaffolding": "word bank"},
+            {"label": "Core"},
+        ],
+    }
+    assert af.validate(data) == []
+    rows = af.tier_payloads(data)
+    assert rows == [
+        {"label": "Support", "title": "Tiered", "description": "body<div style=\"margin-top:18px;padding:12px 16px;border-left:4px solid #0b67c2;background:#eef5fc;border-radius:6px\">word bank</div>"},
+        {"label": "Core", "title": "Tiered", "description": "body"},
+    ]
+    assert all("group" not in row for row in rows)
+
+
+def test_tiered_content_rejects_authored_group_field():
+    data = {
+        "version": "1.0-json", "type": "ASSIGNMENT",
+        "title": "Tiered", "description": "body",
+        "tiers": [{"label": "Support", "group": "Blue"}, {"label": "Core"}],
+    }
+    assert any("group is not permitted" in problem for problem in af.validate(data))
