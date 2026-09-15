@@ -703,6 +703,29 @@ def normalize_assignment(row: dict) -> dict | None:
     queries need. The authoring catalog stays the rich source."""
     if not isinstance(row, dict) or row.get("id") in (None, ""):
         return None
+    submission_types = row.get("submission_types") if isinstance(row.get("submission_types"), list) else []
+    quiz_type = str(row.get("quiz_type") or "").lower()
+    is_quiz_lti_assignment = row.get("is_quiz_lti_assignment") is True
+    is_quiz = bool(
+        "online_quiz" in submission_types
+        or row.get("quiz_id") is not None
+        or row.get("quiz_type") is not None
+        or is_quiz_lti_assignment
+    )
+    if is_quiz_lti_assignment:
+        quiz_kind = "new_quiz"
+    elif "online_quiz" in submission_types:
+        if "new_quiz" in quiz_type or quiz_type == "quizzes.next":
+            quiz_kind = "new_quiz"
+        else:
+            external = row.get("external_tool_tag_attributes")
+            hint = (f"{external.get('url') or ''} {external.get('content_type') or ''}"
+                    if isinstance(external, dict) else "").lower()
+            quiz_kind = "new_quiz" if "quiz" in hint or "new_quiz" in hint else "classic_quiz"
+    elif row.get("quiz_id") is not None or row.get("quiz_type") is not None:
+        quiz_kind = "quiz"
+    else:
+        quiz_kind = ""
     return {
         "id": str(row["id"]),
         "name": str(row.get("name") or ""),
@@ -713,6 +736,13 @@ def normalize_assignment(row: dict) -> dict | None:
         "submission_types": [str(t) for t in (row.get("submission_types") or [])],
         "updated_at": str(row.get("updated_at") or ""),
         "description": row.get("description") if isinstance(row.get("description"), str) else "",
+        # Student-free classification copied from the shared assignment receipt.
+        # These fields let agent-facing preparation reject New Quizzes without
+        # consulting Canvas or the private New Quiz response owner.
+        "quiz_id": str(row.get("quiz_id") or ""),
+        "is_quiz": is_quiz,
+        "quiz_kind": quiz_kind,
+        "is_quiz_lti_assignment": is_quiz_lti_assignment,
     }
 
 

@@ -4,6 +4,35 @@ import pytest
 from api.powergrader import start_workflow
 
 
+def _mirror_scopes(monkeypatch, *, assignment, current, roster=None,
+                   attempts=None, states=None):
+    from api.powergrader import assignment_refresh
+
+    states = states or {"roster": "current", "assignments": "current",
+                        "submissions": "current"}
+    monkeypatch.setattr(assignment_refresh.workspace, "workspace_root",
+                        lambda: "C:/mirror")
+    monkeypatch.setattr(assignment_refresh.read_service, "private_roster",
+                        lambda *args, **kwargs: {"state": states["roster"], "records": roster or [],
+                                                 "last_success_at": "2026-09-15T10:00:00Z"})
+    monkeypatch.setattr(assignment_refresh.read_service, "private_assignments",
+                        lambda *args, **kwargs: {"state": states["assignments"], "records": [assignment],
+                                                 "last_success_at": "2026-09-15T10:00:00Z"})
+    monkeypatch.setattr(assignment_refresh.read_service, "private_submissions",
+                        lambda *args, **kwargs: {"state": states["submissions"], "records": [current],
+                                                 "last_success_at": "2026-09-15T10:00:00Z"})
+    monkeypatch.setattr(assignment_refresh.mirror_store, "read_roster",
+                        lambda *args, **kwargs: {"state": "current", "students": {}, "sections": {}})
+    monkeypatch.setattr(assignment_refresh.mirror_store, "read_assignments",
+                        lambda *args, **kwargs: {"state": "current", "assignments": {assignment["id"]: assignment}})
+    monkeypatch.setattr(assignment_refresh.mirror_store, "read_submissions",
+                        lambda *args, **kwargs: {"state": "current", "submissions": {current["user_id"]: {
+                            "current": current, "attempts": attempts or {"1": {
+                                "attempt": 1, "submitted_at": current["submitted_at"],
+                                "attachment_names": []}}
+                        }}})
+
+
 def test_scoring_guidance_length_limit_only_applies_to_teacher_guidance():
     long_rubric = "x" * (start_workflow.MAX_TEACHER_SCORING_GUIDANCE_CHARS + 1)
 
@@ -285,3 +314,146 @@ def test_new_quiz_writing_stops_before_norms_packet_or_write(monkeypatch, tmp_pa
     assert "private-user" not in serialized
     assert "Private Learner" not in serialized
     assert "Private response text." not in serialized
+
+
+def test_mirror_preparation_returns_text_without_invoking_canvas_or_evidence(monkeypatch):
+    from api.powergrader import assignment_refresh
+
+    assignment = {
+        "id": "assignment-1", "name": "Essay", "description_text": "Write.",
+        "points_possible": 10, "quiz_id": "", "is_quiz": False,
+        "quiz_kind": "", "is_quiz_lti_assignment": False,
+    }
+    current = {
+        "user_id": "student-1", "assignment_id": "assignment-1",
+        "workflow_state": "submitted",
+        "submitted_at": "2026-09-15T10:00:00Z", "graded_at": None,
+        "score": None, "grade": None, "late": False, "missing": False,
+        "excused": False, "attempt": 1, "submission_type": "online_text_entry",
+        "body": "A private response.", "url": "",
+    }
+    _mirror_scopes(monkeypatch, assignment=assignment, current=current,
+                   roster=[{"id": "student-1", "name": "Learner"}])
+    monkeypatch.setattr(assignment_refresh.canvas_fetch, "fetch_submissions",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(
+                            AssertionError("mirror preparation must not fetch Canvas")))
+    monkeypatch.setattr(assignment_refresh.canvas_fetch, "ingest_ordinary_attachments",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(
+                            AssertionError("mirror preparation must not download attachments")))
+
+    rows, prepared, result = assignment_refresh.prepare_assignment_from_mirror(
+        "course-1", "assignment-1")
+
+    assert result == {"status": "mirror", "manifest_path": None}
+    assert prepared["description"] == "Write."
+    assert rows[0]["body"] == "A private response."
+    assert rows[0]["user"]["id"] == "student-1"
+    assert rows[0]["attachments"] == []
+
+
+def test_mirror_preparation_refuses_stale_state_with_refresh_instruction(monkeypatch):
+    from api.powergrader import assignment_refresh
+
+    assignment = {
+        "id": "assignment-1", "name": "Essay", "description_text": "Write.",
+        "points_possible": 10, "quiz_id": "", "is_quiz": False,
+        "quiz_kind": "", "is_quiz_lti_assignment": False,
+    }
+    current = {"user_id": "student-1"}
+    _mirror_scopes(monkeypatch, assignment=assignment, current=current,
+                   states={"roster": "stale", "assignments": "current",
+                           "submissions": "current"})
+    monkeypatch.setattr(assignment_refresh.canvas_fetch, "fetch_submissions",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(
+                            AssertionError("stale mirror must not fetch Canvas")))
+
+    rows, prepared, result = assignment_refresh.prepare_assignment_from_mirror(
+        "course-1", "assignment-1")
+
+    assert rows is None and prepared is None
+    assert result["error"] == assignment_refresh.MIRROR_PREPARATION_ERROR
+
+
+@pytest.mark.parametrize("stale_document", ["roster", "assignment", "submission"])
+def test_mirror_preparation_requires_each_target_document_current(monkeypatch, stale_document):
+    from api.powergrader import assignment_refresh
+
+    assignment = {
+        "id": "assignment-1", "name": "Essay", "description_text": "Write.",
+        "points_possible": 10, "quiz_id": "", "is_quiz": False,
+        "quiz_kind": "", "is_quiz_lti_assignment": False,
+    }
+    current = {
+        "user_id": "student-1", "assignment_id": "assignment-1",
+        "workflow_state": "submitted", "submitted_at": "2026-09-15T10:00:00Z",
+        "graded_at": None, "score": None, "grade": None, "late": False,
+        "missing": False, "excused": False, "attempt": 1,
+        "submission_type": "online_text_entry", "body": "Response.", "url": "",
+    }
+    _mirror_scopes(monkeypatch, assignment=assignment, current=current,
+                   roster=[{"id": "student-1", "name": "Learner"}])
+    if stale_document == "roster":
+        monkeypatch.setattr(assignment_refresh.mirror_store, "read_roster",
+                            lambda *args, **kwargs: {"state": "stale"})
+    elif stale_document == "assignment":
+        monkeypatch.setattr(assignment_refresh.mirror_store, "read_assignments",
+                            lambda *args, **kwargs: {"state": "stale"})
+    else:
+        monkeypatch.setattr(assignment_refresh.mirror_store, "read_submissions",
+                            lambda *args, **kwargs: {"state": "stale"})
+
+    rows, prepared, result = assignment_refresh.prepare_assignment_from_mirror(
+        "course-1", "assignment-1")
+
+    assert rows is None and prepared is None
+    assert result["error"] == assignment_refresh.MIRROR_PREPARATION_ERROR
+
+
+@pytest.mark.parametrize(
+    ("is_quiz", "quiz_kind"),
+    [(False, "quiz"), (False, "new_quiz"), (True, ""), (True, "quiz")],
+)
+def test_mirror_preparation_refuses_ambiguous_quiz_classification(
+    monkeypatch, is_quiz, quiz_kind,
+):
+    from api.powergrader import assignment_refresh
+
+    assignment = {
+        "id": "assignment-1", "name": "Essay", "description_text": "Write.",
+        "points_possible": 10, "quiz_id": "", "is_quiz": is_quiz,
+        "quiz_kind": quiz_kind, "is_quiz_lti_assignment": False,
+    }
+    current = {"user_id": "student-1", "assignment_id": "assignment-1"}
+    _mirror_scopes(monkeypatch, assignment=assignment, current=current,
+                   roster=[{"id": "student-1", "name": "Learner"}])
+
+    rows, prepared, result = assignment_refresh.prepare_assignment_from_mirror(
+        "course-1", "assignment-1")
+
+    assert rows is None and prepared is None
+    assert result["error"] == assignment_refresh.MIRROR_PREPARATION_ERROR
+
+
+def test_mirror_preparation_refuses_submission_from_another_assignment(monkeypatch):
+    from api.powergrader import assignment_refresh
+
+    assignment = {
+        "id": "assignment-1", "name": "Essay", "description_text": "Write.",
+        "points_possible": 10, "quiz_id": "", "is_quiz": False,
+        "quiz_kind": "", "is_quiz_lti_assignment": False,
+    }
+    current = {
+        "user_id": "student-1", "assignment_id": "other-assignment",
+        "workflow_state": "submitted", "submitted_at": "2026-09-15T10:00:00Z",
+        "graded_at": None, "score": None, "grade": None, "late": False,
+        "missing": False, "excused": False, "attempt": 1,
+        "submission_type": "online_text_entry", "body": "Response.", "url": "",
+    }
+    _mirror_scopes(monkeypatch, assignment=assignment, current=current,
+                   roster=[{"id": "student-1", "name": "Learner"}])
+
+    rows, prepared, result = assignment_refresh.prepare_assignment_from_mirror(
+        "course-1", "assignment-1")
+
+    assert rows is None and prepared is None
+    assert result["error"] == assignment_refresh.MIRROR_PREPARATION_ERROR

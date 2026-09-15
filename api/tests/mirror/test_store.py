@@ -116,6 +116,8 @@ def test_assignments_round_trip_slim_shape(tmp_path):
         "submission_types": ["online_text_entry"],
         "updated_at": "2026-06-01T00:00:00Z",
         "description": "Write a five-paragraph essay.",
+        "quiz_id": "", "is_quiz": False, "quiz_kind": "",
+        "is_quiz_lti_assignment": False,
     }
 
 
@@ -149,6 +151,22 @@ def test_normalize_assignment_description_is_permissive_string_like_body(tmp_pat
     assert row["name"] == "Essay 1"
     assert row["points_possible"] == 10
     assert row["submission_types"] == ["online_text_entry"]
+
+
+def test_normalize_assignment_persists_student_free_new_quiz_classification():
+    row = store.normalize_assignment({
+        **ASSIGNMENTS[0], "id": 700011,
+        "submission_types": ["external_tool"],
+        "quiz_id": 880011,
+        "is_quiz_lti_assignment": True,
+        "rubric": [{"description": "must not be copied", "points": 1}],
+    })
+    assert {key: row[key] for key in (
+        "quiz_id", "is_quiz", "quiz_kind", "is_quiz_lti_assignment",
+    )} == {
+        "quiz_id": "880011", "is_quiz": True, "quiz_kind": "new_quiz",
+        "is_quiz_lti_assignment": True,
+    }
 
 
 # --- submissions: merge semantics ------------------------------------------------

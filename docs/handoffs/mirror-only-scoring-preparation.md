@@ -157,3 +157,31 @@ Executor must append a compact report here: traffic light; commit hash if any;
 changed files; exact test command and count; `git diff --check` result;
 deviations; and unresolved decisions. A GREEN result must leave this brief
 retired in the same closing batch according to `AGENTS.md`.
+
+### Execution result (Luna executor)
+
+- Traffic light: GREEN
+- Commit: none (per handoff; senior owns commit/push)
+- Changed files: `api/mirror/store.py`, `api/powergrader/assignment_refresh.py`,
+  `api/powergrader/start_workflow.py`, `api/mcp_server/tools.py`,
+  `api/feedback_artifacts.py`, `api/tests/mirror/test_store.py`,
+  `api/tests/powergrader/test_start_workflow.py`, `docs/mirror.md`,
+  `docs/mcp-server.md`
+- Verification: `py -m pytest -p no:randomly api/tests/mcp_server/test_start_scoring_session.py api/tests/powergrader/test_start_workflow.py` — 24 passed; `py -m pytest -p no:randomly api/tests/mirror/test_store.py` — 42 passed; `py -m compileall -q` on affected modules — passed; `git diff --check` — clean.
+- Evidence: the shared assignment receipt still feeds the versioned mirror writer;
+  preparation reads fresh private roster/assignment/submission projections and
+  direct validated submission rows only. It requires the normalized current-row
+  fields (`user_id`, workflow/timestamps, grading flags, `submission_type`, `body`,
+  `url`) and attempt `attachment_names`, returning the identity-safe
+  `refresh_mirror(course_id)` instruction on invalid or incomplete state. The
+  internal mirror-held marker preserves empty/media/attachment rows in SAFE so
+  `scoring_packet` reports held work; no attachment bytes are acquired.
+- Acceptance correction: the targeted submission file and persisted roster and
+  assignment documents must each declare `state: "current"`; each current
+  submission must carry the requested `assignment_id`. Quiz classification now
+  refuses `quiz_kind: "quiz"` and any mismatch between `is_quiz` and
+  `quiz_kind`, including a New Quiz LTI flag without `quiz_kind: "new_quiz"`.
+  Non-dict documents and non-list records fail closed with the same refresh
+  instruction. Added focused law/contract coverage for each boundary.
+- Deviations: none.
+- Unresolved decisions: none.

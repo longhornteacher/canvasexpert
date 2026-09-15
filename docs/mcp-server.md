@@ -287,6 +287,15 @@ operation token, or private assignment-run id crosses the MCP boundary. A stale 
 changed review plan, invalid answer, or ambiguous write fails closed. Review and editing
 happen in Canvas Live; the teacher request authorizes only the frozen queue, not later work.
 
+Continuation prepares each queue item from fresh local CanvasMirror roster,
+assignment, and submission projections. It makes no live Canvas call and downloads no
+attachments while preparing the SAFE packet. Text responses continue through the existing
+SAFE flow; attachment-bearing, media-only, empty, and unreadable work stays held for review.
+The mirror assignment projection carries only student-free quiz classification fields, so a
+true New Quiz returns `new_quiz_writing_requires_assignment` before scoring norms or packet
+creation. If any required mirror scope is missing, stale, malformed, incomplete, or
+ambiguous, continuation names `refresh_mirror(course_id)` for repair.
+
 Paging counts *responses*, not students. A multi-item quiz gives one row per student per item,
 so `offset`, `limit`, `total` and `next_offset` are all measured in rows, and `students_total`
 carries the distinct-student count separately. Walk pages by following `next_offset` until it

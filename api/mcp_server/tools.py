@@ -2802,7 +2802,7 @@ def continue_scoring_session(scoring_session_id: str, rubric_name: str = "",
             oral_reading_passage="", oral_reading_enabled="false",
             save_session=session_store.save_session, scoring_session=True,
             scoring_guidance=str(scoring_guidance or ""),
-            parent_scoring_session_id=root_id,
+            parent_scoring_session_id=root_id, mirror_only=True,
         )
         payload = result.get("payload") or {}
         if not result.get("ok"):

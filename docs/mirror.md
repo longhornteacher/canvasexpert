@@ -60,7 +60,10 @@ happens when it isn't fresh, by design:
   roster.v1.json                   students + sections (consumer fields only —
                                    no emails, no avatars)
   assignments.v1.json              slim Canvas-shaped assignment index
-                                   (the authoring catalog stays the rich source)
+                                   (the authoring catalog stays the rich source;
+                                   includes only student-free quiz_id, is_quiz,
+                                   quiz_kind, and is_quiz_lti_assignment
+                                   classification)
   submissions/<assignment_id>.v1.json
                                    per-student current row + append-only attempts
   submission_comments_state.v1.json
@@ -316,6 +319,14 @@ submission data itself, so it opens no identity vault and runs no outbound
 safety scan — the response is a sync status, full stop. This keeps the AI's
 entire path to Canvas indirect: it can only ask Canvas Expert to sync, then
 read whatever Canvas Expert wrote to disk.
+
+Scoring Session continuation follows the same boundary. Once a queue item has
+been selected, preparation reads fresh roster, assignment, and submission
+projections only. Ordinary submission text enters the existing SAFE pipeline;
+attachment-bearing, media-only, empty, or unreadable rows remain held for
+review, and no evidence bytes are downloaded. The assignment projection's
+student-free quiz classification stops a true New Quiz with
+`new_quiz_writing_requires_assignment` before norms or packet preparation.
 
 ## v1 non-goals (deliberate)
 

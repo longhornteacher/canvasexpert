@@ -9,12 +9,17 @@ import os
 from datetime import datetime, timezone
 
 from api.powergrader import canvas_fetch
-from api.mirror import new_quizzes
+from api.mirror import new_quizzes, read_service, store as mirror_store
 from api.platform_services import workspace
 
 
 REFRESH_BINARY_LIMIT = 10 * 1024 * 1024
 MEDIA_CLASS_LIMIT = 500 * 1024 * 1024
+
+MIRROR_PREPARATION_ERROR = (
+    "The local CanvasMirror for this course is missing, stale, or incomplete. "
+    "Call refresh_mirror(course_id) and retry."
+)
 
 
 class RefreshBudget:
@@ -209,3 +214,156 @@ def refresh_assignment(course_id: str, assignment_id: str, *, session_id: str):
     if not path:
         status = "incomplete"
     return subs, assignment, {"manifest_path": _relative(path, root), "status": status, "binary_bytes_reserved": budget.used}
+
+
+def _mirror_attachment(filename: str, *, media_recording: bool = False,
+                       attempt=None) -> dict:
+    """Describe held evidence without claiming that any bytes were acquired."""
+    return {
+        "filename": str(filename or ("recording" if media_recording else "attachment")),
+        "display_name": str(filename or ("recording" if media_recording else "attachment")),
+        "attempt": attempt,
+        "media_recording": media_recording,
+        "download_status": "not_downloaded",
+        "extraction_status": "unavailable",
+        "ai_eligible": False,
+        "local_only": False,
+    }
+
+
+def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
+    """Prepare PowerGrader input strictly from fresh local mirror projections.
+
+    This path intentionally has no Canvas transport or evidence owner. It
+    supplies ordinary text to the existing SAFE pipeline and marks all
+    attachment-bearing, media-only, and empty responses for the existing held
+    accounting.
+    """
+    root = workspace.workspace_root()
+    if not root:
+        return None, None, {"error": "No workspace configured — finish setup first."}
+    from api.platform_services import config
+
+    max_age_hours = config.mirror_serve_max_age_hours()
+    try:
+        roster = read_service.private_roster(
+            course_id, root=root, max_age_hours=max_age_hours)
+        assignments = read_service.private_assignments(
+            course_id, root=root, max_age_hours=max_age_hours)
+        submissions_scope = read_service.private_submissions(
+            course_id, root=root, max_age_hours=max_age_hours)
+        roster_document = mirror_store.read_roster(course_id, root=root)
+        assignment_document = mirror_store.read_assignments(course_id, root=root)
+    except (OSError, TypeError, ValueError, KeyError, AttributeError):
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+
+    if not all(isinstance(scope, dict) and scope.get("state") == "current"
+               for scope in (roster, assignments, submissions_scope)):
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+    if (not isinstance(roster_document, dict)
+            or not isinstance(assignment_document, dict)
+            or roster_document.get("state") != "current"
+            or assignment_document.get("state") != "current"):
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+    assignment_records = assignments.get("records")
+    if not isinstance(assignment_records, list):
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+    assignment = next(
+        (dict(row) for row in assignment_records if isinstance(row, dict)
+         and str(row.get("id") or "") == str(assignment_id)), None)
+    if assignment is None:
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+
+    # A versioned assignment record written before this slice, or a malformed
+    # hand-edited record, must not be interpreted as an ordinary assignment.
+    classification_keys = {
+        "quiz_id", "is_quiz", "quiz_kind", "is_quiz_lti_assignment",
+    }
+    if not classification_keys.issubset(assignment):
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+    if (not isinstance(assignment.get("quiz_id"), str)
+            or not isinstance(assignment.get("is_quiz"), bool)
+            or not isinstance(assignment.get("is_quiz_lti_assignment"), bool)
+            or assignment.get("quiz_kind") not in {"", "quiz", "classic_quiz", "new_quiz"}):
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+    quiz_kind = assignment.get("quiz_kind")
+    is_quiz = assignment.get("is_quiz")
+    if (quiz_kind == "quiz"
+            or is_quiz != (quiz_kind != "")
+            or (assignment.get("is_quiz_lti_assignment") and quiz_kind != "new_quiz")):
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+    # The mirror's assignment projection stores description_text under its
+    # student-free name; the downstream workflow still consumes `description`.
+    assignment["description"] = str(
+        assignment.get("description_text") or assignment.get("description") or "")
+    assignment["name"] = str(assignment.get("name") or assignment_id)
+    assignment["points_possible"] = assignment.get("points_possible")
+    roster_records = roster.get("records")
+    if not isinstance(roster_records, list):
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+    roster_by_id = {
+        str(student.get("id")): dict(student)
+        for student in roster_records
+        if isinstance(student, dict) and student.get("id") not in (None, "")
+    }
+    submission_document = mirror_store.read_submissions(
+        course_id, assignment_id, root=root)
+    if (not isinstance(submission_document, dict)
+            or submission_document.get("state") != "current"):
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+    if not isinstance(submission_document.get("submissions"), dict):
+        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+
+    rows = []
+    required_current = {
+        "user_id", "workflow_state", "submitted_at", "graded_at", "score",
+        "grade", "late", "missing", "excused", "attempt",
+        "submission_type", "body", "url",
+    }
+    for entry in submission_document["submissions"].values():
+        if not isinstance(entry, dict) or not isinstance(entry.get("current"), dict):
+            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        current = dict(entry["current"])
+        if not required_current.issubset(current):
+            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        if str(current.get("assignment_id") or "") != str(assignment_id):
+            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        uid = str(current.get("user_id") or "")
+        if not uid or uid not in roster_by_id:
+            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        attempts = entry.get("attempts")
+        if not isinstance(attempts, dict):
+            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        attempt = current.get("attempt")
+        attempt_record = attempts.get(str(attempt)) if attempt not in (None, "") else None
+        if attempt_record is not None and not isinstance(attempt_record, dict):
+            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        attachment_names = []
+        if attempt_record is not None:
+            attachment_names = attempt_record.get("attachment_names")
+            if not isinstance(attachment_names, list) or not all(
+                    isinstance(name, str) for name in attachment_names):
+                return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        submission_type = str(current.get("submission_type") or "")
+        body = str(current.get("body") or "")
+        media_only = submission_type == "media_recording"
+        unreadable = bool(attachment_names) or media_only or not body.strip()
+        if unreadable:
+            body = ""
+        attachments = [
+            _mirror_attachment(name, attempt=attempt) for name in attachment_names
+        ]
+        if media_only and not attachments:
+            attachments = [_mirror_attachment("recording", media_recording=True,
+                                              attempt=attempt)]
+        row = current
+        row.update({
+            "assignment": assignment,
+            "user": roster_by_id[uid],
+            "body": body,
+            "attachments": attachments,
+            "expected_attachment_count": len(attachments) if attachments else None,
+            "_mirror_unreadable": unreadable,
+        })
+        rows.append(row)
+    return rows, assignment, {"status": "mirror", "manifest_path": None}

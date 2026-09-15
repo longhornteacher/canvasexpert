@@ -252,7 +252,7 @@ def pseudonymize_submissions(submissions: list, vault: Vault,
             for cf in code_files if cf.get("text")
         )
         response = "\n\n".join(p for p in (body_text, code_text) if p).strip()
-        if not response and not (s.get("attachments") or []):
+        if not response and not (s.get("attachments") or []) and not s.get("_mirror_unreadable"):
             continue
         entry = {
             "item_id":  str(a.get("id", "")),
@@ -265,6 +265,7 @@ def pseudonymize_submissions(submissions: list, vault: Vault,
             "sis_id":    str(user.get("sis_user_id") or ""),
             "attachments": attachment_values,
             "_expected_attachment_count": s.get("expected_attachment_count", len(attachment_values)),
+            "_mirror_unreadable": bool(s.get("_mirror_unreadable")),
         }
         # Keep latest submission per assignment
         existing = by_student.get(uid)
@@ -299,6 +300,7 @@ def pseudonymize_submissions(submissions: list, vault: Vault,
             "responses": responses,
             "local_attachments": entry.get("attachments") or [],
             "_expected_attachment_count": entry.get("_expected_attachment_count", 0),
+            "_mirror_unreadable": bool(entry.get("_mirror_unreadable")),
         })
 
     return {"contract_version": CONTRACT_VERSION,
@@ -360,6 +362,15 @@ def _prepare_attachment_safe_bundle(bundle: dict, safe_dir: str,
     kept_students = []
     for student in out.get("students") or []:
         pseudo = student.get("pseudonym") or "unknown"
+        if student.get("_mirror_unreadable"):
+            # Mirror-only preparation deliberately downloads no evidence. Keep
+            # the empty response in SAFE so the packet's held count remains
+            # honest, while attachment metadata stays in the private run.
+            student.pop("local_attachments", None)
+            student.pop("_expected_attachment_count", None)
+            student.pop("_mirror_unreadable", None)
+            kept_students.append(student)
+            continue
         attachments = [a for a in student.get("local_attachments") or [] if isinstance(a, dict)]
         if not attachments:
             student.pop("local_attachments", None)

@@ -178,6 +178,7 @@ def run_start_session(
     scoring_session: bool = False,
     scoring_guidance: str = "",
     parent_scoring_session_id: str = "",
+    mirror_only: bool = False,
 ) -> dict:
     """Run the PowerGrader session-start orchestration for one assignment.
 
@@ -206,26 +207,30 @@ def run_start_session(
     session_id = str(uuid.uuid4())
     course_name = config.course_display_name(course_id)
 
-    # One focused owner acquires canonical local evidence before this session.
-    subs, adata, refresh = assignment_refresh.refresh_assignment(course_id, assignment_id, session_id=session_id)
+    # Scoring Session preparation is mirror-only: the agent-facing path never
+    # invokes the focused Canvas/evidence owner. Existing web starts retain the
+    # focused owner and its live evidence behavior.
+    if mirror_only:
+        subs, adata, refresh = assignment_refresh.prepare_assignment_from_mirror(
+            course_id, assignment_id)
+    else:
+        subs, adata, refresh = assignment_refresh.refresh_assignment(
+            course_id, assignment_id, session_id=session_id)
     if refresh.get("error"):
         return {"ok": False, "payload": {"ok": False, "error": refresh["error"], "privacy_steps": []}}
-    if not subs:
-        return {"ok": False, "payload": {"ok": False, "error": "No submissions found for this assignment.",
-                                          "privacy_steps": []}}
+    if not isinstance(adata, dict):
+        return {"ok": False, "payload": {"ok": False,
+            "error": "The assignment could not be prepared safely; refresh the course and retry.",
+            "privacy_steps": []}}
 
     assignment_name = adata.get("name") or assignment_id
     assignment_description = html_to_text(adata.get("description") or "")
     points_possible = float(adata.get("points_possible") or 100)
-    is_new_quiz = adata.get("is_quiz_lti_assignment") is True
+    is_new_quiz = (
+        adata.get("is_quiz_lti_assignment") is True
+        or adata.get("quiz_kind") == "new_quiz"
+    )
 
-    submitted = [s for s in subs if gradebook_snapshot.needs_grading(s)]
-    if not submitted:
-        return {"ok": False, "payload": {
-            "ok": False,
-            "code": "nothing_to_grade",
-            "assignment_name": str(assignment_name),
-        }}
     if is_new_quiz:
         return {"ok": False, "payload": {
             "ok": False,
@@ -237,6 +242,17 @@ def run_start_session(
             "assignment_name": str(assignment_name),
         }}
 
+    if not subs:
+        return {"ok": False, "payload": {"ok": False, "error": "No submissions found for this assignment.",
+                                          "privacy_steps": []}}
+
+    submitted = [s for s in subs if gradebook_snapshot.needs_grading(s)]
+    if not submitted:
+        return {"ok": False, "payload": {
+            "ok": False,
+            "code": "nothing_to_grade",
+            "assignment_name": str(assignment_name),
+        }}
     rubric_text_override = None
     scoring_basis = None
     if scoring_session:
