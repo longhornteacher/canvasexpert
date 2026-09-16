@@ -122,7 +122,9 @@ def test_ordinary_results_submit_once_without_exposing_private_identity(
         "session-1", _result(), _digest(bundle))
 
     assert writes == ["verified write"]
-    assert result["counts"] == {"finalized": 1, "already_applied": 0, "held": 0, "failed": 0}
+    assert result["counts"] == {
+        "finalized": 1, "already_applied": 0, "held": 0, "failed": 0, "attention": 0,
+    }
     assert result["results"] == [{"pseudonym": PSEUDONYM, "status": "finalized"}]
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
     assert session["students"][0]["ai_score"] == 8

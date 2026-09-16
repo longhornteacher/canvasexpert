@@ -166,6 +166,23 @@ _NEXT_STEPS = {
     ),
 }
 
+_NON_RETRYABLE_PREPARATION_CODES = {
+    "mirror_submission_identity_mismatch",
+    "new_quiz_writing_requires_assignment",
+}
+
+
+def _preparation_blocked_error(code: str) -> str:
+    if code == "new_quiz_writing_requires_assignment":
+        return (
+            "This assignment is blocked because New Quiz writing must be graded in Canvas. "
+            "Start a new Scoring Session for another assignment."
+        )
+    return (
+        "This assignment is blocked because CanvasMirror submission state could not be "
+        "matched safely. Refresh the course mirror, then start a new Scoring Session."
+    )
+
 
 def _with_next(tool_name: str, result: dict) -> dict:
     """Attach one static post-result procedure to an authorized success payload."""
@@ -2093,6 +2110,15 @@ def continue_scoring_session(scoring_session_id: str,
         if claim["kind"] == "busy":
             return {"ok": False, "code": "preparation_in_progress",
                     "error": "The active assignment is already being prepared. Retry continue_scoring_session shortly."}
+        if claim["kind"] == "blocked":
+            code = str((claim.get("item") or {}).get("last_failure") or "start_failed")
+            return {
+                "ok": False,
+                "code": "preparation_blocked",
+                "error": _preparation_blocked_error(code),
+                "scoring_session_id": root_id,
+                "queue_counts": scoring_queue.public_progress(claim["root"]),
+            }
         item = claim["item"]
         if claim["kind"] == "ready":
             resolved = scoring_queue.resolve_active_child(root_id)
@@ -2142,7 +2168,7 @@ def continue_scoring_session(scoring_session_id: str,
             if payload.get("code") == "new_quiz_writing_requires_assignment":
                 scoring_queue.record_preparation_failure(
                     root_id, claim["index"], claim["claim"],
-                    "new_quiz_writing_requires_assignment",
+                    "new_quiz_writing_requires_assignment", retryable=False,
                 )
                 return {
                     "ok": False,
@@ -2151,7 +2177,20 @@ def continue_scoring_session(scoring_session_id: str,
                     "assignment_name": str(item.get("assignment_label") or ""),
                 }
             code = str(payload.get("code") or "start_failed")
-            scoring_queue.record_preparation_failure(root_id, claim["index"], claim["claim"], code)
+            deterministic = code in _NON_RETRYABLE_PREPARATION_CODES
+            scoring_queue.record_preparation_failure(
+                root_id, claim["index"], claim["claim"], code,
+                retryable=not deterministic,
+            )
+            if deterministic:
+                return {
+                    "ok": False,
+                    "code": "preparation_blocked",
+                    "error": _preparation_blocked_error(code),
+                    "scoring_session_id": root_id,
+                    "queue_counts": scoring_queue.public_progress(
+                        scoring_queue.load_root_session(root_id) or {"queue": []}),
+                }
             return {"ok": False, "code": code,
                     "error": "The active assignment could not be prepared safely. It remains in this Scoring Session and can be retried."}
 
@@ -2405,6 +2444,12 @@ def submit_scoring_results(scoring_session_id: str, results: list,
         from api.powergrader import scoring_apply
         plan = scoring_apply.build_plan(candidate, pseudonyms=every_pseudonym)
         if not plan.get("ok"):
+            if plan.get("code") == "canvas_write_attention":
+                return {
+                    "ok": False,
+                    "code": "canvas_write_attention",
+                    "error": "A previous Canvas write could not be verified. Review Canvas before retrying.",
+                }
             return {"ok": False, "code": str(plan.get("code") or "canvas_preflight_failed"),
                     "error": "Canvas could not safely prepare this scoring submission."}
         if not plan.get("candidate_ids"):
@@ -2489,7 +2534,8 @@ def _record_scoring_root_result(root_session_id: str, child_session_id: str,
 
 def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()) -> dict:
     """Project ordinary assignment writes to aggregate, pseudonym-only outcomes."""
-    counts = {"finalized": 0, "already_applied": 0, "held": 0, "failed": 0}
+    counts = {"finalized": 0, "already_applied": 0, "held": 0, "failed": 0,
+              "attention": 0}
     outcomes = []
     for item in payload.get("results") or []:
         status = str(item.get("status") or "failed")
@@ -2499,7 +2545,8 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
         counts[public_status] += 1
         outcomes.append({"pseudonym": names.get(str(item.get("user_id"))) or "(unknown student)",
                          "status": public_status,
-                         **({"code": str(item.get("code") or "failed")} if public_status == "failed" else {})})
+                         **({"code": str(item.get("code") or "failed")}
+                            if public_status in {"failed", "attention"} else {})})
     held_ids = {str(uid) for uid in held_user_ids}
     counts["held"] = len(held_ids)
     outcomes.extend({"pseudonym": names.get(uid) or "(unknown student)", "status": "held"}

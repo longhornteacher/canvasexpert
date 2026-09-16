@@ -675,7 +675,8 @@ def _result_projection(operation: dict, result: dict) -> dict:
                 if created:
                     row["created"] = created
                 row["teacher_action"] = (
-                    "In Canvas, assign each draft to the intended students or groups, "
+                    "Teacher action: in Canvas, assign each draft to the intended students, "
+                    "groups, or pods, "
                     "then publish the drafts."
                 )
             elif created:
@@ -685,7 +686,7 @@ def _result_projection(operation: dict, result: dict) -> dict:
                                 and step.get("returned_object_id")), None)
             if bridge_step and not assignment_tiered:
                 row["bridge"] = {
-                    "title": normalized.get("base_title"),
+                    "title": f"{normalized.get('base_title')} - Bridge",
                     "url": bridge_step.get("returned_object_url"),
                 }
         targets.append(row)

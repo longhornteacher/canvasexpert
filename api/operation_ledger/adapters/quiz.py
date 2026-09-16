@@ -326,7 +326,7 @@ class QuizAdapter:
 
         existing_by_title = {}
         existing_by_variant = {}
-        titles = [payload.get("base_title", ""), *[
+        titles = [differentiated_bridge.bridge_title(payload.get("base_title", "")), *[
             v["plan"].get("title", "") for v in variants
         ]]
         for title in titles:
@@ -504,7 +504,7 @@ class QuizAdapter:
             "variant_count": len(variants),
             "variants": variant_summaries,
             "bridge": {
-                "title": payload.get("base_title"),
+                "title": differentiated_bridge.bridge_title(payload.get("base_title")),
                 "due_at": payload.get("bridge_due_at"),
                 "module_name": payload.get("module_name"),
                 "post_to_sis": True,
@@ -512,7 +512,7 @@ class QuizAdapter:
             "only_visible_to_overrides": True,
             "tier_warning": (
                 "Canvas will create one color-suffixed New Quiz per tier and one "
-                "unsuffixed bridge in the module. Review them in Canvas Live; "
+                "server-named '<family> - Bridge' in the module. Review them in Canvas Live; "
                 "the teacher initiates SIS sync there."
             ),
         }

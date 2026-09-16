@@ -89,7 +89,8 @@ def create_root_session(*, queue: list[dict], scope: dict, session_id: str | Non
     for entry in queue:
         item = {key: copy.deepcopy(entry.get(key)) for key in _FROZEN_FIELDS}
         item.update({"status": "pending", "child_session_id": "", "claim": "",
-                     "outcome": "", "last_failure": "", "waiting_for_teacher": False})
+                     "outcome": "", "last_failure": "", "waiting_for_teacher": False,
+                     "preparation_retryable": True})
         frozen_queue.append(item)
     root = {
         "session_kind": ROOT_KIND,
@@ -157,6 +158,9 @@ def claim_active_item(scoring_session_id: str) -> dict:
             return {"kind": "ready", "root": root, "item": copy.deepcopy(item), "index": index}
         if item.get("status") == "preparing":
             return {"kind": "busy", "root": root, "item": copy.deepcopy(item)}
+        if item.get("status") == "failed" and item.get("preparation_retryable") is False:
+            return {"kind": "blocked", "root": root, "item": copy.deepcopy(item),
+                    "index": index}
         claim = str(uuid.uuid4())
         item["status"] = "preparing"
         item["claim"] = claim
@@ -225,7 +229,9 @@ def record_needs_teacher_input(scoring_session_id: str, index: int, claim: str) 
         return True
 
 
-def record_preparation_failure(scoring_session_id: str, index: int, claim: str, code: str) -> bool:
+def record_preparation_failure(
+    scoring_session_id: str, index: int, claim: str, code: str, *, retryable: bool = True,
+) -> bool:
     root_id = str(scoring_session_id or "")
     with session_store.session_lock(root_id):
         root = load_root_session(root_id)
@@ -240,6 +246,7 @@ def record_preparation_failure(scoring_session_id: str, index: int, claim: str, 
         item["status"] = "failed"
         item["claim"] = ""
         item["last_failure"] = str(code or "start_failed")
+        item["preparation_retryable"] = bool(retryable)
         _touch(root)
         session_store.save_session(root)
         return True

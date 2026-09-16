@@ -197,3 +197,27 @@ def test_continue_forwards_teacher_guidance_unchanged(monkeypatch):
     assert result["status"] == "needs_teacher_input"
     assert captured[0]["scoring_guidance"] == guidance
     assert sessions[root_id]["queue"][0]["status"] == "needs_teacher_input"
+
+
+def test_deterministic_preparation_failure_does_not_retry_same_root(monkeypatch):
+    _bind_courses(monkeypatch, [{"id": "c1", "name": "Course One"}])
+    _bind_snapshots(monkeypatch, {"c1": (_snapshot(_assignment("a1", "Essay", 1)), None)})
+    sessions = _bind_session_store(monkeypatch)
+    root_id = tools.start_scoring_session("c1")["scoring_session_id"]
+    attempts = []
+
+    def run_start(**_kwargs):
+        attempts.append(True)
+        return {"ok": False, "payload": {
+            "code": "mirror_submission_identity_mismatch",
+            "error": "Refresh the course mirror, then start a new Scoring Session.",
+        }}
+
+    monkeypatch.setattr("api.powergrader.start_workflow.run_start_session", run_start)
+    first = tools.continue_scoring_session(root_id)
+    second = tools.continue_scoring_session(root_id)
+
+    assert first["code"] == "preparation_blocked"
+    assert second["code"] == "preparation_blocked"
+    assert len(attempts) == 1
+    assert sessions[root_id]["active_index"] == 0

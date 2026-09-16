@@ -366,7 +366,8 @@ def test_mirror_preparation_returns_text_without_invoking_canvas_or_evidence(mon
     rows, prepared, result = assignment_refresh.prepare_assignment_from_mirror(
         "course-1", "assignment-1")
 
-    assert result == {"status": "mirror", "manifest_path": None}
+    assert result == {"status": "mirror", "manifest_path": None,
+                      "historical_only": False}
     assert prepared["description"] == "Write."
     assert rows[0]["body"] == "A private response."
     assert rows[0]["user"]["id"] == "student-1"
@@ -479,3 +480,112 @@ def test_mirror_preparation_refuses_submission_from_another_assignment(monkeypat
 
     assert rows is None and prepared is None
     assert result["error"] == assignment_refresh.MIRROR_PREPARATION_ERROR
+
+
+def _ordinary_assignment():
+    return {
+        "id": "assignment-1", "name": "Essay", "description_text": "Write.",
+        "points_possible": 10, "quiz_id": "", "is_quiz": False,
+        "quiz_kind": "", "is_quiz_lti_assignment": False,
+    }
+
+
+def _orphan_current(**overrides):
+    current = {
+        "user_id": "ghost", "assignment_id": "assignment-1",
+        "workflow_state": "submitted", "submitted_at": "2026-09-15T10:00:00Z",
+        "graded_at": None, "score": None, "grade": None, "late": False,
+        "missing": False, "excused": False, "attempt": 1,
+        "submission_type": "online_text_entry", "body": "Text.", "url": "",
+    }
+    current.update(overrides)
+    return current
+
+
+def test_mirror_preparation_ignores_only_historical_orphan_row(monkeypatch):
+    from api.powergrader import assignment_refresh
+
+    current = _orphan_current(workflow_state="graded", score=7, grade="7",
+                              submitted_at="", body="")
+    _mirror_scopes(monkeypatch, assignment=_ordinary_assignment(),
+                   current=current, roster=[{"id": "student-1", "name": "Learner"}])
+
+    rows, prepared, result = assignment_refresh.prepare_assignment_from_mirror(
+        "course-1", "assignment-1")
+
+    assert rows == []
+    assert result["status"] == "mirror"
+    assert result["historical_only"] is True
+
+
+@pytest.mark.parametrize("case", [
+    "submitted", "pending_review", "unscored_graded", "graded_with_submitted",
+    "graded_excused_no_score", "blank_user",
+])
+def test_mirror_preparation_fails_closed_on_unmatched_rows(monkeypatch, case):
+    from api.powergrader import assignment_refresh
+
+    overrides = {
+        "submitted": {},
+        "pending_review": {"workflow_state": "pending_review"},
+        "unscored_graded": {"workflow_state": "graded", "submitted_at": ""},
+        "graded_with_submitted": {"workflow_state": "graded", "score": 5},
+        "graded_excused_no_score": {"workflow_state": "graded", "submitted_at": "",
+                                    "excused": True},
+        "blank_user": {"user_id": ""},
+    }[case]
+    _mirror_scopes(monkeypatch, assignment=_ordinary_assignment(),
+                   current=_orphan_current(**overrides),
+                   roster=[{"id": "student-1", "name": "Learner"}])
+
+    rows, prepared, result = assignment_refresh.prepare_assignment_from_mirror(
+        "course-1", "assignment-1")
+
+    assert rows is None and prepared is None
+    assert result["code"] == assignment_refresh.MIRROR_SUBMISSION_IDENTITY_MISMATCH_CODE
+    assert result["error"] == assignment_refresh.MIRROR_SUBMISSION_IDENTITY_MISMATCH
+    assert "ghost" not in str(result)
+
+
+def test_historical_only_mirror_returns_nothing_to_grade(monkeypatch, tmp_path):
+    current = _orphan_current(workflow_state="graded", score=7, grade="7",
+                              submitted_at="", body="")
+    _mirror_scopes(monkeypatch, assignment=_ordinary_assignment(),
+                   current=current, roster=[{"id": "student-1", "name": "Learner"}])
+    monkeypatch.setattr(start_workflow.config, "course_display_name", lambda _id: "Course")
+
+    result = start_workflow.run_start_session(
+        course_id="course-1", assignment_id="assignment-1", mode="packet",
+        watch_late="false", auto_post="false", rubric_name="", persona_id="",
+        feedback_pattern_id="", model_id="", response_kind="scr", source_text="",
+        source_files_json="", source_uploads=None, oral_reading_passage="",
+        oral_reading_enabled="false", save_session=lambda _s: None,
+        scoring_session=True, scoring_guidance="", mirror_only=True,
+    )
+
+    assert result == {"ok": False, "payload": {
+        "ok": False, "code": "nothing_to_grade", "assignment_name": "Essay",
+    }}
+
+
+def test_mirror_identity_mismatch_stops_before_any_ai_work(monkeypatch, tmp_path):
+    _mirror_scopes(monkeypatch, assignment=_ordinary_assignment(),
+                   current=_orphan_current(),
+                   roster=[{"id": "student-1", "name": "Learner"}])
+    monkeypatch.setattr(start_workflow.config, "course_display_name", lambda _id: "Course")
+    monkeypatch.setattr(start_workflow.ai_workflow, "run_ai_workflow",
+                        lambda **_kw: (_ for _ in ()).throw(
+                            AssertionError("mismatch must stop before SAFE work")))
+
+    result = start_workflow.run_start_session(
+        course_id="course-1", assignment_id="assignment-1", mode="packet",
+        watch_late="false", auto_post="false", rubric_name="", persona_id="",
+        feedback_pattern_id="", model_id="", response_kind="scr", source_text="",
+        source_files_json="", source_uploads=None, oral_reading_passage="",
+        oral_reading_enabled="false", save_session=lambda _s: None,
+        scoring_session=True, scoring_guidance="", mirror_only=True,
+    )
+
+    assert result["ok"] is False
+    assert result["payload"]["code"] == "mirror_submission_identity_mismatch"
+    assert "ghost" not in str(result)

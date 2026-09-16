@@ -213,7 +213,7 @@ def _finish_operation(operation_id: str, target_results: list[dict]) -> dict:
         status=_receipt_status(final_status),
         targets=_receipt_targets(op.get("targets", [])),
         **({"variants": variants} if variants else {}),
-        **({"teacher_action": "In Canvas, assign each draft to the intended students or groups, then publish the drafts."} if variants else {}),
+        **({"teacher_action": "Teacher action: in Canvas, assign each draft to the intended students, groups, or pods, then publish the drafts."} if variants else {}),
     )
     create_receipt(receipt)
     return {

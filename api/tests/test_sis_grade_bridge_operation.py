@@ -32,7 +32,7 @@ class FakeCanvas:
                 "post_to_sis": False,
             },
             "bridge": {
-                "id": "bridge", "course_id": "course-1", "name": "Synthetic Family",
+                "id": "bridge", "course_id": "course-1", "name": "Synthetic Family - Bridge",
                 "description": description, "points_possible": 10, "assignment_group_id": "77",
                 "due_at": "2026-10-01T23:59:00-05:00", "grading_type": "points",
                 "submission_types": ["none"], "published": True,
@@ -404,18 +404,29 @@ def test_unregistered_family_refuses_before_canvas_read(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("mutation", "error"),
+    ("mutation", "error", "fields"),
     [
-        (lambda fake: fake.assignments["source-a"].update(post_to_sis=True), "source_sis_sync_enabled"),
-        (lambda fake: fake.assignments["source-a"].update(omit_from_final_grade=False), "source_counts_toward_final_grade"),
-        (lambda fake: fake.assignments["bridge"].update(published=False), "registered_bridge_drift"),
+        (lambda fake: fake.assignments["source-a"].update(post_to_sis=True), "source_sis_sync_enabled", None),
+        (lambda fake: fake.assignments["source-a"].update(omit_from_final_grade=False), "source_counts_toward_final_grade", None),
+        (lambda fake: fake.assignments["bridge"].update(published=False), "registered_bridge_shape_drift", ["published"]),
+        (lambda fake: fake.assignments["bridge"].update(description="changed"), "registered_bridge_shape_drift", ["description"]),
+        (lambda fake: fake.assignments["bridge"].update(due_at="2026-10-02T23:59:00-05:00"), "registered_bridge_shape_drift", ["due_at"]),
     ],
 )
-def test_registered_family_drift_fails_closed_before_mutation(bridge_harness, mutation, error):
+def test_registered_family_drift_fails_closed_before_mutation(bridge_harness, mutation, error, fields):
     fake = bridge_harness
     mutation(fake)
     result = _preview()
-    assert result == {"ok": False, "error": error, "blocking": True}
+    assert result["ok"] is False
+    assert result["error"] == error
+    assert result["blocking"] is True
+    if fields is not None:
+        assert result["drift_fields"] == fields
+        wire = json.dumps(result, sort_keys=True)
+        assert set(result["drift_fields"]).issubset(set(differentiated_bridge.BRIDGE_SHAPE_FIELDS))
+        assert "Synthetic Family - Bridge" not in wire
+        assert "changed" not in wire
+        assert "bridge" not in wire.casefold() or "registered_bridge_shape_drift" in wire
     assert fake.send_calls == []
 
 

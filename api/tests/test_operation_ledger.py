@@ -53,7 +53,8 @@ def test_assignment_tier_operation_result_and_receipt_are_content_only(monkeypat
     result = executor._finish_operation("op-tiered", [])
     receipt = captured["receipt"]
     assert result["status"] == "applied"
-    assert receipt["teacher_action"].startswith("In Canvas")
+    assert receipt["teacher_action"].startswith("Teacher action: in Canvas")
+    assert all(word in receipt["teacher_action"] for word in ("students", "groups", "pods", "publish"))
     assert receipt["variants"] == [
         {"label": "Support", "assignment_id": "101", "name": "Practice - Red",
          "html_url": "https://canvas.invalid/a/101"},

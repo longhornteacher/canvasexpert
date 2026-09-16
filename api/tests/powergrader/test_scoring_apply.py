@@ -21,10 +21,12 @@ def _session(**overrides):
     return session
 
 
-def _canvas_get(scored=(), *, workflow_state="graded"):
+def _canvas_get(scored=(), *, workflow_state="graded", live_rows=None):
     """Fake submission reads. ``scored`` names user_ids Canvas already scored."""
     def get(path, params=None, timeout=20):
         user_id = path.rstrip("/").split("/")[-1]
+        if live_rows and user_id in live_rows:
+            return (live_rows[user_id], None)
         scored_row = user_id in scored
         return ({
             "score": 3 if scored_row else None,
@@ -298,16 +300,24 @@ def test_apply_plan_pushes_the_previewed_rows():
     session = _session()
     load, save, saved = _store(session)
     sent = []
+    live_rows = {}
 
     def canvas_send(method, path, payload, timeout=30):
         sent.append((method, path, payload))
+        user_id = path.rstrip("/").split("/")[-1]
+        live_rows[user_id] = {
+            "score": float(payload["submission"]["posted_grade"]),
+            "grade": payload["submission"]["posted_grade"],
+            "workflow_state": "graded",
+            "submission_comments": [{"id": 1, "created_at": "2026-09-16T12:00:00Z"}],
+        }
         return ({"id": 1}, None)
 
     plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers={},
         load_session=load, save_session=save,
-        canvas_get=_canvas_get(), canvas_send=canvas_send)
+        canvas_get=_canvas_get(live_rows=live_rows), canvas_send=canvas_send)
 
     assert result["ok"] is True
     assert len(sent) == 2
@@ -353,9 +363,17 @@ def test_apply_plan_skips_what_the_answer_skipped():
     session["students"][0]["ai_score"] = 12
     load, save, _saved = _store(session)
     sent = []
+    live_rows = {}
 
     def canvas_send(method, path, payload, timeout=30):
         sent.append(path)
+        user_id = path.rstrip("/").split("/")[-1]
+        live_rows[user_id] = {
+            "score": float(payload["submission"]["posted_grade"]),
+            "grade": payload["submission"]["posted_grade"],
+            "workflow_state": "graded",
+            "submission_comments": [{"id": 1, "created_at": "2026-09-16T12:00:00Z"}],
+        }
         return ({"id": 1}, None)
 
     plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
@@ -363,7 +381,7 @@ def test_apply_plan_skips_what_the_answer_skipped():
         "session-1", expected_digest=plan["digest"],
         answers={"score_above_possible": "skip_those"},
         load_session=load, save_session=save,
-        canvas_get=_canvas_get(), canvas_send=canvas_send)
+        canvas_get=_canvas_get(live_rows=live_rows), canvas_send=canvas_send)
 
     assert result["ok"] is True
     assert len(sent) == 1 and "9002" in sent[0]

@@ -203,7 +203,11 @@ def test_prepare_requires_unique_public_tags(monkeypatch):
 
 
 def test_differentiated_assignment_drafts_are_independent_and_student_free(monkeypatch):
-    payload = _build(monkeypatch)
+    payload = _build(
+        monkeypatch,
+        unlock_at="2026-09-01T08:00:00-05:00",
+        lock_at="2026-09-30T23:59:00-05:00",
+    )
     fake = FakeCanvas()
     monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
     monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
@@ -217,6 +221,9 @@ def test_differentiated_assignment_drafts_are_independent_and_student_free(monke
     assert result["state"] == "applied"
     sources = [row for row in fake.assignments.values() if row["name"] != "Practice"]
     assert [row["name"] for row in sources] == ["Practice - Red", "Practice - Gold"]
+    assert all(row["due_at"] == "2026-09-14T15:30:00-05:00" for row in sources)
+    assert all(row["unlock_at"] == "2026-09-01T08:00:00-05:00" for row in sources)
+    assert all(row["lock_at"] == "2026-09-30T23:59:00-05:00" for row in sources)
     assert all(not row["published"] and not row["only_visible_to_overrides"] for row in sources)
     assert all(not rows for rows in fake.overrides.values())
     assert not fake.module_items

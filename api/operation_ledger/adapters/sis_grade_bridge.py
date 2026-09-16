@@ -30,10 +30,11 @@ class _BridgeReadError(RuntimeError):
 
 
 class _BridgeInvariantError(ValueError):
-    def __init__(self, code: str, detail: str = ""):
+    def __init__(self, code: str, detail: str = "", *, fields: list[str] | None = None):
         super().__init__(code)
         self.code = code
         self.detail = detail
+        self.fields = sorted(set(fields or []))
 
 
 class SisGradeBridgeAdapter:
@@ -50,7 +51,7 @@ class SisGradeBridgeAdapter:
         if not registration:
             raise ValueError(
                 "Differentiated family is not registered; create it through "
-                "AssignmentForge or QuizForge first."
+                "QuizForge first. AssignmentForge tier drafts are content-only."
             )
         payload = {
             "course_id": course_id,
@@ -161,10 +162,13 @@ class SisGradeBridgeAdapter:
         try:
             return self._capture_baseline(payload, target)
         except _BridgeInvariantError as exc:
-            return {
+            result = {
                 "blocking_error": exc.code,
                 "private_diagnostic": exc.detail or exc.code,
             }
+            if exc.fields:
+                result["drift_fields"] = exc.fields
+            return result
         except _BridgeReadError as exc:
             return {
                 "blocking_error": "canvas_read_failed",
@@ -186,11 +190,13 @@ class SisGradeBridgeAdapter:
         _validate_source_identity(payload, source_rows)
 
         bridge_state = None
+        registered_bridge_drift = False
         if str(bridge_row.get("id")) != bridge_id:
             raise _BridgeInvariantError("registered_bridge_missing_or_renamed")
         bridge_state = _read_bridge_state(course_id, bridge_id, bridge_row)
-        if _bridge_digest(bridge_state) != payload.get("registered_bridge_digest"):
-            raise _BridgeInvariantError("registered_bridge_drift")
+        registered_bridge_drift = (
+            _bridge_digest(bridge_state) != payload.get("registered_bridge_digest")
+        )
 
         active_users = _get_all(
             f"/api/v1/courses/{course_id}/users",
@@ -239,12 +245,16 @@ class SisGradeBridgeAdapter:
             "points_possible": _normalized_number(first.get("points_possible")),
             "assignment_group_id": str(first.get("assignment_group_id")),
         }
-        if bridge_row is None or not differentiated_bridge.bridge_matches(
-            bridge_row, expected_family, active=True
-        ):
-            raise _BridgeInvariantError("registered_bridge_shape_drift")
-        if (bridge_state or {}).get("overrides"):
-            raise _BridgeInvariantError("registered_bridge_has_overrides")
+        drift_fields = differentiated_bridge.bridge_mismatch_fields(
+            bridge_row, expected_family, active=True,
+            overrides=(bridge_state or {}).get("overrides") or [],
+        )
+        if drift_fields:
+            raise _BridgeInvariantError(
+                "registered_bridge_shape_drift", fields=drift_fields,
+            )
+        if registered_bridge_drift:
+            raise _BridgeInvariantError("registered_bridge_drift")
         memberships_by_student: dict[str, list[int]] = {}
         all_members = set()
         for source_index, members in enumerate(source_memberships):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import html
 import math
+import re
 from datetime import datetime, time
 from urllib.parse import urlsplit, urlunsplit
 
@@ -16,6 +17,11 @@ from .module_placement import attach_assignment_type_module_item
 
 
 CANONICAL_TIERS = ("Support", "Core", "Accelerate", "Extend")
+BRIDGE_SHAPE_FIELDS = (
+    "name", "description", "points_possible", "assignment_group_id", "due_at",
+    "grading_type", "submission_types", "published", "only_visible_to_overrides",
+    "omit_from_final_grade", "post_to_sis", "overrides",
+)
 
 
 def canonical_tier(value: object) -> str:
@@ -46,6 +52,8 @@ def resolve_public_tags(labels: list[object]) -> list[dict]:
                 f"Public Canvas tag for {tier} is missing; set every used tier tag in Settings."
             )
         tag_key = tag.casefold()
+        if tag_key == "bridge":
+            raise ValueError("The public Canvas tag 'Bridge' is reserved for the family bridge")
         if tag_key in seen_tags:
             raise ValueError(
                 "Public Canvas tags for the used tiers must be unique after trimming "
@@ -61,11 +69,19 @@ def normalize_base_title(value: object) -> str:
     title = str(value or "").strip()
     if not title:
         raise ValueError("Differentiated content requires a base title")
+    if re.search(r"(?:^|[\s_:/|\\\-‐‑‒–—−])+bridge\s*$", title, flags=re.IGNORECASE):
+        raise ValueError(
+            "Differentiated family titles must be unsuffixed; '- Bridge' is reserved"
+        )
     return title
 
 
 def source_title(base_title: str, tag: str) -> str:
     return f"{base_title} - {tag}"
+
+
+def bridge_title(base_title: str) -> str:
+    return f"{normalize_base_title(base_title)} - Bridge"
 
 
 def require_family_delivery(due_at: object, module_name: object) -> tuple[str, str, str]:
@@ -105,7 +121,7 @@ def bridge_description() -> str:
 
 def expected_bridge(family: dict, *, active: bool) -> dict:
     return {
-        "name": family["base_title"],
+        "name": bridge_title(family["base_title"]),
         "description": family["bridge_description"],
         "points_possible": family["points_possible"],
         "assignment_group_id": family["assignment_group_id"],
@@ -144,6 +160,23 @@ def structural_digest(state: dict) -> str:
 
 def bridge_matches(assignment: dict, family: dict, *, active: bool) -> bool:
     return _fields_match(assignment, expected_bridge(family, active=active))
+
+
+def bridge_mismatch_fields(
+    assignment: dict, family: dict, *, active: bool, overrides: list[dict] | None = None,
+) -> list[str]:
+    """Return only allowlisted bridge fields whose safe shapes differ."""
+    expected = expected_bridge(family, active=active)
+    actual = assignment_shape(assignment, overrides)
+    mismatches = []
+    for field in BRIDGE_SHAPE_FIELDS:
+        if field == "overrides":
+            if (overrides or []) != []:
+                mismatches.append(field)
+            continue
+        if not _fields_match({field: actual.get(field)}, {field: expected.get(field)}):
+            mismatches.append(field)
+    return sorted(set(mismatches))
 
 
 def execute_family_tail(
@@ -225,7 +258,7 @@ def execute_family_tail(
     module_result = attach_assignment_type_module_item(
         course_id=course_id,
         content_id=str(bridge_id),
-        title=family["base_title"],
+        title=bridge_title(family["base_title"]),
         module_name=payload["module_name"],
         steps=steps,
         context=context,

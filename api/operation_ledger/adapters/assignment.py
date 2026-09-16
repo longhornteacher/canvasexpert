@@ -289,10 +289,10 @@ class AssignmentAdapter:
                 } for row in payload["tiers"]],
                 "tier_warning": (
                     "Canvas will create one unpublished, unrestricted assignment draft "
-                    "per tier. Assign students or groups and publish each draft in Canvas."
+                    "per tier. The teacher assigns students, groups, or pods and publishes each draft in Canvas."
                 ),
                 "teacher_action": (
-                    "In Canvas, assign each draft to the intended students or groups, "
+                    "Teacher action: in Canvas, assign each draft to the intended students, groups, or pods, "
                     "then publish the drafts."
                 ),
             })

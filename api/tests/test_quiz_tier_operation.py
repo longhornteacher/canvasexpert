@@ -6,6 +6,7 @@ import json
 import pytest
 
 from api.operation_ledger import models
+from api.operation_ledger.adapters import differentiated_bridge
 from api.operation_ledger.adapters import quiz as quiz_module
 from api.operation_ledger.adapters.quiz import QuizAdapter
 from api.platform_services import canvas_client, config
@@ -54,6 +55,8 @@ def _request(**settings):
     [
         (_plan(), _plan("Extend", title="Different"), {}, "same exact"),
         (_plan(title="Reading Check - Red"), _plan("Extend", title="Reading Check - Red"), {}, "unsuffixed"),
+        (_plan(title="Reading Check - Bridge"), _plan("Extend", title="Reading Check - Bridge"), {}, "unsuffixed"),
+        (_plan(title="Reading Check – Bridge"), _plan("Extend", title="Reading Check – Bridge"), {}, "unsuffixed"),
         (_plan(points=20), _plan("Extend", points=25), {}, "equal total points"),
         (_plan(), _plan("Unknown"), {}, "canonical tier"),
         (_plan(), _plan("Extend"), {"due_at": ""}, "due_at"),
@@ -83,6 +86,15 @@ def test_prepare_normalizes_server_owned_titles_and_shapes(monkeypatch):
         assert settings["omit_from_final_grade"] is True
         assert settings["post_to_sis"] is False
         assert variant["plan"]["module"] == {}
+
+
+def test_bridge_title_is_server_owned_and_bridge_tag_is_reserved(monkeypatch):
+    assert differentiated_bridge.bridge_title("Reading Check") == "Reading Check - Bridge"
+    with pytest.raises(ValueError, match="unsuffixed"):
+        differentiated_bridge.bridge_title("Reading Check - Bridge")
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {"Support": "Bridge", "Extend": "Gold"})
+    with pytest.raises(ValueError, match="reserved"):
+        differentiated_bridge.resolve_public_tags(["Support", "Extend"])
 
 
 @pytest.mark.parametrize(
@@ -245,10 +257,11 @@ def test_differentiated_quiz_family_example_creates_only_bridge_module_item(monk
     result = QuizAdapter().execute(payload, {"course_id": "42", "steps": []}, {"group_snapshot": resolved["safe"]}, {}, context)
 
     assert result["state"] == "applied"
-    sources = [row for row in fake.assignments.values() if row["name"] != "Reading Check"]
+    bridge_name = differentiated_bridge.bridge_title("Reading Check")
+    sources = [row for row in fake.assignments.values() if row["name"] != bridge_name]
     assert [row["name"] for row in sources] == ["Reading Check - Red", "Reading Check - Gold"]
     assert all(row["published"] and row["only_visible_to_overrides"] and row["omit_from_final_grade"] and not row["post_to_sis"] for row in sources)
-    bridge = next(row for row in fake.assignments.values() if row["name"] == "Reading Check")
+    bridge = next(row for row in fake.assignments.values() if row["name"] == bridge_name)
     assert [str(row["content_id"]) for row in fake.module_items.values()] == [bridge["id"]]
     assert registrations[("42", "Reading Check")]["source_assignment_ids"] == [row["id"] for row in sources]
     assert all(value not in json.dumps(context.steps) for value in ("9001", "9002"))

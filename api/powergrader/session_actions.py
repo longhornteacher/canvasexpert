@@ -5,6 +5,7 @@ import json
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 
 from api.powergrader import attribution
@@ -119,6 +120,38 @@ def _same_comments(before: dict, after: dict) -> bool:
         and before.get("comment_count") == after.get("comment_count")
         and before.get("latest_comment") == after.get("latest_comment")
     )
+
+
+def _numbers_equal(left, right) -> bool:
+    try:
+        return Decimal(str(left)) == Decimal(str(right))
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+
+
+def _same_postcondition(payload: dict, before: dict, after: dict) -> bool:
+    """Prove the exact score/comment payload landed in the Canvas read-back."""
+    if "submission" in payload:
+        posted_grade = (payload.get("submission") or {}).get("posted_grade")
+        if not _numbers_equal(posted_grade, after.get("score")):
+            return False
+    if "comment" in payload:
+        if not after.get("comments_available"):
+            return False
+        if not isinstance(before.get("comment_count"), int) or not isinstance(
+            after.get("comment_count"), int
+        ):
+            return False
+        if after["comment_count"] != before["comment_count"] + 1:
+            return False
+        if after.get("latest_comment") == before.get("latest_comment"):
+            return False
+    return True
+
+
+def _explicit_canvas_rejection(error: object) -> bool:
+    """HTTP responses are explicit rejection; transport errors may have landed."""
+    return str(error or "").lstrip().upper().startswith("HTTP ")
 
 
 def _path(session: dict, user_id: str) -> str:
@@ -313,7 +346,10 @@ def push_grades(
             return _review_error("payload_changed")
         target_digest = pending.get("target_digests", {}).get(user_id)
         if idempotency.get(user_id) == target_digest:
-            preflight.append((user_id, student, payload, target_digest, "already_applied"))
+            preflight.append((
+                user_id, student, payload, target_digest, "already_applied", None,
+                payload_digest,
+            ))
             continue
         if student.get("status") != "approved" or student.get("posted"):
             return _review_error("payload_changed")
@@ -326,25 +362,67 @@ def push_grades(
                 return _review_error("comments_unavailable" if not current.get("comments_available") else "drift_detected")
         if "submission" in payload and not _same_score_baseline(baseline, current):
             return _review_error("drift_detected")
-        preflight.append((user_id, student, payload, target_digest, "pending"))
+        preflight.append((
+            user_id, student, payload, target_digest, "pending", baseline,
+            payload_digest,
+        ))
 
     results = []
     pushed = 0
-    for user_id, student, payload, target_digest, state in preflight:
+    for user_id, student, payload, target_digest, state, baseline, payload_digest in preflight:
         if state == "already_applied":
             student["posted"] = True
             student["status"] = "posted"
-            results.append({"user_id": user_id, "status": "already_applied", "code": "already_applied"})
+            results.append({
+                "user_id": user_id, "status": "already_applied", "code": "already_applied",
+                "request_digest": payload_digest,
+                "target_digest": target_digest,
+                "postcondition_digest": _digest(baseline or {}),
+            })
             continue
-        _, send_error = canvas_send("PUT", _path(session, user_id), payload)
+        _response, send_error = canvas_send("PUT", _path(session, user_id), payload)
         if send_error:
-            results.append({"user_id": user_id, "status": "failed", "code": "canvas_rejected"})
+            if _explicit_canvas_rejection(send_error):
+                results.append({
+                    "user_id": user_id, "status": "failed", "code": "canvas_rejected",
+                    "request_digest": payload_digest, "target_digest": target_digest,
+                    "postcondition_digest": "",
+                })
+                continue
+            student["posted"] = False
+            student["status"] = "attention"
+            student["push_state"] = "sent_unknown"
+            save_session(session)
+            results.append({
+                "user_id": user_id, "status": "attention", "code": "sent_unknown",
+                "request_digest": payload_digest, "target_digest": target_digest,
+                "postcondition_digest": "",
+            })
             continue
+        # Persist the ambiguous state before the verification GET. A process
+        # failure after a successful PUT must never make a later retry blind.
+        student["posted"] = False
+        student["status"] = "attention"
+        student["push_state"] = "sent_unknown"
+        save_session(session)
+        after, verify_error = _fetch_snapshot(session, user_id, canvas_get)
+        if verify_error or not _same_postcondition(payload, baseline or {}, after or {}):
+            results.append({
+                "user_id": user_id, "status": "attention", "code": "sent_unknown",
+                "request_digest": payload_digest, "target_digest": target_digest,
+                "postcondition_digest": _digest(after or {}),
+            })
+            continue
+        student.pop("push_state", None)
         student["posted"] = True
         student["status"] = "posted"
         idempotency[user_id] = target_digest
         pushed += 1
-        results.append({"user_id": user_id, "status": "pushed", "code": "pushed"})
+        results.append({
+            "user_id": user_id, "status": "pushed", "code": "pushed",
+            "request_digest": payload_digest, "target_digest": target_digest,
+            "postcondition_digest": _digest(after or {}),
+        })
 
     if results:
         session.setdefault("push_log", []).append({
@@ -354,9 +432,11 @@ def push_grades(
         })
         save_session(session)
     failed = sum(1 for result in results if result["status"] == "failed")
+    attention = sum(1 for result in results if result["status"] == "attention")
     return {
-        "ok": failed == 0,
+        "ok": failed == 0 and attention == 0,
         "pushed": pushed,
         "results": results,
-        "errors": [result["code"] for result in results if result["status"] == "failed"],
+        "errors": [result["code"] for result in results
+                   if result["status"] in {"failed", "attention"}],
     }, 200

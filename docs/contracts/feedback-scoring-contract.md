@@ -50,10 +50,16 @@ segments concatenate in order to the exact original response and retain one resu
 `(pseudonym, item_id)`. `total`/`segment_total` count projected segment rows, while
 `source_response_total` counts original scorable responses.
 New sessions include only submissions Canvas still marks `submitted` or `pending_review`.
-If refreshed rows contain no such submission, continuation records
+Mirror preparation ignores only an unmatched row that is demonstrably historical already-
+graded work (`workflow_state="graded"`, numeric score present, and empty `submitted_at`).
+Any submitted, pending, or ambiguous identity mismatch fails closed with the structured
+`mirror_submission_identity_mismatch` error; no live Canvas recovery lookup is performed.
+If refreshed rows contain no eligible submission, continuation records
 `nothing_to_grade` for that queue item and moves to the next one without creating
 a packet. A genuinely empty acquisition remains an error rather than being
-recast as completed grading.
+recast as completed grading. Deterministic preparation failures remain active but blocked
+in the root session, and later continuation returns `preparation_blocked` without retrying
+preparation in that session.
 Existing New Quizzes with writing stop before SAFE packet creation with
 `new_quiz_writing_requires_assignment`. The teacher grades that writing in Canvas and
 authors future writing portions as separate 100-point AssignmentForge assignments.
@@ -89,9 +95,12 @@ Teacher guidance remains available privately in full for the session record. Whe
 its effective model and packet projection carries the compaction marker and counts above;
 those counts are the signal that effective text was omitted. Ordinary assignments use the
 public start -> continue -> packet -> submit flow and retain the
-frozen baseline, drift check, per-student idempotency, verification, and content-
-minimized receipt lane. Existing New Quizzes with writing return the identity-safe
-unsupported code before scoring norms, SAFE packet generation, or Canvas mutation. New Quiz
+frozen baseline, drift check, per-student idempotency, PUT-then-GET verification, and
+content-minimized receipt lane. A successful write is posted only when the refreshed score,
+comment availability/count, and latest-comment metadata satisfy the postcondition. A GET
+failure or mismatch is durable `sent_unknown`/Attention with no idempotency and no automatic
+retry; explicit HTTP rejection remains the existing failed result. Existing New Quizzes with
+writing return the identity-safe unsupported code before scoring norms, SAFE packet generation, or Canvas mutation. New Quiz
 assignment totals and assignment-level comments are not scoring fallbacks.
 
 The teacher's request authorizes valid results only for the exact course/assignment

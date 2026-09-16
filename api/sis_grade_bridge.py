@@ -84,11 +84,15 @@ def preview_sis_grade_bridge(
         )[0]
         baseline = adapter.capture_baseline(payload, provisional)
         if baseline.get("blocking_error"):
-            return {
+            result = {
                 "ok": False,
                 "error": baseline["blocking_error"],
                 "blocking": True,
             }
+            fields = baseline.get("drift_fields")
+            if isinstance(fields, list) and all(isinstance(field, str) for field in fields):
+                result["drift_fields"] = sorted(set(fields))
+            return result
         payload = adapter.freeze_payload(payload, baseline)
         target = adapter.verify_targets(
             payload, [{"course_id": course_key}]
@@ -97,11 +101,15 @@ def preview_sis_grade_bridge(
         # already the exact state that apply will drift-check.
         baseline = adapter.capture_baseline(payload, target)
         if baseline.get("blocking_error"):
-            return {
+            result = {
                 "ok": False,
                 "error": baseline["blocking_error"],
                 "blocking": True,
             }
+            fields = baseline.get("drift_fields")
+            if isinstance(fields, list) and all(isinstance(field, str) for field in fields):
+                result["drift_fields"] = sorted(set(fields))
+            return result
 
         target_record = models.new_target(
             target_key=target["target_key"],

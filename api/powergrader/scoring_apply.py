@@ -81,7 +81,8 @@ _ADVISORY_KINDS = {"held_not_scored"}
 
 def _staged(student: dict) -> bool:
     """A row an assistant has scored and nobody has posted yet."""
-    if student.get("posted") or student.get("status") == "posted":
+    if (student.get("posted") or student.get("status") == "posted"
+            or student.get("push_state") == "sent_unknown"):
         return False
     return student.get("ai_score") is not None or bool(
         (student.get("ai_feedback") or "").strip())
@@ -134,6 +135,12 @@ def build_plan(session: dict, *, canvas_get=None, pseudonyms=()) -> dict:
     if canvas_get is None:
         canvas_get, _ = default_transports()
     students = [s for s in session.get("students", []) if s.get("user_id") is not None]
+    if any(s.get("push_state") == "sent_unknown" for s in students):
+        return {
+            "ok": False,
+            "code": "canvas_write_attention",
+            "error": "A previous Canvas write could not be verified. Review Canvas before retrying.",
+        }
     candidates = [s for s in students if _staged(s)]
     candidate_ids = [str(s["user_id"]) for s in candidates]
 

@@ -21,7 +21,9 @@ the only review/edit surface.
   re-identifies privately exactly once, scans all outputs, and selects a write owner
   without exposing transport type or private identifiers.
 - `scoring_apply.py` owns ordinary-assignment questions, frozen review, drift,
-  idempotency, verification, and receipt flow through `session_actions.py`.
+  idempotency, PUT-then-GET verification, and receipt flow through `session_actions.py`.
+  A PUT is persisted as durable Attention/`sent_unknown` before verification; only a
+  matching refreshed score and comment postcondition becomes posted and idempotent.
 - `start_workflow.py` stops existing New Quizzes that need writing scores with
   `new_quiz_writing_requires_assignment` before scoring norms or SAFE packet work.
 - `feedback_vault.py`, `feedback_safety.py`, and `pseudonym.py` own local identity
@@ -39,7 +41,9 @@ the only review/edit surface.
   queue in that root session. It never extends to later-discovered work, another
   Scoring Session, arbitrary grade edit, or SIS action.
 - Ordinary assignments retain a fresh baseline, question digest, drift check,
-  per-student idempotency, verification, and minimized receipt. Canvas Expert does not
+  per-student idempotency, PUT-then-GET verification, and minimized receipt. GET failure,
+  mismatch, or possibly-accepted transport remains durable Attention/`sent_unknown` without
+  retry; explicit Canvas HTTP rejection remains failed. Canvas Expert does not
   write New Quiz item scores, per-item feedback, assignment totals, or fallback comments.
 - A question writes nothing until every allowed answer is explicit and bound to the
   unchanged results, packet digest, and exact review digest. Failures and ambiguous

@@ -7,8 +7,9 @@ Status: accepted product and safety contract.
 A differentiated QuizForge delivery is one Canvas family. AssignmentForge tier delivery is
 content-only and is outside this bridge contract: it creates independent assignment drafts
 and never registers or activates a family. For QuizForge, the color-suffixed assignments
-are the student work surfaces. One unsuffixed no-submission assignment is the bridge shown
-in the selected module and used as the family gradebook column.
+are the student work surfaces. One server-named `<family> - Bridge` no-submission assignment
+is the bridge shown in the selected module and used as the family gradebook column; the
+canonical family identity and configuration key remain the unsuffixed family title.
 
 CanvasExpert creates and verifies that family in Canvas Live and may later project final
 Canvas scores from the registered source assignments into the registered bridge. The teacher
@@ -18,7 +19,8 @@ stores SIS credentials, triggers Canvas Grade Sync, or treats CanvasMirror as wr
 ## 2. Family identity and registration
 
 A family is course-scoped and contains one exact unsuffixed title, two or more exact
-color-suffixed source assignment IDs and titles, one exact bridge assignment ID, and a digest
+color-suffixed source assignment IDs and titles, one exact server-named bridge assignment ID,
+and a digest
 of the verified bridge structure. This student-free record may live in synced workspace
 settings. It never contains names, student IDs, memberships, submissions, scores, or private
 evidence.
@@ -48,7 +50,7 @@ grading, one exact group override, `published=true`,
 
 The bridge finishes with:
 
-- the exact unsuffixed family title, common points possible, and assignment group;
+- the exact `<family> - Bridge` title, common points possible, and assignment group;
 - a due time of 23:59:00 on the source due date, preserving the source timestamp's UTC offset;
 - `submission_types=["none"]`, point grading, no overrides, and whole-course visibility;
 - `published=true`, `omit_from_final_grade=false`, and `post_to_sis=true`; and
@@ -66,7 +68,7 @@ The reviewed differentiated QuizForge operation runs in this order:
 1. Revalidate group membership, public tags, title, points and assignment group, due date,
    module, and same-title collisions.
 2. Create and verify every source in its safe final shape, preserving each exact returned ID.
-3. Create the bridge unpublished, omitted from the final grade, and SIS-disabled, then
+3. Create the server-named `<family> - Bridge` bridge unpublished, omitted from the final grade, and SIS-disabled, then
    checkpoint its exact ID.
 4. Resolve or create the selected module and attach only the exact bridge ID.
 5. Activate and verify the bridge's published, counted, SIS-enabled final shape.

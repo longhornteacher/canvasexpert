@@ -349,7 +349,10 @@ def run_start_session(
         subs, adata, refresh = assignment_refresh.refresh_assignment(
             course_id, assignment_id, session_id=session_id)
     if refresh.get("error"):
-        return {"ok": False, "payload": {"ok": False, "error": refresh["error"], "privacy_steps": []}}
+        payload = {"ok": False, "error": refresh["error"], "privacy_steps": []}
+        if refresh.get("code"):
+            payload["code"] = refresh["code"]
+        return {"ok": False, "payload": payload}
     if not isinstance(adata, dict):
         return {"ok": False, "payload": {"ok": False,
             "error": "The assignment could not be prepared safely; refresh the course and retry.",
@@ -375,6 +378,14 @@ def run_start_session(
         }}
 
     if not subs:
+        # A mirror refresh that carried only historical orphan rows is a
+        # nothing_to_grade signal, distinct from a genuinely empty acquisition.
+        if refresh.get("historical_only"):
+            return {"ok": False, "payload": {
+                "ok": False,
+                "code": "nothing_to_grade",
+                "assignment_name": str(assignment_name),
+            }}
         return {"ok": False, "payload": {"ok": False, "error": "No submissions found for this assignment.",
                                           "privacy_steps": []}}
 

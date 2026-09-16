@@ -298,7 +298,7 @@ The Quiz tab also links the standalone QuizForge app for QTI-ZIP manual import.
 live calls), or **Push live quiz…** (confirmation → streamed log).
 **Differentiated:** a quiz file per Canvas group, delivered through the reviewed
 Operation Ledger family path. Settings supplies public title tags; only the
-unsuffixed no-submission bridge is attached to the selected module.
+server-named `<family> - Bridge` no-submission bridge is attached to the selected module.
 Delivery options: due / unlock / lock dates, grading category, add-to-module
 (or create one), shuffle answers/questions, SIS sync, publish, hide results,
 access code, multiple attempts (+ cooldown, score-to-keep, build-on-last), time
@@ -314,7 +314,7 @@ Microsoft Edge through Playwright; DOCX files are rendered through bundled Pando
 Pick an `<ASSIGNMENTFORGE_JSON>` file, then **Validate** / **Push assignment…**.
 Delivery: dates, grading category, module, SIS, and publish for ordinary assignments.
 Authored tiers are content-only: each becomes an independent unpublished, unrestricted
-Canvas assignment draft with its configured public tag. The teacher assigns students/groups
+Canvas assignment draft with its configured public tag. The teacher assigns students/groups/pods
 and publishes the drafts in Canvas; no Roster group set or bridge is involved. Rubric
 association is not part of this operation path.
 

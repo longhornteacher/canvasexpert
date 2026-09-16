@@ -417,6 +417,8 @@ def test_assignment_tier_result_projection_is_content_only_and_actionable():
          "html_url": "https://canvas.invalid/a/102"},
     ]
     assert "draft" in target["teacher_action"]
+    assert "Teacher action" in target["teacher_action"]
+    assert all(word in target["teacher_action"] for word in ("students", "groups", "pods", "publish"))
 
     def keys(value):
         if isinstance(value, dict):

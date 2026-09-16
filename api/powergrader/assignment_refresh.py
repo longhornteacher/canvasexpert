@@ -21,6 +21,29 @@ MIRROR_PREPARATION_ERROR = (
     "Call refresh_mirror(course_id) and retry."
 )
 
+# A mirror submission row whose user no longer matches the roster is an
+# identity mismatch unless it is a provably historical committed grade. The
+# outward code and message name no ID, name, count, or other student identity.
+MIRROR_SUBMISSION_IDENTITY_MISMATCH_CODE = "mirror_submission_identity_mismatch"
+MIRROR_SUBMISSION_IDENTITY_MISMATCH = (
+    "The local CanvasMirror contains a submission row that does not match the "
+    "course roster. Call refresh_mirror(course_id) and retry."
+)
+
+
+def _is_historical_orphan(current: dict) -> bool:
+    """A committed Canvas grade for a departed learner: safe to ignore.
+
+    Only a row Canvas already graded, carrying a real score and no submission
+    timestamp, can be a historical orphan. Every other unmatched row --
+    submitted, pending, unscored, or ambiguous -- fails closed.
+    """
+    return (
+        current.get("workflow_state") == "graded"
+        and current.get("score") is not None
+        and not str(current.get("submitted_at") or "").strip()
+    )
+
 
 class RefreshBudget:
     def __init__(self, limit=REFRESH_BINARY_LIMIT):
@@ -315,6 +338,8 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
         return None, None, {"error": MIRROR_PREPARATION_ERROR}
 
     rows = []
+    entry_count = 0
+    historical_orphans = 0
     required_current = {
         "user_id", "workflow_state", "submitted_at", "graded_at", "score",
         "grade", "late", "missing", "excused", "attempt",
@@ -328,9 +353,19 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
             return None, None, {"error": MIRROR_PREPARATION_ERROR}
         if str(current.get("assignment_id") or "") != str(assignment_id):
             return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        entry_count += 1
         uid = str(current.get("user_id") or "")
         if not uid or uid not in roster_by_id:
-            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+            # A row that cannot be reconciled to the roster is an identity
+            # mismatch, never live Canvas work. Only a provably historical
+            # committed grade (graded, scored, never submitted) is ignored.
+            if _is_historical_orphan(current):
+                historical_orphans += 1
+                continue
+            return None, None, {
+                "error": MIRROR_SUBMISSION_IDENTITY_MISMATCH,
+                "code": MIRROR_SUBMISSION_IDENTITY_MISMATCH_CODE,
+            }
         attempts = entry.get("attempts")
         if not isinstance(attempts, dict):
             return None, None, {"error": MIRROR_PREPARATION_ERROR}
@@ -366,4 +401,5 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
             "_mirror_unreadable": unreadable,
         })
         rows.append(row)
-    return rows, assignment, {"status": "mirror", "manifest_path": None}
+    return rows, assignment, {"status": "mirror", "manifest_path": None,
+                              "historical_only": bool(entry_count) and historical_orphans == entry_count}

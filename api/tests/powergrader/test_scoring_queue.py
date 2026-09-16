@@ -105,3 +105,22 @@ def test_needs_teacher_input_and_write_failure_do_not_advance(monkeypatch):
     root = scoring_queue.load_root_session(root_id)
     assert root["active_index"] == 0
     assert root["queue"][0]["status"] == "ready"
+
+
+def test_deterministic_preparation_failure_stays_blocked_after_reload(monkeypatch):
+    _memory_store(monkeypatch)
+    root_id = "root-blocked"
+    scoring_queue.create_root_session(
+        queue=[_queue_item("c1", "a1"), _queue_item("c1", "a2")],
+        scope={}, session_id=root_id)
+    claim = scoring_queue.claim_active_item(root_id)
+    assert scoring_queue.record_preparation_failure(
+        root_id, claim["index"], claim["claim"],
+        "mirror_submission_identity_mismatch", retryable=False,
+    )
+
+    blocked = scoring_queue.claim_active_item(root_id)
+    assert blocked["kind"] == "blocked"
+    assert blocked["item"]["preparation_retryable"] is False
+    assert blocked["item"]["last_failure"] == "mirror_submission_identity_mismatch"
+    assert scoring_queue.load_root_session(root_id)["active_index"] == 0

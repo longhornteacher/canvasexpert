@@ -266,7 +266,7 @@
     var action = reviews.find(function (review) { return review.teacher_action; });
     return action && action.teacher_action
       ? action.teacher_action
-      : "In Canvas, assign each draft to the intended students or groups, then publish the drafts.";
+      : "Teacher action: in Canvas, assign each draft to the intended students, groups, or pods, then publish the drafts.";
   }
 
   async function reviewAndApply(operationId, logFn, bannerEl, confirmLabel) {

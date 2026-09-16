@@ -140,8 +140,8 @@ changed bridge grades in Canvas Live. The teacher reviews there and owns Canvas 
 - Embeds a visible **TEKS** label per tagged item + prints a coverage report.
 - **Differentiated family**: two or more files with the same unsuffixed base title and
   canonical `metadata.variant` tier create exact `Base - <configured tag>` quizzes. Each
-  source is published, group-only, omitted from the final grade, and SIS-disabled. One
-  unsuffixed no-submission bridge is attached to the required module and registered only
+source is published, group-only, omitted from the final grade, and SIS-disabled. One
+server-named `<Base> - Bridge` no-submission bridge is attached to the required module and registered only
   after exact postconditions pass.
 
 ### Assignments (AssignmentForge)
@@ -151,7 +151,8 @@ changed bridge grades in Canvas Live. The teacher reviews there and owns Canvas 
 - **Differentiated content**: one file with two or more canonical tiers creates one
   independent `Base - <configured tag>` assignment draft per tier, each carrying its own
   scaffolding. Drafts are unpublished and unrestricted; the teacher assigns students/groups
-  and publishes them in Canvas. No bridge, override, module item, or roster lookup is used.
+   and publishes them in Canvas. No bridge, override, module item, or roster lookup is used;
+   the teacher owns the student/group/pod placement action.
 
 Differentiated quiz delivery retains its timezone-aware due timestamp, module, unique public
 tags, equal points, and assignment-group requirements. AssignmentForge tier drafts preserve
