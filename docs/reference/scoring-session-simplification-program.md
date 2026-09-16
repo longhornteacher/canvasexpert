@@ -1,11 +1,15 @@
 # Scoring Session simplification program
 
-Status: approved senior plan; execute one batch at a time
+Status: batch 01 accepted GREEN; execute one remaining batch
 
-Current batch: **01 — assignment-scoped session cutover**. Its only active direct
-brief is `docs/handoffs/scoring-session-simplification-01-assignment-runs.md`.
-Batch 02 must not receive a direct brief until batch 01 is accepted GREEN and the
-batch-01 brief is retired in the same senior batch.
+Current batch: **02 — canonical scoring artifacts and legacy preparation
+deletion**. Its only active direct brief is
+`docs/handoffs/scoring-session-simplification-02-artifacts.md`.
+
+Required program sections for batch 02: **Locked decisions**, **Handoff 02 —
+canonical scoring artifacts and legacy preparation deletion**, its **Locked
+scope**, **Acceptance criteria**, **Expected focused gate**, and **Stop
+conditions**. Outstanding senior decisions carried into batch 02: none.
 
 This document is the durable architecture and batch boundary for simplifying
 Scoring Sessions. It is not an implementation brief and does not authorize an
