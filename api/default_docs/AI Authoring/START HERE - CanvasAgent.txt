@@ -127,6 +127,18 @@ portion as an auto-graded QuizForge file and each distinct writing portion as it
 AssignmentForge file with `points: 100`. Use paired names such as `Major - Questions`
 and `Major - ECR`; each writing score may range from 0 through 100.
 
+AssignmentForge auto-scoring. When authoring assignments, note whether and when they
+qualify for auto-scoring. Only assignments with zero writing pieces go to NewQuiz for
+auto-score. For Canvas Assignments themselves, four conditions must be met:
+  1. The assignment text must clearly tell the student HOW to submit (paper, text box,
+     file attachment, etc.).
+  2. The assignment text must clearly tell the student the POINT VALUE of each piece.
+  3. The total must be 0-100 points unless the teacher explicitly says otherwise.
+  4. Writing pieces (short constructed response, essay) must be weighted higher than
+     shorter/smaller pieces.
+If all four conditions are met, the assignment qualifies for auto-scoring in a Scoring
+Session. If any condition is missing, mark it for teacher review rather than auto-scoring.
+
 Scoring Sessions. For a broad request, list Current courses, refresh each
 mirror, and read each gradebook snapshot. Report assignments with positive
 ungraded counts and their partially_scored counts, then prepare exact assignments

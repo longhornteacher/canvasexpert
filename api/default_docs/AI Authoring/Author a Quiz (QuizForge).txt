@@ -70,6 +70,11 @@ and owns Canvas Grade Sync.
   writing portion, author a separate AssignmentForge artifact worth 100 points. For a
   mixed assessment, use paired titles such as `Outsiders Ch 1-4 Major - Questions` and
   `Outsiders Ch 1-4 Major - ECR`.
+
+  **Auto-scoring eligibility:** QuizForge quizzes with zero writing pieces qualify for
+  AI auto-scoring. If the assessment includes any writing portion (even if authored
+  separately as AssignmentForge), that writing portion uses Canvas Manual Review or
+  AI Scoring Sessions with AssignmentForge - never QuizForge auto-scoring.
 - `prompt` (string): Full stem. Include fences inline (see Section 6) with explicit `\n` newlines. Every scored item needs a non-empty prompt; only `STIMULUS`/`STIMULUS_END` may be empty (and `ORDERING` may reuse `header` if `prompt` is omitted).
 - `points` (number, optional): Only include when the teacher explicitly asks for custom weights. Otherwise, omit `points` and let QuizForge assign default scoring.
 - `stimulus_id` (string): Optional explicit link to a stimulus `id`; otherwise, item attaches to the most recent stimulus above it.

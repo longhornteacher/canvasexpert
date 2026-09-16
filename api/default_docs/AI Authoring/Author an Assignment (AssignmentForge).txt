@@ -8,6 +8,16 @@
 - The JSON is fed to Canvas Expert for pushing. Do not perform Canvas delivery or student placement tasks yourself.
 - Delivery details (due dates, grading category, module, publish state) are chosen by the teacher in the push tool — **do not** put them in the JSON. Tiered delivery creates independent assignment drafts; the teacher assigns and publishes them in Canvas.
 
+### Auto-scoring eligibility
+
+AssignmentForge assignments may qualify for AI auto-scoring in a Scoring Session when all four of these conditions are met:
+1. **Completion method is explicit in the assignment text:** Students must clearly understand HOW to submit (e.g., "Write a 1-page response in the text box," "Upload a PDF," "Attach a Word document").
+2. **Point values are explicit per piece:** The assignment text must clearly state the point value for each distinct work piece (e.g., "Part 1: 40 points | Part 2: 60 points").
+3. **Total points is 0-100 or teacher-authorized:** The assignment must be worth 0-100 points unless the teacher has explicitly approved a different scale.
+4. **Writing pieces are weighted appropriately:** Short constructed responses (SCR) and essays are worth more than shorter, smaller work pieces.
+
+If any condition is unmet, the assignment is eligible for teacher review only — do not auto-score it. These conditions ensure students have fair notice and consistent, predictable grading.
+
 ## 2. OUTPUT CONTRACT — STRICT JSON ENVELOPE
 - Emit exactly one JSON object wrapped in tags:
   ```

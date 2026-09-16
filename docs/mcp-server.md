@@ -188,12 +188,20 @@ returns only each draft's label, never its absolute path. Pass `kind` to narrow 
 **Scoring Session workflow.** For a broad request such as “what needs grading,” the
 assistant lists Current courses, refreshes their mirrors as needed, and reads
 `get_gradebook_snapshot` to discover exact assignments. It then calls
-`prepare_scoring_session(course_id, assignment_id, scoring_guidance="")`. Preparation
+`prepare_scoring_session(course_id, assignment_id, scoring_guidance=””)`. Preparation
 forces one foreground full scoring refresh for that course, reads only current local
 mirror projections, performs no direct Canvas read, and saves one assignment-scoped
 session on success. Canvas workflow state is authoritative: a numeric score or teacher
 comment does not clear `submitted` or `pending_review` work. The assistant never asks
 for an assignment type or scoring transport.
+
+AssignmentForge auto-scoring gates: An assignment qualifies for AI auto-scoring in a
+Scoring Session only when all four conditions are met: (1) the assignment text explicitly
+tells students HOW to submit (paper, text box, file, etc.); (2) the assignment text
+explicitly states the point value of each work piece; (3) the total is 0-100 points
+unless the teacher explicitly approved a different scale; (4) writing pieces (SCR/ECR)
+are weighted higher than shorter pieces. If any condition is unmet, the assignment
+is eligible for teacher review only - do not auto-score it.
 
 If the assignment lacks a usable Canvas rubric, preparation returns `needs_teacher_input`
 with `needs_scoring_norms` and a concise question. Ask for bounded guidance, then retry
