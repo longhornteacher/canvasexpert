@@ -34,25 +34,23 @@ _SERVER_INSTRUCTIONS = (
     "For content, call get_authoring_contract. push_content_live stages and "
     "creates in one call; stage_content leaves a draft for review. Use the "
     "preview_content_push/apply_content_push pair for due, unlock, or lock dates. "
-    "For an unscoped request such as 'start a Scoring Session' or 'what needs "
-    "grading', list Current courses, call refresh_mirror for each Current course, "
-    "then read get_gradebook_snapshot for each. Report assignments with ungraded "
-    "greater than zero and partially_scored counts. Start one session for the "
-    "Current backlog; do not ask the teacher to pick an assignment. A scoped start "
-    "may name one Current course or exact assignment. On needs_refresh, refresh "
-    "listed courses and retry. The queue is frozen; later work needs a later session. "
-    "Never ask the teacher to choose a scoring transport or use assignment type. "
-    "Call continue_scoring_session to prepare the first item. For needs_scoring_norms, "
-    "ask its question, then continue with bounded scoring guidance. If empty, report nothing_to_grade. Disclose held work; item/catalog "
+    "For a broad request such as 'what needs grading', list Current courses, call "
+    "refresh_mirror for each Current course, then read get_gradebook_snapshot for "
+    "each and loop over exact assignments. Report assignments with ungraded greater "
+    "than zero and partially_scored counts; do not ask the teacher to pick an assignment. "
+    "Call prepare_scoring_session with both "
+    "course_id and assignment_id for one assignment. It performs one private full "
+    "scoring refresh; never ask the teacher to choose a scoring transport or use "
+    "assignment type. For needs_scoring_norms, ask its question, then retry the "
+    "same exact preparation with bounded scoring guidance. If empty, report nothing_to_grade. Disclose held work; item/catalog "
     "or evidence gaps do not mean the assignment is empty. Read every SAFE page "
     "with get_scoring_packet, including first-page contract and rubric. Score only "
     "those pseudonymized responses; submit_scoring_results with expected_packet_digest. "
     "Each result needs pseudonym, item_id, score, and feedback; valid rows post to Canvas. "
     "For needs_teacher_input, ask only its listed "
     "questions and resubmit the same results with the review digest and answers. "
-    "After each terminal submit, continue with the same root id until complete, "
-    "teacher input, a blocker, or the teacher stops. Authorization covers only the "
-    "frozen queue. list_scoring_sessions is an identity-free resume aid. "
+    "After a terminal submit, the exact assignment session is complete; prepare "
+    "another assignment explicitly if needed. list_scoring_sessions is an identity-free resume aid. "
     "SIS grade bridges are separate: preview_sis_grade_bridge reviews; "
     "apply_sis_grade_bridge writes. Asking for a write is the authorization; "
     "it covers only its named target and course, never another session or "
@@ -390,22 +388,17 @@ def refresh_mirror(course_id: str) -> str:
 
 
 @mcp.tool(structured_output=False)
-def start_scoring_session(course_id: str = "", assignment_id: str = "") -> str:
-    """Refresh requested Current courses, then freeze a mirror-backed queue."""
-    return _compact(tools.start_scoring_session(course_id, assignment_id))
-
-
-@mcp.tool(structured_output=False)
-def continue_scoring_session(scoring_session_id: str,
-                             scoring_guidance: str = "") -> str:
-    """Prepare or resume the active assignment in a frozen Scoring Session queue."""
-    return _compact(tools.continue_scoring_session(
-        scoring_session_id, scoring_guidance))
+def prepare_scoring_session(course_id: str, assignment_id: str,
+                            scoring_guidance: str = "") -> str:
+    """Prepare one exact assignment after one private full mirror refresh.
+    Returns a session id ready for packet paging, or a typed identity-safe blocker."""
+    return _compact(tools.prepare_scoring_session(
+        course_id, assignment_id, scoring_guidance))
 
 
 @mcp.tool(structured_output=False)
 def list_scoring_sessions() -> str:
-    """List identity-free root Scoring Sessions with aggregate queue progress."""
+    """List identity-free assignment-scoped Scoring Session summaries."""
     return _compact(tools.list_scoring_sessions())
 
 

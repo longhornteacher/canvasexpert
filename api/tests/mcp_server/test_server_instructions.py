@@ -35,15 +35,14 @@ INSTRUCTION_BUDGET = 3000
 # exists: both descriptions were already trimmed to single sentences before
 # raising this, so the remaining cost is the two tools' own name/schema
 # structure, not wordy prose.
-# The current unified scoring surface has one start, one packet, one submit,
+# The current unified scoring surface has one preparation, one packet, one submit,
 # and one optional identity-free list tool; no scoring preview/apply pair.
 LISTING_BUDGET = 17956
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
     "get_scoring_packet",
-    "start_scoring_session",
-    "continue_scoring_session",
+    "prepare_scoring_session",
     "preview_sis_grade_bridge",
     "preview_learning_objective",
     "preview_roster_student_change",
@@ -65,7 +64,7 @@ def test_instruction_block_stays_within_budget():
 def test_chat_scoring_uses_one_assignment_type_neutral_submit_flow():
     instructions = server._SERVER_INSTRUCTIONS
 
-    assert "start a Scoring Session" in instructions
+    assert "prepare_scoring_session" in instructions
     assert "get_scoring_packet" in instructions
     assert "submit_scoring_results" in instructions
     assert "valid rows post to Canvas" in instructions
@@ -190,7 +189,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 37
+    assert len(listed) == 36
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -235,7 +234,6 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
     monkeypatch.setattr(
         tools.config, "active_courses", lambda: [{"id": "111", "name": "Course"}]
     )
-    monkeypatch.setattr(tools, "_visible_scoring_sessions", lambda: [])
     monkeypatch.setattr(
         tools.config,
         "get_persona",
@@ -243,8 +241,7 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
     )
 
     session = {
-        "session_id": "session-1-child", "session_kind": "assignment_run",
-        "parent_scoring_session_id": "session-1",
+        "session_id": "session-1", "session_kind": "scoring_assignment",
         "course_id": "111",
         "assignment_name": "Quiz",
         "assignment_id": "assignment-1",
@@ -253,6 +250,7 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
         "scoring_rubric_text": "Award credit for a correct explanation.",
         "students": [{"user_id": "900001", "status": "pending"}],
         "privacy_artifacts": {"safe_bundle": str(tmp_path / "bundle.json")},
+        "status": "ready",
     }
     (tmp_path / "bundle.json").write_text(json.dumps({
         "contract_version": "1.0",
@@ -267,22 +265,12 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
             }],
         }],
     }), encoding="utf-8")
-    from api.powergrader import scoring_queue, session_store
+    from api.powergrader import session_store
     sessions = {session["session_id"]: session}
     monkeypatch.setattr(session_store, "load_session", lambda session_id: sessions.get(session_id))
     monkeypatch.setattr(session_store, "save_session",
                         lambda item: sessions.__setitem__(item["session_id"], item))
     monkeypatch.setattr(session_store, "session_lock", lambda _sid: nullcontext())
-    root = scoring_queue.create_root_session(queue=[{
-        "course_id": "111", "course_label": "Course", "assignment_id": "assignment-1",
-        "assignment_label": "Quiz", "due_at": "", "ungraded": 1, "partially_scored": 0,
-    }], scope={}, session_id="session-1")
-    root["queue"][0]["status"] = "ready"
-    root["queue"][0]["child_session_id"] = session["session_id"]
-    root["queue_digest"] = scoring_queue._queue_digest(root["queue"])
-    root["status"] = "ready"
-    session_store.save_session(root)
-
     wire = server._compact(tools.get_scoring_packet("session-1"))
     result = json.loads(wire)
 
@@ -310,9 +298,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 37
-    assert len(_synthetic_mcp["calls"]) == 37
-    assert len(_synthetic_mcp["gated"]) == 37
+    assert len(results) == 36
+    assert len(_synthetic_mcp["calls"]) == 36
+    assert len(_synthetic_mcp["gated"]) == 36
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

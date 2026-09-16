@@ -1,9 +1,9 @@
 # Feedback Scoring Contract - v1
 
 The data contract between the MCP-connected scoring agent and Canvas Expert's
-private scoring engine. Canvas Expert has no hosted grader. The agent scores one
-assignment-bounded SAFE pseudonymized packet at a time, then submits results to
-Canvas Expert for validation and the exact assignment-run Canvas write.
+private scoring engine. Canvas Expert has no hosted grader. The agent prepares one
+exact assignment-bounded SAFE pseudonymized packet at a time, then submits results
+to Canvas Expert for validation and the exact assignment Canvas write.
 
 Privacy invariant: the agent sees pseudonyms and scrubbed work only. Real names,
 Canvas/SIS IDs, signed URLs, credentials, and private paths remain in the local
@@ -15,27 +15,19 @@ shape change requires a major bump.
 
 ## Direction 1 - SAFE bundle (Canvas Expert -> agent)
 
-`start_scoring_session(course_id="", assignment_id="")` first forces a foreground
-full CanvasMirror rebuild for every requested Current course, then freezes an ordered
-queue from the resulting mirror gradebook snapshots. Empty filters mean every
-Current course; a course alone means that course; both filters mean that exact
-assignment. An assignment without its course is an invalid scope. Start performs
-no Canvas write and does not resolve scoring norms. The returned root
-`scoring_session_id` authorizes valid results only for the frozen queue; later
-assignments require a later Scoring Session.
-
-`continue_scoring_session(scoring_session_id, scoring_guidance="")` performs the
-same scoring-specific full CanvasMirror rebuild for the active course, then
-prepares or resumes the active assignment. A
-usable Canvas assignment rubric always wins.
+`prepare_scoring_session(course_id, assignment_id, scoring_guidance="")` requires
+one exact Current course and assignment, performs one foreground scoring-specific
+full CanvasMirror rebuild, and prepares the assignment from the resulting local
+projections. It performs no Canvas write and does not make a direct Canvas read.
+A usable Canvas assignment rubric always wins.
 Otherwise the teacher provides bounded scoring guidance. Teacher guidance is retained privately
 in full; when it exceeds the effective transport ceiling, the model and SAFE packet use
 a deterministic compacted projection with an explicit marker and original/effective/
 omitted character and unit counts. No basis returns a
 successful conversation state with `ok: true`, `status: "needs_teacher_input"`, code
-`needs_scoring_norms`, the same root `scoring_session_id`, assignment name, and a
-concise question. The agent asks and continues the same root
-session. Page zero from `get_scoring_packet` includes the server-authored feedback
+`needs_scoring_norms`, the assignment name, and a concise question. The agent asks
+and retries the same exact preparation with bounded guidance. Page zero from
+`get_scoring_packet` includes the server-authored feedback
 contract and resolved basis.
 Later pages may omit context. Optional shared assignment materials may be compacted or
 omitted when needed to fit the transport ceiling, but the packet carries an explicit
@@ -57,12 +49,10 @@ Mirror preparation ignores only an unmatched row that is demonstrably historical
 graded work (`workflow_state="graded"`, numeric score present, and empty `submitted_at`).
 Any submitted, pending, or ambiguous identity mismatch fails closed with the structured
 `mirror_submission_identity_mismatch` error; no live Canvas recovery lookup is performed.
-If refreshed rows contain no eligible submission, continuation records
-`nothing_to_grade` for that queue item and moves to the next one without creating
-a packet. A genuinely empty acquisition remains an error rather than being
-recast as completed grading. Deterministic preparation failures remain active but blocked
-in the root session, and later continuation returns `preparation_blocked` without retrying
-preparation in that session.
+If refreshed rows contain no eligible submission, preparation returns the typed
+`nothing_to_grade` blocker without creating a packet. A genuinely empty acquisition
+remains an error rather than being recast as completed grading. Every other failed
+preparation returns a stable code, stage, retryability, and identity-safe user action.
 Existing New Quizzes with writing stop before SAFE packet creation with
 `new_quiz_writing_requires_assignment`. The teacher grades that writing in Canvas and
 authors future writing portions as separate 100-point AssignmentForge assignments.
@@ -97,7 +87,7 @@ the exact review digest. A changed review plan or invalid answer fails closed.
 Teacher guidance remains available privately in full for the session record. When oversized,
 its effective model and packet projection carries the compaction marker and counts above;
 those counts are the signal that effective text was omitted. Ordinary assignments use the
-public start -> continue -> packet -> submit flow and retain the
+public prepare -> packet -> submit flow and retain the
 frozen baseline, drift check, per-student idempotency, PUT-then-GET verification, and
 content-minimized receipt lane. A successful write is posted only when the refreshed score,
 comment availability/count, and latest-comment metadata satisfy the postcondition. A GET
@@ -107,11 +97,8 @@ writing return the identity-safe unsupported code before scoring norms, SAFE pac
 assignment totals and assignment-level comments are not scoring fallbacks.
 
 The teacher's request authorizes valid results only for the exact course/assignment
-queue frozen in that root session. Each result set and write remains bound to its
-active assignment run. It does not authorize assignments discovered later, another
-Scoring Session, SIS action, or arbitrary grade edit. The assistant continues after
-each terminal submit until the queue is complete, teacher input is required, a
-blocker occurs, or the teacher asks it to stop. Canvas Live is the review/edit
+saved in that assignment-scoped session. It does not authorize another Scoring
+Session, SIS action, or arbitrary grade edit. Canvas Live is the review/edit
 surface. Canvas Expert has no local approval
 queue, import workflow, or second blanket confirmation. Student feedback is not labeled
 as AI unless the teacher explicitly chose a signoff; writing-process observations never enter Canvas

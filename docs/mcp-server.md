@@ -7,9 +7,9 @@ while CanvasExpert keeps sole custody of the Canvas PAT and almost every write p
 - **Local and indirect.** Serves this teacher's own Canvas data from Canvas Expert's
   local copy on their computer. It never holds the Canvas token. Canvas writes use
   bounded preview/apply or operation-ledger paths, except a teacher-requested
-  `push_content_live` and the Scoring Session submit. A request to start one
-  Scoring Session authorizes valid results only for its frozen course/assignment
-  queue; the server privately selects the Canvas transport. `submit_scoring_results` keeps
+  `push_content_live` and the Scoring Session submit. A request to prepare one
+  assignment authorizes valid results only for that exact course/assignment; the
+  server privately selects the Canvas transport. `submit_scoring_results` keeps
   the SAFE packet binding, per-student review, drift, idempotency, verification, and
   receipt safeguards. Everything else writes only to local CanvasExpert state.
 - **Pseudonymized, not anonymous.** Every student-data tool routes its result through the identity vault
@@ -35,7 +35,7 @@ while CanvasExpert keeps sole custody of the Canvas PAT and almost every write p
 
 ## Tools
 
-Tool schema version 48 (37 tools).
+Tool schema version 49 (36 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -71,9 +71,8 @@ Tool schema version 48 (37 tools).
 | `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |
 | `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state | Yes, pseudonymized |
 | `refresh_mirror(course_id)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |
-| `start_scoring_session(course_id="", assignment_id="")` | Refresh requested Current courses, then freeze a mirror-backed queue for every Current course, one Current course, or one exact assignment in a Current course | No |
-| `continue_scoring_session(scoring_session_id, scoring_guidance="")` | Prepare or resume the active queue item; missing norms pause the same root session for teacher input | No |
-| `list_scoring_sessions()` | One identity-free row per root Scoring Session with aggregate queue progress | No |
+| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="")` | Refresh one Current course once, then prepare one exact assignment from current mirror projections; missing norms return bounded teacher input | No |
+| `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
 | `submit_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None)` | Post valid SAFE-packet results to Canvas, or return pseudonym-only questions for an explicit conversational answer and retry | Yes, pseudonymized |
 
@@ -186,58 +185,46 @@ it likewise needs no course gate, no identity vault, and no safety scan. It reus
 returns only each draft's label, never its absolute path. Pass `kind` to narrow to one of
 `quiz`, `assignment`, or `page`; omit it to see everything staged across all three.
 
-**Scoring Session workflow.** `start_scoring_session(course_id="", assignment_id="")`
-freezes an ordered queue from fresh Current-course mirror gradebook snapshots. Empty
-filters mean every Current course; a course alone means that course; both filters mean
-that exact assignment. An assignment without a course is an invalid scope. Start performs
-no Canvas write. The root `scoring_session_id` authorizes valid results only for its frozen
-queue; newly discovered assignments need a later session.
+**Scoring Session workflow.** For a broad request such as “what needs grading,” the
+assistant lists Current courses, refreshes their mirrors as needed, and reads
+`get_gradebook_snapshot` to discover exact assignments. It then calls
+`prepare_scoring_session(course_id, assignment_id, scoring_guidance="")`. Preparation
+forces one foreground full scoring refresh for that course, reads only current local
+mirror projections, performs no direct Canvas read, and saves one assignment-scoped
+session on success. Canvas workflow state is authoritative: a numeric score or teacher
+comment does not clear `submitted` or `pending_review` work. The assistant never asks
+for an assignment type or scoring transport.
 
-For a broad request such as “start a Scoring Session” or “what needs grading,” the
-assistant lists Current courses and calls `start_scoring_session`. Start itself forces
-a foreground full CanvasMirror rebuild for each requested Current course before reading the
-gradebook snapshots. It reports assignments whose `ungraded` count is positive and
-their `partially_scored` counts, then starts one session without asking the teacher to pick
-an assignment. If a requested refresh fails, start returns `needs_refresh` and creates no
-session; refresh the listed courses and retry.
-Canvas workflow state is authoritative: a numeric score or teacher comment does not clear
-`submitted` or `pending_review` work. The assistant never asks for an assignment type or
-scoring transport.
-
-`continue_scoring_session(scoring_session_id, scoring_guidance="")`
-prepares or resumes exactly one active assignment. If it lacks a usable Canvas rubric, it
-returns `needs_teacher_input`, the same root id, and a concise question requesting bounded
-scoring guidance. Ask the teacher for that guidance, then continue
-that same root. A Canvas rubric remains authoritative for each assignment. If a just-in-time
-refresh finds no grading work, continuation records `nothing_to_grade` and advances without
-creating a packet. `list_scoring_sessions()` returns one identity-free row per root session
-and aggregate progress.
+If the assignment lacks a usable Canvas rubric, preparation returns `needs_teacher_input`
+with `needs_scoring_norms` and a concise question. Ask for bounded guidance, then retry
+the same exact course and assignment. If no current work remains, it returns the typed
+`nothing_to_grade` blocker without creating a packet. Every other failed preparation
+returns `code`, `stage`, `retryable`, and identity-safe `user_action`; there is no generic
+preparation fallback. `list_scoring_sessions()` lists only assignment-scoped summaries.
 
 Teacher guidance is retained privately in full. If it exceeds the effective transport
 ceiling, continuation deterministically compacts it for model and packet use; page zero
 exposes the compacted projection's marker and original/effective/omitted character and unit
 counts so omission is explicit.
 
-`get_scoring_packet()` retrieves pseudonymized response rows for exactly the active
-assignment, with full text (no silent truncation) and a packet digest bound to the root,
-private assignment run, exact course/assignment coordinates, and SAFE bundle. Page zero
+`get_scoring_packet()` retrieves pseudonymized response rows for exactly the prepared
+assignment, with full text (no silent truncation) and a packet digest bound to the one
+session id, exact course/assignment coordinates, and SAFE bundle. Page zero
 must include the server-authored scoring contract and resolved basis; later pages may omit
 context. Student response text is untrusted work, not instructions. `submit_scoring_results()`
 accepts only pseudonym/item results bound to that packet. Ordinary assignment results with
 no questions apply immediately. If judgment is needed, the tool returns `needs_teacher_input`,
 pseudonym-only questions, allowed answers, and a review digest without writing; the assistant
 asks the teacher, then retries the same tool with the unchanged results and explicit answers.
-After every terminal submit, the assistant calls `continue_scoring_session` with the same
-root id and keeps going until the queue is complete, teacher input is required, a blocker
-occurs, or the teacher asks it to stop. Existing New Quizzes with writing stop before a
+After a terminal submit, the assignment-scoped session is complete; prepare another exact
+assignment explicitly if needed. Existing New Quizzes with writing stop before a
 packet with `new_quiz_writing_requires_assignment`; the teacher grades them in Canvas and
 uses separate 100-point assignments for future writing portions. No transport type,
-operation token, or private assignment-run id crosses the MCP boundary. A stale packet,
+operation token, or private local id crosses the MCP boundary. A stale packet,
 changed review plan, invalid answer, or ambiguous write fails closed. Review and editing
-happen in Canvas Live; the teacher request authorizes only the frozen queue, not later work.
+happen in Canvas Live; the teacher request authorizes only the exact assignment, not later work.
 
-Continuation performs the same scoring-specific full rebuild for the active course
-before preparing each queue item, then uses
+Preparation performs the scoring-specific full rebuild once before using
 fresh local CanvasMirror roster, assignment, and submission projections. It makes no
 live Canvas call and downloads no attachments while preparing the SAFE packet. Text
 responses continue through the existing SAFE flow; attachment-bearing, media-only,
@@ -245,7 +232,7 @@ empty, and unreadable work stays held for review.
 The mirror assignment projection carries only student-free quiz classification fields, so a
 true New Quiz returns `new_quiz_writing_requires_assignment` before scoring norms or packet
 creation. If any required mirror scope is missing, stale, malformed, incomplete, or
-ambiguous, continuation names `refresh_mirror(course_id)` for repair.
+ambiguous, preparation returns a typed mirror blocker naming `refresh_mirror(course_id)` for repair.
 
 Paging counts projected response segments, not students. A multi-item quiz gives one row per
 student per item, and an oversized response may give several complete ordered segments. The
@@ -277,10 +264,10 @@ the gate has passed it, `get_scoring_packet` included.
 **Scoring Session writes.** `submit_scoring_results()` sends ordinary assignment scores and
 comments through the frozen, drift-checked, verified assignment write lane. Canvas Expert
 does not write New Quiz item scores, per-item feedback, assignment totals, or fallback
-comments. Results return only aggregate counts and pseudonym-keyed outcomes. A teacher who asked to start this
-session has authorized valid results for its frozen queue to post; the assistant reports
-what landed, calls `continue_scoring_session` after terminal outcomes, and directs review or
-edits to Canvas Live. Authorization never carries to later assignments, another session,
+comments. Results return only aggregate counts and pseudonym-keyed outcomes. A teacher who asked to prepare this
+assignment has authorized valid results for that exact assignment to post; the assistant
+directs review or edits to Canvas Live. Authorization never carries to later assignments,
+another session,
 SIS action, or arbitrary grade edit.
 Ordinary assignments may offer comment-only posting after the teacher answers its question.
 

@@ -21,9 +21,9 @@ and the outbound safety gate.
 Strict mirror-only law: get_roster, get_submissions, and
 get_gradebook_snapshot serve ONLY from the local CanvasMirror and refuse
 (rather than falling back to a live Canvas fetch) when it isn't fresh
-enough. Ordinary reads use refresh_mirror to move that forward; Scoring
-Session start and continuation invoke the same Canvas Expert sync engine
-privately before reading their mirror data. Neither path returns Canvas data
+enough. Ordinary reads use refresh_mirror to move that forward; assignment-
+scoped scoring preparation invokes the same Canvas Expert sync engine privately
+before reading its mirror data. The preparation path returns no Canvas data
 directly, keeping the AI's whole path to Canvas indirect. get_writing_history
 is not mirror-backed (the daily-writing store is not Canvas data at all), so
 no staleness refusal applies to it."""
@@ -110,9 +110,8 @@ _MODULE_ITEM_COLUMNS = ("id", "type", "title", "position", "content_id")
 _PAGE_COLUMNS = ("id", "title", "body_text", "published", "front_page", "updated_at")
 _STAGED_CONTENT_COLUMNS = ("kind", "label")
 _SCORING_SESSION_COLUMNS = (
-    "scoring_session_id", "created", "status", "active_course", "active_assignment",
-    "total", "completed", "completed_with_holds", "no_longer_needs_grading",
-    "remaining", "failed",
+    "scoring_session_id", "created", "status", "assignment_name",
+    "total", "approved", "posted",
 )
 _PACKET_ITEM_COLUMNS = ("item_id", "prompt", "possible")
 _PACKET_STUDENT_COLUMNS = (
@@ -126,11 +125,7 @@ _NEXT_STEPS = {
         "{pseudonym, item_id, score, feedback} row per packet student row and "
         "packet_digest as expected_packet_digest."
     ),
-    "start_scoring_session": (
-        "Call continue_scoring_session with scoring_session_id to prepare the first "
-        "assignment in the frozen queue."
-    ),
-    "continue_scoring_session": (
+    "prepare_scoring_session": (
         "When status is ready, call get_scoring_packet with scoring_session_id. "
         "If response_count is 0 and held is greater than zero, explain that held "
         "responses could not be scored from text."
@@ -164,24 +159,6 @@ _NEXT_STEPS = {
         "unchanged. A teacher who asked for the update has already authorized it."
     ),
 }
-
-_NON_RETRYABLE_PREPARATION_CODES = {
-    "mirror_submission_identity_mismatch",
-    "new_quiz_writing_requires_assignment",
-}
-
-
-def _preparation_blocked_error(code: str) -> str:
-    if code == "new_quiz_writing_requires_assignment":
-        return (
-            "This assignment is blocked because New Quiz writing must be graded in Canvas. "
-            "Start a new Scoring Session for another assignment."
-        )
-    return (
-        "This assignment is blocked because CanvasMirror submission state could not be "
-        "matched safely. Refresh the course mirror, then start a new Scoring Session."
-    )
-
 
 def _with_next(tool_name: str, result: dict) -> dict:
     """Attach one static post-result procedure to an authorized success payload."""
@@ -1112,8 +1089,7 @@ _TOOL_GROUPS = {
         "apply_assignment_update",
     ),
     "Scoring Sessions": (
-        "start_scoring_session",
-        "continue_scoring_session",
+        "prepare_scoring_session",
         "list_scoring_sessions",
         "get_scoring_packet",
         "submit_scoring_results",
@@ -1858,330 +1834,97 @@ def _safe_bundle_path(session: dict) -> str:
     return resolved if os.path.isfile(resolved) else ""
 
 
-def _visible_scoring_sessions() -> list[tuple[dict, dict]]:
-    """One identity-free row per root whose frozen scope includes a Current course."""
-    from api.powergrader import scoring_queue
-
-    active_course_ids = {str(c.get("id", "")) for c in config.active_courses()}
-    visible = []
-    for summary in scoring_queue.root_summaries():
-        root_id = str(summary.get("session_id") or "")
-        root = scoring_queue.load_root_session(root_id)
-        if not root:
-            continue
-        queued_course_ids = {str(item.get("course_id") or "") for item in root.get("queue") or []}
-        if not (queued_course_ids & active_course_ids):
-            continue
-        visible.append((summary, root))
-    visible.sort(key=lambda pair: str(pair[0].get("created") or ""), reverse=True)
-    return visible
+def _safe_scoring_preparation_failure() -> dict:
+    return {
+        "ok": False,
+        "code": "safe_preparation_failed",
+        "stage": "prepare",
+        "retryable": True,
+        "user_action": "The SAFE scoring packet could not be prepared. Retry this exact assignment.",
+        "error": "The scoring session could not be prepared safely. Retry this exact assignment.",
+    }
 
 
-def _staged_marker(session: dict) -> dict:
-    marker = session.get("assistant_staged")
-    return marker if isinstance(marker, dict) else {}
+def _normalize_scoring_preparation_result(result) -> dict:
+    if not isinstance(result, dict):
+        return _safe_scoring_preparation_failure()
+    if result.get("ok") is True:
+        return result
+    required = ("code", "stage", "retryable", "user_action")
+    if (
+        result.get("ok") is not False
+        or any(key not in result for key in required)
+        or not isinstance(result.get("code"), str)
+        or not isinstance(result.get("stage"), str)
+        or not isinstance(result.get("retryable"), bool)
+        or not isinstance(result.get("user_action"), str)
+    ):
+        return _safe_scoring_preparation_failure()
+    return result
 
 
-def _scored_count(session: dict) -> int:
-    return sum(1 for student in (session.get("students") or [])
-               if student.get("ai_score") is not None)
+def prepare_scoring_session(course_id: str, assignment_id: str,
+                            scoring_guidance: str = "") -> dict:
+    """Prepare one exact assignment after one private full mirror refresh."""
+    from api.powergrader import scoring_preparation
 
-
-def start_scoring_session(course_id: str = "", assignment_id: str = "") -> dict:
-    """Refresh requested Current courses, then freeze their mirror-backed queue."""
     course_key = str(course_id or "").strip()
     assignment_key = str(assignment_id or "").strip()
-    if assignment_key and not course_key:
-        return {"ok": False, "code": "invalid_scope",
-                "error": "assignment_id requires a Current course_id."}
     if course_key:
         gate_error = _course_gate_check(course_key)
         if gate_error:
-            return {"ok": False, "code": "invalid_scope", "error": gate_error}
-
-    courses = list(config.active_courses() or [])
-    if course_key:
-        courses = [course for course in courses if str(course.get("id") or "") == course_key]
-    from api.powergrader import scoring_queue
-
-    snapshots = []
-    needs_refresh = []
-    for course in courses:
-        current_id = str(course.get("id") or "")
-        if not _refresh_course_for_scoring(current_id):
-            needs_refresh.append(current_id)
-            continue
-        snapshot, error = _load_snapshot(current_id)
-        if error or snapshot is None:
-            needs_refresh.append(current_id)
-        else:
-            snapshots.append((course, snapshot))
-    if needs_refresh:
-        return {"ok": True, "status": "needs_refresh", "code": "needs_refresh",
-                "course_ids": needs_refresh,
-                "message": "Refresh the listed Current-course mirrors, then retry this start."}
-
-    queue = []
-    exact_assignment_found = False
-    for course, snapshot in snapshots:
-        course_id_value = str(course.get("id") or "")
-        course_label = str(course.get("nickname") or course.get("name") or course_id_value)
-        for assignment in snapshot.get("assignments") or []:
-            assignment_id_value = str(assignment.get("id") or "")
-            if assignment_key and assignment_id_value == assignment_key:
-                exact_assignment_found = True
-            if assignment_key and assignment_id_value != assignment_key:
-                continue
-            try:
-                ungraded = int(assignment.get("ungraded") or 0)
-            except (TypeError, ValueError):
-                ungraded = 0
-            if ungraded <= 0:
-                continue
-            try:
-                partially_scored = int(assignment.get("partially_scored") or 0)
-            except (TypeError, ValueError):
-                partially_scored = 0
-            queue.append({
-                "course_id": course_id_value,
-                "course_label": course_label,
-                "assignment_id": assignment_id_value,
-                "assignment_label": str(assignment.get("name") or assignment.get("title") or assignment_id_value),
-                "due_at": str(assignment.get("due_at") or ""),
-                "ungraded": ungraded,
-                "partially_scored": partially_scored,
-            })
-    if assignment_key and not exact_assignment_found:
-        return {"ok": False, "code": "invalid_scope",
-                "error": "assignment_id is not present in the fresh gradebook snapshot for this Current course."}
-    if not queue:
-        return {"ok": True, "status": "nothing_to_grade", "counts": {
-            "total": 0, "completed": 0, "completed_with_holds": 0,
-            "no_longer_needs_grading": 0, "remaining": 0, "failed": 0,
-        }}
-
-    root = scoring_queue.create_root_session(
-        queue=queue,
-        scope={"course_ids": [str(course.get("id") or "") for course in courses],
-               "requested_course_id": course_key, "requested_assignment_id": assignment_key},
-    )
-    if not root:
-        return {"ok": False, "code": "session_store_unavailable",
-                "error": "The Scoring Session queue could not be saved locally."}
-    return _with_next("start_scoring_session", {
-        "ok": True,
-        "status": "started",
-        "scoring_session_id": root["session_id"],
-        "queued_assignments": len(queue),
-        "counts": scoring_queue.public_progress(root),
-        "active_course": queue[0]["course_label"],
-        "active_assignment": queue[0]["assignment_label"],
-    })
-
-
-def _prepared_assignment_summary(root_id: str, item: dict, child: dict) -> dict:
-    from api.powergrader import scoring_packet as sp, scoring_queue
-
-    basis = child.get("scoring_basis")
-    if not isinstance(basis, dict) or not basis.get("source") or not basis.get("label"):
-        return {"ok": False, "code": "invalid_scoring_session",
-                "error": "The active assignment has no resolved scoring basis."}
-    bundle_path = _safe_bundle_path(child)
-    if not bundle_path:
-        return {"ok": False, "code": "packet_missing",
-                "error": "The active assignment's SAFE packet is unavailable."}
+            return {
+                "ok": False, "code": "invalid_scope", "stage": "validate",
+                "retryable": False,
+                "user_action": "Provide a Current course_id and exact assignment_id.",
+                "error": gate_error,
+            }
     try:
-        with open(bundle_path, encoding="utf-8") as handle:
-            safe_bundle = json.load(handle)
-        page = sp.build_packet(session=child, safe_bundle=safe_bundle,
-                               offset=0, limit=1, include_context=False)
-    except Exception:
-        return {"ok": False, "code": "packet_unavailable",
-                "error": "The active assignment's SAFE packet could not be verified."}
-    return {
-        "ok": True,
-        "status": "ready",
-        "scoring_session_id": root_id,
-        "course": str(item.get("course_label") or ""),
-        "assignment_name": str(item.get("assignment_label") or ""),
-        "due_at": str(item.get("due_at") or ""),
-        "ungraded": int(item.get("ungraded") or 0),
-        "partially_scored": int(item.get("partially_scored") or 0),
-        "student_count": len(child.get("students") or []),
-        "response_count": int(page.get("total") or 0),
-        "held": int(page.get("held") or 0),
-        "scoring_basis": basis,
-        "queue_counts": scoring_queue.public_progress(
-            scoring_queue.load_root_session(root_id) or {"queue": []}),
-    }
-
-
-def continue_scoring_session(scoring_session_id: str,
-                             scoring_guidance: str = "") -> dict:
-    """Prepare or resume only the current assignment in a root Scoring Session."""
-    from api.powergrader import scoring_packet as sp, scoring_queue, session_store, start_workflow
-
-    root_id = str(scoring_session_id or "")
-    while True:
-        claim = scoring_queue.claim_active_item(root_id)
-        if claim["kind"] == "not_found":
-            return {"ok": False, "code": "session_not_found", "error": "Scoring Session not found."}
-        if claim["kind"] == "complete":
-            return {"ok": True, "status": "complete", "scoring_session_id": root_id,
-                    "counts": scoring_queue.public_progress(claim["root"])}
-        if claim["kind"] == "busy":
-            return {"ok": False, "code": "preparation_in_progress",
-                    "error": "The active assignment is already being prepared. Retry continue_scoring_session shortly."}
-        if claim["kind"] == "blocked":
-            code = str((claim.get("item") or {}).get("last_failure") or "start_failed")
-            return {
-                "ok": False,
-                "code": "preparation_blocked",
-                "error": _preparation_blocked_error(code),
-                "scoring_session_id": root_id,
-                "queue_counts": scoring_queue.public_progress(claim["root"]),
-            }
-        item = claim["item"]
-        if claim["kind"] == "ready":
-            resolved = scoring_queue.resolve_active_child(root_id)
-            if not resolved.get("ok"):
-                return {"ok": False, "code": str(resolved.get("code") or "child_unavailable"),
-                        "error": "The active assignment run could not be safely resumed."}
-            summary = _prepared_assignment_summary(root_id, item, resolved["child"])
-            if summary.get("ok"):
-                summary["queue_counts"] = scoring_queue.public_progress(resolved["root"])
-                return _with_next("continue_scoring_session", summary)
-            return summary
-
-        course_id_value = str(item.get("course_id") or "")
-        if not _refresh_course_for_scoring(course_id_value):
-            scoring_queue.record_preparation_failure(
-                root_id, claim["index"], claim["claim"],
-                "mirror_refresh_failed", retryable=True,
-            )
-            return {
-                "ok": False,
-                "code": "mirror_refresh_failed",
-                "error": (
-                    "CanvasMirror could not be refreshed for the active course. "
-                    "Retry continue_scoring_session."
-                ),
-                "scoring_session_id": root_id,
-                "queue_counts": scoring_queue.public_progress(
-                    scoring_queue.load_root_session(root_id) or {"queue": []}),
-            }
-
-        result = start_workflow.run_start_session(
-            course_id=course_id_value,
-            assignment_id=str(item.get("assignment_id") or ""),
-            mode="packet", watch_late="false", auto_post="false",
-            rubric_name="", persona_id="",
-            feedback_pattern_id="", model_id="", response_kind="scr",
-            source_text="", source_files_json="", source_uploads=None,
-            oral_reading_passage="", oral_reading_enabled="false",
-            save_session=session_store.save_session, scoring_session=True,
-            scoring_guidance=str(scoring_guidance or ""),
-            parent_scoring_session_id=root_id, mirror_only=True,
+        result = scoring_preparation.prepare_scoring_session(
+            course_key, assignment_key, scoring_guidance,
+            refresh_course=_refresh_course_for_scoring,
         )
-        payload = result.get("payload") or {}
-        if not result.get("ok"):
-            if payload.get("code") == "nothing_to_grade":
-                if not scoring_queue.record_nothing_to_grade(root_id, claim["index"], claim["claim"]):
-                    return {"ok": False, "code": "active_item_changed",
-                            "error": "The active assignment changed during refresh; no queue item was skipped."}
-                continue
-            if payload.get("code") == "needs_scoring_norms":
-                if not scoring_queue.record_needs_teacher_input(root_id, claim["index"], claim["claim"]):
-                    return {"ok": False, "code": "active_item_changed",
-                            "error": "The active assignment changed during preparation."}
-                root = scoring_queue.load_root_session(root_id) or {"queue": []}
-                return {
-                    "ok": True,
-                    "status": "needs_teacher_input",
-                    "code": "needs_scoring_norms",
-                    "scoring_session_id": root_id,
-                    "course": str(item.get("course_label") or ""),
-                    "assignment_name": str(item.get("assignment_label") or ""),
-                    "question": "What bounded scoring guidance should I follow for this assignment?",
-                    "queue_counts": scoring_queue.public_progress(root),
-                }
-            if payload.get("code") == "new_quiz_writing_requires_assignment":
-                scoring_queue.record_preparation_failure(
-                    root_id, claim["index"], claim["claim"],
-                    "new_quiz_writing_requires_assignment", retryable=False,
-                )
-                return {
-                    "ok": False,
-                    "code": "new_quiz_writing_requires_assignment",
-                    "error": str(payload.get("error") or "Grade this writing in Canvas."),
-                    "assignment_name": str(item.get("assignment_label") or ""),
-                }
-            code = str(payload.get("code") or "start_failed")
-            deterministic = code in _NON_RETRYABLE_PREPARATION_CODES
-            scoring_queue.record_preparation_failure(
-                root_id, claim["index"], claim["claim"], code,
-                retryable=not deterministic,
-            )
-            if deterministic:
-                return {
-                    "ok": False,
-                    "code": "preparation_blocked",
-                    "error": _preparation_blocked_error(code),
-                    "scoring_session_id": root_id,
-                    "queue_counts": scoring_queue.public_progress(
-                        scoring_queue.load_root_session(root_id) or {"queue": []}),
-                }
-            error = (
-                str(payload.get("error"))
-                if code.startswith("mirror_") and payload.get("error")
-                else "The active assignment could not be prepared safely. It remains in this Scoring Session and can be retried."
-            )
-            return {"ok": False, "code": code, "error": error}
+    except Exception:
+        return _safe_scoring_preparation_failure()
+    result = _normalize_scoring_preparation_result(result)
+    if result.get("ok") and result.get("status") == "ready":
+        return _with_next("prepare_scoring_session", result)
+    return result
 
-        child_id = str(result.get("session_id") or "")
-        child = session_store.load_session(child_id) if child_id else None
-        if not child or not scoring_queue.attach_child(
-                root_id, claim["index"], claim["claim"], child_id):
-            return {"ok": False, "code": "active_item_changed",
-                    "error": "The active assignment changed during preparation; its private run was not attached."}
-        resolved = scoring_queue.resolve_active_child(root_id)
-        if not resolved.get("ok"):
-            return {"ok": False, "code": "child_unavailable",
-                    "error": "The active assignment run could not be safely resumed."}
-        summary = _prepared_assignment_summary(root_id, item, resolved["child"])
-        if summary.get("ok"):
-            summary["queue_counts"] = scoring_queue.public_progress(resolved["root"])
-            return _with_next("continue_scoring_session", summary)
-        return summary
+
+def _load_scoring_assignment_session(scoring_session_id: str) -> dict | None:
+    from api.powergrader import session_store
+
+    session_id = str(scoring_session_id or "")
+    session = session_store.load_session(session_id)
+    if (not isinstance(session, dict)
+            or str(session.get("session_id") or "") != session_id
+            or session.get("session_kind") != "scoring_assignment"):
+        return None
+    return session
 
 
 def list_scoring_sessions() -> dict:
-    """List identity-free root Scoring Sessions and aggregate queue progress."""
-    from api.powergrader import scoring_queue
+    """List identity-free summaries for current assignment-scoped sessions."""
+    from api.powergrader import session_store
 
+    active_course_ids = {str(c.get("id") or "") for c in config.active_courses()}
     rows = []
-    visible = _visible_scoring_sessions()
-    for summary, root in visible:
-        labels = scoring_queue.active_labels(root)
-        counts = scoring_queue.public_progress(root)
+    for summary in session_store.list_session_summaries():
+        if summary.get("session_kind") != "scoring_assignment":
+            continue
+        if str(summary.get("course_id") or "") not in active_course_ids:
+            continue
         rows.append([
-            summary.get("session_id"),
-            summary.get("created"),
-            root.get("status"),
-            labels["active_course"],
-            labels["active_assignment"],
-            counts["total"],
-            counts["completed"],
-            counts["completed_with_holds"],
-            counts["no_longer_needs_grading"],
-            counts["remaining"],
-            counts["failed"],
+            summary.get("session_id"), summary.get("created"),
+            summary.get("status"), summary.get("assignment_name"),
+            summary.get("total", 0), summary.get("approved", 0),
+            summary.get("posted", 0),
         ])
-
-    return {
-        "ok": True,
-        "sessions": {"columns": list(_SCORING_SESSION_COLUMNS), "rows": rows},
-    }
+    rows.sort(key=lambda row: str(row[1] or ""), reverse=True)
+    return {"ok": True, "sessions": {
+        "columns": list(_SCORING_SESSION_COLUMNS), "rows": rows,
+    }}
 
 
 def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10,
@@ -2237,16 +1980,18 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
 
     Text-only (no media entries, no attachment filenames). Never raises.
     """
-    from api.powergrader import scoring_packet as sp, scoring_queue
+    from api.powergrader import scoring_packet as sp
 
-    resolved = scoring_queue.resolve_active_child(scoring_session_id)
-    if not resolved.get("ok"):
-        code = str(resolved.get("code") or "session_not_found")
-        if code == "needs_teacher_input":
-            return {"ok": False, "code": code,
-                    "error": "Continue the Scoring Session with an attached Canvas rubric or bounded guidance before requesting its packet."}
-        return {"ok": False, "code": code, "error": "The Scoring Session has no ready active assignment packet."}
-    session = resolved["child"]
+    session = _load_scoring_assignment_session(scoring_session_id)
+    if not session:
+        return {"ok": False, "code": "session_not_found",
+                "error": "The assignment-scoped Scoring Session was not found."}
+    if session.get("status") == "needs_teacher_input":
+        return {"ok": False, "code": "needs_teacher_input",
+                "error": "Prepare this exact assignment with an attached Canvas rubric or bounded guidance before requesting its packet."}
+    if session.get("status") not in {"ready", "completed", "completed_with_holds"}:
+        return {"ok": False, "code": "packet_unavailable",
+                "error": "The assignment-scoped Scoring Session has no ready packet."}
 
     gate_err = _course_gate_check(str(session.get("course_id") or ""))
     if gate_err:
@@ -2317,14 +2062,12 @@ def submit_scoring_results(scoring_session_id: str, results: list,
     No result content or real identity is returned, including on failure.
     """
     from api import feedback_pipeline as fp
-    from api.powergrader import scoring_packet as sp, scoring_queue, session_store
+    from api.powergrader import scoring_packet as sp, session_store
 
-    resolved = scoring_queue.resolve_active_child(scoring_session_id)
-    if not resolved.get("ok"):
-        return {"ok": False, "code": str(resolved.get("code") or "session_not_found"),
-                "error": "The Scoring Session has no ready active assignment."}
-    session = resolved["child"]
-    child_session_id = str(session.get("session_id") or "")
+    session = _load_scoring_assignment_session(scoring_session_id)
+    if not session:
+        return {"ok": False, "code": "session_not_found",
+                "error": "The assignment-scoped Scoring Session was not found."}
     gate_error = _course_gate_check(str(session.get("course_id") or ""))
     if gate_error:
         return {"ok": False, "code": "course_unavailable", "error": gate_error}
@@ -2339,7 +2082,7 @@ def submit_scoring_results(scoring_session_id: str, results: list,
     except Exception:
         return {"ok": False, "code": "packet_unavailable", "error": "The SAFE scoring packet could not be read."}
     packet_digest = sp.packet_digest(
-        scoring_session_id, safe_bundle, assignment_run_id=child_session_id,
+        scoring_session_id, safe_bundle,
         course_id=session.get("course_id"), assignment_id=session.get("assignment_id"),
     )
     if str(expected_packet_digest or "") != packet_digest:
@@ -2384,7 +2127,7 @@ def submit_scoring_results(scoring_session_id: str, results: list,
     # Ordinary assignment risk planning reuses the exact freeze/drift lane used
     # by Canvas Expert's guarded scorer. Its internal user ids are translated
     # before any question can cross MCP.
-    if session.get("session_kind") == "assignment_run":
+    if session.get("session_kind") == "scoring_assignment":
         from api.powergrader import scoring_apply
         plan = scoring_apply.build_plan(candidate, pseudonyms=every_pseudonym)
         if not plan.get("ok"):
@@ -2409,8 +2152,8 @@ def submit_scoring_results(scoring_session_id: str, results: list,
                     "review_digest": plan["digest"], "questions": safe["questions"],
                     "counts": {"ready": len(plan["candidate_ids"]),
                                "held": held_count}}
-                return _record_scoring_root_result(
-                    scoring_session_id, child_session_id, pseudonym.gate(response, vault))
+                return _record_scoring_session_result(
+                    scoring_session_id, pseudonym.gate(response, vault))
             if str(review_digest) != str(plan.get("digest")):
                 return {"ok": False, "code": "review_changed", "error": "The scoring review changed. Submit the current review again."}
         elif review_digest:
@@ -2424,8 +2167,8 @@ def submit_scoring_results(scoring_session_id: str, results: list,
         # staged-result update and the complete plan/freeze/push sequence.
         # session_store uses an RLock and re-entrant interprocess lock, so the
         # guarded helpers can safely acquire the same session lock again.
-        with session_store.session_lock(child_session_id):
-            current = session_store.load_session(child_session_id)
+        with session_store.session_lock(scoring_session_id):
+            current = session_store.load_session(scoring_session_id)
             if not current:
                 return {"ok": False, "code": "session_not_found", "error": "Scoring Session not found."}
             current_by_uid = {str(st.get("user_id")): st for st in current.get("students") or []}
@@ -2437,15 +2180,15 @@ def submit_scoring_results(scoring_session_id: str, results: list,
                     target["ai_item_results"] = staged.get("ai_item_results") or []
             session_store.save_session(current)
             payload, _status = scoring_apply.apply_plan(
-                child_session_id, expected_digest=plan["digest"], answers=answers,
+                scoring_session_id, expected_digest=plan["digest"], answers=answers,
                 load_session=session_store.load_session, save_session=session_store.save_session,
                 pseudonyms=every_pseudonym,
             )
         held_user_ids = {str(st.get("user_id") or "") for st in session.get("students") or []
                          if str(st.get("user_id") or "") not in set(plan.get("candidate_ids") or [])}
         held_user_ids.update(str(uid) for uid in resolved.get("skipped") or [])
-        return _record_scoring_root_result(
-            scoring_session_id, child_session_id,
+        return _record_scoring_session_result(
+            scoring_session_id,
             _scoring_apply_result(payload, names, vault, held_user_ids=held_user_ids))
 
     return {
@@ -2455,25 +2198,25 @@ def submit_scoring_results(scoring_session_id: str, results: list,
     }
 
 
-def _record_scoring_root_result(root_session_id: str, child_session_id: str,
-                                result: dict) -> dict:
-    """Persist aggregate queue progress after the assignment write owner returns."""
-    from api.powergrader import scoring_queue
+def _record_scoring_session_result(scoring_session_id: str, result: dict) -> dict:
+    """Persist terminal outcome on only the exact assignment session."""
+    from api.powergrader import session_store
 
-    update = scoring_queue.record_submit_result(root_session_id, child_session_id, result)
-    if not update.get("ok"):
-        return {"ok": False, "code": str(update.get("code") or "active_item_changed"),
-                "error": "The Scoring Session changed during submission; its queue was not advanced."}
-    response = {**result,
-                "scoring_session_id": root_session_id,
-                "queue_counts": update.get("progress") or {},
-                "session_status": update.get("status") or "active"}
-    if result.get("ok") and result.get("status") != "needs_teacher_input":
-        response["next"] = (
-            "Call continue_scoring_session with this same scoring_session_id to advance "
-            "to the next assignment or receive aggregate completion."
-        )
-    return response
+    with session_store.session_lock(scoring_session_id):
+        session = _load_scoring_assignment_session(scoring_session_id)
+        if not session:
+            return {"ok": False, "code": "session_not_found",
+                    "error": "The assignment-scoped Scoring Session was not found."}
+        if result.get("status") == "needs_teacher_input":
+            session["status"] = "needs_teacher_input"
+        elif result.get("ok"):
+            session["status"] = "completed_with_holds" if (result.get("counts") or {}).get("held") else "completed"
+            session["outcome_counts"] = dict(result.get("counts") or {})
+        else:
+            session["status"] = "ready"
+            session["last_failure"] = str(result.get("code") or "write_failed")
+        session_store.save_session(session)
+    return {**result, "scoring_session_id": scoring_session_id}
 
 
 def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()) -> dict:

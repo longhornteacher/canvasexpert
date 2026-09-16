@@ -139,7 +139,6 @@ def list_session_summaries() -> list[dict]:
         sessions.append({
             "session_id":      s.get("session_id"),
             "session_kind":    s.get("session_kind", ""),
-            "parent_scoring_session_id": s.get("parent_scoring_session_id", ""),
             "assignment_name": s.get("assignment_name"),
             "course_id":       s.get("course_id"),
             "assignment_id":   s.get("assignment_id"),

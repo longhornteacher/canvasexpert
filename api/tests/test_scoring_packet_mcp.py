@@ -67,10 +67,12 @@ def _fake_session(session_id: str, course_id: str, people: list[dict] | None = N
     people = people or []
     return {
         "session_id": session_id,
+        "session_kind": "scoring_assignment",
         "course_id": course_id,
         "assignment_name": assignment_name,
         "assignment_id": "700010",
         "created": "2026-01-01T08:00:00",
+        "status": "ready",
         "scoring_basis": {"source": "canvas_rubric", "label": "Test Rubric"},
         "students": [{"user_id": p["canvas_id"], "status": "pending"} for p in people],
         "privacy_artifacts": {},
@@ -122,7 +124,7 @@ def _attach_bundle(session: dict, tmp_path, bundle: dict, name: str = "bundle.js
 
 
 def _bind_session_store(monkeypatch, sessions: dict) -> dict:
-    """Bind root/child records against an in-memory map. Returns the map."""
+    """Bind assignment-scoped session records against an in-memory map."""
     from contextlib import nullcontext
     monkeypatch.setattr("api.powergrader.session_store.load_session",
                         lambda sid: sessions.get(sid))
@@ -138,33 +140,6 @@ def _bind_session_store(monkeypatch, sessions: dict) -> dict:
          "total": len(session.get("students") or [])}
         for session in sessions.values()
     ])
-    # Existing packet fixtures describe the private assignment run. Expose
-    # them through the new root boundary instead of making them public roots.
-    from api.powergrader import scoring_queue
-    for root_id, child in list(sessions.items()):
-        if child.get("session_kind") == scoring_queue.ROOT_KIND:
-            continue
-        child_id = f"{root_id}-assignment-run"
-        child["session_id"] = child_id
-        child["session_kind"] = scoring_queue.CHILD_KIND
-        child["parent_scoring_session_id"] = root_id
-        queue_item = {
-            "course_id": str(child.get("course_id") or ""),
-            "course_label": str(child.get("course_id") or ""),
-            "assignment_id": str(child.get("assignment_id") or ""),
-            "assignment_label": str(child.get("assignment_name") or ""),
-            "due_at": "", "ungraded": 1, "partially_scored": 0,
-        }
-        root = scoring_queue.create_root_session(
-            queue=[queue_item], scope={}, session_id=root_id,
-        )
-        root["queue"][0]["status"] = "ready"
-        root["queue"][0]["child_session_id"] = child_id
-        sessions[child_id] = child
-        sessions[root_id] = root
-        sessions[root_id]["queue_digest"] = scoring_queue._queue_digest(root["queue"])
-        sessions[root_id]["progress"] = scoring_queue._progress(root)
-        sessions[root_id]["status"] = "ready"
     return sessions
 
 
@@ -412,12 +387,18 @@ def test_build_packet_oversize_guard_on_a_single_response(monkeypatch):
 def test_packet_digest_is_shared_by_both_sides():
     """build_packet and the staging guard must derive the same digest."""
     bundle = _fake_safe_bundle([{"pseudonym": "Pikachu"}], items=1)
-    session = _fake_session("s1-run", "c1")
-    session.update({"parent_scoring_session_id": "root-1", "assignment_id": "a1"})
+    session = _fake_session("s1", "c1")
+    session["assignment_id"] = "a1"
     packet = scoring_packet.build_packet(session=session, safe_bundle=bundle, include_context=False)
 
     assert packet["packet_digest"] == scoring_packet.packet_digest(
-        "root-1", bundle, assignment_run_id="s1-run", course_id="c1", assignment_id="a1")
+        "s1", bundle, course_id="c1", assignment_id="a1")
+    assert packet["packet_digest"] != scoring_packet.packet_digest(
+        "other-session", bundle, course_id="c1", assignment_id="a1")
+    assert packet["packet_digest"] != scoring_packet.packet_digest(
+        "s1", bundle, course_id="other-course", assignment_id="a1")
+    assert packet["packet_digest"] != scoring_packet.packet_digest(
+        "s1", bundle, course_id="c1", assignment_id="other-assignment")
 
 
 # --- list_scoring_sessions --------------------------------------------------
@@ -451,19 +432,22 @@ def test_list_scoring_sessions_filters_to_current_courses(monkeypatch, tmp_path)
     assert [row[0] for row in result["sessions"]["rows"]] == ["s1"]
 
 
-def test_list_scoring_sessions_lists_root_without_private_child_rows(monkeypatch, tmp_path):
+def test_list_scoring_sessions_ignores_unsupported_legacy_records(monkeypatch, tmp_path):
     people = _seed_vault(monkeypatch, tmp_path, count=1)
     _set_active_courses(monkeypatch, ["111"])
 
-    child = _fake_session("s1", "111", people)
-    _attach_bundle(child, tmp_path, _fake_safe_bundle(people, items=1))
-    sessions = _bind_session_store(monkeypatch, {"s1": child})
+    current = _fake_session("s1", "111", people)
+    _attach_bundle(current, tmp_path, _fake_safe_bundle(people, items=1))
+    legacy = _fake_session("legacy", "111", people)
+    legacy["session_kind"] = "legacy_root"
+    sessions = _bind_session_store(monkeypatch, {"s1": current, "legacy": legacy})
 
     result = tools.list_scoring_sessions()
 
     assert [row[0] for row in result["sessions"]["rows"]] == ["s1"]
     assert len(result["sessions"]["rows"]) == 1
-    assert sessions["s1-assignment-run"]["session_kind"] == "assignment_run"
+    assert "legacy" in sessions
+    assert sessions["legacy"]["session_kind"] == "legacy_root"
 
 
 def test_list_scoring_sessions_uses_compact_neutral_columns(monkeypatch, tmp_path):
@@ -479,8 +463,9 @@ def test_list_scoring_sessions_uses_compact_neutral_columns(monkeypatch, tmp_pat
 
     assert list(result["sessions"]["columns"]) == list(tools._SCORING_SESSION_COLUMNS)
     assert row[0] == "s1"
-    assert row[5] == 1
-    assert row[8] == 0
+    assert len(row) == 7
+    assert row[4] == 3
+    assert row[5:] == [0, 0]
 
 
 # --- get_scoring_packet -----------------------------------------------------

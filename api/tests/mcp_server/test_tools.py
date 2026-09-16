@@ -646,7 +646,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 37
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 36
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -1685,7 +1685,7 @@ def test_server_registers_the_expected_tool_set():
             "apply_learning_objective", "delete_learning_objective",
             "get_roster_student_settings", "preview_roster_student_change",
             "apply_roster_student_change", "clear_roster_student_field",
-        "start_scoring_session", "continue_scoring_session", "list_scoring_sessions", "get_scoring_packet",
+        "prepare_scoring_session", "list_scoring_sessions", "get_scoring_packet",
         "submit_scoring_results",
         }
 
@@ -1748,8 +1748,8 @@ def test_every_next_procedure_points_at_a_live_tool_too():
         f"next-procedure text names retired tool(s): {sorted(set(retired_mentions))}")
 
 
-def test_get_scoring_packet_ignores_pre_root_assignment_session(_on_disk_scoring_session):
-    """The backlog queue is a clean break; old assignment records are not roots."""
+def test_get_scoring_packet_ignores_unsupported_historical_session(_on_disk_scoring_session):
+    """Historical root/child-shaped records are not assignment sessions."""
     session_id = _on_disk_scoring_session()
 
     result = tools.get_scoring_packet(scoring_session_id=session_id)

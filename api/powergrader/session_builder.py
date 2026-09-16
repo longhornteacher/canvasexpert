@@ -147,7 +147,7 @@ def build_session(
     evidence_manifest: str | None = None,
     evidence_status: str = "unknown",
     oral_reading_passage: dict | None = None,
-    parent_scoring_session_id: str = "",
+    session_kind: str = "",
 ) -> dict:
     """Build the session dictionary ready to save."""
     session = {
@@ -174,7 +174,6 @@ def build_session(
         "students":        students or [],
         "push_log":        [],
     }
-    if parent_scoring_session_id:
-        session["session_kind"] = "assignment_run"
-        session["parent_scoring_session_id"] = str(parent_scoring_session_id)
+    if session_kind:
+        session["session_kind"] = str(session_kind)
     return session

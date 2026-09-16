@@ -132,7 +132,7 @@ def test_every_mcp_tool_named_is_a_real_tool(text):
 
 def test_scoring_session_flow_is_assignment_type_neutral(text):
     lowered = text.lower()
-    assert "start_scoring_session" in lowered
+    assert "prepare_scoring_session" in lowered
     assert "get_scoring_packet" in lowered
     assert "submit_scoring_results" in lowered
     assert "never ask the teacher to choose a scoring transport" in lowered
