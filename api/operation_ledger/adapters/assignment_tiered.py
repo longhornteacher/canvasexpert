@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from .. import models
-from .adapter_support import build_result, ensure_step, find_step
+from .adapter_support import (
+    build_result,
+    ensure_step,
+    find_step,
+    is_uncertain as _is_uncertain,
+)
 from api.platform_services import canvas_client
 
 
@@ -178,19 +183,3 @@ def _replace_local_step(steps: list[dict], step: dict) -> None:
             steps[index] = step
             return
     steps.append(step)
-
-
-def _is_uncertain(error: str) -> bool:
-    lower = str(error or "").lower()
-    return any(
-        term in lower
-        for term in (
-            "timeout",
-            "timed out",
-            "connection",
-            "network",
-            "unparseable",
-            "no response",
-            "read timed out",
-        )
-    )

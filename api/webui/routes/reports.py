@@ -11,8 +11,6 @@ from datetime import datetime
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
-import requests
-
 from api import nq_report, portfolio, portfolio_service, student_packet
 from api.mirror import read_service, store as mirror_store
 from api.platform_services import config, workspace
@@ -29,127 +27,6 @@ router = APIRouter(prefix="/api", tags=["reports"])
 @router.get("/download-root")
 def get_download_root():
     return JSONResponse({"root": config.get_download_root()})
-
-
-@router.get("/assignments-full")
-def list_assignments_full(course_id: str):
-    """All assignments for a course. Its last browser consumer went away with
-    the due-date extension UI; kept as a catalog-backed read with no current
-    caller.
-    Returns id, name, submission_types, due_at, points_possible, is_quiz, quiz_kind.
-    Served from Course Catalog when current; falls back to a live fetch otherwise.
-    """
-    assignment_scope = read_service.catalog_assignments(course_id, max_age_hours=None)
-    group_scope = read_service.catalog_assignment_groups(course_id, max_age_hours=None)
-    if assignment_scope["state"] == "current" and group_scope["state"] == "current":
-        group_names = {g["id"]: g["name"] for g in group_scope["records"]}
-        assignments = [
-            {
-                "id":                   record["id"],
-                "name":                 record["name"],
-                "submission_types":     record["submission_types"],
-                "due_at":               record["due_at"][:10],
-                "points_possible":      record["points_possible"],
-                "quiz_id":              record["quiz_id"],
-                "assignment_group_id":  record["assignment_group_id"],
-                "assignment_group_name": group_names.get(record["assignment_group_id"], ""),
-                "is_quiz":              record["is_quiz"],
-                "quiz_kind":            record["quiz_kind"],
-                "is_quiz_lti_assignment": record["is_quiz_lti_assignment"],
-            }
-            for record in assignment_scope["records"]
-        ]
-        assignments.sort(
-            key=lambda a: a["due_at"] if a["due_at"] else "0000-00-00",
-            reverse=True,
-        )
-        return JSONResponse({"ok": True, "assignments": assignments})
-
-    hdrs, base = canvas_headers()
-    if not hdrs:
-        return JSONResponse({"ok": False, "error": "No token saved."})
-    results, params = [], {"per_page": 100}
-    url = f"{base}/api/v1/courses/{course_id}/assignments"
-    while url:
-        try:
-            r = requests.get(url, headers=hdrs, params=params, timeout=20)
-        except requests.RequestException as e:
-            return JSONResponse({"ok": False, "error": str(e)})
-        if r.status_code != 200:
-            return JSONResponse({"ok": False, "error": f"HTTP {r.status_code}"})
-        results.extend(r.json())
-        params = {}
-        url = None
-        for part in r.headers.get("Link", "").split(","):
-            if 'rel="next"' in part:
-                url = part.split(";")[0].strip().strip("<>")
-                break
-    # Pre-build a lookup for assignment group names from the full Canvas
-    # response. The list endpoint often includes inline group name data.
-    group_names: dict[str, str] = {}
-    for a in results:
-        gid = a.get("assignment_group_id")
-        if gid is not None:
-            gid_str = str(gid)
-            # Canvas sometimes embeds a mini assignment_group object
-            inline = a.get("assignment_group") or {}
-            if isinstance(inline, dict) and inline.get("name"):
-                group_names[gid_str] = inline["name"]
-            elif gid_str not in group_names:
-                group_names[gid_str] = ""  # will be resolved later
-
-    def _is_quiz(a: dict) -> bool:
-        st = a.get("submission_types") or []
-        return bool(
-            "online_quiz" in st
-            or a.get("quiz_id") is not None
-            or a.get("quiz_type") is not None
-            or a.get("is_quiz_lti_assignment") is True  # New Quizzes
-        )
-
-    def _quiz_kind(a: dict) -> str:
-        st = a.get("submission_types") or []
-        qt = a.get("quiz_type") or ""
-        if a.get("is_quiz_lti_assignment") is True:
-            return "new_quiz"
-        if "online_quiz" in st:
-            if "new_quiz" in qt.lower() or qt.lower() == "quizzes.next":
-                return "new_quiz"
-            # external_tool with a quiz-like URL can hint new quiz
-            ext = a.get("external_tool_tag_attributes") or {}
-            if isinstance(ext, dict):
-                url = (ext.get("url") or "").lower()
-                content_type = (ext.get("content_type") or "").lower()
-                if "quiz" in url or "quiz" in content_type or "new_quiz" in content_type:
-                    return "new_quiz"
-            return "classic_quiz"
-        if a.get("quiz_id") is not None or a.get("quiz_type") is not None:
-            return "quiz"
-        return ""
-
-    assignments = [
-        {
-            "id":                   str(a["id"]),
-            "name":                 a.get("name", ""),
-            "submission_types":     a.get("submission_types") or [],
-            "due_at":               (a.get("due_at") or "")[:10],
-            "points_possible":      a.get("points_possible"),
-            "quiz_id":              str(a.get("quiz_id") or ""),
-            "assignment_group_id":  str(a.get("assignment_group_id") or ""),
-            "assignment_group_name":
-                group_names.get(str(a["assignment_group_id"]), "")
-                if a.get("assignment_group_id") is not None else "",
-            "is_quiz":              _is_quiz(a),
-            "quiz_kind":            _quiz_kind(a),
-            "is_quiz_lti_assignment": a.get("is_quiz_lti_assignment") is True,
-        }
-        for a in results
-    ]
-    assignments.sort(
-        key=lambda a: a["due_at"] if a["due_at"] else "0000-00-00",
-        reverse=True,
-    )
-    return JSONResponse({"ok": True, "assignments": assignments})
 
 
 @router.get("/course-folder")

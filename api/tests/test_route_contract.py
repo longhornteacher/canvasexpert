@@ -28,7 +28,6 @@ EXPECTED = [
     ('/api/ai-ta/rebuild', ('POST',)),
     ('/api/ai-ta/toolkit-file', ('GET',)),
     ('/api/assignment-groups', ('GET',)),
-    ('/api/assignments-full', ('GET',)),
     ('/api/connections/claude-package', ('POST',)),
     ('/api/connections/claude/connect', ('POST',)),
     ('/api/connections/claude/disconnect', ('POST',)),

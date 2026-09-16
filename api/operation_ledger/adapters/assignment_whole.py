@@ -14,6 +14,7 @@ from .adapter_support import (
     build_result,
     find_step,
     has_outbound_marker,
+    is_uncertain as _is_uncertain,
     module_id_from_steps,
     normalize,
     prepend_step,
@@ -303,22 +304,6 @@ def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
     if attach_step.get("outbound_started_at") or has_marker:
         return {"state": "sent_unknown", "returned_object_id": assignment_id}
     return {"state": "pending", "returned_object_id": assignment_id}
-
-
-def _is_uncertain(error: str) -> bool:
-    lower = str(error or "").lower()
-    return any(
-        term in lower
-        for term in (
-            "timeout",
-            "timed out",
-            "connection",
-            "network",
-            "unparseable",
-            "no response",
-            "read timed out",
-        )
-    )
 
 
 def validate_printable_pdf(pdf_path: str, *, allowed_roots=None) -> tuple:

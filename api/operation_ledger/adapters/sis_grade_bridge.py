@@ -179,12 +179,12 @@ class SisGradeBridgeAdapter:
         course_id = target["course_id"]
         source_rows = []
         for source_id in payload.get("source_assignment_ids") or []:
-            source, error = _get_assignment(course_id, str(source_id))
+            source, error = adapter_support.get_assignment(course_id, str(source_id))
             if error or source is None:
                 raise _BridgeInvariantError("registered_source_missing")
             source_rows.append(source)
         bridge_id = str(payload.get("bridge_assignment_id") or "")
-        bridge_row, bridge_error = _get_assignment(course_id, bridge_id)
+        bridge_row, bridge_error = adapter_support.get_assignment(course_id, bridge_id)
         if bridge_error or bridge_row is None:
             raise _BridgeInvariantError("registered_bridge_missing_or_renamed")
         _validate_source_identity(payload, source_rows)
@@ -556,7 +556,7 @@ class SisGradeBridgeAdapter:
                     error_class=type(exc),
                 )
 
-        final_assignment, _error = _get_assignment(course_id, bridge_id)
+        final_assignment, _error = adapter_support.get_assignment(course_id, bridge_id)
         return adapter_support.build_result(
             "applied", steps=steps,
             returned_object_id=bridge_id,
@@ -647,15 +647,6 @@ def _get_all(path: str, params: dict | None = None) -> list[dict]:
     if error or not complete or not isinstance(rows, list):
         raise _BridgeReadError(str(error or "incomplete Canvas collection"))
     return rows
-
-
-def _get_assignment(course_id: str, assignment_id: str) -> tuple[dict | None, str | None]:
-    assignment, error = canvas_client.canvas_get(
-        f"/api/v1/courses/{course_id}/assignments/{assignment_id}"
-    )
-    if error or not isinstance(assignment, dict):
-        return None, str(error or "invalid assignment response")
-    return assignment, None
 
 
 def _validate_source_identity(payload: dict, source_rows: list[dict]) -> None:
@@ -832,7 +823,7 @@ def _source_state(source: dict, overrides: list[dict]) -> dict:
 
 def _read_bridge_state(course_id: str, bridge_id: str, assignment: dict | None = None) -> dict:
     if assignment is None:
-        assignment, error = _get_assignment(course_id, bridge_id)
+        assignment, error = adapter_support.get_assignment(course_id, bridge_id)
         if error:
             raise _BridgeReadError(error)
     overrides = _get_all(

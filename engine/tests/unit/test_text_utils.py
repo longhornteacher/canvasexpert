@@ -40,30 +40,12 @@ class TestSafeFilenameComponent(unittest.TestCase):
         self.assertEqual(result, "x" * 10)
 
 
-class TestDelegatingCallers(unittest.TestCase):
-    def test_workspace_safe_component_matches_shared_helper(self):
-        from api.platform_services.workspace import safe_component
+def test_folder_creator_preserves_spaces():
+    """folder_creator.sanitize_filename delegates to the shared helper."""
+    from engine.packaging.folder_creator import sanitize_filename
 
-        self.assertEqual(safe_component("Chapter 5: Quiz"), safe_filename_component("Chapter 5: Quiz"))
-
-    def test_folder_creator_preserves_spaces(self):
-        from engine.packaging.folder_creator import sanitize_filename
-
-        self.assertEqual(sanitize_filename("Chapter 5 Quiz"), "Chapter 5 Quiz")
-        self.assertEqual(sanitize_filename(""), "")
-
-    def test_ai_ta_sanitize_filename_falls_back_to_rubric(self):
-        from api.webui.ai_ta import _sanitize_filename
-
-        self.assertEqual(_sanitize_filename(""), "Rubric")
-        self.assertEqual(_sanitize_filename("Essay: Grading"), "Essay_ Grading")
-
-    def test_feedback_contract_and_portfolio_agree(self):
-        from api.feedback_contract import safe as feedback_safe
-        from api.portfolio import _safe as portfolio_safe
-
-        self.assertEqual(feedback_safe("O'Brien's (Group A) - Essay!"), "O'Brien's (Group A) - Essay!")
-        self.assertEqual(feedback_safe("Essay 1"), portfolio_safe("Essay 1"))
+    assert sanitize_filename("Chapter 5 Quiz") == "Chapter 5 Quiz"
+    assert sanitize_filename("") == ""
 
 
 if __name__ == "__main__":

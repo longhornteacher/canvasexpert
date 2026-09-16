@@ -155,6 +155,7 @@ RETIRED_PATHS = (
     ("api/powergrader/estimates.py", "(none)", "Retire the never-wired PowerGrader estimate helpers"),
     ("api/webui/static/gradebook/extensions.js", "(none)", "Retire the school calendar, bell schedules, and the late-work sweep"),
     ("api/default_docs/AI Authoring/Author a Class Schedule.txt", "(none)", "Retire the school calendar, bell schedules, and the late-work sweep"),
+    ("api/tests/test_reports_routes.py", "(none)", "Retire GET /api/assignments-full; its last browser consumer went with the extension UI"),
 )
 
 

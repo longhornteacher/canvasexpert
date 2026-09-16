@@ -195,7 +195,7 @@ def execute_family_tail(
     bridge_id = create_step.get("returned_object_id")
     bridge_url = create_step.get("returned_object_url")
     if bridge_id:
-        assignment, read_error = _get_assignment(course_id, str(bridge_id))
+        assignment, read_error = adapter_support.get_assignment(course_id, str(bridge_id))
         activate_state = adapter_support.find_step(steps, "activate_bridge").get("state")
         expected_active = activate_state in {"applied", "skipped"}
         if read_error or not bridge_matches(
@@ -240,7 +240,7 @@ def execute_family_tail(
             returned_object_url=bridge_url,
         )
         adapter_support.replace_step(steps, marked)
-        assignment, read_error = _get_assignment(course_id, bridge_id)
+        assignment, read_error = adapter_support.get_assignment(course_id, bridge_id)
         if read_error or not bridge_matches(assignment or {}, family, active=False):
             return _stop(
                 steps, context, marked, read_error or "bridge create postcondition mismatch",
@@ -270,7 +270,7 @@ def execute_family_tail(
         return module_result
 
     activate_step = adapter_support.ensure_step(steps, "activate_bridge")
-    assignment, read_error = _get_assignment(course_id, str(bridge_id))
+    assignment, read_error = adapter_support.get_assignment(course_id, str(bridge_id))
     active = not read_error and bridge_matches(assignment or {}, family, active=True)
     if not active:
         if activate_step.get("outbound_started_at"):
@@ -294,7 +294,7 @@ def execute_family_tail(
                 failure_state=failure_state,
                 returned_object_id=str(bridge_id),
             )
-        assignment, read_error = _get_assignment(course_id, str(bridge_id))
+        assignment, read_error = adapter_support.get_assignment(course_id, str(bridge_id))
         if read_error or not bridge_matches(assignment or {}, family, active=True):
             return _stop(
                 steps, context, marked,
@@ -322,7 +322,7 @@ def execute_family_tail(
             "sent_unknown", steps=steps, returned_object_id=str(bridge_id),
             error_code=error,
         )
-    assignment, read_error = _get_assignment(course_id, str(bridge_id))
+    assignment, read_error = adapter_support.get_assignment(course_id, str(bridge_id))
     if read_error or not bridge_matches(assignment or {}, family, active=True):
         return adapter_support.build_result(
             "sent_unknown", steps=steps, returned_object_id=str(bridge_id),
@@ -392,7 +392,7 @@ def reconcile_family_tail(
     bridge_id = str(create_step.get("returned_object_id") or "")
     if not bridge_id:
         return {"state": _unfinished_state(create_step), "steps": projected}
-    bridge, read_error = _get_assignment(course_id, bridge_id)
+    bridge, read_error = adapter_support.get_assignment(course_id, bridge_id)
     if read_error or not bridge_matches(bridge or {}, family, active=True):
         return {"state": "sent_unknown", "steps": projected}
     projected.append(_safe_step(create_step, bridge.get("html_url")))
@@ -473,7 +473,7 @@ def _verified_family_sources(
     points = []
     groups = []
     for source_id, title in zip(source_ids, source_titles):
-        assignment, error = _get_assignment(course_id, str(source_id))
+        assignment, error = adapter_support.get_assignment(course_id, str(source_id))
         if error or assignment is None:
             return {}, rows, "source_exact_id_unverified"
         expected = {
@@ -507,15 +507,6 @@ def _verified_family_sources(
         "points_possible": points[0],
         "assignment_group_id": groups[0],
     }, rows, None
-
-
-def _get_assignment(course_id: str, assignment_id: str) -> tuple[dict | None, str | None]:
-    assignment, error = canvas_client.canvas_get(
-        f"/api/v1/courses/{course_id}/assignments/{assignment_id}"
-    )
-    if error or not isinstance(assignment, dict):
-        return None, str(error or "invalid assignment response")
-    return assignment, None
 
 
 def _fields_match(actual: dict, expected: dict) -> bool:

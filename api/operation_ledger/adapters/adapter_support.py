@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from api.platform_services import canvas_client
+
 from .. import models
 
 
@@ -81,6 +83,15 @@ def is_uncertain(error: str) -> bool:
             "read timed out",
         )
     )
+
+
+def get_assignment(course_id: str, assignment_id: str) -> tuple[dict | None, str | None]:
+    assignment, error = canvas_client.canvas_get(
+        f"/api/v1/courses/{course_id}/assignments/{assignment_id}"
+    )
+    if error or not isinstance(assignment, dict):
+        return None, str(error or "invalid assignment response")
+    return assignment, None
 
 
 def build_result(
