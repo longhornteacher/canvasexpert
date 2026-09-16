@@ -43,7 +43,7 @@ def _wire(monkeypatch, tmp_path, *, assignment=None, submissions=None):
     bundle_path.write_text(json.dumps({"students": [{"pseudonym": "Pikachu", "responses": [{
         "item_id": "item-1", "prompt": "Explain.", "response": "A response.", "possible": 10,
     }]}]}), encoding="utf-8")
-    monkeypatch.setattr(scoring_preparation.ai_workflow, "run_ai_workflow", lambda **_kwargs: {
+    monkeypatch.setattr(scoring_preparation.scoring_artifacts, "build_scoring_artifacts", lambda **_kwargs: {
         "ok": True, "privacy_steps": [], "privacy_artifacts": {"safe_bundle": str(bundle_path)},
         "ai_by_uid": {}, "ai_item_by_uid": {}, "copilot_packet": None,
     })

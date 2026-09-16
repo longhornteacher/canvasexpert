@@ -17,11 +17,9 @@ from api import gradebook_snapshot
 from api.nq_report import html_to_text
 from api.platform_services import config, workspace
 from api.powergrader import (
-    ai_workflow,
     assignment_refresh,
     media_recordings,
-    oral_reading,
-    privacy,
+    scoring_artifacts,
     session_builder,
     session_store,
     student_attachments,
@@ -216,31 +214,6 @@ def _extra_time_map(entries: list[dict]) -> dict:
     return {str(entry["id"]): entry.get("days", 0) for entry in entries}
 
 
-def _append_privacy_audit(
-    *, privacy_artifacts: dict, assignment_name: str, session_id: str,
-    course_id: str, assignment_id: str, privacy_steps: list[dict],
-) -> tuple[dict, list[dict]]:
-    if not privacy_artifacts.get("private_folder"):
-        return privacy_artifacts, privacy_steps
-    audit_path = privacy.write_privacy_audit_file(
-        privacy_artifacts["private_folder"], assignment_name, session_id,
-        course_id, assignment_id, "", privacy_steps, privacy_artifacts,
-    )
-    if audit_path:
-        privacy_artifacts["privacy_audit"] = audit_path
-        privacy_steps.append(privacy.privacy_step(
-            "privacy_audit", "Saved PowerGrader privacy audit", "ok",
-            "Private decoder folder includes a JSON record of these privacy steps.",
-            path=audit_path,
-        ))
-    else:
-        privacy_steps.append(privacy.privacy_step(
-            "privacy_audit", "Saved PowerGrader privacy audit", "warn",
-            "Could not write the optional privacy audit JSON; session still records these steps.",
-        ))
-    return privacy_artifacts, privacy_steps
-
-
 def _safe_bundle_path(session: dict) -> str:
     raw = (session.get("privacy_artifacts") or {}).get("safe_bundle") or ""
     resolved = workspace.extended_path(raw) if raw else ""
@@ -408,8 +381,6 @@ def prepare_scoring_session(
             "assignment_name": assignment_name,
         }
 
-    media_submissions = [row for row in submitted if row.get("submission_type") == "media_recording"]
-    oral_passage = ""
     writing_timeline_tracked = writing_timeline.is_tracked_assignment(assignment)
     if writing_timeline_tracked:
         student_attachments.attach_writing_timelines(submitted, roster_submissions=submissions)
@@ -417,12 +388,11 @@ def prepare_scoring_session(
     session_id = str(uuid.uuid4())
     course_name = config.course_display_name(course_id)
     try:
-        ai_result = ai_workflow.run_ai_workflow(
-            mode="packet", submitted=submitted, assignment_name=assignment_name,
+        ai_result = scoring_artifacts.build_scoring_artifacts(
+            submitted=submitted, assignment_name=assignment_name,
             assignment_description=assignment_description, course_id=course_id,
             course_name=course_name, assignment_id=assignment_id, session_id=session_id,
-            rubric_name=rubric_name, rubric_text_override=rubric_text_override,
-            persona_id="", source_text="", source_files_json="", source_uploads=None,
+            protected=config.active_protected_names(),
         )
     except Exception:
         ai_result = {"ok": False}
@@ -445,11 +415,6 @@ def prepare_scoring_session(
         tier_map=config.roster_tier_by_id(course_id),
         monitored=config.get_monitored_students(),
         extra_time_map=_extra_time_map(config.get_extra_time(course_id)),
-    )
-    privacy_artifacts, privacy_steps = _append_privacy_audit(
-        privacy_artifacts=privacy_artifacts, assignment_name=assignment_name,
-        session_id=session_id, course_id=course_id, assignment_id=assignment_id,
-        privacy_steps=privacy_steps,
     )
     session = session_builder.build_session(
         session_id=session_id, course_id=course_id, assignment_id=assignment_id,

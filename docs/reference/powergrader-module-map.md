@@ -8,4 +8,6 @@ routing, use the single source of truth: `docs/reference/powergrader-scoring-map
 
 Public teacher flow: MCP `prepare_scoring_session` -> `get_scoring_packet` ->
 `submit_scoring_results`. One assignment-scoped session contains one SAFE packet;
-packets and writes remain assignment-bounded. Canvas Live is the review/edit surface.
+packets and writes remain assignment-bounded. New preparation owns one private
+session JSON and one scrubbed SAFE bundle JSON. Canvas Live is the review/edit
+surface.

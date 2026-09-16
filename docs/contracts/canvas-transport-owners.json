@@ -95,19 +95,6 @@
       "reason": "The central operation-ledger post-apply hook invalidates applicable catalog scopes after the confirmed operation succeeds."
     },
     {
-      "path": "api/operation_ledger/adapters/assignment_tiered.py",
-      "symbol": "execute",
-      "detector": "attr:_canvas_send",
-      "call_index": 2,
-      "call_form": "canvas_client._canvas_send(\"POST\", path, override_request) [per-student tier override]",
-      "classification": "canvas_mutation",
-      "scopes": [
-        "private.assignments"
-      ],
-      "reconciliation": "none",
-      "reason": "Per-student override write. The base override facts are not projected into the mirror at all; the only mirror footprint is the effective due date cached on the affected submission rows (private.submissions cached_due_date), read by the Student Report 'Due date extended to' line. Bounded, low-severity staleness (the report falls back to live Canvas outside the freshness window) — deferred for 1.0beta as a documented bounded limitation, not an open gap. See mutation-reconciliation-map.md family 3."
-    },
-    {
       "path": "api/operation_ledger/adapters/assignment_update.py",
       "symbol": "AssignmentUpdateAdapter.execute",
       "detector": "attr:_canvas_send",

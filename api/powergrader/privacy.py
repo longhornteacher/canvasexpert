@@ -1,13 +1,7 @@
-"""Privacy helpers for local Scoring Session artifacts.
+"""Privacy helpers for local Scoring Session artifacts."""
 
-Functions for building privacy step records and writing private audit files.
-"""
-
-import json
 import os
-from datetime import datetime
 
-from api import feedback_pipeline as fp
 from api.platform_services import workspace
 
 
@@ -48,37 +42,3 @@ def feedback_artifact_dirs(
         )
         return safe, private
     return workspace.for_ai_root(), workspace.grading_keys_root()
-
-
-def write_privacy_audit_file(
-    private_folder: str,
-    assignment_name: str,
-    session_id: str,
-    course_id: str,
-    assignment_id: str,
-    model_id: str,
-    privacy_steps: list[dict],
-    privacy_artifacts: dict,
-) -> str | None:
-    try:
-        os.makedirs(workspace.extended_path(private_folder), exist_ok=True)
-        audit_root = workspace.audits_dir() or private_folder
-        os.makedirs(workspace.extended_path(audit_root), exist_ok=True)
-        path = os.path.join(
-            audit_root,
-            f"{fp.safe(assignment_name)}__powergrader-privacy-audit-{fp.safe(session_id)}.json",
-        )
-        with open(workspace.extended_path(path), "w", encoding="utf-8") as f:
-            json.dump({
-                "session_id": session_id,
-                "course_id": course_id,
-                "assignment_id": assignment_id,
-                "assignment_name": assignment_name,
-                "model_id": model_id,
-                "created": datetime.now().isoformat(timespec="seconds"),
-                "privacy_steps": privacy_steps,
-                "privacy_artifacts": privacy_artifacts,
-            }, f, indent=2, ensure_ascii=False)
-        return path
-    except Exception:
-        return None

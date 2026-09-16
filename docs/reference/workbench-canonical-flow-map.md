@@ -82,7 +82,7 @@ No additional grading UI retirement candidates are queued.
 | `/api/push/preview` (dry-run POST) | Still called by `push/quiz.js` for QuizForge dry-run preview |
 | `gradebook_service.py` curve migration | Data migration, not a surface; no teacher-visible behavior |
 | `app_context.js` localStorage migration | One-time data migration, not a surface |
-| SAFE/private scoring artifacts | Active private safety boundary consumed by MCP Scoring Sessions |
+| SAFE/private scoring artifacts | Active private safety boundary consumed by MCP Scoring Sessions; new runs have one private session JSON and one scrubbed SAFE bundle JSON |
 | Operation-ledger recovery seams | Required safety boundary; not migration overlap |
 
 ## Template inheritance summary

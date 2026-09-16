@@ -11,7 +11,6 @@ import pytest
 from PIL import Image
 import requests
 
-from api.powergrader import ai_workflow
 from api.powergrader import canvas_fetch
 from api.powergrader import new_quiz_fetch as nq
 from api.powergrader import session_builder

@@ -94,7 +94,7 @@ When OneDrive is available, teacher-authored content lives in
 `Canvas Uploads\`, and synced `settings.json`. Human-facing student work is
 canonical under `Student Work\Submissions\<Course>\Assignments\<Assignment>\`;
 pseudonymized artifacts live under `For AI\`, derived output under
-`Student Work\Reports\`, and vault/session/audit state under `_System\`.
+`Student Work\Reports\`, and vault/session state under `_System\`.
 `Student Work\` and `_System\` are
 PRIVATE; review every pseudonymized packet before sharing because it is not
 guaranteed anonymous.

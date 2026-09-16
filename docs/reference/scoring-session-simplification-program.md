@@ -1,15 +1,6 @@
 # Scoring Session simplification program
 
-Status: batch 01 accepted GREEN; execute one remaining batch
-
-Current batch: **02 — canonical scoring artifacts and legacy preparation
-deletion**. Its only active direct brief is
-`docs/handoffs/scoring-session-simplification-02-artifacts.md`.
-
-Required program sections for batch 02: **Locked decisions**, **Handoff 02 —
-canonical scoring artifacts and legacy preparation deletion**, its **Locked
-scope**, **Acceptance criteria**, **Expected focused gate**, and **Stop
-conditions**. Outstanding senior decisions carried into batch 02: none.
+Status: complete — batches 01 and 02 accepted GREEN on 2026-09-16.
 
 This document is the durable architecture and batch boundary for simplifying
 Scoring Sessions. It is not an implementation brief and does not authorize an
@@ -197,8 +188,7 @@ checkpoint is unavailable after the focused gate passes.
 
 ## Program completion
 
-The program is complete only when both batches are GREEN, all direct briefs are
-retired, the current pointer is removed from this document, and the durable scoring
+Both batches are GREEN, the direct briefs are retired, and the durable scoring
 contract/module maps describe the simplified implementation. A later bridge-sync
 simplification is intentionally separate because it crosses the Operation Ledger
 and SIS write boundary.

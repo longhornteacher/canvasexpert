@@ -8,9 +8,11 @@ write authorization. Canvas Live is the only review/edit surface.
 
 ## Current ownership
 
-- `scoring_preparation.py`, `session_builder.py`, and the mirror acquisition modules
-  assemble one private assignment-scoped session and complete SAFE bundle. It exposes
-  the session only after its scoring basis is resolved.
+- `scoring_preparation.py` delegates canonical SAFE construction to
+  `scoring_artifacts.py`; `session_builder.py` assembles the one private
+  assignment-scoped session. Together with the mirror acquisition modules they
+  expose the session only after its scoring basis is resolved. A new run writes
+  only that session JSON and one scrubbed SAFE bundle JSON.
 - `scoring_packet.py` validates the session-bound SAFE bundle, pages full text, and
   provides the server-authored contract and resolved basis on the first page.
 - `api/mcp_server/tools.py` validates pseudonym/item results against the bundle,

@@ -106,78 +106,6 @@ def test_pseudonymize_submissions_is_safety_green(tmp_path):
     assert verdict["green"] is True and not verdict["hard"]
 
 
-def test_media_read_aloud_safe_projection_is_scrubbed_and_has_no_private_media_fields(tmp_path):
-    """Law: only the explicit transcript-first oral allowlist reaches SAFE."""
-    assignment = {"id": 4242, "name": "Read Aloud", "points_possible": 10, "description": ""}
-    submission = {
-        "user_id": 9001, "body": "", "submitted_at": "2026-06-01T10:00:00Z",
-        "assignment": assignment, "user": {"name": "Ada Lovelace", "sis_user_id": "5001"},
-        "attachments": [{
-            "filename": "private.wav", "item_id": "media-private", "download_status": "downloaded", "media_recording": True,
-            "oral_reading": {
-                "status": "needs_review", "passage": "Ada reads carefully",
-                "passage_digest": "p" * 64, "transcript": "Ada reads carefully",
-                "metrics": {"source_words": 3, "exact_matched_words": 3, "accuracy": 1.0, "wcpm": 90},
-                "uncertainty": ["low_confidence"],
-                "difference_candidates": [{"kind": "substitution", "expected": "Ada", "observed": "Ada", "start_seconds": 1.2}],
-                "canonical_sha256": "a" * 64, "canonical_path": "C:/private/audio.wav",
-                "word_events": [{"word": "Ada", "start": 1.2}], "model_version": "private-cache",
-            },
-        }],
-    }
-    vault = Vault(str(tmp_path / "vault.json"))
-    bundle = fp.pseudonymize_submissions([submission], vault, "Read Aloud")
-    result = fp.write_safe_and_private(bundle, vault, str(tmp_path / "SAFE"), str(tmp_path / "PRIVATE"))
-    safe = json.loads(open(result["safe_bundle"], encoding="utf-8").read())
-    oral = safe["students"][0]["responses"][0]["oral_reading"]
-
-    assert oral["version"] == "1.0"
-    assert oral["candidate_counts_only"] is True
-    assert oral["evidence_digest"]
-    assert "Ada" not in json.dumps(safe)
-    for forbidden in ("private.wav", "media-private", "canonical_sha256", "canonical_path", "word_events", "model_version", "url"):
-        assert forbidden not in json.dumps(safe)
-    assert safety.scan_payload(safe, vault)["green"] is True
-
-
-def test_media_read_aloud_unavailable_stays_in_private_teacher_queue(tmp_path):
-    assignment = {"id": 4242, "name": "Read Aloud", "points_possible": 10, "description": ""}
-    submission = {
-        "user_id": 9001, "body": "", "submitted_at": "2026-06-01T10:00:00Z",
-        "assignment": assignment, "user": {"name": "Ada Lovelace", "sis_user_id": "5001"},
-        "attachments": [{"filename": "private.wav", "download_status": "failed", "media_recording": True,
-                         "oral_reading": {"status": "unavailable", "error_message": "Model is unavailable."}}],
-    }
-    vault = Vault(str(tmp_path / "vault.json"))
-    bundle = fp.pseudonymize_submissions([submission], vault, "Read Aloud")
-    result = fp.write_safe_and_private(bundle, vault, str(tmp_path / "SAFE"), str(tmp_path / "PRIVATE"))
-
-    assert result["safe_students"] == 0
-    assert result["media_holds"] == [{"pseudonym": bundle["students"][0]["pseudonym"], "message": "Model is unavailable."}]
-
-
-def test_media_read_aloud_scrub_survivor_gets_a_specific_private_hold(tmp_path):
-    vault = Vault(str(tmp_path / "vault.json"))
-    vault._by_id["999"] = {"pseudonym": "",
-                            "real_name": "Ghost", "sis_id": "", "nicknames": [], "first_seen": ""}
-    bundle = {
-        "students": [{"pseudonym": "Pikachu", "local_attachments": [], "responses": [{
-            "item_id": "42", "response": "", "oral_reading": {
-                "version": "1.0", "status": "complete", "passage": "Ghost reads", "transcript": "Ghost reads",
-                "passage_digest": "p" * 64, "evidence_digest": "e" * 64,
-                "metrics": {}, "uncertainty": [], "difference_candidates": [],
-            },
-        }]}],
-    }
-    result = fp.write_safe_and_private(bundle, vault, str(tmp_path / "SAFE"), str(tmp_path / "PRIVATE"))
-
-    assert result["safe_students"] == 0
-    assert result["media_holds"] == [{
-        "pseudonym": "Pikachu",
-        "message": "Read-aloud evidence could not be safely scrubbed; review the recording locally.",
-    }]
-
-
 def test_pseudonymize_submissions_keeps_latest_attempt(tmp_path):
     a = {"id": 1, "name": "A", "points_possible": 5, "description": "x"}
     subs = [
@@ -337,32 +265,8 @@ def test_upsert_roster_captures_preferred_name_as_nickname(tmp_path):
     assert scrub.verify_clean(scrubbed, v) == []
 
 
-def test_write_safe_and_private_excludes_unscrubbed_student(tmp_path):
-    """If a real identifier survives scrubbing, that student is pulled from SAFE
-    (kept in PRIVATE), never written into a 'safe' file."""
-    v = Vault(str(tmp_path / "vault.json"))
-    # A vault entry with a real name but NO pseudonym -> no scrub rule is built for
-    # it, so a mention of "Ghost" cannot be scrubbed but verify_clean still flags it.
-    v._by_id["999"] = {"pseudonym": "",
-                       "real_name": "Ghost", "sis_id": "", "nicknames": [],
-                       "first_seen": ""}
-    bundle = fp.pseudonymize_submissions(_submissions_fixture(), v, "Essay 1")
-    # Inject an un-scrubbable real name into the first student's response.
-    bundle["students"][0]["responses"][0]["response"] += " I worked with Ghost."
-
-    safe_dir = tmp_path / "SAFE"
-    priv_dir = tmp_path / "PRIVATE"
-    result = fp.write_safe_and_private(bundle, v, str(safe_dir), str(priv_dir))
-
-    assert result["excluded"], "the student mentioning 'Ghost' must be excluded"
-    # The excluded student's SAFE .txt is not written; SAFE has fewer students.
-    assert result["safe_students"] == len(bundle["students"]) - 1
-    safe_blob = (safe_dir / f"{fp.safe('Essay 1')}__bundle.json").read_text(encoding="utf-8")
-    assert "Ghost" not in safe_blob                    # nothing un-scrubbed reached SAFE
-
-
 def test_build_contract_text_inlines_rubric():
-    """With a rubric, HOW-TO-SCORE is self-contained; without, it stays honest."""
+    """With a rubric, the server-authored contract is self-contained."""
     with_rubric = fp.build_contract_text("Sage", rubric_text="3 pts: uses a loop")
     assert "3 pts: uses a loop" in with_rubric
     assert "RUBRIC" in with_rubric
@@ -380,104 +284,6 @@ def test_build_contract_text_defaults_to_glows_and_grows_without_ai_label():
     assert "Drafted by Sage (AI)" not in contract
     assert "Autofeedback" not in contract
     assert "End each `feedback` value with it exactly once" not in contract
-
-
-def test_write_safe_and_private_inlines_rubric_into_how_to_score(tmp_path):
-    """The rubric travels into the SAFE HOW-TO-SCORE so the teacher's LLM gets it."""
-    v = Vault(str(tmp_path / "vault.json"))
-    bundle = fp.pseudonymize_submissions(_submissions_fixture(), v, "Essay 1")
-    safe_dir = tmp_path / "SAFE"
-    fp.write_safe_and_private(bundle, v, str(safe_dir), str(tmp_path / "PRIVATE"),
-                              rubric_text="Criterion: image has alt text")
-    how_to = (safe_dir / f"{fp.safe('Essay 1')}__HOW-TO-SCORE.txt").read_text(encoding="utf-8")
-    assert "image has alt text" in how_to
-
-
-def test_write_safe_and_private_writes_scrubbed_shared_context(tmp_path):
-    v = Vault(str(tmp_path / "vault.json"))
-    bundle = fp.pseudonymize_submissions(_submissions_fixture(), v, "Essay 1")
-    bundle["shared_context"] = {
-        "assignment_description": "Use the class passage.",
-        "materials": [{
-            "title": "Passage",
-            "source": "pasted",
-            "text": "Ada Lovelace is named inside the source passage.",
-        }],
-    }
-    safe_dir = tmp_path / "SAFE"
-    result = fp.write_safe_and_private(bundle, v, str(safe_dir), str(tmp_path / "PRIVATE"))
-
-    assert result["shared_context"]
-    shared_text = (safe_dir / f"{fp.safe('Essay 1')}__SHARED-CONTEXT.txt").read_text(encoding="utf-8")
-    safe_blob = (safe_dir / f"{fp.safe('Essay 1')}__bundle.json").read_text(encoding="utf-8")
-    assert "Source material: Passage" in shared_text
-    assert "Ada" not in shared_text and "Lovelace" not in shared_text
-    assert "Ada" not in safe_blob and "Lovelace" not in safe_blob
-
-
-def test_write_safe_and_private_forced_compact_uses_short_names(tmp_path):
-    """compact=True forces the shorter leaf names regardless of path depth."""
-    v = Vault(str(tmp_path / "vault.json"))
-    bundle = fp.pseudonymize_submissions(_submissions_fixture(), v, "Essay 1")
-    safe_dir = tmp_path / "SAFE"
-    priv_dir = tmp_path / "PRIVATE"
-    result = fp.write_safe_and_private(bundle, v, str(safe_dir), str(priv_dir), compact=True)
-
-    assert (safe_dir / "bundle.json").is_file()
-    assert (safe_dir / "how-to-score.txt").is_file()
-    assert (priv_dir / "private.json").is_file()
-    assert (priv_dir / "who-is-who.csv").is_file()
-    assert result["safe_bundle"] == str(safe_dir / "bundle.json")
-    assert result["private_bundle"] == str(priv_dir / "private.json")
-    assert result["who_is_who"] == str(priv_dir / "who-is-who.csv")
-    for path in result["student_txts"]:
-        assert os.path.basename(path).startswith("s-")
-
-
-def test_write_safe_and_private_auto_detects_compact_on_deep_path(tmp_path):
-    """With compact left as None (the default), a workspace path deep enough to
-    push the readable names over the teacher-visible budget switches to the
-    compact scheme automatically -- mirrors PowerGrader's packet/batch fallback."""
-    v = Vault(str(tmp_path / "vault.json"))
-    bundle = fp.pseudonymize_submissions(_submissions_fixture(), v, "Essay 1")
-    deep_base = tmp_path / ("Deep" * 40) / ("Deep" * 40)
-    safe_dir = deep_base / "SAFE"
-    priv_dir = deep_base / "PRIVATE"
-    result = fp.write_safe_and_private(bundle, v, str(safe_dir), str(priv_dir))
-
-    assert os.path.isfile(workspace.extended_path(str(safe_dir / "bundle.json")))
-    assert result["safe_bundle"] == str(safe_dir / "bundle.json")
-
-
-def _code_submission():
-    """An upload-only submission: a student turned in an HTML file (no text entry).
-    code_files is what the route's _enrich_with_code_files populates from the upload."""
-    a = {"id": 7, "name": "Webpage 1", "points_possible": 10, "description": "<p>Build a page.</p>"}
-    return [{
-        "user_id": 9001, "body": "", "submitted_at": "2026-06-10T10:00:00Z", "score": None,
-        "assignment": a, "user": {"name": "Ada Lovelace", "sis_user_id": "5001"},
-        "attachments": [{"filename": "index.html", "url": "https://x/f"}],
-        "code_files": [{"filename": "index.html",
-                        "text": "<h1>Ada's Hobbies</h1>\n<!-- by Ada Lovelace -->\n<p>Hi</p>"}],
-    }]
-
-
-def test_code_file_upload_is_scored_html_preserved_and_name_scrubbed(tmp_path):
-    v = Vault(str(tmp_path / "vault.json"))
-    subs = _code_submission()
-    bundle = fp.pseudonymize_submissions(subs, v, "Webpage 1")
-    assert len(bundle["students"]) == 1
-    resp = bundle["students"][0]["responses"][0]["response"]
-    assert "<h1>" in resp and "--- index.html ---" in resp   # raw HTML kept; file header added
-
-    safe_dir = tmp_path / "SAFE"
-    result = fp.write_safe_and_private(bundle, v, str(safe_dir), str(tmp_path / "PRIVATE"),
-                                       submissions=subs)
-    assert result["attachment_only"] == []     # code upload is scored, not excluded
-    assert result["safe_students"] == 1         # not pulled by the verify gate
-    safe_blob = (safe_dir / f"{fp.safe('Webpage 1')}__bundle.json").read_text(encoding="utf-8")
-    assert "<h1>" in safe_blob                  # HTML tags survived the scrub
-    assert "Ada" not in safe_blob and "Lovelace" not in safe_blob   # name scrubbed from code
 
 
 def test_validate_results_catches_violations(tmp_path):

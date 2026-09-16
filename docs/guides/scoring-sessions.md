@@ -48,6 +48,8 @@ teacher's machine. The agent sees stable one-word pseudonyms and scrubbed
 response content; pseudonymized does not mean anonymous.
 
 Canvas Live is the review surface. The private Scoring Session record is an
-assignment-bounded SAFE packet and write authorization, not a multi-assignment
+assignment-bounded SAFE packet and write authorization. A new preparation has
+one private session record and one scrubbed SAFE bundle; the agent receives no
+storage details or identity mapping. It is not a multi-assignment
 queue or local grading UI. Canvas Expert has no hosted AI grader, manual import
 workflow, or New Quiz write path.

@@ -10,7 +10,6 @@ from api.feedback_artifacts import (
     _scrub_bundle,
     pseudonymize,
     pseudonymize_submissions,
-    write_safe_and_private,
 )
 from api.feedback_results import (
         _AI_SIGNATURE_LINE_RE,
@@ -51,5 +50,4 @@ __all__ = [
     "reidentify",
     "reidentified_csv",
     "validate_results",
-    "write_safe_and_private",
 ]
