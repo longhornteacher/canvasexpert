@@ -44,6 +44,6 @@ def html_to_docx(html: str, reference_docx: str, out_path: str) -> str:
     except OSError as exc:
         raise RuntimeError(
             "Pandoc executable was not found. Install Pandoc system-wide "
-            "(for example: winget install JohnMacFarlane.Pandoc) and rerun the spike."
+            "(for example: winget install JohnMacFarlane.Pandoc) and retry the export."
         ) from exc
     return str(output)

@@ -18,7 +18,6 @@ def test_supported_entrypoints_use_one_module_identity_and_activity_is_retired(t
         Path("api/qf_ui.py"),
         Path("api/mcp_server/__main__.py"),
         Path("api/qf_pusher.py"),
-        Path("api/push_tiers.py"),
         Path("api/validate_qf.py"),
         Path("api/diagnose_newquizzes.py"),
     }
@@ -80,7 +79,6 @@ for name in (
     "api.mcp_server.server",
     "api.webui.routes.push_validation",
     "api.qf_pusher",
-    "api.push_tiers",
     "api.validate_qf",
     "api.diagnose_newquizzes",
 ):

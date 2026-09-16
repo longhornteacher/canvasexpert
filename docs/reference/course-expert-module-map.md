@@ -86,8 +86,7 @@ Expert loads that bundle first, then the shared push cards, then the page-specif
   The legacy QuizForge streaming HTTP wrappers (`/api/push/stream`, `/api/push-multi-whole/stream`,
   `/api/push-variants/stream`, `/api/push-multi/stream`) were removed in July 2026.
   `qf_pusher.py` remains a whole-quiz/planning owner. The unsafe differentiated
-  `push_tiers.py` live CLI is retired; differentiated writes must use the reviewed
-  Operation Ledger family path.
+  Differentiated writes must use the reviewed Operation Ledger family path.
 - Assignment/Page printable path ownership lives in `api/operation_ledger/adapters/assignment.py`.
 
 ## First Places To Look By Symptom

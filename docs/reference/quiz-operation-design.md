@@ -10,8 +10,7 @@
 
 Course Expert and standalone Quiz use the typed `content.quiz` Operation Ledger
 prepare/review/apply path. `qf_pusher.py` remains the local plan and whole-quiz transport owner
-consumed by the adapter. The former `push_tiers.py` direct differentiated CLI is retired; it
-cannot bypass the reviewed family operation.
+consumed by the adapter. Differentiated delivery cannot bypass the reviewed family operation.
 
 The live planner accepts auto-graded QuizForge types only. `ESSAY` and `FILEUPLOAD` are
 rejected immediately after local parse and before preparation, transformation, or Canvas;

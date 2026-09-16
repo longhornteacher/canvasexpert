@@ -173,7 +173,6 @@ grade options; CanvasExpert does not assign or publish them for the teacher.
 | `codefmt.py` | VSCode-style code highlighting (Pygments → inline styles) |
 | `teks.py` | TEKS coverage report + visible labels |
 | `qf_pusher.py` | Driver: envelope → live quiz (points, settings, stimulus, TEKS) |
-| `push_tiers.py` | Retired compatibility stub; differentiated writes use the reviewed Forge operation path |
 | `downloader.py` | Submission downloader → canonical `Student Work/Submissions/<course>/Assignments/<assignment>/<student>/Attempt <n>/` tree; no duplicate raw by-student mirror |
 | `validate_qf.py` | QuizForge compliance checker |
 | `qf_ui.py` | Launches the local web UI (see "Web UI" above) |
