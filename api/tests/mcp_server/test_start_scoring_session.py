@@ -10,6 +10,9 @@ from api.mcp_server import tools
 
 def _bind_courses(monkeypatch, courses):
     monkeypatch.setattr(tools.config, "active_courses", lambda: copy.deepcopy(courses))
+    # Session-refresh behavior is asserted explicitly in the focused tests;
+    # ordinary fixtures keep the Canvas coordinator out of unit tests.
+    monkeypatch.setattr(tools, "_refresh_course_for_scoring", lambda _course_id: True)
 
 
 def _bind_snapshots(monkeypatch, snapshots):
@@ -49,6 +52,33 @@ def _assignment(assignment_id, name, ungraded, partially_scored=0, due_at=""):
             "partially_scored": partially_scored, "due_at": due_at}
 
 
+def test_scoring_refresh_waits_for_successful_foreground_plan(monkeypatch):
+    enqueued = []
+    monkeypatch.setattr(
+        tools, "_enqueue_sync",
+        lambda course_id, scopes: enqueued.append((course_id, scopes)) or "plan-1",
+    )
+    monkeypatch.setattr(
+        tools, "_wait_for_plan",
+        lambda plan_id, timeout_seconds: {
+            "plan_id": plan_id, "timeout_seconds": timeout_seconds,
+            "state": "succeeded",
+        },
+    )
+
+    assert tools._refresh_course_for_scoring("c1") is True
+    assert enqueued == [("c1", tools._REFRESH_SCOPES)]
+
+
+def test_scoring_refresh_rejects_failed_or_timed_out_plan(monkeypatch):
+    monkeypatch.setattr(tools, "_enqueue_sync", lambda *_args: "plan-1")
+    monkeypatch.setattr(tools, "_wait_for_plan", lambda *_args, **_kwargs: {"state": "failed"})
+    assert tools._refresh_course_for_scoring("c1") is False
+
+    monkeypatch.setattr(tools, "_wait_for_plan", lambda *_args, **_kwargs: {"state": "running"})
+    assert tools._refresh_course_for_scoring("c1") is False
+
+
 def test_unscoped_start_freezes_ordered_queue_from_every_current_snapshot(monkeypatch):
     _bind_courses(monkeypatch, [
         {"id": "c1", "name": "Course One"},
@@ -72,6 +102,44 @@ def test_unscoped_start_freezes_ordered_queue_from_every_current_snapshot(monkey
     ]
     assert root["queue"][0]["partially_scored"] == 1
     assert root["queue"][0]["due_at"] == "2026-10-01"
+
+
+def test_start_forces_refresh_for_every_requested_current_course(monkeypatch):
+    _bind_courses(monkeypatch, [{"id": "c1"}, {"id": "c2"}])
+    refreshes = []
+    monkeypatch.setattr(
+        tools, "_refresh_course_for_scoring",
+        lambda course_id: refreshes.append(course_id) or True,
+    )
+    _bind_snapshots(monkeypatch, {
+        "c1": (_snapshot(_assignment("a1", "First", 1)), None),
+        "c2": (_snapshot(_assignment("a2", "Second", 1)), None),
+    })
+    _bind_session_store(monkeypatch)
+
+    result = tools.start_scoring_session()
+
+    assert result["status"] == "started"
+    assert refreshes == ["c1", "c2"]
+
+
+def test_start_refresh_failure_blocks_queue_creation(monkeypatch):
+    _bind_courses(monkeypatch, [{"id": "c1"}])
+    monkeypatch.setattr(tools, "_refresh_course_for_scoring", lambda _course_id: False)
+    calls = _bind_snapshots(monkeypatch, {})
+    sessions = _bind_session_store(monkeypatch)
+
+    result = tools.start_scoring_session("c1")
+
+    assert result == {
+        "ok": True,
+        "status": "needs_refresh",
+        "code": "needs_refresh",
+        "course_ids": ["c1"],
+        "message": "Refresh the listed Current-course mirrors, then retry this start.",
+    }
+    assert calls == []
+    assert sessions == {}
 
 
 def test_scoped_start_includes_only_the_exact_assignment(monkeypatch):
@@ -175,6 +243,50 @@ def test_continue_pauses_for_norms_then_resumes_same_root_idempotently(
     assert attempts[1]["parent_scoring_session_id"] == root_id
     assert attempts[1]["scoring_guidance"] == "Writing"
     assert sessions[root_id]["queue"][0]["child_session_id"] == "child-1"
+
+
+def test_continue_forces_refresh_before_each_new_assignment_preparation(monkeypatch, tmp_path):
+    _bind_courses(monkeypatch, [{"id": "c1", "name": "Course One"}])
+    _bind_snapshots(monkeypatch, {"c1": (_snapshot(_assignment("a1", "Essay", 1)), None)})
+    sessions = _bind_session_store(monkeypatch)
+    root_id = tools.start_scoring_session("c1")["scoring_session_id"]
+    refreshes = []
+    monkeypatch.setattr(
+        tools, "_refresh_course_for_scoring",
+        lambda course_id: refreshes.append(course_id) or True,
+    )
+
+    def run_start(**_kwargs):
+        return {"ok": False, "payload": {"code": "needs_scoring_norms"}}
+
+    monkeypatch.setattr("api.powergrader.start_workflow.run_start_session", run_start)
+
+    result = tools.continue_scoring_session(root_id)
+
+    assert result["status"] == "needs_teacher_input"
+    assert refreshes == ["c1"]
+    assert sessions[root_id]["queue"][0]["status"] == "needs_teacher_input"
+
+
+def test_continue_refresh_failure_is_retryable_and_does_not_prepare(monkeypatch):
+    _bind_courses(monkeypatch, [{"id": "c1", "name": "Course One"}])
+    _bind_snapshots(monkeypatch, {"c1": (_snapshot(_assignment("a1", "Essay", 1)), None)})
+    sessions = _bind_session_store(monkeypatch)
+    root_id = tools.start_scoring_session("c1")["scoring_session_id"]
+    monkeypatch.setattr(tools, "_refresh_course_for_scoring", lambda _course_id: False)
+    monkeypatch.setattr(
+        "api.powergrader.start_workflow.run_start_session",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("mirror refresh failure must precede preparation")
+        ),
+    )
+
+    result = tools.continue_scoring_session(root_id)
+
+    assert result["code"] == "mirror_refresh_failed"
+    assert result["scoring_session_id"] == root_id
+    assert sessions[root_id]["queue"][0]["status"] == "failed"
+    assert sessions[root_id]["queue"][0]["preparation_retryable"] is True
 
 
 def test_continue_forwards_teacher_guidance_unchanged(monkeypatch):

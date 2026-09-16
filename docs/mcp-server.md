@@ -71,7 +71,7 @@ Tool schema version 48 (37 tools).
 | `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |
 | `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state | Yes, pseudonymized |
 | `refresh_mirror(course_id)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |
-| `start_scoring_session(course_id="", assignment_id="")` | Freeze a mirror-backed queue for every Current course, one Current course, or one exact assignment in a Current course | No |
+| `start_scoring_session(course_id="", assignment_id="")` | Refresh requested Current courses, then freeze a mirror-backed queue for every Current course, one Current course, or one exact assignment in a Current course | No |
 | `continue_scoring_session(scoring_session_id, scoring_guidance="")` | Prepare or resume the active queue item; missing norms pause the same root session for teacher input | No |
 | `list_scoring_sessions()` | One identity-free row per root Scoring Session with aggregate queue progress | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
@@ -194,10 +194,12 @@ no Canvas write. The root `scoring_session_id` authorizes valid results only for
 queue; newly discovered assignments need a later session.
 
 For a broad request such as “start a Scoring Session” or “what needs grading,” the
-assistant lists Current courses, requests `refresh_mirror` for each, and reads each
-`get_gradebook_snapshot`. It reports assignments whose `ungraded` count is positive and
+assistant lists Current courses and calls `start_scoring_session`. Start itself forces
+a foreground CanvasMirror refresh for each requested Current course before reading the
+gradebook snapshots. It reports assignments whose `ungraded` count is positive and
 their `partially_scored` counts, then starts one session without asking the teacher to pick
-an assignment. If start returns `needs_refresh`, refresh the listed courses and retry.
+an assignment. If a requested refresh fails, start returns `needs_refresh` and creates no
+session; refresh the listed courses and retry.
 Canvas workflow state is authoritative: a numeric score or teacher comment does not clear
 `submitted` or `pending_review` work. The assistant never asks for an assignment type or
 scoring transport.
@@ -234,10 +236,11 @@ operation token, or private assignment-run id crosses the MCP boundary. A stale 
 changed review plan, invalid answer, or ambiguous write fails closed. Review and editing
 happen in Canvas Live; the teacher request authorizes only the frozen queue, not later work.
 
-Continuation prepares each queue item from fresh local CanvasMirror roster,
-assignment, and submission projections. It makes no live Canvas call and downloads no
-attachments while preparing the SAFE packet. Text responses continue through the existing
-SAFE flow; attachment-bearing, media-only, empty, and unreadable work stays held for review.
+Continuation refreshes the active course before preparing each queue item, then uses
+fresh local CanvasMirror roster, assignment, and submission projections. It makes no
+live Canvas call and downloads no attachments while preparing the SAFE packet. Text
+responses continue through the existing SAFE flow; attachment-bearing, media-only,
+empty, and unreadable work stays held for review.
 The mirror assignment projection carries only student-free quiz classification fields, so a
 true New Quiz returns `new_quiz_writing_requires_assignment` before scoring norms or packet
 creation. If any required mirror scope is missing, stale, malformed, incomplete, or

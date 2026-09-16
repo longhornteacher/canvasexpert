@@ -11,11 +11,13 @@ agent-scored. Existing New Quizzes with writing stop with
 ## Before scoring
 
 For a broad request such as “start a Scoring Session” or “what needs grading,” the
-agent lists Current courses, refreshes each mirror, and reads each gradebook
-snapshot. It reports assignments with positive `ungraded` counts and their
-`partially_scored` counts, then starts one session for that frozen backlog. It does
-not ask the teacher to choose one assignment. If start returns `needs_refresh`, the
-agent refreshes the listed courses and retries. A scoped request can name one
+agent lists Current courses and starts the session. `start_scoring_session` forces
+a foreground CanvasMirror refresh for every requested Current course before it
+reads each gradebook snapshot. It reports assignments with positive `ungraded`
+counts and their `partially_scored` counts, then starts one session for that
+refreshed, frozen backlog. It does not ask the teacher to choose one assignment.
+If a requested refresh fails, start returns `needs_refresh` and creates no session;
+the agent refreshes the listed courses and retries. A scoped request can name one
 Current course, or one assignment within that course.
 
 Starting a Scoring Session performs no Canvas write. The teacher's request
@@ -27,8 +29,9 @@ Session, arbitrary grade edits, or any SIS/Skyward action.
 
 1. Start one Scoring Session for the requested Current-course scope. Canvas
    workflow state, not a score or comment, decides what still needs grading.
-2. Call `continue_scoring_session` with the root id. It prepares the current queue
-   item. If Canvas has no usable rubric and Canvas Expert reports local rubric
+2. Call `continue_scoring_session` with the root id. It refreshes the active
+   course's CanvasMirror, then prepares the current queue item. If Canvas has no
+   usable rubric and Canvas Expert reports local rubric
    choices, ask the teacher which one to use, or ask for bounded scoring guidance,
    then continue the same root session. If a refreshed item no longer needs grading,
    continuation records that outcome and moves to the next item without a packet.

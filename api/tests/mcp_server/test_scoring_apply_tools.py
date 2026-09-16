@@ -239,6 +239,7 @@ def test_backlog_session_pauses_submits_advances_and_completes_after_reload(
                                         "ungraded": 1, "partially_scored": 0}], "source": "mirror"}, None),
     }
     monkeypatch.setattr(tools, "_load_snapshot", lambda course_id: snapshots[course_id])
+    monkeypatch.setattr(tools, "_refresh_course_for_scoring", lambda _course_id: True)
     sessions = {}
     monkeypatch.setattr(session_store, "load_session", lambda session_id: sessions.get(session_id))
     monkeypatch.setattr(session_store, "save_session",

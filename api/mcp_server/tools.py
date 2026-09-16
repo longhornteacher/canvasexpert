@@ -21,9 +21,10 @@ and the outbound safety gate.
 Strict mirror-only law: get_roster, get_submissions, and
 get_gradebook_snapshot serve ONLY from the local CanvasMirror and refuse
 (rather than falling back to a live Canvas fetch) when it isn't fresh
-enough. refresh_mirror is the assistant's only way to move that forward —
-it triggers Canvas Expert's own sync engine and reports freshness, never
-Canvas data, keeping the AI's whole path to Canvas indirect. get_writing_history
+enough. Ordinary reads use refresh_mirror to move that forward; Scoring
+Session start and continuation invoke the same Canvas Expert sync engine
+privately before reading their mirror data. Neither path returns Canvas data
+directly, keeping the AI's whole path to Canvas indirect. get_writing_history
 is not mirror-backed (the daily-writing store is not Canvas data at all), so
 no staleness refusal applies to it."""
 from __future__ import annotations
@@ -1799,6 +1800,22 @@ _REFRESH_TIMEOUT_SECONDS = 25.0
 _REFRESH_SCOPES = ["course.refresh", "roster", "groups"]
 
 
+def _refresh_course_for_scoring(course_id: str) -> bool:
+    """Force one foreground CanvasMirror refresh before scoring uses it.
+
+    Scoring is intentionally stricter than ordinary mirror-backed reads: a
+    mirror that is merely inside its serve-age window may still predate a
+    teacher's recent Canvas Live edit.  Keep the refresh private to Canvas
+    Expert and return only a success bit to the scoring orchestration.
+    """
+    try:
+        plan_id = _enqueue_sync(course_id, _REFRESH_SCOPES)
+        plan = _wait_for_plan(plan_id, timeout_seconds=_REFRESH_TIMEOUT_SECONDS)
+    except Exception:
+        return False
+    return plan.get("state") == "succeeded"
+
+
 def refresh_mirror(course_id: str) -> dict:
     """Ask Canvas Expert to sync this course's local CanvasMirror from Canvas
     (a submissions delta plus a roster refresh), then report freshness — the
@@ -1868,7 +1885,7 @@ def _scored_count(session: dict) -> int:
 
 
 def start_scoring_session(course_id: str = "", assignment_id: str = "") -> dict:
-    """Freeze a mirror-backed queue of Current-course assignments needing scoring."""
+    """Refresh requested Current courses, then freeze their mirror-backed queue."""
     course_key = str(course_id or "").strip()
     assignment_key = str(assignment_id or "").strip()
     if assignment_key and not course_key:
@@ -1888,6 +1905,9 @@ def start_scoring_session(course_id: str = "", assignment_id: str = "") -> dict:
     needs_refresh = []
     for course in courses:
         current_id = str(course.get("id") or "")
+        if not _refresh_course_for_scoring(current_id):
+            needs_refresh.append(current_id)
+            continue
         snapshot, error = _load_snapshot(current_id)
         if error or snapshot is None:
             needs_refresh.append(current_id)
@@ -2030,8 +2050,26 @@ def continue_scoring_session(scoring_session_id: str,
                 return _with_next("continue_scoring_session", summary)
             return summary
 
+        course_id_value = str(item.get("course_id") or "")
+        if not _refresh_course_for_scoring(course_id_value):
+            scoring_queue.record_preparation_failure(
+                root_id, claim["index"], claim["claim"],
+                "mirror_refresh_failed", retryable=True,
+            )
+            return {
+                "ok": False,
+                "code": "mirror_refresh_failed",
+                "error": (
+                    "CanvasMirror could not be refreshed for the active course. "
+                    "Retry continue_scoring_session."
+                ),
+                "scoring_session_id": root_id,
+                "queue_counts": scoring_queue.public_progress(
+                    scoring_queue.load_root_session(root_id) or {"queue": []}),
+            }
+
         result = start_workflow.run_start_session(
-            course_id=str(item.get("course_id") or ""),
+            course_id=course_id_value,
             assignment_id=str(item.get("assignment_id") or ""),
             mode="packet", watch_late="false", auto_post="false",
             rubric_name="", persona_id="",

@@ -391,7 +391,7 @@ def refresh_mirror(course_id: str) -> str:
 
 @mcp.tool(structured_output=False)
 def start_scoring_session(course_id: str = "", assignment_id: str = "") -> str:
-    """Freeze a mirror-backed queue for all Current courses or one narrower scope."""
+    """Refresh requested Current courses, then freeze a mirror-backed queue."""
     return _compact(tools.start_scoring_session(course_id, assignment_id))
 
 
