@@ -195,7 +195,7 @@ queue; newly discovered assignments need a later session.
 
 For a broad request such as “start a Scoring Session” or “what needs grading,” the
 assistant lists Current courses and calls `start_scoring_session`. Start itself forces
-a foreground CanvasMirror refresh for each requested Current course before reading the
+a foreground full CanvasMirror rebuild for each requested Current course before reading the
 gradebook snapshots. It reports assignments whose `ungraded` count is positive and
 their `partially_scored` counts, then starts one session without asking the teacher to pick
 an assignment. If a requested refresh fails, start returns `needs_refresh` and creates no
@@ -236,7 +236,8 @@ operation token, or private assignment-run id crosses the MCP boundary. A stale 
 changed review plan, invalid answer, or ambiguous write fails closed. Review and editing
 happen in Canvas Live; the teacher request authorizes only the frozen queue, not later work.
 
-Continuation refreshes the active course before preparing each queue item, then uses
+Continuation performs the same scoring-specific full rebuild for the active course
+before preparing each queue item, then uses
 fresh local CanvasMirror roster, assignment, and submission projections. It makes no
 live Canvas call and downloads no attachments while preparing the SAFE packet. Text
 responses continue through the existing SAFE flow; attachment-bearing, media-only,

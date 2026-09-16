@@ -67,7 +67,7 @@ def test_scoring_refresh_waits_for_successful_foreground_plan(monkeypatch):
     )
 
     assert tools._refresh_course_for_scoring("c1") is True
-    assert enqueued == [("c1", tools._REFRESH_SCOPES)]
+    assert enqueued == [("c1", tools._SCORING_REFRESH_SCOPES)]
 
 
 def test_scoring_refresh_rejects_failed_or_timed_out_plan(monkeypatch):
@@ -286,6 +286,27 @@ def test_continue_refresh_failure_is_retryable_and_does_not_prepare(monkeypatch)
     assert result["code"] == "mirror_refresh_failed"
     assert result["scoring_session_id"] == root_id
     assert sessions[root_id]["queue"][0]["status"] == "failed"
+    assert sessions[root_id]["queue"][0]["preparation_retryable"] is True
+
+
+def test_continue_preserves_sanitized_mirror_diagnostic(monkeypatch):
+    _bind_courses(monkeypatch, [{"id": "c1", "name": "Course One"}])
+    _bind_snapshots(monkeypatch, {"c1": (_snapshot(_assignment("a1", "Essay", 1)), None)})
+    sessions = _bind_session_store(monkeypatch)
+    root_id = tools.start_scoring_session("c1")["scoring_session_id"]
+
+    monkeypatch.setattr(
+        "api.powergrader.start_workflow.run_start_session",
+        lambda **_kwargs: {"ok": False, "payload": {
+            "code": "mirror_submission_row_invalid",
+            "error": "The local CanvasMirror for this course is missing, stale, or incomplete. Call refresh_mirror(course_id) and retry.",
+        }},
+    )
+
+    result = tools.continue_scoring_session(root_id)
+
+    assert result["code"] == "mirror_submission_row_invalid"
+    assert "CanvasMirror" in result["error"]
     assert sessions[root_id]["queue"][0]["preparation_retryable"] is True
 
 

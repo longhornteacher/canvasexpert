@@ -125,6 +125,20 @@ def test_full_pass_requests_submission_comments_delta_does_not(tmp_path):
     assert "include[]" not in graded_call
 
 
+def test_full_pass_can_skip_submission_comments_for_scoring(tmp_path):
+    canvas = FakeCanvas(submissions=[_sub(700010)])
+    result = sync.full_pass(COURSE, canvas_get_all=canvas,
+                            canvas_get_all_complete=canvas.complete,
+                            root=str(tmp_path), now=NOW, with_comments=False)
+
+    assert result["ok"] is True
+    submissions_call = next(
+        params for path, params in canvas.calls
+        if path.endswith("/students/submissions")
+        and "submitted_since" not in params and "graded_since" not in params)
+    assert submissions_call["include[]"] == ["submission_history"]
+
+
 def test_full_pass_captures_submission_comments(tmp_path):
     canvas = FakeCanvas(submissions=[
         _sub(700010, submission_comments=[

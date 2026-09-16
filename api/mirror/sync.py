@@ -359,14 +359,17 @@ def _skipped_lifecycle_new_quizzes(course_id, *, root=None) -> dict:
 def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, now=None,
               bypass_new_quiz_cooldown: bool = False,
               skip_new_quiz_metadata: bool = False,
-              course_name: str | None = None) -> dict:
+              course_name: str | None = None,
+              with_comments: bool = True) -> dict:
     """Backfill / nightly reconcile: fetch everything first, then rewrite.
 
     ``bypass_new_quiz_cooldown`` plumbs the manual ``sync_now`` override down
     to the New Quiz metadata capability gate (1.0beta slice 01a) — the
     15-minute heartbeat never passes it. ``course_name`` is forwarded to
     Course Catalog's coordinated-receipt refresh only (1.0beta slice 02c);
-    it never affects this pass's own behavior."""
+    it never affects this pass's own behavior. ``with_comments=False`` keeps
+    callers that only need assignment/roster/submission projections out of the
+    independent submission-comments acquisition lane."""
     blocked = _guard(course_id, root)
     if blocked:
         return blocked
@@ -403,12 +406,13 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
         # actually reported as gone; fall back to the last-good map.
         sections = (previous_roster or {}).get("sections") or {}
     submissions, error = _fetch_submissions(course_id, canvas_get_all,
-                                            with_comments=True)
+                                            with_comments=with_comments)
     if error:
-        store.record_submission_comments_state(
-            course_id, ok=False,
-            error_code=error_code(error),
-            attempted_at=started, root=root)
+        if with_comments:
+            store.record_submission_comments_state(
+                course_id, ok=False,
+                error_code=error_code(error),
+                attempted_at=started, root=root)
         store.record_pass(course_id, "full", ok=False,
                           error_code=error_code(error), attempted_at=started, root=root)
         return {"ok": False, "error": error}
@@ -421,8 +425,9 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
         store.merge_submissions(course_id, assignment_id,
                                 grouped.get(assignment_id, []), root=root,
                                 attempted_at=started, replace=True)
-    store.record_submission_comments_state(
-        course_id, ok=True, attempted_at=started, root=root)
+    if with_comments:
+        store.record_submission_comments_state(
+            course_id, ok=True, attempted_at=started, root=root)
     watermark = _overlapped(started)
     store.record_pass(course_id, "roster", ok=True, attempted_at=started, root=root)
     store.record_pass(course_id, "full", ok=True, attempted_at=started,

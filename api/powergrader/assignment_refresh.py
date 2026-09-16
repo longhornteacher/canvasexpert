@@ -31,6 +31,11 @@ MIRROR_SUBMISSION_IDENTITY_MISMATCH = (
 )
 
 
+def _mirror_preparation_failure(code: str) -> dict:
+    """Return a stable, non-PII reason for a mirror-only preparation failure."""
+    return {"error": MIRROR_PREPARATION_ERROR, "code": str(code)}
+
+
 def _is_historical_orphan(current: dict) -> bool:
     """A committed Canvas grade for a departed learner: safe to ignore.
 
@@ -264,7 +269,7 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
     """
     root = workspace.workspace_root()
     if not root:
-        return None, None, {"error": "No workspace configured — finish setup first."}
+        return None, None, _mirror_preparation_failure("mirror_workspace_unavailable")
     from api.platform_services import config
 
     max_age_hours = config.mirror_serve_max_age_hours()
@@ -278,24 +283,24 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
         roster_document = mirror_store.read_roster(course_id, root=root)
         assignment_document = mirror_store.read_assignments(course_id, root=root)
     except (OSError, TypeError, ValueError, KeyError, AttributeError):
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_projection_unavailable")
 
     if not all(isinstance(scope, dict) and scope.get("state") == "current"
                for scope in (roster, assignments, submissions_scope)):
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_scope_stale")
     if (not isinstance(roster_document, dict)
             or not isinstance(assignment_document, dict)
             or roster_document.get("state") != "current"
             or assignment_document.get("state") != "current"):
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_projection_unavailable")
     assignment_records = assignments.get("records")
     if not isinstance(assignment_records, list):
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_assignment_projection_invalid")
     assignment = next(
         (dict(row) for row in assignment_records if isinstance(row, dict)
          and str(row.get("id") or "") == str(assignment_id)), None)
     if assignment is None:
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_assignment_missing")
 
     # A versioned assignment record written before this slice, or a malformed
     # hand-edited record, must not be interpreted as an ordinary assignment.
@@ -303,18 +308,18 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
         "quiz_id", "is_quiz", "quiz_kind", "is_quiz_lti_assignment",
     }
     if not classification_keys.issubset(assignment):
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_assignment_classification_invalid")
     if (not isinstance(assignment.get("quiz_id"), str)
             or not isinstance(assignment.get("is_quiz"), bool)
             or not isinstance(assignment.get("is_quiz_lti_assignment"), bool)
             or assignment.get("quiz_kind") not in {"", "quiz", "classic_quiz", "new_quiz"}):
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_assignment_classification_invalid")
     quiz_kind = assignment.get("quiz_kind")
     is_quiz = assignment.get("is_quiz")
     if (quiz_kind == "quiz"
             or is_quiz != (quiz_kind != "")
             or (assignment.get("is_quiz_lti_assignment") and quiz_kind != "new_quiz")):
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_assignment_classification_invalid")
     # The mirror's assignment projection stores description_text under its
     # student-free name; the downstream workflow still consumes `description`.
     assignment["description"] = str(
@@ -323,7 +328,7 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
     assignment["points_possible"] = assignment.get("points_possible")
     roster_records = roster.get("records")
     if not isinstance(roster_records, list):
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_roster_projection_invalid")
     roster_by_id = {
         str(student.get("id")): dict(student)
         for student in roster_records
@@ -333,9 +338,9 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
         course_id, assignment_id, root=root)
     if (not isinstance(submission_document, dict)
             or submission_document.get("state") != "current"):
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_submission_projection_invalid")
     if not isinstance(submission_document.get("submissions"), dict):
-        return None, None, {"error": MIRROR_PREPARATION_ERROR}
+        return None, None, _mirror_preparation_failure("mirror_submission_projection_invalid")
 
     rows = []
     entry_count = 0
@@ -347,12 +352,12 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
     }
     for entry in submission_document["submissions"].values():
         if not isinstance(entry, dict) or not isinstance(entry.get("current"), dict):
-            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+            return None, None, _mirror_preparation_failure("mirror_submission_row_invalid")
         current = dict(entry["current"])
         if not required_current.issubset(current):
-            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+            return None, None, _mirror_preparation_failure("mirror_submission_row_invalid")
         if str(current.get("assignment_id") or "") != str(assignment_id):
-            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+            return None, None, _mirror_preparation_failure("mirror_submission_row_invalid")
         entry_count += 1
         uid = str(current.get("user_id") or "")
         if not uid or uid not in roster_by_id:
@@ -368,17 +373,17 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
             }
         attempts = entry.get("attempts")
         if not isinstance(attempts, dict):
-            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+            return None, None, _mirror_preparation_failure("mirror_submission_attempt_invalid")
         attempt = current.get("attempt")
         attempt_record = attempts.get(str(attempt)) if attempt not in (None, "") else None
         if attempt_record is not None and not isinstance(attempt_record, dict):
-            return None, None, {"error": MIRROR_PREPARATION_ERROR}
+            return None, None, _mirror_preparation_failure("mirror_submission_attempt_invalid")
         attachment_names = []
         if attempt_record is not None:
             attachment_names = attempt_record.get("attachment_names")
             if not isinstance(attachment_names, list) or not all(
                     isinstance(name, str) for name in attachment_names):
-                return None, None, {"error": MIRROR_PREPARATION_ERROR}
+                return None, None, _mirror_preparation_failure("mirror_submission_attempt_invalid")
         submission_type = str(current.get("submission_type") or "")
         body = str(current.get("body") or "")
         media_only = submission_type == "media_recording"

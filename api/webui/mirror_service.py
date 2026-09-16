@@ -140,6 +140,30 @@ def _run_course_refresh(course_id: str):
         return {"ok": bool(results) and all(result.get("ok") for result in results)}
 
 
+def _run_scoring_course_refresh(course_id: str):
+    """Rebuild the course projections used by a scoring session.
+
+    Scoring cannot rely on the ordinary delta watermark: a teacher may have
+    changed an assignment or submission in Canvas Live after the last mirror
+    pass without changing the delta window in a way that repairs an incomplete
+    local projection.  Comments are deliberately excluded because scoring
+    preparation does not read them and they are an independent mirror concern.
+    """
+    with _telemetry("course.scoring_refresh"):
+        course = next((item for item in config.saved_courses()
+                       if str(item.get("id")) == str(course_id)), None)
+        if not course:
+            return {"ok": False, "error_class": "course_unavailable"}
+        return sync.full_pass(
+            course_id,
+            canvas_get_all=canvas_get_all,
+            canvas_get_all_complete=canvas_get_all_complete,
+            course_name=course.get("name"),
+            bypass_new_quiz_cooldown=True,
+            with_comments=False,
+        )
+
+
 def coordinator_instance() -> coordinator.MirrorCoordinator:
     """The sole production registry.  Every runner above is read-only."""
     return coordinator.configure_default({
@@ -147,6 +171,7 @@ def coordinator_instance() -> coordinator.MirrorCoordinator:
         "course_context": _run_course_context,
         "roster": _run_roster,
         "groups": _run_groups,
+        "course.scoring_refresh": _run_scoring_course_refresh,
         "submissions.course_delta": _run_submission_delta,
         "new_quizzes.metadata": _run_new_quiz_metadata,
     })

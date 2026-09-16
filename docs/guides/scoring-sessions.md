@@ -12,7 +12,7 @@ agent-scored. Existing New Quizzes with writing stop with
 
 For a broad request such as “start a Scoring Session” or “what needs grading,” the
 agent lists Current courses and starts the session. `start_scoring_session` forces
-a foreground CanvasMirror refresh for every requested Current course before it
+a foreground full CanvasMirror rebuild for every requested Current course before it
 reads each gradebook snapshot. It reports assignments with positive `ungraded`
 counts and their `partially_scored` counts, then starts one session for that
 refreshed, frozen backlog. It does not ask the teacher to choose one assignment.
@@ -29,8 +29,9 @@ Session, arbitrary grade edits, or any SIS/Skyward action.
 
 1. Start one Scoring Session for the requested Current-course scope. Canvas
    workflow state, not a score or comment, decides what still needs grading.
-2. Call `continue_scoring_session` with the root id. It refreshes the active
-   course's CanvasMirror, then prepares the current queue item. If Canvas has no
+2. Call `continue_scoring_session` with the root id. It performs the same
+   scoring-specific full CanvasMirror rebuild for the active course, then prepares
+   the current queue item. If Canvas has no
    usable rubric and Canvas Expert reports local rubric
    choices, ask the teacher which one to use, or ask for bounded scoring guidance,
    then continue the same root session. If a refreshed item no longer needs grading,

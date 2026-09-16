@@ -1798,6 +1798,9 @@ _REFRESH_TIMEOUT_SECONDS = 25.0
 # background heartbeat closes the same gap from the other side; see
 # mirror_service.due_passes.
 _REFRESH_SCOPES = ["course.refresh", "roster", "groups"]
+# Scoring does not use the ordinary delta refresh. Its runner performs a full
+# rebuild so unchanged or malformed local assignment rows are replaced too.
+_SCORING_REFRESH_SCOPES = ["course.scoring_refresh"]
 
 
 def _refresh_course_for_scoring(course_id: str) -> bool:
@@ -1809,7 +1812,7 @@ def _refresh_course_for_scoring(course_id: str) -> bool:
     Expert and return only a success bit to the scoring orchestration.
     """
     try:
-        plan_id = _enqueue_sync(course_id, _REFRESH_SCOPES)
+        plan_id = _enqueue_sync(course_id, _SCORING_REFRESH_SCOPES)
         plan = _wait_for_plan(plan_id, timeout_seconds=_REFRESH_TIMEOUT_SECONDS)
     except Exception:
         return False
@@ -2128,8 +2131,12 @@ def continue_scoring_session(scoring_session_id: str,
                     "queue_counts": scoring_queue.public_progress(
                         scoring_queue.load_root_session(root_id) or {"queue": []}),
                 }
-            return {"ok": False, "code": code,
-                    "error": "The active assignment could not be prepared safely. It remains in this Scoring Session and can be retried."}
+            error = (
+                str(payload.get("error"))
+                if code.startswith("mirror_") and payload.get("error")
+                else "The active assignment could not be prepared safely. It remains in this Scoring Session and can be retried."
+            )
+            return {"ok": False, "code": code, "error": error}
 
         child_id = str(result.get("session_id") or "")
         child = session_store.load_session(child_id) if child_id else None

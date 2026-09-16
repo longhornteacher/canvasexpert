@@ -16,7 +16,7 @@ shape change requires a major bump.
 ## Direction 1 - SAFE bundle (Canvas Expert -> agent)
 
 `start_scoring_session(course_id="", assignment_id="")` first forces a foreground
-CanvasMirror refresh for every requested Current course, then freezes an ordered
+full CanvasMirror rebuild for every requested Current course, then freezes an ordered
 queue from the resulting mirror gradebook snapshots. Empty filters mean every
 Current course; a course alone means that course; both filters mean that exact
 assignment. An assignment without its course is an invalid scope. Start performs
@@ -24,8 +24,9 @@ no Canvas write and does not resolve scoring norms. The returned root
 `scoring_session_id` authorizes valid results only for the frozen queue; later
 assignments require a later Scoring Session.
 
-`continue_scoring_session(scoring_session_id, scoring_guidance="")` refreshes the
-active course's CanvasMirror, then prepares or resumes the active assignment. A
+`continue_scoring_session(scoring_session_id, scoring_guidance="")` performs the
+same scoring-specific full CanvasMirror rebuild for the active course, then
+prepares or resumes the active assignment. A
 usable Canvas assignment rubric always wins.
 Otherwise the teacher provides bounded scoring guidance. Teacher guidance is retained privately
 in full; when it exceeds the effective transport ceiling, the model and SAFE packet use

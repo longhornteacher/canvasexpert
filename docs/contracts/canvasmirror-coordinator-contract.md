@@ -2,7 +2,8 @@
 
 CanvasMirror scheduling is process-local, read-only, and bounded to two workers. It
 accepts production scopes `course.refresh`, `course_context`, `course_structure`,
-`roster`, `groups`, `submissions.course_delta`, and `new_quizzes.metadata`.
+`roster`, `groups`, `course.scoring_refresh`, `submissions.course_delta`, and
+`new_quizzes.metadata`.
 `course.refresh` is one compatibility orchestration job: manual work invokes the
 reviewed legacy sync once, and heartbeat work invokes the filtered due-maintenance
 path once. It is never a claim that a legacy pass and a scope mean the same thing.

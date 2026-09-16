@@ -436,6 +436,26 @@ def test_sync_now_forwards_course_name_to_catalog(monkeypatch, tmp_path, _config
     assert catalog["course_name"] == "Course One"
 
 
+def test_scoring_refresh_runs_a_full_pass_without_comments(monkeypatch, _configure):
+    _configure(courses=({"id": "111", "name": "Course One"},))
+    captured = {}
+
+    def full_pass(course_id, **kwargs):
+        captured["course_id"] = course_id
+        captured.update(kwargs)
+        return {"ok": True, "assignments": 2}
+
+    monkeypatch.setattr(mirror_service.sync, "full_pass", full_pass)
+
+    result = mirror_service._run_scoring_course_refresh("111")
+
+    assert result == {"ok": True, "assignments": 2}
+    assert captured["course_id"] == "111"
+    assert captured["course_name"] == "Course One"
+    assert captured["with_comments"] is False
+    assert captured["bypass_new_quiz_cooldown"] is True
+
+
 # --- sync_now -------------------------------------------------------------------
 
 def test_sync_now_scopes_to_saved_courses(monkeypatch, tmp_path, _configure):
