@@ -33,9 +33,9 @@ def get_download_root():
 
 @router.get("/assignments-full")
 def list_assignments_full(course_id: str):
-    """All assignments for a course — used by Gradebook's Extra Time dropdown
-    (`gradebook/extensions.js`); the standalone download picker this was
-    originally built for has since been retired.
+    """All assignments for a course. Its last browser consumer went away with
+    the due-date extension UI; kept as a catalog-backed read with no current
+    caller.
     Returns id, name, submission_types, due_at, points_possible, is_quiz, quiz_kind.
     Served from Course Catalog when current; falls back to a live fetch otherwise.
     """

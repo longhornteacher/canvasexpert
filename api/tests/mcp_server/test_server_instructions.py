@@ -190,7 +190,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 41
+    assert len(listed) == 37
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -310,9 +310,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 41
-    assert len(_synthetic_mcp["calls"]) == 41
-    assert len(_synthetic_mcp["gated"]) == 41
+    assert len(results) == 37
+    assert len(_synthetic_mcp["calls"]) == 37
+    assert len(_synthetic_mcp["gated"]) == 37
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

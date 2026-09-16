@@ -1,8 +1,0 @@
-{
-  "_comment": "Rename this file to 'Teacher Schedule.json' after editing. Each block needs a unique name, its raw_periods (bell meeting IDs from your Bell Schedule CSV, in order), and an optional label with your class name. The day calendar selects the ordered bell meetings for each date.",
-  "version": "1.0-json",
-  "blocks": [
-    {"name": "1st Period", "raw_periods": [1], "label": "Replace with your class name"},
-    {"name": "4th/5th", "raw_periods": [4, 5], "label": "Replace with your class name"}
-  ]
-}

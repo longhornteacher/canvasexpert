@@ -115,20 +115,15 @@
     var courseName = gbCourseName();
     var msg = document.getElementById("gb-readiness-msg");
     var policyBtn = document.getElementById("btn-apply-policy");
-    var sweepBtn = document.getElementById("btn-sweep-preview");
-    var sweepApply = document.getElementById("btn-sweep-apply");
 
     if (!hasCourse) {
       if (policyBtn) policyBtn.disabled = true;
-      if (sweepBtn) sweepBtn.disabled = true;
-      if (sweepApply) { sweepApply.hidden = true; sweepApply.disabled = true; }
       if (msg) {
         msg.hidden = false;
         msg.innerHTML = '<p class="hint" style="margin:0">No course selected. Gradebook changes are unavailable.</p>';
       }
     } else {
       if (policyBtn) policyBtn.disabled = false;
-      if (sweepBtn) sweepBtn.disabled = false;
       if (msg) {
         msg.hidden = false;
         msg.innerHTML = '<strong>Working in:</strong> ' + esc(courseName) + '. Changes on this page affect this course only.';
@@ -136,7 +131,6 @@
     }
   }
 
-  var sweepEntries = [];
   var curveResults = [];
 
 
@@ -158,97 +152,10 @@
     canvasWriteReview: window.CE_WRITE_REVIEW.confirm,
     postForm:      postForm,
     // Mutable state for feature files
-    get sweepEntries() { return sweepEntries; },
-    set sweepEntries(v) { sweepEntries = v; },
     get curveResults() { return curveResults; },
     set curveResults(v) { curveResults = v; },
     syncReadiness: syncGradebookReadiness,
   };
-
-  // ── Sweep date-range presets ───────────────────────────────────────────
-
-  function _applySweepPreset(preset, gpStart, gpEnd) {
-    const fromEl = document.getElementById("sw-from");
-    const toEl   = document.getElementById("sw-to");
-    if (!fromEl || !toEl) return;
-    const now = new Date();
-    switch (preset) {
-      case "month": {
-        const y = now.getFullYear(), m = now.getMonth();
-        fromEl.value = `${y}-${String(m + 1).padStart(2, "0")}-01`;
-        toEl.value   = now.toISOString().slice(0, 10);
-        break;
-      }
-      case "30d": {
-        const d = new Date(now); d.setDate(d.getDate() - 30);
-        fromEl.value = d.toISOString().slice(0, 10);
-        toEl.value   = now.toISOString().slice(0, 10);
-        break;
-      }
-      case "year": {
-        const yr = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
-        fromEl.value = `${yr}-08-01`;
-        toEl.value   = `${yr + 1}-06-01`;
-        break;
-      }
-      default: // gp-N
-        if (gpStart && gpEnd) { fromEl.value = gpStart; toEl.value = gpEnd; }
-    }
-  }
-
-  function _buildPeriodChips() {
-    const chips = document.getElementById("sw-period-chips");
-    if (!chips) return;
-    chips.innerHTML = "";
-
-    // Grading period chips first (prepend)
-    const gps      = window.GB_GRADING_PERIODS || [];
-    const years    = new Set(gps.map(gp => gp.year).filter(Boolean));
-    const multiYr  = years.size > 1;
-    gps.forEach((gp, i) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "chip sw-preset-chip";
-      btn.dataset.preset = `gp-${i}`;
-      btn.dataset.start  = gp.start;
-      btn.dataset.end    = gp.end;
-      // Use code if present (e.g. "T1"), otherwise abbreviate verbose names
-      const label = gp.code
-        ? gp.code
-        : gp.name
-            .replace(" Grading Period", " GP")
-            .replace(/ \/ Report Card \d+/, "");
-      btn.textContent = (multiYr && gp.year) ? `${label} (${gp.year})` : label;
-      chips.appendChild(btn);
-    });
-
-    // Generic presets
-    [{ label: "This month", preset: "month" },
-     { label: "Last 30d",   preset: "30d"   },
-     { label: "School year", preset: "year" }].forEach(p => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "chip sw-preset-chip";
-      btn.dataset.preset = p.preset;
-      btn.textContent    = p.label;
-      chips.appendChild(btn);
-    });
-
-    chips.addEventListener("click", e => {
-      const btn = e.target.closest(".sw-preset-chip");
-      if (!btn) return;
-      _applySweepPreset(btn.dataset.preset, btn.dataset.start, btn.dataset.end);
-      chips.querySelectorAll(".sw-preset-chip").forEach(b =>
-        b.classList.toggle("chip-active", b === btn));
-    });
-  }
-
-  function _initSweepDateRange() {
-    // Default: last 30 days (grading-period chips remain one click away).
-    _applySweepPreset("30d");
-    const c30 = document.querySelector('[data-preset="30d"]');
-    if (c30) c30.classList.add("chip-active");
-  }
 
   // ── Tab switching ──────────────────────────────────────────────────────
 
@@ -342,27 +249,6 @@
     _clearStatus("xt-status");
     const sb = document.getElementById("btn-save-roster");
     if (sb) sb.hidden = true;
-    // Extensions
-    const es = document.getElementById("ext-students");
-    if (es) es.innerHTML = "";
-    const ea = document.getElementById("ext-assignment");
-    if (ea) { ea.innerHTML = '<option value="">— loading —</option>'; ea.disabled = true; }
-    const eh = document.getElementById("ext-hint");
-    if (eh) eh.textContent = "(loading…)";
-    const eb = document.getElementById("btn-ext-apply");
-    if (eb) eb.hidden = true;
-    _clearStatus("ext-status");
-    hideBanner(document.getElementById("ext-banner"));
-    // Sweep
-    sweepEntries = [];
-    const sw = document.getElementById("sw-table-wrap");
-    if (sw) sw.hidden = true;
-    const swl = document.getElementById("sw-log");
-    if (swl) swl.hidden = true;
-    _clearStatus("sw-status");
-    hideBanner(document.getElementById("sw-banner"));
-    const sab = document.getElementById("btn-sweep-apply");
-    if (sab) sab.hidden = true;
     // Curves
     curveResults = [];
     const cvw = document.getElementById("cv-preview-wrap");
@@ -381,9 +267,6 @@
   }
 
   // ── Init ───────────────────────────────────────────────────────────────
-
-  _buildPeriodChips();
-  _initSweepDateRange();
 
   // Auto-load the first course if one is already selected (e.g. saved_courses populated)
   if (gbCourseId()) {

@@ -119,7 +119,6 @@ def apply_sis_grade_bridge(
 
 
 @mcp.tool(structured_output=False)
-@mcp.tool(structured_output=False)
 def list_sections(course_id: str) -> str:
     """List a saved course's section names from the local mirror. No student data."""
     return _compact(tools.list_sections(course_id))
@@ -388,34 +387,6 @@ def refresh_mirror(course_id: str) -> str:
     """Refresh a saved course's local CanvasMirror only after a read refuses as stale.
     It reports sync status, never data; after a successful sync, retry the refused read."""
     return _compact(tools.refresh_mirror(course_id))
-
-
-@mcp.tool(structured_output=False)
-def get_bell_schedule(schedule_id: str = "") -> str:
-    """Read workspace Bell Schedules as ordered meeting lists.
-    An empty schedule_id returns all variants. No student data."""
-    return _compact(tools.get_bell_schedule(schedule_id))
-
-
-@mcp.tool(structured_output=False)
-def get_day_schedule(date: str) -> str:
-    """Resolve the teacher's schedule blocks and Calendar state for one date.
-    date is YYYY-MM-DD. Repeated blocks produce one entry per consecutive
-    meeting run. No student data."""
-    return _compact(tools.get_day_schedule(date))
-
-
-@mcp.tool(structured_output=False)
-def get_teacher_schedule() -> str:
-    """Read the teacher's local schedule as versioned blocks."""
-    return _compact(tools.get_teacher_schedule())
-
-
-@mcp.tool(structured_output=False)
-def get_school_calendar(date_from: str = "", date_to: str = "") -> str:
-    """Read canonical School Calendar readiness or one bounded date range.
-    Pass both dates for a range or omit both for readiness only. No student data."""
-    return _compact(tools.get_school_calendar(date_from, date_to))
 
 
 @mcp.tool(structured_output=False)

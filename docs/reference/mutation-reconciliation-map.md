@@ -55,17 +55,6 @@ Batch 7 unit 02 target — point `_run_routine_curve` at the same
 machinery. The ledger adapter `operation_ledger/adapters/curve.py` was **dead**
 (no producer emitted `gradebook.curve`) — Batch 8 retired it.
 
-**Not a gap — late sweep is CanvasExpert-owned:** the late-sweep owners
-(`operation_ledger/adapters/sweep.py SweepAdapter.execute` and
-`webui/routes/routines_builtin.py _run_routine_sweep`) write
-`seconds_late_override` per student, but late-work identification is entirely
-internal to CanvasExpert — `work_registry/providers/late_work.py` recomputes
-affected students from `due_at`/`submitted_at` with the school-day calculation
-and uses the mirror `late` flag only as a prefilter (which the sweep does not
-change: it overrides seconds on already-timestamp-late submissions). No mirror
-consumer reads `seconds_late_override`, so no submissions-projection
-reconciliation is owed. Recorded `n/a`, not a Former Program 9 gap.
-
 **Duplicate implementation — retired 2026-07-19 (Batch 8):** the
 ledger adapter `operation_ledger/adapters/curve.py` (`gradebook.curve` KIND) was
 **dead** — no non-test producer emitted that KIND. The live curve writers are
@@ -118,8 +107,7 @@ source/bridge publish, exclusion, and SIS-flag patches map conservatively to
 
 **Deferred (bounded staleness, accepted 2026-07-19) — not an open gap:** tier
 overrides (`assignment_tiered.py`), quiz overrides (`quiz_steps.py
-create_override`), extension/override adapters (`extension.py`), and the direct
-route `webui/routes/gradebook_extensions.py extend_due` all create/update Canvas
+create_override`), and extension/override adapters (`extension.py`) all create/update Canvas
 assignment overrides with no mirror invalidate call. A senior audit
 (2026-07-19) traced the actual staleness this causes and ruled it a deliberately
 deferred, bounded limitation rather than a reconciliation task, on this evidence:
@@ -135,7 +123,7 @@ deferred, bounded limitation rather than a reconciliation task, on this evidence
   (`normalize_submission`, `store.py`) — Canvas's per-student effective due date.
   One mirror-backed teacher surface reads it: the Student Report "Due date
   extended to X" line (`api/student_packet.py` `_info_blocks`). Every other
-  override reader (sweep, late-catchup) reads **live**, so it is always correct.
+  override reader (late-catchup) reads **live**, so it is always correct.
 - **The write-through delta hook cannot repair it, and this is why it is not
   simply wired like curves/grades.** `refresh_submissions_course_delta`
   (`api/mirror/sync.py`) refetches only rows `submitted_since`/`graded_since` the
@@ -201,9 +189,6 @@ Canvas content. They remain classified `canvas_read_acquisition`, reconciliation
   `/files` init POST and the follow-up upload-URL POST): scope `none` is the
   documented correct state per spine 14.2 ("never trigger course-wide binary
   refresh"), not a gap.
-- **Diagnostics** (`diagnose_newquizzes.py _probe`): classified
-  `diagnostic_probe`, scope `focused_evidence`, `n/a` — a standalone auth-probe
-  CLI, read-only except one report-enqueue POST.
 - **External** (`openrouter_client.py score`): classified `external`, not a
   Canvas write. Listed explicitly (not excluded) because it aliases
   `requests.post` onto a local name (`http_post = requests.post`) rather than
@@ -227,8 +212,7 @@ Canvas content. They remain classified `canvas_read_acquisition`, reconciliation
    gap is the scheduled-routine writer `routines_builtin.py _curve_apply_core` /
    `_run_routine_curve` — wire it to the same `mirror_service.notify_course_changed`
    targeted refresh PowerGrader uses (coalesced once per course; Batch 7 unit 02).
-   The ledger `curve.py` adapter is dead (see family 1) — do not reconcile it. The
-   late sweep is out of scope — CanvasExpert-owned (`n/a`), not a reconciliation gap.
+   The ledger `curve.py` adapter is dead (see family 1) — do not reconcile it.
 2. **Catalog structure** (family 2): **covered 2026-07-19** for
    `catalog.assignments` and `catalog.modules` by the central ledger post-apply
    stale-mark hook (ten `none` → `invalidate` contract transitions), and
@@ -259,7 +243,7 @@ Canvas content. They remain classified `canvas_read_acquisition`, reconciliation
 - The generic `/api/operations/{kind}/prepare` endpoint accepts any registered
   KIND (gated only by `require_local_mutation`, not a kind allowlist). After the
   dead adapters are removed, consider allowlisting the KINDs the UI actually
-  submits (`gradebook.sweep`, `content.*`) so a stale KIND cannot be hand-invoked.
+  submits (`content.*`) so a stale KIND cannot be hand-invoked.
 
 No entry in this document is `unknown`-scoped; the JSON contract carries zero
 `unknown`-scope owners today (grep it directly rather than trusting this

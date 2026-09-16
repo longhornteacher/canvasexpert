@@ -1,6 +1,0 @@
-school_year,row_type,code,name,start_date,end_date,report_issue_date,basis
-2026-SUM,Academic Period,S1,Summer Term 1,2026-06-08,2026-06-26,2026-06-26,Sample data — fictional district for testing
-2026-SUM,Academic Period,S2,Summer Term 2,2026-06-29,2026-07-17,2026-07-17,Sample data — fictional district for testing
-2026-SUM,Holiday,,Juneteenth,2026-06-19,2026-06-19,,Sample data
-2026-SUM,Holiday,,Independence Day,2026-07-03,2026-07-03,,Sample data
-2026-SUM,No School for Students,,Summer Break,2026-07-20,2026-08-14,,Sample data

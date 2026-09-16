@@ -8,111 +8,12 @@ import uuid as _uuid
 from datetime import datetime, timedelta
 
 from api.platform_services import config
-from .. import deps, mirror_service, school_calendar
+from .. import mirror_service
 from api.platform_services.canvas_client import canvas_get, canvas_get_all, _canvas_send
 from ..gradebook_service import _load_curve_events, _save_curve_events, _apply_curve_model
 from ..mirror_reads import students_or_live, submissions_or_live
-from ..schooldays import _school_days_late, parse_iso_local
 from api import operational_log, routine_reads, sis_grade_bridge, student_packet
 from api.powergrader import assignment_refresh
-
-from api.nq_report import html_to_text
-
-
-# --------------------------------------------------------------------------
-# Sweep
-# --------------------------------------------------------------------------
-
-def _run_routine_sweep(params):
-    from ..schooldays import school_days_late_detail
-    window = int(params.get("window_days", 30))
-    cutoff = (datetime.now().date() - timedelta(days=window)).isoformat()
-
-    lines, ok = [], True
-    per_course = {}
-    span_start = span_end = None
-    for c in config.active_courses():
-        cid = str(c["id"])
-        asgns, err = canvas_get_all(f"/api/v1/courses/{cid}/assignments", {"per_page": 100})
-        if err:
-            lines.append(f"✗ {c['nickname']}: {err}")
-            ok = False
-            continue
-        amap = {a["id"]: a for a in (asgns or [])
-                if a.get("published", True) and (a.get("points_possible") or 0) > 0
-                and ((a.get("due_at") or "")[:10] >= cutoff)}
-        if not amap:
-            lines.append(f"· {c['nickname']}: nothing due in window")
-            continue
-
-        subs, err = canvas_get_all(f"/api/v1/courses/{cid}/students/submissions",
-                                    {"student_ids[]": "all", "per_page": 100}, timeout=90)
-        if err:
-            lines.append(f"✗ {c['nickname']}: {err}")
-            ok = False
-            continue
-
-        students, err, _source = students_or_live(cid)
-        if err:
-            lines.append(f"✗ {c['nickname']}: {err}")
-            ok = False
-            continue
-        name_by_id = {str(s["id"]): (s.get("sortable_name") or s.get("name", ""))
-                      for s in students}
-
-        extra = {str(e["id"]): int(e.get("days", 1))
-                 for e in config.get_extra_time(cid)} if params.get("honor_extra_time", True) else {}
-
-        candidates = []
-        for sub in (subs or []):
-            if sub.get("excused") or not sub.get("submitted_at"):
-                continue
-            a = amap.get(sub.get("assignment_id"))
-            if not a:
-                continue
-            due = parse_iso_local(sub.get("cached_due_date") or a.get("due_at"))
-            submitted = parse_iso_local(sub.get("submitted_at"))
-            if not due or not submitted:
-                continue
-            candidates.append((sub, a, due, submitted))
-            span_start = due.date() if span_start is None else min(span_start, due.date())
-            span_end = submitted.date() if span_end is None else max(span_end, submitted.date())
-        per_course[cid] = (c, candidates, name_by_id, extra)
-
-    no_count: set[str] = set()
-    if span_start is not None:
-        bell_schedules, _problems = deps.load_bell_schedules()
-        result = school_calendar.resolve_instructional_range(
-            span_start.isoformat(), span_end.isoformat(), set(bell_schedules))
-        if result["state"] != "ready":
-            return {"ok": False, "lines": [f"✗ {school_calendar.CALENDAR_REPAIR_MESSAGE}"],
-                    "summary": "calendar not configured"}
-        no_count = set(result["no_count_dates"])
-
-    total = 0
-    for cid, (c, candidates, name_by_id, extra) in per_course.items():
-        for sub, a, due, submitted in candidates:
-            raw_days, excluded = school_days_late_detail(due, submitted, no_count)
-            if raw_days <= 0:
-                continue
-            uid = str(sub.get("user_id"))
-            school_days = max(raw_days - extra.get(uid, 0), 0)
-            if school_days <= 0:
-                continue
-
-            _, err = _canvas_send("PUT",
-                f"/api/v1/courses/{cid}/assignments/{a['id']}/submissions/{uid}",
-                {"submission": {"late_policy_status": "late",
-                                "seconds_late_override": school_days * 86400}})
-            if err:
-                lines.append(f"✗ {name_by_id.get(uid, uid)}/{a.get('name','')}: {err}")
-                ok = False
-            else:
-                total += 1
-            lines.append(f"✓ {name_by_id.get(uid, uid)}/{a.get('name','')}: {school_days} school days late")
-
-    return {"ok": ok, "lines": lines,
-            "summary": f"{total} late submission(s) corrected"}
 
 
 # --------------------------------------------------------------------------
@@ -349,71 +250,6 @@ def _run_routine_curve(params):
                 operational_log.emit("mirror.notify_course_changed", "failed", error_class=type(exc))
     summary = f"{applied} assignment(s) curved" if mode == "apply" else f"{flagged} assignment(s) flagged below {floor:g}%"
     return {"ok": ok, "lines": lines or ["· all assignment averages at or above the floor"], "summary": summary}
-
-
-# --------------------------------------------------------------------------
-# Grading debt
-# --------------------------------------------------------------------------
-
-def _run_routine_grading_debt(params):
-    min_days = int(params.get("school_days", 3))
-    now_dt = datetime.now().astimezone()
-    lines, ok = [], True
-    per_course = {}
-    span_start = None
-    for c in config.active_courses():
-        cid = str(c["id"])
-        asgns_result = routine_reads.read_scope(
-            "assignments", cid, live_reader=canvas_get_all)
-        if not asgns_result["ok"]:
-            lines.append(f"✗ {c['nickname']}: {asgns_result['error']}")
-            ok = False
-            continue
-        aname = {str(a["id"]): a.get("name", "") for a in (asgns_result["records"] or [])}
-        subs_result = routine_reads.read_scope(
-            "submissions", cid, live_reader=canvas_get_all)
-        if not subs_result["ok"]:
-            lines.append(f"✗ {c['nickname']}: {subs_result['error']}")
-            ok = False
-            continue
-
-        candidates = []
-        for s_ in (subs_result["records"] or []):
-            if s_.get("workflow_state") != "submitted" or not s_.get("submitted_at"):
-                continue
-            sub_dt = parse_iso_local(s_["submitted_at"])
-            if not sub_dt:
-                continue
-            candidates.append((sub_dt, aname.get(str(s_.get("assignment_id")), "?")))
-            span_start = sub_dt.date() if span_start is None else min(span_start, sub_dt.date())
-        per_course[cid] = (c, candidates)
-
-    no_count: set[str] = set()
-    if span_start is not None:
-        bell_schedules, _problems = deps.load_bell_schedules()
-        result = school_calendar.resolve_instructional_range(
-            span_start.isoformat(), now_dt.date().isoformat(), set(bell_schedules))
-        if result["state"] != "ready":
-            return {"ok": False, "lines": [f"✗ {school_calendar.CALENDAR_REPAIR_MESSAGE}"],
-                    "summary": "calendar not configured"}
-        no_count = set(result["no_count_dates"])
-
-    total = 0
-    for cid, (c, candidates) in per_course.items():
-        debts = []
-        for sub_dt, name in candidates:
-            days = _school_days_late(sub_dt, now_dt, no_count)
-            if days >= min_days:
-                debts.append((days, name))
-        total += len(debts)
-        if debts:
-            debts.sort(reverse=True)
-            oldest = ", ".join(f"\"{n}\" ({d}d)" for d, n in debts[:3])
-            lines.append(f"⚑ {c['nickname']}: {len(debts)} ungraded > {min_days} school days — oldest: {oldest}")
-        else:
-            lines.append(f"✓ {c['nickname']}: no grading debt")
-    return {"ok": ok, "lines": lines,
-            "summary": f"{total} ungraded submission(s) older than {min_days} school days"}
 
 
 # --------------------------------------------------------------------------

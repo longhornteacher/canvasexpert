@@ -15,8 +15,8 @@ from api.platform_services import config
 from api import operational_log
 from api.webui import readiness
 from .routines_builtin import (
-    _run_routine_sweep, _run_routine_download, _run_routine_curve,
-    _run_routine_grading_debt, _run_routine_student_reports,
+    _run_routine_download, _run_routine_curve,
+    _run_routine_student_reports,
     _run_routine_sis_bridge_sync,
 )
 
@@ -28,12 +28,6 @@ router = APIRouter(prefix="/api", tags=["routines"])
 # --------------------------------------------------------------------------
 
 _ROUTINE_DEFS = {
-    "sweep": {
-        "label": "Auto-sweep late work",
-        "writes": True,
-        "default": {"enabled": False, "every_hours": 24,
-                    "params": {"window_days": 30}},
-    },
     "download": {
         "label": "Auto-download new student work",
         "writes": False,
@@ -45,12 +39,6 @@ _ROUTINE_DEFS = {
         "writes": True,
         "default": {"enabled": False, "every_hours": 168,
                     "params": {"floor": 80, "mode": "flag", "window_days": 30}},
-    },
-    "grading_debt": {
-        "label": "Grading-debt report",
-        "writes": False,
-        "default": {"enabled": True, "every_hours": 24,
-                    "params": {"school_days": 3}},
     },
     "student_reports": {
         "label": "Refresh monitored-student reports",
@@ -101,8 +89,8 @@ def _routine(rid, label, writes=False, default=None):
     return deco
 
 _ROUTINE_RUNNERS = {
-    "sweep": _run_routine_sweep, "download": _run_routine_download,
-    "curve": _run_routine_curve, "grading_debt": _run_routine_grading_debt,
+    "download": _run_routine_download,
+    "curve": _run_routine_curve,
     "student_reports": _run_routine_student_reports,
     "sis_bridge_sync": _run_routine_sis_bridge_sync,
 }

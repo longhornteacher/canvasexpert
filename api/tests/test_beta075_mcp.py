@@ -19,7 +19,7 @@ def _explode_live(*_args, **_kwargs):
 def test_live_mcp_schema_matches_versioned_contract():
     from api.mcp_server import server
 
-    assert contract.TOOL_SCHEMA_VERSION == 47
+    assert contract.TOOL_SCHEMA_VERSION == 48
     expected = contract.load_contract()
     live = contract.live_contract(server.mcp)
     assert live == expected
@@ -124,11 +124,13 @@ def test_live_mcp_schema_matches_versioned_contract():
     # v44 retires stage/preview/apply scoring tools and exposes the single
     # assignment-type-neutral submit_scoring_results contract. v45 adds the
     # backlog-wide Scoring Session continuation tool. v47 removes the retired
-    # assessment and local-rubric surfaces.
+    # assessment and local-rubric surfaces. v48 removes the four calendar-read
+    # tools (get_bell_schedule, get_day_schedule, get_teacher_schedule,
+    # get_school_calendar), retiring them to the web UI scheduler.
     assert len(contract.load_contract(40)["tools"]) == 44
     assert len(contract.load_contract(41)["tools"]) == 46
     assert len(contract.load_contract(42)["tools"]) == 46
-    assert len(live["tools"]) == 41
+    assert len(live["tools"]) == 37
     assert "confirm_sis_grade_bridge_passback" not in {
         tool["name"] for tool in live["tools"]
     }

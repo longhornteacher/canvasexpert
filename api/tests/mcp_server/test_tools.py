@@ -551,8 +551,7 @@ def test_get_authoring_contract_unknown_kind_returns_structured_error():
     assert result == {
         "ok": False,
         "error": ("unknown kind 'essay'; expected one of: "
-                  "quiz, assignment, page, schedule, academic_calendar, "
-                  "learning_objective"),
+                  "quiz, assignment, page, learning_objective"),
     }
 
 
@@ -578,18 +577,6 @@ def test_get_authoring_contract_matches_the_one_canonical_repo_file():
             assert result["contract"] == canonical_text
         else:
             assert result["contract"].startswith(canonical_text)
-
-
-def test_get_authoring_contract_schedule_is_direct_write_without_staging_appendix():
-    canonical_path = os.path.join(
-        tools.REPO_ROOT, "api", "default_docs", "AI Authoring", "Author a Class Schedule.txt"
-    )
-    with open(canonical_path, encoding="utf-8") as handle:
-        canonical_text = handle.read()
-    result = tools.get_authoring_contract("schedule")
-    assert result == {"ok": True, "kind": "schedule", "contract": canonical_text}
-    assert "Staging this for the teacher" not in result["contract"]
-
 
 
 def test_download_contract_route_returns_the_same_bytes_as_the_mcp_tool():
@@ -650,7 +637,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     grouped = [name for names in tools._TOOL_GROUPS.values() for name in names]
     expected_groups = {
         "Course discovery and catalog", "Create and Forge", "Scoring Sessions", "Gradebook",
-        "SIS Grade Bridges", "Learning Objectives", "School Calendar",
+        "SIS Grade Bridges", "Learning Objectives",
         "Writing Timeline", "Writing Record", "Students",
     }
 
@@ -659,7 +646,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 41
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 37
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -1694,8 +1681,6 @@ def test_server_registers_the_expected_tool_set():
         # Shipped with the SIS grade bridge; this set was never updated with them.
         "list_sis_grade_bridges", "preview_sis_grade_bridge",
         "apply_sis_grade_bridge",
-        "get_bell_schedule", "get_day_schedule", "get_teacher_schedule",
-        "get_school_calendar",
         "get_course_pages", "list_learning_objectives", "preview_learning_objective",
             "apply_learning_objective", "delete_learning_objective",
             "get_roster_student_settings", "preview_roster_student_change",
@@ -1719,31 +1704,6 @@ def test_server_wrappers_return_compact_json(monkeypatch):
     assert isinstance(wire, str)
     assert "\n" not in wire and ": " not in wire and ", " not in wire
     assert json.loads(wire) == tools.list_courses()
-
-
-# --- save_teacher_schedule (no course_id, no student data -> no gates) ------
-
-def _teacher_schedule_workspace(monkeypatch, tmp_path):
-    workspace_root = tmp_path / "workspace"
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(workspace_root))
-    monkeypatch.setattr(
-        workspace, "library_folder", lambda name: str(workspace_root / "Library" / name)
-    )
-    calendars = workspace_root / "Library" / "Calendars"
-    calendars.mkdir(parents=True)
-    (calendars / "Bell Schedule - Example.csv").write_text(
-        "period_id,start,end\n"
-        "1,8:00 AM,8:45 AM\n"
-        "2,8:50 AM,9:35 AM\n"
-        "3,9:40 AM,10:25 AM\n"
-        "4,10:30 AM,11:15 AM\n"
-        "5,11:20 AM,12:05 PM\n"
-        "6,12:10 PM,12:55 PM\n"
-        "7,1:00 PM,1:45 PM\n"
-        "8,1:50 PM,2:35 PM\n",
-        encoding="utf-8",
-    )
-    return calendars / "Teacher Schedule.json"
 
 
 def test_every_next_procedure_names_a_live_tool():
@@ -1786,44 +1746,6 @@ def test_every_next_procedure_points_at_a_live_tool_too():
 
     assert not retired_mentions, (
         f"next-procedure text names retired tool(s): {sorted(set(retired_mentions))}")
-
-
-def test_server_registers_get_school_calendar_wrapper(monkeypatch):
-    from api.mcp_server import server
-
-    monkeypatch.setattr(tools, "get_school_calendar", lambda date_from, date_to: {
-        "ok": True, "readiness": {"status": "ready"},
-    })
-    wire = server.get_school_calendar("2026-08-17", "2026-08-21")
-    assert json.loads(wire) == {"ok": True, "readiness": {"status": "ready"}}
-
-
-def _game_score_workspace(monkeypatch, tmp_path):
-    workspace_root = tmp_path / "workspace"
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(workspace_root))
-    monkeypatch.setattr(
-        workspace, "library_folder", lambda name: str(workspace_root / "Library" / name)
-    )
-    calendars = workspace_root / "Library" / "Calendars"
-    calendars.mkdir(parents=True)
-    calendar = {
-        "version": "1.0-json", "type": "SCHOOL_CALENDAR", "revision": 1,
-        "school_year": "2026-27", "coverage": {"start": "2026-08-17", "end": "2026-08-18"},
-        "days": {
-            "2026-08-17": {"kind": "instructional", "schedule_id": "ordinary"},
-            "2026-08-18": {"kind": "instructional", "schedule_id": "ordinary"},
-        },
-        "grading_periods": [],
-        "events": [
-            {"id": "game-1", "kind": "game", "label": "Bobcats", "shape": "date",
-             "date": "2026-08-18", "detail": "Away", "result": "Scheduled"},
-            {"id": "dance-1", "kind": "dance", "label": "Fall Dance", "shape": "date",
-             "date": "2026-08-17"},
-        ],
-    }
-    path = calendars / "School Calendar.json"
-    path.write_text(json.dumps(calendar), encoding="utf-8")
-    return path
 
 
 def test_get_scoring_packet_ignores_pre_root_assignment_session(_on_disk_scoring_session):

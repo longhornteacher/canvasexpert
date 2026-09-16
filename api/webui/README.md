@@ -103,16 +103,6 @@ For the full ownership map, see `docs/reference/settings-module-map.md`.
 
 ### Calendar module routing
 
-The canonical School Calendar, Bell Schedules, and Teacher Schedule editor live on one
-primary-nav page, not in Settings.
-
-- Page/template owner: `api/webui/routes/calendar.py`, `templates/calendar.html`
-- Browser owner: `static/pages/calendar.js`, `static/pages/calendar.css`
-- Canonical service (schema, validation, create/preview/apply): `api/webui/school_calendar.py`
-- Teacher Schedule/Bell Schedule read-write: `api/webui/routes/schedule.py`, `api/webui/schedule_setup.py`
-
-For the full contract, see `docs/contracts/canonical-school-calendar-contract.md`.
-
 ### Scoring Sessions
 
 Scoring Sessions are available through MCP only. The agent starts one frozen
@@ -128,9 +118,9 @@ review/edit surface. See
 Gradebook is also intentionally split for low-token debugging.
 
 - Route facade: `api/webui/routes/gradebook.py`
-- Route feature files: `routes/gradebook_policy.py`, `routes/gradebook_sweep.py`, `routes/gradebook_extra_time.py`, `routes/gradebook_extensions.py`, `routes/gradebook_curves.py`, `routes/gradebook_snapshot.py`
+- Route feature files: `routes/gradebook_policy.py`, `routes/gradebook_extra_time.py`, `routes/gradebook_curves.py`, `routes/gradebook_snapshot.py`
 - Shared browser bootstrap: `gradebook.js`
-- Feature files: `gradebook/policy.js`, `gradebook/extra_time.js`, `gradebook/extensions.js`, `gradebook/sweep.js`, `gradebook/curves.js`, `gradebook/snapshot.js`
+- Feature files: `gradebook/policy.js`, `gradebook/extra_time.js`, `gradebook/curves.js`, `gradebook/snapshot.js`
 
 For the full ownership map and current source-size report, see `docs/reference/gradebook-module-map.md`.
 

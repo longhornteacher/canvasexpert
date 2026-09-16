@@ -31,10 +31,6 @@ from . import af, ai_ta, pf, runner
 from api.platform_services import workspace
 from api import runtime_paths
 from api.platform_services.canvas_client import canvas_headers, canvas_get, canvas_get_all, _canvas_send
-from .schooldays import (
-    parse_iso_local, _is_school_day, _school_days_late,
-    school_days_late_detail, _add_school_days,
-)
 
 from .deps import (
     WEBUI_DIR, API_DIR, REPO_ROOT,
@@ -43,8 +39,6 @@ from .deps import (
     list_ai_ta_files,
 )
 
-from .routes.calendar import router as _calendar_router
-from .routes.schedule import router as _schedule_router
 from .routes.courses import router as _courses_router
 from .routes.course_catalog import router as _course_catalog_router
 from .routes.dailywriting import router as _dailywriting_router
@@ -170,8 +164,6 @@ async def _api_errors_return_json(request: Request, exc: Exception):
 
 
 app.include_router(_onboarding_router)
-app.include_router(_calendar_router)
-app.include_router(_schedule_router)
 app.include_router(_courses_router)
 app.include_router(_course_catalog_router)
 app.include_router(_dailywriting_router)

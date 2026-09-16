@@ -35,7 +35,12 @@
     "none",
     "unknown"
   ],
-  "allowed_reconciliation_states": ["targeted", "invalidate", "none", "n/a"],
+  "allowed_reconciliation_states": [
+    "targeted",
+    "invalidate",
+    "none",
+    "n/a"
+  ],
   "owners": [
     {
       "path": "api/operation_ledger/adapters/differentiated_bridge.py",
@@ -44,7 +49,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", <course_assignments_path>, request) [create differentiated-family bridge]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments"],
+      "scopes": [
+        "catalog.assignments"
+      ],
       "reconciliation": "invalidate",
       "reason": "Creates the unpublished, omitted, SIS-disabled bridge after every exact differentiated source is verified. The central operation-ledger post-apply hook invalidates catalog.assignments after the complete content operation succeeds."
     },
@@ -55,7 +62,9 @@
       "call_index": 2,
       "call_form": "canvas_client._canvas_send(\"PUT\", <bridge_assignment_path>, request) [activate differentiated-family bridge]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments"],
+      "scopes": [
+        "catalog.assignments"
+      ],
       "reconciliation": "invalidate",
       "reason": "Activates the exact bridge only after its module item and every source postcondition are verified. The central operation-ledger post-apply hook invalidates catalog.assignments after the complete content operation succeeds."
     },
@@ -66,7 +75,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"PUT\", <bridge_submission_path>, request) [copy one final grade/status]",
       "classification": "canvas_mutation",
-      "scopes": ["private.submissions"],
+      "scopes": [
+        "private.submissions"
+      ],
       "reconciliation": "targeted",
       "reason": "Each copied final row is write-ahead checkpointed and exactly verified; after confirmed grade writes the adapter invokes mirror_service.notify_course_changed once for the course, reusing the targeted submissions delta refresh."
     },
@@ -77,7 +88,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", path, request) [tiered assignment create]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments"],
+      "scopes": [
+        "catalog.assignments"
+      ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates applicable catalog scopes after the confirmed operation succeeds."
     },
@@ -88,7 +101,9 @@
       "call_index": 2,
       "call_form": "canvas_client._canvas_send(\"POST\", path, override_request) [per-student tier override]",
       "classification": "canvas_mutation",
-      "scopes": ["private.assignments"],
+      "scopes": [
+        "private.assignments"
+      ],
       "reconciliation": "none",
       "reason": "Per-student override write. The base override facts are not projected into the mirror at all; the only mirror footprint is the effective due date cached on the affected submission rows (private.submissions cached_due_date), read by the Student Report 'Due date extended to' line. Bounded, low-severity staleness (the report falls back to live Canvas outside the freshness window) — deferred for 1.0beta as a documented bounded limitation, not an open gap. See mutation-reconciliation-map.md family 3."
     },
@@ -99,7 +114,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"PUT\", <assignment_path>, request) [publish/date patch on an id-addressed existing assignment]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments"],
+      "scopes": [
+        "catalog.assignments"
+      ],
       "reconciliation": "invalidate",
       "reason": "Patches only the caller-supplied published/due_at/unlock_at/lock_at fields of an existing assignment; description, points_possible, and assignment_group_id are never read or resent. The central operation-ledger post-apply hook invalidates catalog.assignments after the confirmed operation succeeds."
     },
@@ -110,7 +127,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", path_create, request)",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments"],
+      "scopes": [
+        "catalog.assignments"
+      ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates applicable catalog scopes after the confirmed operation succeeds."
     },
@@ -121,7 +140,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", \"/api/v1/courses/<course_id>/files\", init_payload)",
       "classification": "canvas_upload",
-      "scopes": ["none"],
+      "scopes": [
+        "none"
+      ],
       "reconciliation": "none",
       "reason": "File-upload init only. Spine 14.2 says uploads must never trigger a course-wide binary refresh; there is no evidence-record scope tracked for printable attachments, so 'none' here is the expected steady state, not a gap."
     },
@@ -132,7 +153,9 @@
       "call_index": 1,
       "call_form": "requests.post(upload_url, data=upload_params, files={...})",
       "classification": "canvas_upload",
-      "scopes": ["none"],
+      "scopes": [
+        "none"
+      ],
       "reconciliation": "n/a",
       "reason": "Second leg of the Canvas two-step file upload; the target is a Canvas-issued storage URL, not the core REST API. No JSON scope to reconcile."
     },
@@ -143,20 +166,11 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", path, request) [quick assignment create]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments"],
+      "scopes": [
+        "catalog.assignments"
+      ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates applicable catalog scopes after the confirmed operation succeeds."
-    },
-    {
-      "path": "api/operation_ledger/adapters/sweep.py",
-      "symbol": "SweepAdapter.execute",
-      "detector": "attr:_canvas_send",
-      "call_index": 1,
-      "call_form": "canvas_client._canvas_send(\"PUT\", <submission_path>, request) [seconds_late_override per student]",
-      "classification": "canvas_mutation",
-      "scopes": ["private.submissions"],
-      "reconciliation": "n/a",
-      "reason": "Writes seconds_late_override to Canvas, but late-work identification is entirely CanvasExpert-internal: work_registry/providers/late_work.py recomputes affected students from due_at/submitted_at via the school-day calculation and uses the mirror 'late' flag only as a prefilter, which the sweep does not alter (it overrides seconds on already-timestamp-late submissions). No mirror consumer reads seconds_late_override, so no submissions-projection reconciliation is owed. Not a Former Program 9 gap."
     },
     {
       "path": "api/operation_ledger/adapters/page.py",
@@ -165,7 +179,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", path, request) [create page]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.pages"],
+      "scopes": [
+        "catalog.pages"
+      ],
       "reconciliation": "invalidate",
       "reason": "Creates a Canvas page, which the v3 catalog projects as its own pages scope (read by the get_course_pages MCP tool and the web UI). The central operation-ledger post-apply hook invalidates catalog.pages after the confirmed operation succeeds, unconditionally for content.page; it additionally invalidates catalog.modules only when the payload carries a module placement."
     },
@@ -176,7 +192,9 @@
       "call_index": 2,
       "call_form": "canvas_client._canvas_send(\"POST\", module_path, module_request) [create module for page placement]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.modules"],
+      "scopes": [
+        "catalog.modules"
+      ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates catalog.modules after the confirmed operation succeeds."
     },
@@ -187,7 +205,9 @@
       "call_index": 3,
       "call_form": "canvas_client._canvas_send(\"POST\", item_path, item_request) [attach page as module item]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.modules"],
+      "scopes": [
+        "catalog.modules"
+      ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates catalog.modules after the confirmed operation succeeds."
     },
@@ -198,7 +218,10 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", path_create, quiz_payload)",
       "classification": "canvas_mutation",
-      "scopes": ["new_quiz.metadata", "catalog.assignments"],
+      "scopes": [
+        "new_quiz.metadata",
+        "catalog.assignments"
+      ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates catalog.assignments and catalog.modules after the confirmed operation succeeds; new_quiz.metadata remains unreconciled in this unit."
     },
@@ -209,7 +232,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"PUT\", restrict_path, restrict_payload)",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments"],
+      "scopes": [
+        "catalog.assignments"
+      ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates applicable catalog scopes after the confirmed operation succeeds."
     },
@@ -220,7 +245,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", override_path, override_request)",
       "classification": "canvas_mutation",
-      "scopes": ["private.assignments"],
+      "scopes": [
+        "private.assignments"
+      ],
       "reconciliation": "none",
       "reason": "Per-student override write. The base override facts are not projected into the mirror at all; the only mirror footprint is the effective due date cached on the affected submission rows (private.submissions cached_due_date), read by the Student Report 'Due date extended to' line. Bounded, low-severity staleness (the report falls back to live Canvas outside the freshness window) — deferred for 1.0beta as a documented bounded limitation, not an open gap. See mutation-reconciliation-map.md family 3."
     },
@@ -231,7 +258,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", item_path, item_payload)",
       "classification": "canvas_mutation",
-      "scopes": ["new_quiz.metadata"],
+      "scopes": [
+        "new_quiz.metadata"
+      ],
       "reconciliation": "none",
       "reason": "This unit invalidates only catalog.assignments and catalog.modules; new_quiz.metadata has no invalidate here."
     },
@@ -242,7 +271,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"PUT\", patch_path, request)",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments"],
+      "scopes": [
+        "catalog.assignments"
+      ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates applicable catalog scopes after the confirmed operation succeeds."
     },
@@ -253,7 +284,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"DELETE\", rollback_path, {}) [delete quiz created by this failed attempt]",
       "classification": "canvas_mutation",
-      "scopes": ["new_quiz.metadata"],
+      "scopes": [
+        "new_quiz.metadata"
+      ],
       "reconciliation": "invalidate",
       "reason": "This is the bounded rollback of a quiz created by the same operation after a definitive item failure; the adapter's failure path invalidates the assignment catalog after the rollback attempt."
     },
@@ -264,7 +297,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", <modules_path>, module_request) [create module]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.modules"],
+      "scopes": [
+        "catalog.modules"
+      ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates catalog.modules after the confirmed operation succeeds."
     },
@@ -275,7 +310,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", item_path, item_request)",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.modules"],
+      "scopes": [
+        "catalog.modules"
+      ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates catalog.modules after the confirmed operation succeeds."
     },
@@ -286,7 +323,9 @@
       "call_index": 1,
       "call_form": "_canvas_send(\"PUT\", <submission_path>, request) [apply curve]",
       "classification": "canvas_mutation",
-      "scopes": ["private.submissions"],
+      "scopes": [
+        "private.submissions"
+      ],
       "reconciliation": "targeted",
       "reason": "Direct webui route: on the success branch (any push ok) it calls mirror_service.notify_course_changed(course_id), which runs sync.refresh_submissions_course_delta — the same narrow per-course submissions delta refresh PowerGrader uses, inline rather than via the _notify_write_through helper. The parallel ledger adapter operation_ledger/adapters/curve.py is dead (no producer emits gradebook.curve); the scheduled-routine path routines_builtin.py _curve_apply_core is the only remaining unreconciled curve writer (Batch 7 unit 02)."
     },
@@ -297,7 +336,9 @@
       "call_index": 1,
       "call_form": "_canvas_send(\"PUT\", <submission_path>, request) [revert curve]",
       "classification": "canvas_mutation",
-      "scopes": ["private.submissions"],
+      "scopes": [
+        "private.submissions"
+      ],
       "reconciliation": "targeted",
       "reason": "Direct webui route: on the success branch (any push ok) it calls mirror_service.notify_course_changed(course_id), which runs sync.refresh_submissions_course_delta — the same narrow per-course submissions delta refresh PowerGrader uses, inline rather than via the _notify_write_through helper. Reverting a curve writes posted_grade back and is reconciled identically to the apply path above."
     },
@@ -308,20 +349,11 @@
       "call_index": 1,
       "call_form": "_canvas_send(method, \"/api/v1/courses/<course_id>/late_policy\", ...)",
       "classification": "canvas_mutation",
-      "scopes": ["gradebook.late_policy"],
+      "scopes": [
+        "gradebook.late_policy"
+      ],
       "reconciliation": "invalidate",
       "reason": "mirror_store.invalidate_late_policy(cid) is called immediately after a verified apply. This whole-scope stale-mark (not a precise merge) is why the state is 'invalidate' rather than 'targeted'."
-    },
-    {
-      "path": "api/webui/routes/gradebook_extensions.py",
-      "symbol": "extend_due",
-      "detector": "name:_canvas_send",
-      "call_index": 1,
-      "call_form": "_canvas_send(method, <override_path>, request)",
-      "classification": "canvas_mutation",
-      "scopes": ["private.assignments"],
-      "reconciliation": "none",
-      "reason": "Per-student override write (direct route). The base override facts are not projected into the mirror at all; the only mirror footprint is the effective due date cached on the affected submission rows (private.submissions cached_due_date), read by the Student Report 'Due date extended to' line. Bounded, low-severity staleness (the report falls back to live Canvas outside the freshness window) — deferred for 1.0beta as a documented bounded limitation, not an open gap. See mutation-reconciliation-map.md family 3."
     },
     {
       "path": "api/webui/routes/roster_canvas.py",
@@ -330,7 +362,9 @@
       "call_index": 1,
       "call_form": "canvas_send(\"POST\", <course_group_categories_path>, {\"name\": name})",
       "classification": "canvas_mutation",
-      "scopes": ["private.groups"],
+      "scopes": [
+        "private.groups"
+      ],
       "reconciliation": "targeted",
       "reason": "Roster group-set creation uses this create-only transport after review. Its exact-category reconciliation invokes roster.py's _reconcile_group_category, which targeted-merges the private groups mirror and falls back to invalidation without changing the confirmed write result."
     },
@@ -341,7 +375,9 @@
       "call_index": 1,
       "call_form": "canvas_send(\"POST\", <group_categories_path>, {\"name\": name})",
       "classification": "canvas_mutation",
-      "scopes": ["private.groups"],
+      "scopes": [
+        "private.groups"
+      ],
       "reconciliation": "targeted",
       "reason": "Callers (roster.py, roster_groups.py) invoke _reconcile_group_category after a verified write, which live-refetches only the affected category and merges it via mirror_store.merge_group_category, falling back to whole-document invalidate_groups only on failure."
     },
@@ -352,7 +388,9 @@
       "call_index": 1,
       "call_form": "canvas_send(\"POST\", <memberships_path>, {\"user_id\": user_id})",
       "classification": "canvas_mutation",
-      "scopes": ["private.groups"],
+      "scopes": [
+        "private.groups"
+      ],
       "reconciliation": "targeted",
       "reason": "Roster callers use this returned-membership transport. Reconciliation touches only the checkpointed new category through _reconcile_group_category; existing categories and memberships are never changed."
     },
@@ -363,7 +401,9 @@
       "call_index": 1,
       "call_form": "canvas_send(\"DELETE\", <memberships_path>, {})",
       "classification": "canvas_mutation",
-      "scopes": ["private.groups"],
+      "scopes": [
+        "private.groups"
+      ],
       "reconciliation": "targeted",
       "reason": "Same _reconcile_group_category convergence path as create_canvas_group."
     },
@@ -374,20 +414,11 @@
       "call_index": 1,
       "call_form": "canvas_send(\"POST\", <group_categories_path>, req)",
       "classification": "canvas_mutation",
-      "scopes": ["private.groups"],
+      "scopes": [
+        "private.groups"
+      ],
       "reconciliation": "targeted",
       "reason": "Route calls the injected invalidate_groups callback (roster.py's _reconcile_group_category) after a verified create, same targeted-merge-with-invalidate-fallback path as roster_canvas.py."
-    },
-    {
-      "path": "api/webui/routes/routines_builtin.py",
-      "symbol": "_run_routine_sweep",
-      "detector": "name:_canvas_send",
-      "call_index": 1,
-      "call_form": "_canvas_send(\"PUT\", <submission_path>, request) [routine-triggered late sweep]",
-      "classification": "canvas_mutation",
-      "scopes": ["private.submissions"],
-      "reconciliation": "n/a",
-      "reason": "Scheduled-routine late sweep; same as SweepAdapter.execute. Writes seconds_late_override, which no mirror consumer reads; late-work identification is recomputed inside CanvasExpert from timestamps (work_registry/providers/late_work.py). No submissions-projection reconciliation is owed. Not a Former Program 9 gap."
     },
     {
       "path": "api/webui/routes/routines_builtin.py",
@@ -396,7 +427,9 @@
       "call_index": 1,
       "call_form": "_canvas_send(\"PUT\", <submission_path>, request) [routine-triggered curve apply]",
       "classification": "canvas_mutation",
-      "scopes": ["private.submissions"],
+      "scopes": [
+        "private.submissions"
+      ],
       "reconciliation": "targeted",
       "reason": "Scheduled-routine curve writer. Its caller _run_routine_curve fires one coalesced mirror_service.notify_course_changed(course_id) after each course's whole curve batch (once per course that curved at least one assignment), which runs sync.refresh_submissions_course_delta — the same narrow per-course submissions delta refresh PowerGrader and the direct curve routes use. Fire-and-forget; the heartbeat repairs any miss."
     },
@@ -407,7 +440,10 @@
       "call_index": 1,
       "call_form": "canvas_send(\"PUT\", _path(session, user_id), payload) [grade + optional comment]",
       "classification": "canvas_mutation",
-      "scopes": ["private.submissions", "private.submission_comments"],
+      "scopes": [
+        "private.submissions",
+        "private.submission_comments"
+      ],
       "reconciliation": "targeted",
       "reason": "The unified MCP Scoring Session submit path calls scoring_apply.apply_plan, which reaches this frozen, drift-checked, receipt-backed grade writer and triggers a narrow mirror refresh after a verified push."
     },
@@ -418,7 +454,9 @@
       "call_index": 1,
       "call_form": "session.post(<student_analysis_report_url>, data={\"quiz_report[report_type]\": \"student_analysis\", ...})",
       "classification": "canvas_read_acquisition",
-      "scopes": ["focused_evidence"],
+      "scopes": [
+        "focused_evidence"
+      ],
       "reconciliation": "n/a",
       "reason": "Per spine 14.3, the New Quiz Student Analysis report creation is a read acquisition with a Canvas-side generated artifact, not a content mutation. Must remain a specialized focused path and never be scheduled as routine background metadata work."
     },
@@ -429,7 +467,9 @@
       "call_index": 1,
       "call_form": "session.post(f\"{base}/api/v1/jwts?...\", ...) [native workflow JWT exchange]",
       "classification": "canvas_read_acquisition",
-      "scopes": ["focused_evidence"],
+      "scopes": [
+        "focused_evidence"
+      ],
       "reconciliation": "n/a",
       "reason": "Auth-token exchange step of the sessionless native file-resolution chain; no content change."
     },
@@ -440,7 +480,9 @@
       "call_index": 2,
       "call_form": "session.post(f\"{backend}/api/native/launch\", json={\"params\": ..., \"signature\": ...})",
       "classification": "canvas_read_acquisition",
-      "scopes": ["focused_evidence"],
+      "scopes": [
+        "focused_evidence"
+      ],
       "reconciliation": "n/a",
       "reason": "Native-session bootstrap step used only to resolve New Quiz file-upload evidence; deliberately best-effort and never creates a Canvas write path (module docstring)."
     },
@@ -451,7 +493,9 @@
       "call_index": 1,
       "call_form": "requests.request(method, f\"{base}{path}\", headers=hdrs, json=payload, timeout=timeout)",
       "classification": "generic_transport_internal",
-      "scopes": ["none"],
+      "scopes": [
+        "none"
+      ],
       "reconciliation": "n/a",
       "reason": "Shared internal Canvas transport used by every _canvas_send/canvas_send caller listed above. The HTTP method is a caller-supplied parameter; scope and reconciliation are owned by each call site above, not by this shared internal."
     },
@@ -462,7 +506,9 @@
       "call_index": 1,
       "call_form": "_session.request(method, url, timeout=30, **kw)",
       "classification": "generic_transport_internal",
-      "scopes": ["none"],
+      "scopes": [
+        "none"
+      ],
       "reconciliation": "n/a",
       "reason": "Shared internal transport for the standalone qf_pusher.py script below; not part of the served app, operation ledger, or CanvasMirror. The get/post/put/patch/delete wrappers in this module are literal-method pass-throughs to this same function and issue no independent HTTP call."
     },
@@ -473,7 +519,10 @@
       "call_index": 1,
       "call_form": "canvas.put(core(f\"/courses/{course_id}/assignments/{quiz_id}\"), json=...)",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments", "new_quiz.metadata"],
+      "scopes": [
+        "catalog.assignments",
+        "new_quiz.metadata"
+      ],
       "reconciliation": "n/a",
       "reason": "Standalone experimental CLI script (`py qf_pusher.py`) for pushing QuizForge files to a live Canvas New Quiz; no CanvasMirror or operation-ledger integration exists for this path."
     },
@@ -484,7 +533,9 @@
       "call_index": 1,
       "call_form": "canvas.post(core(f\"/courses/{course_id}/modules\"), json=...)",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.modules"],
+      "scopes": [
+        "catalog.modules"
+      ],
       "reconciliation": "n/a",
       "reason": "Standalone experimental CLI script; no CanvasMirror or operation-ledger integration."
     },
@@ -495,7 +546,9 @@
       "call_index": 1,
       "call_form": "canvas.post(core(f\"/courses/{course_id}/modules/{module_id}/items\"), json=...)",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.modules"],
+      "scopes": [
+        "catalog.modules"
+      ],
       "reconciliation": "n/a",
       "reason": "Standalone experimental CLI script; no CanvasMirror or operation-ledger integration."
     },
@@ -506,7 +559,9 @@
       "call_index": 1,
       "call_form": "canvas.post(quiz(f\"/courses/{course_id}/quizzes/{quiz_id}/items\"), json=payload)",
       "classification": "canvas_mutation",
-      "scopes": ["new_quiz.metadata"],
+      "scopes": [
+        "new_quiz.metadata"
+      ],
       "reconciliation": "n/a",
       "reason": "Standalone experimental CLI script; no CanvasMirror or operation-ledger integration."
     },
@@ -517,20 +572,11 @@
       "call_index": 1,
       "call_form": "canvas.post(quiz(f\"/courses/{course_id}/quizzes\"), json=...) [create quiz shell]",
       "classification": "canvas_mutation",
-      "scopes": ["new_quiz.metadata"],
+      "scopes": [
+        "new_quiz.metadata"
+      ],
       "reconciliation": "n/a",
       "reason": "Standalone experimental CLI script; no CanvasMirror or operation-ledger integration."
-    },
-    {
-      "path": "api/diagnose_newquizzes.py",
-      "symbol": "_probe",
-      "detector": "attr:request",
-      "call_index": 1,
-      "call_form": "requests.request(method, url, headers=headers, data=data, params=params, timeout=20)",
-      "classification": "diagnostic_probe",
-      "scopes": ["focused_evidence"],
-      "reconciliation": "n/a",
-      "reason": "Auth-probe CLI tool (`py diagnose_newquizzes.py`). Method is a caller-supplied parameter, but per the module docstring every call is read-only except the New Quiz Student Analysis report-create POST, which only enqueues a Canvas-generated report and never mutates course content."
     }
   ]
 }

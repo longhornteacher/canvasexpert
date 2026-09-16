@@ -13,7 +13,7 @@ from . import storage
 from .models import validate_job, validate_registry_document
 from .providers import (CalendarNeedsAttention, CourseTimeout, DiscoveryDeadline,
                          CourseUnavailable, ProviderFailure, WorkCourseReads)
-from .providers import grading_debt, home_attention, late_work, roster_warnings
+from .providers import grading_debt, home_attention, roster_warnings
 
 
 MAX_COURSE_WORKERS = 3
@@ -60,7 +60,6 @@ def _scan_course(course: dict, *, now: str, deadline: float, canvas_get_all=None
     providers = (
         grading_debt.scan_course,
         home_attention.scan_comment_follow_up,
-        late_work.scan_course,
         roster_warnings.scan_course,
     )
     for provider in providers:

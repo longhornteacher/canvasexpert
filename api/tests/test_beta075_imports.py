@@ -19,7 +19,6 @@ def test_supported_entrypoints_use_one_module_identity_and_activity_is_retired(t
         Path("api/mcp_server/__main__.py"),
         Path("api/qf_pusher.py"),
         Path("api/validate_qf.py"),
-        Path("api/diagnose_newquizzes.py"),
     }
 
     for path in api_root.rglob("*.py"):
@@ -80,7 +79,6 @@ for name in (
     "api.webui.routes.push_validation",
     "api.qf_pusher",
     "api.validate_qf",
-    "api.diagnose_newquizzes",
 ):
     importlib.import_module(name)
 
@@ -119,7 +117,6 @@ for filename, names in owners.items():
         for args in (
             [str(api_root / "qf_pusher.py")],
             [str(api_root / "validate_qf.py")],
-            [str(api_root / "diagnose_newquizzes.py"), "--help"],
         ):
             smoke = subprocess.run(
                 [sys.executable, *args],

@@ -172,7 +172,7 @@ def run_routine(
     """Run a routine with exactly-once coordination.
 
     Args:
-        routine_id: The routine identifier (e.g. "sweep", "grading_debt").
+        routine_id: The routine identifier (e.g. "download", "curve").
         runner_fn: Callable that takes ``params`` and returns a result dict.
         params: Parameters passed to the runner.
         scheduled_due: Optional ISO timestamp for scheduled runs.

@@ -24,7 +24,6 @@ EXPECTED_PRESENTATION = {
     "/gradebook": ("gradebook.html", "workspace", "left-main", 1),
     "/roster": ("roster.html", "workspace", "left-main", 1),
     "/settings": ("settings.html", "workspace", "left-main", 1),
-    "/calendar": ("calendar.html", "workspace", "left-main", 1),
     # Routines sits on the workspace layout so its title shares a left edge
     # with the other primary-nav pages instead of jumping inward.
     "/routines": ("routines.html", "workspace", "full", 0),
@@ -39,7 +38,6 @@ FEATURE_CSS = (
     "api/webui/static/pages/gradebook.css",
     "api/webui/static/roster_workbench.css",
     "api/webui/static/pages/settings.css",
-    "api/webui/static/pages/calendar.css",
     "api/webui/static/pages/routines.css",
     "api/webui/static/pages/student_reports.css",
     "api/webui/static/pages/course.css",
@@ -71,8 +69,6 @@ def _configure_fictional(monkeypatch):
     monkeypatch.setattr(pages.config, "active_courses", lambda: courses)
     monkeypatch.setattr(pages.config, "saved_courses", lambda: courses)
     monkeypatch.setattr(pages.config, "get_download_root", lambda: "")
-    monkeypatch.setattr(pages.school_calendar, "readiness", lambda **kw: {"status": "unconfigured", "problems": ["unconfigured"]})
-    monkeypatch.setattr(pages.school_calendar, "read", lambda root=None: (None, ["unconfigured"]))
     monkeypatch.setattr(pages.config, "get_tier_tags", lambda: {
         "Support": "", "Core": "", "Accelerate": "", "Extend": "",
     })
@@ -118,7 +114,7 @@ def _configure_fictional(monkeypatch):
 
 
 def test_registry_is_the_full_program_route_map():
-    assert len(EXPECTED_PRESENTATION) == 11
+    assert len(EXPECTED_PRESENTATION) == 10
 
 
 def test_all_live_templates_use_layouts_and_no_inline_styles():
@@ -177,7 +173,6 @@ def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_pat
         "/gradebook": "/gradebook",
         "/roster": "/roster",
         "/settings": "/settings",
-        "/calendar": "/calendar",
         "/routines": "/routines",
         "/course": "/course",
         "/about": "/about",
@@ -255,30 +250,3 @@ def test_settings_links_to_calendar_for_class_schedule(monkeypatch):
     assert 'href="/calendar"' in text
     assert 'id="class-schedule-card"' not in text
     assert 'id="cal"' not in text
-
-
-def test_calendar_page_has_the_teacher_schedule_editor(monkeypatch):
-    _configure_fictional(monkeypatch)
-    text = _client().get("/calendar").text
-    assert 'id="calendar-teacher-block-list"' in text
-    assert 'id="calendar-bell-card"' in text
-    assert 'id="calendar-change-card"' in text
-    assert 'id="calendar-create-card"' in text
-
-
-def test_class_schedule_editor_edits_block_periods_and_course_separately():
-    """The block name is what a slide binds to, so it gets its own field.
-
-    Collapsing name and label into one input rewrites the binding key on every
-    save, which breaks slides and trips the duplicate-name check.
-    """
-    text = _source("api/webui/static/pages/calendar.js")
-    assert 'data-field="name"' in text
-    assert 'data-field="periods"' in text
-    assert 'data-field="label"' in text
-    assert 'data-field="course_id"' in text
-    assert '<option value="">(none)</option>' in text
-    assert "not a Current course; choose one or clear" in text
-    assert "disabled" in text
-    assert "Settings &rarr; Current courses" in text
-    assert 'data-field="course"' not in text

@@ -11,11 +11,9 @@ monkeypatch them without touching the real Canvas API or identity vault
 
 Every ``course_id`` tool gates on ``config.active_courses()`` — the same
 Current-course scope the web UI uses. ``list_courses``,
-``get_authoring_contract``, ``get_product_guide``, ``list_staged_content``,
-``get_bell_schedule``, ``get_day_schedule``, ``get_teacher_schedule`` and
-``get_school_calendar`` are
-the only tools with no ``course_id`` and no student data, so they skip both the
-course gate and the outbound safety gate. ``get_writing_history`` breaks that
+``get_authoring_contract``, ``get_product_guide`` and ``list_staged_content``
+are the only tools with no ``course_id`` and no student data, so they skip both
+the course gate and the outbound safety gate. ``get_writing_history`` breaks that
 pairing on purpose: it has no ``course_id`` either (the daily-writing store has
 no course concept), but it is student data, so it still runs the identity vault
 and the outbound safety gate.
@@ -44,7 +42,7 @@ from api.mirror import queries as mirror_queries
 from api.mirror import read_service
 from api.mirror import store as mirror_store
 from api.platform_services import config, workspace
-from api.webui import bell_schedule, mirror_service, schedule_setup, school_calendar
+from api.webui import mirror_service
 from api.webui.deps import REPO_ROOT
 from api.webui import deps
 from api import feedback_safety, feedback_vault
@@ -1071,12 +1069,9 @@ _CONTRACT_FILES = {
     "quiz": "Author a Quiz (QuizForge).txt",
     "assignment": "Author an Assignment (AssignmentForge).txt",
     "page": "Author a Page (PageForge).txt",
-    "schedule": "Author a Class Schedule.txt",
-    "academic_calendar": "Author an Academic Calendar.txt",
     "learning_objective": "Author a Learning Objective.txt",
 }
-_DIRECT_WRITE_CONTRACT_KINDS = frozenset(
-    {"schedule", "academic_calendar", "learning_objective"})
+_DIRECT_WRITE_CONTRACT_KINDS = frozenset({"learning_objective"})
 _STAGED_CONTRACT_KINDS = ("quiz", "assignment", "page")
 
 # Product knowledge the tool surface does not imply. An assistant that only
@@ -1133,15 +1128,6 @@ _TOOL_GROUPS = {
         "preview_learning_objective",
         "apply_learning_objective",
         "delete_learning_objective",
-    ),
-    "School Calendar": (
-        # Reads only. The calendar and bell write pairs were retired with the
-        # classroom display they were built to feed; those edits live in the
-        # web UI, where a teacher can see a calendar while changing it.
-        "get_school_calendar",
-        "get_bell_schedule",
-        "get_day_schedule",
-        "get_teacher_schedule",
     ),
     # Mirror submissions are the evidence exposed by the Writing Timeline job.
     "Writing Timeline": ("get_submissions",),
@@ -1839,93 +1825,6 @@ def refresh_mirror(course_id: str) -> dict:
                 "message": "Still syncing — wait a few seconds, then try again."}
     return {"ok": False, "status": "failed",
             "error": "Sync failed. Try again, or use Sync now in the CanvasExpert web UI."}
-
-
-def get_bell_schedule(schedule_id: str = "") -> dict:
-    """Read bell schedule(s) from workspace Calendars folder.
-
-    No course gate, no student data — no safety gate.
-    schedule_id: empty string ("") returns all variants as {schedule_id: meetings},
-                 non-empty returns just that one or error if not found.
-    """
-    bell_schedules, problems = deps.load_bell_schedules()
-
-    if schedule_id == "":
-        return {
-            "ok": True,
-            "schedules": bell_schedules,
-            "problems": problems,
-        }
-
-    if schedule_id not in bell_schedules:
-        return {
-            "ok": False,
-            "error": f"schedule '{schedule_id}' not found",
-            "problems": problems,
-        }
-
-    return {
-        "ok": True,
-        "schedule_id": schedule_id,
-        "meetings": bell_schedules[schedule_id],
-        "problems": problems,
-    }
-
-
-def get_day_schedule(date: str) -> dict:
-    """Resolve teacher blocks for a specific date.
-
-    No course gate, no student data — no safety gate.
-    date: "YYYY-MM-DD" string
-    Returns the canonical calendar's own resolution ``state`` (unconfigured,
-    invalid_calendar, outside_coverage, no_school, no_regular_classes,
-    unknown_schedule, or ready) alongside blocks: [{name, label, start, end,
-    raw_periods, schedule_id, period_ids, segments, seq}, ...] sorted by
-    start time. A repeated block produces one entry per consecutive meeting
-    run; slides bind to its first entry.
-    """
-    result = deps.resolve_schedule_for(date)
-    return {
-        "ok": True,
-        "date": date,
-        "state": result["state"],
-        "blocks": result["blocks"],
-        "problems": result["problems"],
-    }
-
-
-def get_teacher_schedule() -> dict:
-    """Read teacher schedule from workspace Calendars folder.
-
-    No course gate, no student data — no safety gate.
-    """
-    teacher_schedule, problems = deps.load_teacher_schedule()
-    return {
-        "ok": True,
-        "schedule": teacher_schedule,
-        "problems": problems,
-    }
-
-
-def get_school_calendar(date_from: str = "", date_to: str = "") -> dict:
-    """Read the canonical School Calendar: readiness, plus a bounded range.
-
-    No course_id, no student data -- no course gate, no safety gate.
-    date_from/date_to: pass both for day/grading-period/event rows in that
-    inclusive range; omit both for readiness only (revision, coverage,
-    today's resolution, low-coverage warning). Never raises.
-    """
-    bell_schedules, _bell_problems = deps.load_bell_schedules()
-    readiness = school_calendar.readiness(bell_schedule_ids=bell_schedules)
-    result = {"ok": True, "readiness": readiness}
-    if date_from and date_to:
-        projection, problems = school_calendar.range_projection(date_from, date_to)
-        if projection is None:
-            return {"ok": False, "problems": problems}
-        result["days"] = projection["days"]
-        result["grading_periods"] = projection["grading_periods"]
-        result["events"] = projection["events"]
-    return result
 
 
 # --- Scoring Packet MCP Tools (v22) ----------------------------------------

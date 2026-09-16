@@ -17,7 +17,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from api.platform_services import config, workspace
-from .. import deps, school_calendar
+from .. import deps
 from api import operational_log, runtime_paths
 from ..local_request_guard import csrf_token
 from ..deps import (
@@ -148,23 +148,12 @@ def course_page(request: Request, course_id: str = ""):
 
 @router.get("/gradebook", response_class=HTMLResponse)
 def gradebook_page(request: Request):
-    calendar_readiness = school_calendar.readiness()
-    doc, _problems = school_calendar.read()
-    all_gp = sorted(doc["grading_periods"], key=lambda g: g["start"]) if doc else []
-    total_no_count = (
-        sum(1 for entry in doc["days"].values()
-            if entry.get("kind") in ("no_school", "no_regular_classes"))
-        if doc else 0
-    )
     return templates.TemplateResponse(request, "gradebook.html", {
         "nav_section":          "grade",
         "csrf_token":           csrf_token(),
         "token_is_set":         config.token_is_set(),
         "canvas_base":          config.get_canvas_base(),
         "saved_courses":        config.active_courses(),
-        "calendar_status":      calendar_readiness["status"],
-        "all_grading_periods":  all_gp,
-        "total_no_count_days":  total_no_count,
         **_routines_template_context(),
     })
 

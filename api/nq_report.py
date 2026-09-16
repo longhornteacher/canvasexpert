@@ -1,8 +1,7 @@
 """Parse a New Quizzes "Student Analysis" CSV into structured per-student data.
 
-Pure stdlib — no app or network imports (mirrors api/webui/calendar_csv.py), so it
-is trivially unit-testable offline. Format reference + rationale:
-docs/reference/new-quizzes-student-analysis-csv.md.
+Pure stdlib — no app or network imports, so it is trivially unit-testable offline.
+Format reference + rationale: docs/reference/new-quizzes-student-analysis-csv.md.
 
 Layout (positional, variable width):
   [ 9 fixed lead ] [ N x 5-col item block ] [ 5 fixed trailing ]

@@ -35,7 +35,7 @@ while CanvasExpert keeps sole custody of the Canvas PAT and almost every write p
 
 ## Tools
 
-Tool schema version 47 (41 tools).
+Tool schema version 48 (37 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -71,10 +71,6 @@ Tool schema version 47 (41 tools).
 | `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |
 | `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state | Yes, pseudonymized |
 | `refresh_mirror(course_id)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |
-| `get_bell_schedule(schedule_id="")` | Workspace Bell Schedules; an empty id returns all variants | No |
-| `get_day_schedule(date)` | Calendar state and schedule blocks for one YYYY-MM-DD date; repeated blocks yield consecutive meeting runs | No |
-| `get_teacher_schedule()` | The teacher's local versioned schedule blocks | No |
-| `get_school_calendar(date_from="", date_to="")` | Canonical School Calendar readiness, or a bounded range when both dates are given | No |
 | `start_scoring_session(course_id="", assignment_id="")` | Freeze a mirror-backed queue for every Current course, one Current course, or one exact assignment in a Current course | No |
 | `continue_scoring_session(scoring_session_id, scoring_guidance="")` | Prepare or resume the active queue item; missing norms pause the same root session for teacher input | No |
 | `list_scoring_sessions()` | One identity-free row per root Scoring Session with aggregate queue progress | No |
@@ -171,27 +167,12 @@ needs no course gate, no identity vault, and no safety scan. Forge kinds (`quiz`
 `api/default_docs/AI Authoring/` file the web UI's `/api/download-contract` route serves,
 then receive the Forge-only staging appendix.
 
-The Calendar, Bell Schedule, and teacher-schedule tools are reads only
-(`get_school_calendar`, `get_bell_schedule`, `get_day_schedule`,
-`get_teacher_schedule`). They share the same exemption: no `course_id`, no student data,
-no course gate, no safety scan. Their write pairs were retired in schema v39 along with
-`get_seating_context` and the whole Seating feature: all of them were built to feed the
-classroom display, which has since been removed, and a calendar edit wants a calendar in
-front of you, so those edits live in the web UI. What follows describes the retired shape and is kept only as
-background for the stored contracts. The event pair used `action="upsert"` with one complete
-structured event or `action="delete"` with its stable `event_id`; it mutates only the
-canonical `events` array and supports the same revision/digest/atomic-write boundary.
-The game-score pair is intentionally narrower: it requires an existing stable event ID whose
-kind is `game`, changes only its `result`, and preserves the event's label, date, shape, and
-other fields. It is the preferred tool for recording a result on a game that is already on the
-calendar; it does not create or retarget events.
-
 `get_product_guide(topic="")` closes the gap between what the tool list implies and what
 the app actually does. Every successful response returns an ordered object that annotates
 all ten topics with one-line summaries. `overview` serves Appendix B; the other named
 CanvasAgent sections serve their exact Appendix A-F slices; `full` serves the entire file;
 and the two writing topics serve their own canonical files. `tools` is generated from the
-frozen schema-v47 contract and groups all 41 tools exactly once by teacher-facing job.
+frozen schema-v48 contract and groups all 37 tools exactly once by teacher-facing job.
 Topic matching trims surrounding whitespace and ignores case. The download route's
 CanvasAgent bytes equal `topic="full"`; section topics are extracted from those same bytes.
 Results are text-only MCP content: the server returns one minified JSON text block and

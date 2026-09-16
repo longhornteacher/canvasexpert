@@ -31,8 +31,7 @@ def list_students(course_id: str):
 @router.get("/api/extra-time")
 def get_extra_time(course_id: str):
     return JSONResponse({"ok": True,
-                         "students": config.get_extra_time(course_id),
-                         "sweep_settings": config.get_sweep_settings()})
+                         "students": config.get_extra_time(course_id)})
 
 
 @router.post("/api/extra-time")

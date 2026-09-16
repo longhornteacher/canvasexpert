@@ -12,7 +12,7 @@ import time
 from api.mirror import store
 from api.platform_services import config, workspace
 from api.work_registry.providers import WorkCourseReads
-from api.work_registry.providers import grading_debt, home_attention, late_work, roster_warnings
+from api.work_registry.providers import grading_debt, home_attention, roster_warnings
 
 COURSE = "555001"
 
@@ -232,28 +232,6 @@ def test_wrapper_falls_back_live_when_mirror_read_errors(monkeypatch, tmp_path):
 
 
 # --- providers, end to end -------------------------------------------------------
-
-def test_late_work_scan_course_reads_mirror_with_zero_live_calls(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    _populate(str(tmp_path))
-    monkeypatch.setattr(late_work.config, "get_extra_time", lambda course_id: [])
-    monkeypatch.setattr(
-        late_work.school_calendar, "resolve_instructional_range",
-        lambda date_from, date_to, known_schedule_ids, **kw: {
-            "state": "ready", "date_from": date_from, "date_to": date_to,
-            "days": {}, "no_count_dates": [],
-        })
-
-    reads = _reads(_explode)
-    findings = late_work.scan_course(
-        COURSE, now="2026-07-11T12:00:00+00:00", reads=reads,
-    )
-    assert len(findings) == 1
-    assert findings[0]["kind"] == "late.work"
-    assert findings[0]["assignment_id"] == "700100"
-    # Two late, string-id submissions aggregate onto the one assignment.
-    assert findings[0]["counts"] == {"total": 2, "pending": 2, "affected": 2}
-
 
 def test_grading_debt_and_comment_followup_read_mirror_with_comment_shape(monkeypatch, tmp_path):
     _mount(monkeypatch, tmp_path)

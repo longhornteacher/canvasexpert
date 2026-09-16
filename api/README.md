@@ -67,7 +67,6 @@ bundled Pandoc through `pypandoc-binary`.
 
 - **Quiz**: `py qf_pusher.py "<quiz.txt>"` → live New Quiz (unpublished)
 - **Validate**: `py validate_qf.py <file.txt>`
-- **New Quizzes diagnostic**: `py diagnose_newquizzes.py --course <id> [--assignment <nq_id>]`
 
 Differentiated live delivery has no direct CLI. Use the reviewed AssignmentForge or
 QuizForge Operation Ledger path so public tags, bridge creation, exact-ID recovery,
@@ -247,9 +246,8 @@ ANTHROPIC_KEY=
   course `GET /api/quiz/v1/courses/:id/quizzes` returns **200**; in a **concluded /
   past-enrollment** course the same call returns **403**. New Quizzes is an LTI tool, so
   access follows your live enrollment — the old "403" was a past-enrollment course, not a
-  PAT limitation. Use `py diagnose_newquizzes.py --course <id> [--assignment <nq_id>]`
-  (see `api/diagnose_newquizzes.py`) to check any course; it reads 401 (missing scope —
-  admin can grant), 403 (concluded enrollment, or missing scope), and transient 5xx apart.
+  PAT limitation. A 401 means a missing scope (an admin can grant it); a 403 means a
+  concluded enrollment or a missing scope.
 - **The Reports API (student/item analysis) is the response-content path, but the gateway
   is flaky.** `POST /api/quiz/v1/courses/:course_id/quizzes/:assignment_id/reports`
   (`report_type=student_analysis|item_analysis`, `format=csv|json`) enqueues a report and

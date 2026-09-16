@@ -96,7 +96,6 @@ First time in the app, a four-step wizard runs:
      scroll to Approved Integrations, click "+ New Access Token", then
      Generate Token and copy it. Pasting it into the wizard stores it in the
      Windows credential store.
-  4. Calendars: optional school-year dates that the late-work features use.
 
 Opening it again later. Double-click the same "Open Canvas Expert.bat". There
 is no Start menu entry unless the teacher makes a shortcut to that file.
@@ -167,12 +166,6 @@ Learning Objectives. Reviewed, revision-protected per-course objectives,
 each grounded in current modules, assignments, and pages. A changed source
 marks one for review rather than silently rewriting the objective.
 
-School Calendar. The canonical School Calendar holds school dates, day kinds,
-grading periods, bell schedules, and the Teacher Schedule. Teacher Schedule
-save is a direct local write; bell schedules and calendar changes use their own
-preview/apply pairs. The Calendar page and tools keep records in the workspace
-for date math and classroom displays.
-
 Writing Timeline. For a tracked assignment, Canvas Expert can include limited
 revision-history observations from a submitted Word document in the private SAFE
 scoring evidence. Observations only, never a score or likelihood, and never
@@ -198,8 +191,8 @@ actually changes how other features treat them, so accommodations are honored
 automatically rather than remembered each time. Printable per-student reports
 over time, useful for conferences.
 
-Gradebook tools. Late policies, late-work sweeps, curves with transparent
-math, and per-student extensions. Each previews what will change first.
+Gradebook tools. Late policies, curves with transparent math, and per-student
+extra-time accommodations. Each previews what will change first.
 
 Routines. Small jobs that run on the teacher's own computer on a schedule
 or at app launch: download new submissions, flag late work, keep a running
@@ -275,10 +268,6 @@ Reading
   * get_roster, get_submissions, and get_gradebook_snapshot
     read only the local mirror and will refuse when it is stale. When one
     refuses, call refresh_mirror(course_id), then retry that read once.
-  * get_school_calendar, get_bell_schedule, get_day_schedule and
-    get_teacher_schedule read the local calendar and schedules. They are
-    reads only: the teacher edits calendars and bell schedules in the
-    Canvas Expert web UI, where they can see a calendar while changing it.
   * get_writing_history(pseudonym) reads a separate private per-student writing
     record some teachers keep. It takes no course_id, and it exists to coach a
     writer over time rather than to grade one assignment.

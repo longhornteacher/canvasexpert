@@ -161,7 +161,6 @@ _CONTRACT_FILE_MAP = {
     # assistant and a connected one read identical bytes.
     "CanvasAgent": "START HERE - CanvasAgent.txt",
     "WritingTimeline": "Writing Timeline (tracked assignments).txt",
-    "AcademicCalendar": "Author an Academic Calendar.txt",
 }
 
 

@@ -8,8 +8,8 @@ marks it stale.
 
 Covers the brief's named surface: three zero-live scopes, three fallback
 shapes (``source="canvas"``), unknown-scope rejection (structured, not an
-exception), metadata labeling, and proof that the writing routines' (sweep,
-curve) owners/imports of ``mirror_reads`` are untouched by this migration.
+exception), metadata labeling, and proof that the writing routine (curve)
+owners/imports of ``mirror_reads`` are untouched by this migration.
 """
 from __future__ import annotations
 
@@ -189,52 +189,7 @@ def test_result_keys_are_exactly_the_named_set(monkeypatch, tmp_path):
     assert set(result.keys()) == {"ok", "records", "error", "source", "synced_at", "generation"}
 
 
-# --- (d) built-in routines are migrated: grading_debt and download ---------------
-
-def test_grading_debt_uses_read_scope_with_zero_live_calls_when_fresh(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    _populate(str(tmp_path))
-    monkeypatch.setattr(routines_builtin, "canvas_get_all", _explode)
-    monkeypatch.setattr(routines_builtin.config, "active_courses",
-                        lambda: [{"id": COURSE, "nickname": "Course"}])
-    monkeypatch.setattr(routines_builtin.config, "get_sweep_settings",
-                        lambda: {"honor_extra_time": True})
-    monkeypatch.setattr(
-        routines_builtin.school_calendar, "resolve_instructional_range",
-        lambda date_from, date_to, known_schedule_ids, **kw: {
-            "state": "ready", "date_from": date_from, "date_to": date_to,
-            "days": {}, "no_count_dates": [],
-        })
-    result = routines_builtin._run_routine_grading_debt({"school_days": 3})
-    assert result["ok"] is True
-    assert "1 ungraded" in result["summary"]
-
-
-def test_grading_debt_falls_back_live_via_read_scope_when_stale(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    _populate(str(tmp_path), fresh=False)
-    monkeypatch.setattr(routines_builtin.config, "active_courses",
-                        lambda: [{"id": COURSE, "nickname": "Course"}])
-    monkeypatch.setattr(routines_builtin.config, "get_sweep_settings",
-                        lambda: {"honor_extra_time": True})
-    monkeypatch.setattr(
-        routines_builtin.school_calendar, "resolve_instructional_range",
-        lambda date_from, date_to, known_schedule_ids, **kw: {
-            "state": "ready", "date_from": date_from, "date_to": date_to,
-            "days": {}, "no_count_dates": [],
-        })
-
-    def fake_get(path, params=None, timeout=None):
-        if path.endswith("/assignments"):
-            return [{"id": "live-a", "name": "Live Assignment"}], None
-        return [{"assignment_id": "live-a", "user_id": "live-u",
-                 "workflow_state": "submitted",
-                 "submitted_at": "2020-01-01T09:00:00Z"}], None
-
-    monkeypatch.setattr(routines_builtin, "canvas_get_all", fake_get)
-    result = routines_builtin._run_routine_grading_debt({"school_days": 3})
-    assert result["ok"] is True
-    assert "1 ungraded" in result["summary"]
+# --- (d) built-in routines: download and other survivors ---------------
 
 
 def test_download_assignment_listing_uses_read_scope(monkeypatch, tmp_path):
@@ -259,25 +214,6 @@ def test_download_assignment_listing_uses_read_scope(monkeypatch, tmp_path):
 
 
 # --- (e) no private rows/source envelopes leak into what built-ins report --------
-
-def test_grading_debt_lines_never_serialize_the_source_envelope(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    _populate(str(tmp_path))
-    monkeypatch.setattr(routines_builtin, "canvas_get_all", _explode)
-    monkeypatch.setattr(routines_builtin.config, "active_courses",
-                        lambda: [{"id": COURSE, "nickname": "Course"}])
-    monkeypatch.setattr(routines_builtin.config, "get_sweep_settings",
-                        lambda: {"honor_extra_time": True})
-    monkeypatch.setattr(
-        routines_builtin.school_calendar, "resolve_instructional_range",
-        lambda date_from, date_to, known_schedule_ids, **kw: {
-            "state": "ready", "date_from": date_from, "date_to": date_to,
-            "days": {}, "no_count_dates": [],
-        })
-    result = routines_builtin._run_routine_grading_debt({"school_days": 3})
-    blob = " ".join(result["lines"]) + result["summary"]
-    for leaked in ("mirror", "canvas", "generation", "synced_at"):
-        assert leaked not in blob
 
 
 # --- (f) custom SDK: canvas_read is injected and delegates to read_scope --------
@@ -304,11 +240,10 @@ def test_custom_sdkcanvas_get_all_and_canvas_send_remain(monkeypatch, tmp_path):
 
 # --- (g) proof that writing-routine (sweep/curve) owners/imports are unchanged --
 
-def test_sweep_and_curve_still_use_the_unmigrated_mirror_reads_helpers():
-    """Locked non-goal: only grading_debt/download migrate to read_scope.
-    Sweep's students_or_live name lookup and curve's audit-baseline
-    submissions_or_live stay on the existing compatibility reader, unchanged
-    (same function objects mirror_reads.py defines)."""
+def test_curve_still_uses_the_unmigrated_mirror_reads_helpers():
+    """Locked non-goal: only download migrates to read_scope.
+    Curve's audit-baseline submissions_or_live stays on the existing
+    compatibility reader, unchanged (same function objects mirror_reads.py defines)."""
     assert routines_builtin.students_or_live is mirror_reads.students_or_live
     assert routines_builtin.submissions_or_live is mirror_reads.submissions_or_live
     assert not hasattr(routines_builtin, "assignments_or_live")

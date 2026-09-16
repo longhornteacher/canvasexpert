@@ -14,9 +14,8 @@
   <div class="ce-gradebook-rail">
     <p class="ce-gradebook-rail-kicker">Gradebook tools</p>
     <div class="ce-tabs ce-gradebook-tabs gb-tabs" role="tablist" aria-orientation="vertical">
-      <button type="button" id="gb-tab-button-policy" class="gb-tab active" data-tab="policy" role="tab" aria-selected="true" aria-controls="gb-tab-policy" tabindex="0">Policy &amp; Sweep</button>
+      <button type="button" id="gb-tab-button-policy" class="gb-tab active" data-tab="policy" role="tab" aria-selected="true" aria-controls="gb-tab-policy" tabindex="0">Policy</button>
       <button type="button" id="gb-tab-button-extra-time" class="gb-tab" data-tab="extra-time" role="tab" aria-selected="false" aria-controls="gb-tab-extra-time" tabindex="-1">Extra-time</button>
-      <button type="button" id="gb-tab-button-extensions" class="gb-tab" data-tab="extensions" role="tab" aria-selected="false" aria-controls="gb-tab-extensions" tabindex="-1">Extensions</button>
       <button type="button" id="gb-tab-button-curves" class="gb-tab" data-tab="curves" role="tab" aria-selected="false" aria-controls="gb-tab-curves" tabindex="-1">Curves</button>
       <button type="button" id="gb-tab-button-snapshot" class="gb-tab" data-tab="snapshot" role="tab" aria-selected="false" aria-controls="gb-tab-snapshot" tabindex="-1">Snapshot</button>
       <button type="button" id="gb-tab-button-routines" class="gb-tab" data-tab="routines" role="tab" aria-selected="false" aria-controls="gb-tab-routines" tabindex="-1">Routines</button>
@@ -26,7 +25,7 @@
 {% endif %}
 {% endblock %}
 
-{% block workspace_header %}{{ page_header('Gradebook', 'Late policy, extra time, extensions, and curves for one course.') }}{% endblock %}
+{% block workspace_header %}{{ page_header('Gradebook', 'Late policy, extra time, and curves for one course.') }}{% endblock %}
 
 {% block primary %}
 
@@ -50,16 +49,6 @@
           <option value="{{ c.id }}" data-name="{{ c.name }}">{{ c.nickname }}</option>
           {% endfor %}
         </select>
-        {% if calendar_status == "ready" %}
-        <span class="gb-cal-badge">
-          📅 {{ total_no_count_days }} day(s) off ·
-          {{ all_grading_periods | length }} grading periods
-        </span>
-        {% else %}
-        <span class="gb-cal-badge">
-          No calendar · <a href="/calendar">set up Calendar</a>
-        </span>
-        {% endif %}
       </div>
     </div>
   </section>
@@ -112,59 +101,6 @@
       <div id="lp-banner" class="push-banner" hidden></div>
     </div>
 
-    <!-- Sweep card -->
-    <div class="ce-panel ce-gradebook-panel">
-      <h2>Late work sweep</h2>
-      <p class="ce-hint ce-gradebook-snapshot-lede">
-        Finds every late submission in the selected date range, counts
-        <strong>school days</strong> (every no-count date from Calendar, plus extra time from
-        Students), then sets Canvas's lateness override to the corrected count. Canvas applies
-        its own late policy — no grade math here. Re-running is safe.
-      </p>
-
-      {% if calendar_status != "ready" %}
-      <p class="ce-gradebook-warn">
-        No school calendar configured — every day counts as instructional until one is set up.
-        <a href="/calendar">Set up Calendar</a> to skip weekends and no-school days automatically.
-      </p>
-      {% endif %}
-
-      <!-- Date range row -->
-      <div class="ce-gradebook-grid ce-gradebook-grid--dates">
-        <label>From (assignment due) <input type="date" id="sw-from"></label>
-        <label>To (assignment due) <input type="date" id="sw-to"></label>
-      </div>
-      <!-- Period preset chips (populated by JS) -->
-      <div id="sw-period-chips" class="ce-gradebook-chips"></div>
-
-      <div class="opt-checks ce-gradebook-options ce-gradebook-options--spaced">
-        <label class="opt-check"><input type="checkbox" id="sw-extra" checked> Honor extra time from Students</label>
-      </div>
-      <p class="gb-roster-note">
-        Uses extra time from <a href="/roster?focus=extra-time">Students</a>.
-      </p>
-      <div class="ce-actions ce-gradebook-action-row">
-        <button id="btn-sweep-preview">Preview sweep (no changes)</button>
-        <button id="btn-sweep-apply" class="primary" hidden>Set lateness for 0 submissions…</button>
-      </div>
-      <p id="sw-status" class="status hint"></p>
-      <div id="sw-table-wrap" class="ce-gradebook-table-scroll" hidden>
-        <table class="ce-table ce-gradebook-table">
-          <thead><tr>
-            <th>Student</th><th>Assignment</th><th>Due → Submitted</th>
-            <th>Canvas days</th><th>School days</th><th>Excluded dates</th>
-          </tr></thead>
-          <tbody id="sw-tbody"></tbody>
-        </table>
-        <p class="ce-hint ce-gradebook-table-note">
-          Hover a row for excluded date detail. "School days" is what will be sent to Canvas.
-          Applying recomputes the sweep from current Canvas state and writes every late
-          submission it finds — you review the recomputed count before anything is written.
-        </p>
-      </div>
-      <pre id="sw-log" class="log" hidden></pre>
-      <div id="sw-banner" class="push-banner" hidden></div>
-    </div>
 
   </div><!-- /policy panel -->
 
@@ -173,8 +109,7 @@
     <div class="ce-panel ce-gradebook-panel">
       <h2>Extra-time students</h2>
       <p class="ce-hint ce-gradebook-snapshot-lede">
-        This compatibility view reads the same standing extra-time settings used by
-        sweep and extensions. Students is the main place to manage them.
+        This compatibility view reads the same standing extra-time settings. Students is the main place to manage them.
       </p>
       <p class="gb-roster-note">
         Manage extra time in <a href="/roster?focus=extra-time">Students</a>.
@@ -185,37 +120,6 @@
         <button id="btn-reload-roster" class="small">↻ Reload from Canvas</button>
         <button id="btn-save-roster" class="primary" hidden>Save roster</button>
       </div>
-    </div>
-  </div>
-
-  <!-- ── Extensions ───────────────────────────────────────────────────── -->
-  <div id="gb-tab-extensions" class="gb-panel" role="tabpanel" aria-labelledby="gb-tab-button-extensions" hidden>
-    <div class="ce-panel ce-gradebook-panel">
-      <h2>Grant an extension</h2>
-      <p class="ce-hint ce-gradebook-snapshot-lede">
-        Gives selected students extra school days on one assignment via a Canvas
-        <strong>assignment override</strong> — their due date actually moves, so nothing
-        shows as late. District holidays and extra time from Students are automatically
-        considered.
-      </p>
-      <p class="gb-roster-note">
-        Uses extra time from <a href="/roster?focus=extra-time">Students</a>.
-      </p>
-      <p id="ext-status" class="status hint"></p>
-      <div class="ce-gradebook-grid ce-gradebook-grid--extension">
-        <label>Assignment <small class="lbl-hint" id="ext-hint">(loading…)</small>
-          <select id="ext-assignment" disabled><option value="">— loading —</option></select>
-        </label>
-        <label>Extra school days
-          <input type="number" id="ext-days" value="1" min="1" max="30" step="1">
-        </label>
-      </div>
-      <div id="ext-students" class="xt-list ce-u-mt-2"></div>
-      <div class="ce-actions ce-gradebook-action-row">
-        <button id="btn-ext-reload" class="small">↻ Reload assignments &amp; students</button>
-        <button id="btn-ext-apply" class="primary" hidden>Grant extension…</button>
-      </div>
-      <div id="ext-banner" class="push-banner" hidden></div>
     </div>
   </div>
 
@@ -398,13 +302,10 @@
 <script>
   window.GB_CANVAS_BASE      = {{ canvas_base | tojson }};
   window.GB_SAVED            = {{ saved_courses | tojson }};
-  window.GB_GRADING_PERIODS  = {{ all_grading_periods | tojson }};
 </script>
 <script src="/static/gradebook.js?v={{ asset_v }}"></script>
 <script src="/static/gradebook/policy.js?v={{ asset_v }}"></script>
 <script src="/static/gradebook/extra_time.js?v={{ asset_v }}"></script>
-<script src="/static/gradebook/extensions.js?v={{ asset_v }}"></script>
-<script src="/static/gradebook/sweep.js?v={{ asset_v }}"></script>
 <script src="/static/gradebook/curves.js?v={{ asset_v }}"></script>
 <script src="/static/gradebook/snapshot.js?v={{ asset_v }}"></script>
 {% endblock %}

@@ -54,7 +54,6 @@ Use only the row relevant to the active handoff.
 | Routines | `api/custom_routines/AUTHORING.md` | Local jobs only; scheduled Canvas posting requires a specific teacher opt-in and the PowerGrader write safeguards. |
 | CanvasMirror | `docs/mirror.md` for current behavior; exact sections of `docs/reference/canvasmirror-1.0beta-information-spine.md` for target design | The vision is section-routed only and never read wholesale for execution; cached state never authorizes a write. |
 | Course Catalog | `docs/contracts/course-catalog-contract.md` | Student-free navigation/search projection only; no PII, raw HTML, URLs, credentials, private paths, evidence, or write preflight. |
-| Calendar | `docs/contracts/canonical-school-calendar-contract.md` | One public, student-free date authority; Calendar UI and MCP share validation and writes; no parallel academic/day calendar. |
 | MCP server | `docs/mcp-server.md` | Pseudonymized reads plus local writes behind preview/apply pairs, and a small number of bounded, documented Canvas write surfaces (also behind preview/apply pairs). Never a live Canvas response handed to the assistant. |
 | Learning Objectives | `api/learning_objectives.py`, with `api/default_docs/AI Authoring/Author a Learning Objective.txt` for the authoring grammar | Reviewed objectives are teacher-confirmed and revision-protected; a write applies only the exact reviewed preview. |
 | Operation Ledger | `docs/reference/operation-ledger-module-map.md` | High-risk Canvas write boundary; preserve checkpoints, idempotency, verification, and receipts. |
@@ -75,14 +74,6 @@ Use only the row relevant to the active handoff.
    teacher-identifying config belong in the UI/workspace, never source. `CANVAS_BASE_DEFAULT`
    remains empty.
 
-   **Academic calendars and school bell schedules are not covered by this guardrail.** They
-   are public information — schools post them on their own front pages — with zero FERPA
-   exposure and zero student data. A real district calendar or bell schedule may ship as a
-   seed file under `api/default_docs/` (e.g. `api/default_docs/Calendars/*.csv`), alongside
-   the blank `calendar_template.csv` and fictional `Summer_Session_Sample.csv`, provided: it's
-   a seed file consumed by the existing data-driven loader (no district value hardcoded in
-   `.py`, no code path that branches on a district), and it contains no student data and no
-   per-teacher contact info. Do not "fix" real schedule data found there as a violation.
 4. **Local only.** The token-holding app binds `127.0.0.1`. Do not add public routes,
    external exposure, or public-infrastructure assumptions.
 5. **Describe AI privacy honestly.** SAFE artifacts are pseudonymized and scrubbed, not
@@ -176,7 +167,7 @@ Two measurements justify this discipline:
 - A mutation that made `data_freshness` always return `"current"`, removing mirror
   staleness entirely, failed only 2 tests out of 1,917. Fifty tests mention `fresh`, `stale`,
   or `zero_live_calls` in their names, but only 2 pin the law.
-- The MCP server registers 43 tools. Only 9 have wrapper-layer tests, while 7 tests
+- The MCP server registers 37 tools. Only 9 have wrapper-layer tests, while 7 tests
   redundantly cover the same wrapper mechanism.
 
 Two house-style decisions remain open and must be answered explicitly rather than inferred:

@@ -5,7 +5,6 @@ from . import models, operations, batches, registry, executor, claims, recovery
 from .adapters import (
     AssignmentAdapter, AssignmentUpdateAdapter, PageAdapter, QuickAssignmentAdapter,
     QuizAdapter, SisGradeBridgeAdapter,
-    SweepAdapter,
 )
 
 __all__ = [
@@ -14,7 +13,7 @@ __all__ = [
     "recovery",
     "AssignmentAdapter", "AssignmentUpdateAdapter", "PageAdapter",
     "QuickAssignmentAdapter", "QuizAdapter",
-    "SisGradeBridgeAdapter", "SweepAdapter",
+    "SisGradeBridgeAdapter",
 ]
 
 registry.register(AssignmentAdapter())
@@ -23,4 +22,3 @@ registry.register(PageAdapter())
 registry.register(QuickAssignmentAdapter())
 registry.register(QuizAdapter())
 registry.register(SisGradeBridgeAdapter())
-registry.register(SweepAdapter())

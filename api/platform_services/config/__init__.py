@@ -38,10 +38,9 @@ from .mirror import (
 
 # --- Gradebook tools ---
 from .gradebook import (
-    SWEEP_DEFAULTS, TIER_NAMES,
+    TIER_NAMES,
     get_extra_time, set_extra_time,
     get_tier_tags, set_tier_tags,
-    get_sweep_settings, set_sweep_settings,
 )
 
 # --- Feedback tools personas and patterns ---

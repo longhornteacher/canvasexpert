@@ -112,10 +112,6 @@ RETIRED_FILES = {
         # which the content push pair contradicts.
         "d6898fbb9e3ebdf9b171eccc8789f1f492c848cabd76f7f04902eccfadfd60c7",
     }),
-    # Named the removed classroom display alongside Calendar.
-    "Author a Class Schedule.txt": frozenset({
-        "b65df7567b0b26b29aa23c4c58ea4432767d8a7a05fb7987059fda9a30536275",
-    }),
 }
 
 

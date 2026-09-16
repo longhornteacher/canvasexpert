@@ -29,18 +29,14 @@ the agent pauses before submitting validated results through guarded write handl
 same session. Canvas Live is the only place to review or edit posted work; there is no local scoring
 queue or hosted grader.
 
-**Gradebook tools** for one course at a time: set Canvas's own late policy, sweep late work by counting real
-school days instead of calendar days, honor per-student extra time, grant extensions, apply curves, and take
-snapshots.
+**Gradebook tools** for one course at a time: set Canvas's own late policy, honor per-student extra time,
+apply curves, and take snapshots.
 
 **Students** is your class list plus the things Canvas will not hold: accommodations, extra time, small
 groups, monitoring flags, and private notes. Student reports pull it together per kid.
 
 **Assessments** imports Eduphoria exports, matches them to your roster, and turns them into a standards
 profile, coverage reports, longitudinal history, and grouping suggestions.
-
-**Calendar** holds your school year, bell schedules, no-school days, public events, and your own teaching
-schedule in one place. The late-work sweep and your routines both read from it.
 
 **Routines** run the recurring chores so you stop remembering them.
 

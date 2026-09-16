@@ -10,7 +10,7 @@ import pytest
 from api.work_registry import discovery, storage
 from api.work_registry.models import material_version, stable_fingerprint
 from api.work_registry.providers import CalendarNeedsAttention, WorkCourseReads, finding
-from api.work_registry.providers import grading_debt, home_attention, late_work, roster_warnings
+from api.work_registry.providers import grading_debt, home_attention, roster_warnings
 
 
 def _job(kind="grade.debt", course_id="course-1", assignment_id="assignment-1"):
@@ -143,11 +143,6 @@ def test_course_provider_failure_does_not_stop_other_providers(monkeypatch):
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError()),
     )
     monkeypatch.setattr(
-        discovery.late_work,
-        "scan_course",
-        lambda *args, **kwargs: [_job(kind="late.work", assignment_id="late-1")],
-    )
-    monkeypatch.setattr(
         discovery.roster_warnings,
         "scan_course",
         lambda *args, **kwargs: [_job(kind="roster.warning", assignment_id="warning-1")],
@@ -158,17 +153,10 @@ def test_course_provider_failure_does_not_stop_other_providers(monkeypatch):
         {"id": "course-1"}, now="2026-07-11T12:00:00+00:00", deadline=time.monotonic() + 5)
     assert record["stale"] is True
     assert record["error_code"] == "provider_failed"
-    assert {job["assignment_id"] for job in record["findings"]} == {"late-1", "warning-1"}
+    assert {job["assignment_id"] for job in record["findings"]} == {"warning-1"}
 
 
 def test_scan_course_shares_successful_assignment_and_submission_reads(monkeypatch):
-    monkeypatch.setattr(late_work.config, "get_extra_time", lambda course_id: [])
-    monkeypatch.setattr(
-        late_work.school_calendar, "resolve_instructional_range",
-        lambda date_from, date_to, known_schedule_ids, **kw: {
-            "state": "ready", "date_from": date_from, "date_to": date_to,
-            "days": {}, "no_count_dates": [],
-        })
     monkeypatch.setattr(roster_warnings, "scan_course", lambda *args, **kwargs: [])
 
     assignments_path = "/api/v1/courses/course-1/assignments"
@@ -182,7 +170,6 @@ def test_scan_course_shares_successful_assignment_and_submission_reads(monkeypat
             return [
                 {"id": "debt-1", "published": True, "due_at": "2026-07-09T11:00:00+00:00",
                  "submission_types": ["online_text_entry"]},
-                {"id": "late-1", "published": True, "due_at": "2026-07-09T11:00:00+00:00"},
             ], None
         assert path == submissions_path
         assert params == {
@@ -199,14 +186,6 @@ def test_scan_course_shares_successful_assignment_and_submission_reads(monkeypat
                 "score": None,
                 "submission_comments": [],
             },
-            {
-                "assignment_id": "late-1",
-                "user_id": "fictional-learner-2",
-                "workflow_state": "late",
-                "late": True,
-                "submitted_at": "2026-07-11T11:00:00+00:00",
-                "submission_comments": [],
-            },
         ], None
 
     record = discovery._scan_course(
@@ -218,7 +197,7 @@ def test_scan_course_shares_successful_assignment_and_submission_reads(monkeypat
 
     assert record["stale"] is False
     assert {item["kind"] for item in record["findings"]} == {
-        "grade.debt", "late.work",
+        "grade.debt",
     }
     assert calls == {assignments_path: 1, submissions_path: 1}
 
@@ -250,68 +229,8 @@ def test_grading_debt_uses_canvas_state_for_new_quiz_score_and_teacher_comment(m
     assert findings[0]["counts"] == {"total": 2, "pending": 2, "affected": 2}
 
 
-def test_late_work_uses_school_day_and_extra_time(monkeypatch):
-    monkeypatch.setattr(late_work.config, "get_extra_time", lambda course_id: [])
-    monkeypatch.setattr(
-        late_work.school_calendar, "resolve_instructional_range",
-        lambda date_from, date_to, known_schedule_ids, **kw: {
-            "state": "ready", "date_from": date_from, "date_to": date_to,
-            "days": {}, "no_count_dates": [],
-        })
-
-    def fake_get(path, params=None, timeout=None):
-        if path.endswith("/assignments"):
-            return [{"id": 1, "published": True, "due_at": "2026-07-09T11:00:00+00:00"}], None
-        return [{"assignment_id": 1, "user_id": "u-1", "workflow_state": "late",
-                 "submitted_at": "2026-07-11T11:00:00+00:00"}], None
-
-    reads = _reads(fake_get)
-    findings = late_work.scan_course(
-        "course-1", now="2026-07-11T12:00:00+00:00", reads=reads,
-    )
-    assert len(findings) == 1
-    assert findings[0]["kind"] == "late.work"
-    assert findings[0]["counts"]["affected"] == 1
 
 
-def test_late_work_raises_calendar_needs_attention_when_calendar_cannot_cover_the_range(monkeypatch):
-    """A late submission exists, but the calendar can't validate its
-    due/submitted range -- the provider must raise rather than confidently
-    reporting zero late-work findings."""
-    monkeypatch.setattr(late_work.config, "get_extra_time", lambda course_id: [])
-    monkeypatch.setattr(
-        late_work.school_calendar, "resolve_instructional_range",
-        lambda date_from, date_to, known_schedule_ids, **kw: {
-            "state": "unconfigured", "problems": ["unconfigured"], "repair_url": "/calendar",
-        })
-
-    def fake_get(path, params=None, timeout=None):
-        if path.endswith("/assignments"):
-            return [{"id": 1, "published": True, "due_at": "2026-07-09T11:00:00+00:00"}], None
-        return [{"assignment_id": 1, "user_id": "u-1", "workflow_state": "late",
-                 "submitted_at": "2026-07-11T11:00:00+00:00"}], None
-
-    reads = _reads(fake_get)
-    with pytest.raises(CalendarNeedsAttention):
-        late_work.scan_course("course-1", now="2026-07-11T12:00:00+00:00", reads=reads)
-
-
-def test_scan_course_marks_stale_with_calendar_error_code_and_keeps_last_good(monkeypatch):
-    """discovery._scan_course must classify CalendarNeedsAttention distinctly
-    and mark the course stale -- scan_active_courses then falls back to the
-    last-known-good findings rather than confidently reporting zero."""
-    monkeypatch.setattr(grading_debt, "scan_course", lambda *args, **kwargs: [])
-    monkeypatch.setattr(roster_warnings, "scan_course", lambda *args, **kwargs: [])
-    monkeypatch.setattr(discovery.home_attention, "scan_comment_follow_up", lambda *args, **kwargs: [])
-    monkeypatch.setattr(
-        discovery.late_work, "scan_course",
-        lambda *args, **kwargs: (_ for _ in ()).throw(CalendarNeedsAttention()),
-    )
-
-    record = discovery._scan_course(
-        {"id": "course-1"}, now="2026-07-11T12:00:00+00:00", deadline=time.monotonic() + 5)
-    assert record["stale"] is True
-    assert record["error_code"] == "calendar_needs_attention"
 
 
 def test_comment_follow_up_classifier_is_ordered_conservative_and_ta_aware():

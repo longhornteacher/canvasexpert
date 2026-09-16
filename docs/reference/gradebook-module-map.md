@@ -15,9 +15,7 @@ As of 2026-07-08, Gradebook is split on both sides:
 - Backend shared Canvas helpers: `api/webui/routes/gradebook_common.py`
 - Backend feature routers:
   - `api/webui/routes/gradebook_policy.py`
-  - `api/webui/routes/gradebook_sweep.py`
   - `api/webui/routes/gradebook_extra_time.py`
-  - `api/webui/routes/gradebook_extensions.py`
   - `api/webui/routes/gradebook_curves.py`
   - `api/webui/routes/gradebook_snapshot.py`
 - Shared grade math and event storage: `api/webui/gradebook_service.py`
@@ -29,9 +27,7 @@ Facade include order:
 1. `gradebook_snapshot.py`
 2. `gradebook_policy.py`
 3. `gradebook_extra_time.py`
-4. `gradebook_extensions.py`
-5. `gradebook_sweep.py`
-6. `gradebook_curves.py`
+4. `gradebook_curves.py`
 
 ## Source-size reports
 
@@ -49,13 +45,11 @@ reports; this map intentionally does not maintain line-count snapshots.
 Feature ownership:
 
 - `gradebook_policy.py` - late-policy load/apply flow
-- `gradebook_sweep.py` - late-work sweep preview/apply flow
 - `gradebook_extra_time.py` - extra-time roster, student list, tier tags
-- `gradebook_extensions.py` - due-date extension tools
 - `gradebook_curves.py` - curve preview/apply/history/revert
 - `gradebook_snapshot.py` - whole-course grading snapshot
 - `gradebook_common.py` - shared Canvas fetch helpers used by the route modules
-- `gradebook_service.py` - shared sweep math, curve math, and curve event storage
+- `gradebook_service.py` - shared curve math and curve event storage
 
 Assistant-operated SIS grade bridges do not belong to this Web UI facade. Start with the
 [SIS Grade Bridges guide](../guides/sis-grade-bridges.md), then follow its exact contract and
@@ -75,8 +69,6 @@ Feature ownership:
 
 - `policy.js` - late-policy load/apply flow
 - `extra_time.js` - extra-time roster and save flow
-- `extensions.js` - due-date extension tools
-- `sweep.js` - late-work sweep preview/apply flow
 - `curves.js` - curve preview/apply/history/revert
 - `snapshot.js` - whole-course grading snapshot
 
@@ -85,7 +77,7 @@ Namespace seams:
 - backend import seam: `api.webui.routes.gradebook`
 - browser shared namespace: `window.CE_GRADEBOOK`
   - shared helpers such as `postForm`, `showBanner`, `showLog`, `gbCourseId`
-  - mutable accessors for `sweepEntries` and `curveResults`
+  - mutable accessors for `curveResults`
 
 ## First places to look by symptom
 
@@ -95,13 +87,6 @@ Namespace seams:
 - extra-time problems:
   - `gradebook_extra_time.py`
   - `gradebook_common.py` if student list fetches are failing
-- extension problems:
-  - `gradebook_extensions.py`
-  - `gradebook_common.py` for assignment fetch helpers
-- sweep problems:
-  - `gradebook_sweep.py`
-  - `gradebook_service.py`
-  - `gradebook_common.py` if Canvas fetches are failing
 - curve problems:
   - `gradebook_curves.py`
   - `gradebook_service.py`
@@ -120,6 +105,6 @@ Namespace seams:
 - put new backend behavior into `gradebook_*.py` feature files instead of growing
   the facade
 - use `gradebook_common.py` only for shared Canvas fetch helpers
-- use `gradebook_service.py` for sweep math, curve math, and curve event storage
+- use `gradebook_service.py` for curve math and curve event storage
 - keep `window.CE_GRADEBOOK` for browser shared helpers instead of copying fetch
   helpers across tabs
