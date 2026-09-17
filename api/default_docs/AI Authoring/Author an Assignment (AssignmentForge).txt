@@ -185,16 +185,46 @@ not full exemplars and do not apply to open-ended CREATE work; that work keeps
 the normal freeform Glows & Grows feedback.
 
 ## 6. HTML STYLE GUIDE (student-facing polish)
+
+### Structure & Layout
 - Structure the description: an `<h2>` task title or hook, a short "What you'll do" paragraph, `<h3>` sections (Directions, Requirements, How you'll be graded), `<ol>/<ul>` for steps and criteria.
 - Tables (`<table>`) are good for rubric summaries and requirement checklists. Keep inline styles minimal and readable; Canvas strips `<script>`/`<style>` blocks, so use inline `style="…"` sparingly for accents (borders, background tints).
 - Bold key nouns and verbs students must act on. Keep paragraphs short (2–3 sentences).
 - Write at the audience's reading level from `metadata.grade`.
+- Use visual hierarchy: clear headings, white space, bullet points, and numbered lists to guide students through the task.
+
+### Visual Polish
+- Ensure all HTML renders cleanly and professionally in Canvas. Use semantic HTML (`<p>`, `<strong>`, `<em>`, `<h2>`–`<h4>`) rather than inline styling where possible.
+- Add subtle borders or background colors to highlight key sections (scaffolding, resources, grading criteria) using inline `style="border: 1px solid #ccc; padding: 1rem; background-color: #f9f9f9;"` patterns.
+- Align lists and numbered steps consistently.
+- Test that the layout is readable on mobile (Canvas is often accessed on phones).
+
+### Crystal-Clear Student Expectations
+- Include an explicit **"What You'll Do"** or **"Task"** section that tells students exactly how they will complete the work:
+  - **"Answer these questions on paper and be prepared to discuss in class"** (thinking/discussion task, no submission)
+  - **"Write your response in a Word document and upload it to Canvas"** (written submission)
+  - **"Read the chapter and take notes in your textbook"** (reading task with physical notes, no submission)
+  - **"Think about the following questions and discuss with a partner"** (collaborative thinking task)
+  - **"Submit a Google Doc link showing your work"** (external tool submission)
+  - **"Record a video and upload it"** (media submission)
+- State where students submit (Canvas text box, file upload, on paper, etc.) and what format is expected.
+- If the work is thinking-based with no formal submission, say so explicitly: *"This is a reflection task. You don't submit anything, but be ready to share your thinking in class."*
 
 ### Course-resource placeholders (resolved per course at push time)
 Because one payload may push to many courses (where file/page IDs differ), never hardcode Canvas IDs. Use placeholders:
 - `{{file:NAME.ext}}` → a link to the course file whose name matches `NAME.ext` (e.g., `{{file:Essay Rubric.pdf}}`)
 - `{{page:Page Title}}` → a link to the course page with that title
 - The push tool resolves each placeholder per course and warns when no match exists. Plain external links are just normal `<a href="https://…">` HTML — no placeholder needed.
+
+### Allowed Resources & Tools
+Always link external resources students are **explicitly allowed** to use. Common approved tools and references:
+- **Dictionary & Vocabulary:** `<a href="https://www.dictionary.com/" target="_blank">Dictionary.com</a>`, Merriam-Webster, Spanish/bilingual dictionaries
+- **Writing & Research:** `<a href="https://owl.purdue.edu/owl/index.html" target="_blank">Purdue OWL (Online Writing Lab)</a>`, citation guides
+- **Classroom Tools via Clever:** `<a href="https://clever.com/" target="_blank">Clever</a>` (math apps, writing tools, research databases your school provides)
+- **Math & Science:** Desmos calculator, Khan Academy, subject-specific tools your school licenses
+- **Accessibility:** Text-to-speech readers, spell-check, auto-translate tools (if permitted per assignment)
+
+Include these as a "Resources You Can Use" section with clickable links. If a resource requires special access (school login, etc.), note that in parentheses: `<a href="https://example.com">Example Database</a> (school login required)`. Never require students to use an unapproved tool, and always provide alternatives for essential tasks.
 
 ## 7. VALIDATION RULES (tools enforce these)
 1. Envelope present, JSON parses, `version` is `"1.0-json"`.
@@ -220,15 +250,15 @@ Because one payload may push to many courses (where file/page IDs differ), never
   "points": 100,
   "metadata": { "subject": "ELA", "grade": 7, "teks": "110.23(b)(11)" },
   "submission": { "types": ["online_text_entry", "online_upload"], "allowed_extensions": ["pdf", "docx"] },
-  "description": "<h2>Found Poetry: Remix the Article</h2><p>You will turn the article we read this week into a <strong>found poem</strong> — a poem built entirely from words and phrases you select from the original text.</p><h3>Directions</h3><ol><li>Re-read the article and highlight 15–25 words or phrases that stand out.</li><li>Arrange your selections into a poem of at least 10 lines.</li><li>Give your poem an original title (not the article's title).</li></ol><h3>Requirements</h3><ul><li>Every word must come from the article.</li><li>At least 10 lines.</li><li>Original title.</li></ul><p>Need the rubric? {{file:Found Poetry Rubric.pdf}}</p>",
+  "description": "<h2>Found Poetry: Remix the Article</h2><p>You will turn the article we read this week into a <strong>found poem</strong> — a poem built entirely from words and phrases you select from the original text.</p><div style=\"border-left: 4px solid #0066cc; padding: 1rem; background-color: #f0f4ff; margin: 1rem 0;\"><h3 style=\"margin-top: 0;\">What You'll Do</h3><p><strong>Write a found poem on your own.</strong> Type or handwrite your poem on paper or in a Word document, then upload your work to Canvas. (If you write on paper, take a clear photo and upload it as a PDF or image.)</p></div><h3>Directions</h3><ol><li>Re-read the article and highlight 15–25 words or phrases that stand out.</li><li>Arrange your selections into a poem of at least 10 lines.</li><li>Give your poem an original title (not the article's title).</li></ol><h3>Requirements</h3><ul><li>Every word must come from the article.</li><li>At least 10 lines.</li><li>Original title.</li></ul><h3>Resources You Can Use</h3><ul><li><a href=\"https://www.dictionary.com/\" target=\"_blank\">Dictionary.com</a> — Look up word meanings and origins</li><li><a href=\"https://owl.purdue.edu/owl/index.html\" target=\"_blank\">Purdue OWL</a> — Tips on poetry writing and grammar</li></ul><p><strong>Need the rubric?</strong> {{file:Found Poetry Rubric.pdf}}</p>",
   "tiers": [
     { "label": "Support",
-      "scaffolding": "<div><h3>Helpful supports</h3><ul><li>Start by circling 10 <em>nouns</em> and 5 <em>verbs</em> that feel powerful.</li><li>Try this frame for your first line: \"<em>(a place or time from the article)</em>, where <em>(something happens)</em>.\"</li><li>Lines can be short — even one word.</li></ul></div>" },
+      "scaffolding": "<div style=\"border-left: 4px solid #ffa500; padding: 1rem; background-color: #fff9f0; margin-top: 1rem;\"><h3 style=\"margin-top: 0;\">Helpful Supports</h3><ul><li>Start by circling 10 <em>nouns</em> and 5 <em>verbs</em> that feel powerful.</li><li>Try this frame for your first line: \"<em>(a place or time from the article)</em>, where <em>(something happens)</em>.\"</li><li>Lines can be short — even one word.</li></ul></div>" },
     { "label": "Core" },
     { "label": "Accelerate",
-      "scaffolding": "<div><h3>Go further</h3><p>Add a 3–4 sentence artist's statement explaining one deliberate choice you made about line breaks or word order.</p></div>" },
+      "scaffolding": "<div style=\"border-left: 4px solid #28a745; padding: 1rem; background-color: #f0fff4; margin-top: 1rem;\"><h3 style=\"margin-top: 0;\">Go Further</h3><p>Add a 3–4 sentence artist's statement explaining one deliberate choice you made about line breaks or word order.</p></div>" },
     { "label": "Extend",
-      "scaffolding": "<div><h3>Extend</h3><p>Write a second found poem from the <em>same</em> article that takes the opposite stance, then add a short paragraph analyzing how word choice alone shifted the tone.</p></div>" }
+      "scaffolding": "<div style=\"border-left: 4px solid #6f42c1; padding: 1rem; background-color: #f8f5ff; margin-top: 1rem;\"><h3 style=\"margin-top: 0;\">Extend Your Thinking</h3><p>Write a second found poem from the <em>same</em> article that takes the opposite stance, then add a short paragraph analyzing how word choice alone shifted the tone.</p></div>" }
   ]
 }
 </ASSIGNMENTFORGE_JSON>

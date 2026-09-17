@@ -41,6 +41,11 @@ Useful starting references for new debugging and refactor sessions:
 - `docs/reference/powergrader-module-map.md` - internal/private Scoring Session backend module map (legacy filename); no teacher-facing scoring UI remains.
 - `docs/reference/gradebook-module-map.md` - Gradebook route/script ownership and feature routing map.
 - `docs/reference/roster-module-map.md` - Roster route/script ownership and current hotspot map.
+- `docs/reference/assignment-corrections-design.md` - accepted private correction behavior for
+  AssignmentForge results, its exact-ID association, and the remaining bounded constraints.
+- `docs/reference/authoring-contract-drift.md` - three audited divergences between the live authoring
+  contract, the synced workspace playbook, and how differentiated families are actually built,
+  including which findings are resolved in `dev`.
 
 ## Handoff Convention
 
