@@ -67,3 +67,48 @@ def test_tiered_content_rejects_authored_group_field():
         "tiers": [{"label": "Support", "group": "Blue"}, {"label": "Core"}],
     }
     assert any("group is not permitted" in problem for problem in af.validate(data))
+
+
+def test_support_blocks_render_as_static_boxes_with_tier_specific_language():
+    data = {
+        "version": "1.0-json", "type": "ASSIGNMENT", "title": "Tiered",
+        "description": "body",
+        "tiers": [
+            {"label": "Support"}, {"label": "Core"}, {"label": "Accelerate"},
+        ],
+        "supports": {
+            "Support": {"stem_frame": ["The author reveals ___ because ___."]},
+            "Core": {"scaffold": "bullet", "verb_bank": ["reveals", "conveys"]},
+            "Accelerate": {"verb_bank": ["qualify", "synthesize"]},
+        },
+    }
+
+    rows = af.tier_payloads(data)
+
+    assert "Complete the sentence:" in rows[0]["description"]
+    assert "Word bank:" in rows[1]["description"]
+    assert "Push your analysis with verbs like:" in rows[2]["description"]
+    assert all("<details>" not in row["description"] and "<summary>" not in row["description"]
+               for row in rows)
+    assert "&lt;" not in rows[0]["description"]
+
+
+def test_supports_and_corrections_validate_additively():
+    data = {
+        "version": "1.0-json", "type": "ASSIGNMENT", "title": "Tiered",
+        "description": "body", "tiers": [{"label": "Support"}, {"label": "Core"}],
+        "supports": {}, "corrections": {},
+    }
+    assert af.validate(data) == []
+
+    data["corrections"] = {
+        "item-1": {"shared": {"answer": "Use walk.", "why": "Present tense."},
+                   "by_tier": None},
+    }
+    assert af.validate(data) == []
+
+    data["corrections"]["item-2"] = {
+        "shared": {"answer": "A", "why": "B"},
+        "by_tier": {"red": {"answer": "C", "why": "D"}},
+    }
+    assert any("exactly one of shared or by_tier" in problem for problem in af.validate(data))

@@ -106,6 +106,17 @@ submit refusal occurs before result validation, re-identification, Canvas planni
 call. Activation and final submission are serialized by one deterministic course/assignment
 scope lock, and the lock order is scope, then session.
 
+AssignmentForge corrections are a private, teacher-authored scoring aid. When a
+submitted result is below the packet item's met/full-credit threshold and the
+private authored envelope contains an exact `item_id` correction, Canvas Expert
+appends one plain-text `📋 COPY THIS:` block containing `Answer` and `Why` to the
+existing feedback before it reaches Canvas `comment[text_comment]`. Shared
+corrections are used for prompt-identical parts; tier-specific corrections are
+selected from the exact AssignmentForge tier/tag associated with the created
+assignment. Missing corrections, full-credit results, and CREATE/open-ended
+parts retain the submitted Glows & Grows text unchanged. The correction library
+never enters the SAFE packet or MCP response.
+
 Teacher guidance remains available privately in full for the session record. When oversized,
 its effective model and packet projection carries the compaction marker and counts above;
 those counts are the signal that effective text was omitted. Ordinary assignments use the

@@ -149,6 +149,43 @@ def test_payload_build_accepts_tiers(tmp_path, monkeypatch):
     }]
 
 
+def test_payload_keeps_supports_and_corrections_private_to_the_operation(tmp_path, monkeypatch):
+    af_file = tmp_path / "tiered.assignmentforge.txt"
+    af_file.write_text(
+        """<ASSIGNMENTFORGE_JSON>
+{"version":"1.0-json","type":"ASSIGNMENT","title":"Tiered","description":"<p>Hi</p>",
+ "tiers":[{"label":"Support"},{"label":"Core"},{"label":"Accelerate"}],
+ "supports":{"silver":{"stem_frame":["The author reveals ___."]},
+              "red":{"scaffold":"bullet","verb_bank":["reveals"]},
+              "blue":{"verb_bank":["synthesize"]}},
+ "corrections":{"item-1":{"shared":{"answer":"Use walk.","why":"Present tense."},"by_tier":null}}}
+</ASSIGNMENTFORGE_JSON>""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("api.platform_services.config.get_tier_tags", lambda: {
+        "Support": "Silver", "Core": "Red", "Accelerate": "Blue",
+    })
+    monkeypatch.setattr("api.platform_services.config.get_canvas_base",
+                        lambda: "https://canvas.invalid")
+
+    payload = AssignmentAdapter().build_payload({"path": str(af_file)})
+
+    assert payload["supports"]["silver"]["stem_frame"]
+    assert payload["corrections"]["item-1"]["shared"]["answer"] == "Use walk."
+    assert "Complete the sentence:" in payload["tiers"][0]["description"]
+    assert "Word bank:" in payload["tiers"][1]["description"]
+    assert "Push your analysis with verbs like:" in payload["tiers"][2]["description"]
+    assert "<details>" not in "".join(row["description"] for row in payload["tiers"])
+
+    from api.operation_ledger.adapters.assignment_tiered import _assignment_data
+    canvas_body = _assignment_data(
+        payload, payload["tiers"][0]["title"], payload["tiers"][0]["description"],
+        "course-1", lambda *_args: None,
+    )
+    assert "supports" not in canvas_body
+    assert "corrections" not in canvas_body
+
+
 def test_payload_build_raises_on_placeholders(tmp_path, monkeypatch):
     af_file = tmp_path / "placeholder.assignmentforge.json"
     af_file.write_text(

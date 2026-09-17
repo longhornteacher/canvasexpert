@@ -248,6 +248,22 @@ def test_ordinary_text_preparation_saves_one_assignment_session(monkeypatch, tmp
     assert all("parent" not in key for key in session)
 
 
+def test_preparation_keeps_private_assignmentforge_corrections_on_the_session(monkeypatch, tmp_path):
+    saved, prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(
+        rubric=[{"description": "Reasoning", "points": 10, "ratings": []}],
+    ))
+    monkeypatch.setattr(scoring_preparation.assignmentforge, "for_assignment", lambda *_args: {
+        "tier": "Red",
+        "corrections": {"item-1": {"shared": {"answer": "A", "why": "B"}, "by_tier": None}},
+    })
+
+    result = prepare()
+
+    session = saved[result["scoring_session_id"]]
+    assert session["assignmentforge_tier"] == "Red"
+    assert session["assignmentforge_corrections"]["item-1"]["shared"]["answer"] == "A"
+
+
 def test_mirror_failure_is_typed_and_identity_safe(monkeypatch, tmp_path):
     monkeypatch.setattr(scoring_preparation.workspace, "workspace_root", lambda: str(tmp_path))
     monkeypatch.setattr(scoring_preparation.assignment_refresh, "prepare_assignment_from_mirror",

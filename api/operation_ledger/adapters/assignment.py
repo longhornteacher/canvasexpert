@@ -57,11 +57,19 @@ class AssignmentAdapter:
             tags = differentiated_bridge.resolve_public_tags(
                 [row["label"] for row in tiers]
             )
+            tiers = [
+                {
+                    **row,
+                    **resolved,
+                }
+                for row, resolved in zip(
+                    af.add_supports(tiers, data.get("supports"), tags), tags
+                )
+            ]
             base_title = differentiated_bridge.normalize_base_title(name)
-            for row, resolved in zip(tiers, tags):
-                row.update(resolved)
+            for row in tiers:
                 row["title"] = differentiated_bridge.source_title(
-                    base_title, resolved["tag"]
+                    base_title, row["tag"]
                 )
 
         description = str(data.get("description") or "")
@@ -91,6 +99,10 @@ class AssignmentAdapter:
         if tiers:
             payload["tiers"] = tiers
             payload["base_title"] = base_title
+        if data.get("supports"):
+            payload["supports"] = data["supports"]
+        if data.get("corrections"):
+            payload["corrections"] = data["corrections"]
         if sub_fields.get("allowed_extensions"):
             payload["allowed_extensions"] = sub_fields["allowed_extensions"]
         if sub_fields.get("external_tool_tag_attributes"):
@@ -136,6 +148,8 @@ class AssignmentAdapter:
             "module_name": payload.get("module_name"),
             "tiers": payload.get("tiers"),
             "base_title": payload.get("base_title"),
+            "supports": payload.get("supports"),
+            "corrections": payload.get("corrections"),
         }
         return models.sha256_dict(keys)
 

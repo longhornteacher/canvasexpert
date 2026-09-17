@@ -40,7 +40,9 @@ If any condition is unmet, the assignment is eligible for teacher review only �
   "points": 100,
   "submission": { ... },
   "metadata": {},
-  "tiers": [ ... ]
+  "tiers": [ ... ],
+  "supports": { ... },
+  "corrections": { ... }
 }
 </ASSIGNMENTFORGE_JSON>
 ```
@@ -52,6 +54,8 @@ If any condition is unmet, the assignment is eligible for teacher review only �
 - `submission` (optional, object): see Section 4. Defaults to `{ "types": ["online_text_entry"] }`.
 - `metadata` (optional): free-form notes (subject, grade, `teks` standard codes). Students never see metadata; tools may ignore unknown keys.
 - `tiers` (optional, array): differentiation tiers — see Section 5. Omit entirely for a whole-class assignment.
+- `supports` (optional, object): additive per-tier scaffolds — see Section 5.1. Omit it when no standing support block is needed.
+- `corrections` (optional, object): teacher-approved, item-keyed answer fixes for scoring — see Section 5.2. Omit it for assignments with no discrete/checkable parts.
 
 ### Writing portions split from New Quizzes
 
@@ -133,6 +137,53 @@ The teacher reviews the independent drafts in Canvas, assigns them, and publishe
 and rigor of coverage flex — never the objective, never a watered-down standard. Support is
 *access to the same work*, not a smaller version of it.
 
+### 5.1 Standing support blocks
+
+`supports` is keyed by either the canonical tier label (`Support`, `Core`,
+`Accelerate`, `Extend`) or that tier's configured public Canvas tag. Keys are
+case-insensitive, so a teacher using `silver`, `red`, and `blue` tags can keep
+those names in the envelope without changing the canonical tier labels.
+
+```json
+"supports": {
+  "silver": { "stem_frame": ["The setting reveals ___ because ___."] },
+  "red": { "scaffold": "bullet", "verb_bank": ["demonstrates", "reveals", "conveys"] },
+  "blue": { "verb_bank": ["evaluate", "qualify", "synthesize"] }
+}
+```
+
+`stem_frame` renders as a Silver-style “Complete the sentence” box, a Red
+entry with `scaffold` renders as a “Word bank” box alongside the existing
+structural scaffold, and a Blue/Accelerate/Extend entry without `scaffold`
+renders as a challenge: “Push your analysis with verbs like:”. Use the
+Tier 2/Tier 3 vocabulary model in the ELA authoring references for the word
+bank; do not invent a new vocabulary list just for the renderer. Each block is
+a static styled `<div>` so it remains visible in Canvas. Do not use
+`<details>`, `<summary>`, scripts, or block-level styles.
+
+### 5.2 Teacher-approved corrections
+
+`corrections` is stored in the local AssignmentForge envelope, not in Canvas's
+rubric object. Its keys must be the exact `item_id` values already exposed by
+the Scoring Session packet. Each entry sets exactly one of `shared` or
+`by_tier`, never both and never neither:
+
+```json
+"corrections": {
+  "<packet item_id>": {
+    "shared": { "answer": "Change walked to walk.", "why": "The sentence uses present tense." },
+    "by_tier": null
+  }
+}
+```
+
+For a scaled prompt, replace the `shared` object with a non-empty `by_tier`
+object whose keys are canonical labels or configured public tags and whose
+values are `{ "answer": "...", "why": "..." }`. Corrections apply only when
+the scored part is below the packet item's met/full-credit threshold. They are
+not full exemplars and do not apply to open-ended CREATE work; that work keeps
+the normal freeform Glows & Grows feedback.
+
 ## 6. HTML STYLE GUIDE (student-facing polish)
 - Structure the description: an `<h2>` task title or hook, a short "What you'll do" paragraph, `<h3>` sections (Directions, Requirements, How you'll be graded), `<ol>/<ul>` for steps and criteria.
 - Tables (`<table>`) are good for rubric summaries and requirement checklists. Keep inline styles minimal and readable; Canvas strips `<script>`/`<style>` blocks, so use inline `style="…"` sparingly for accents (borders, background tints).
@@ -153,6 +204,11 @@ Because one payload may push to many courses (where file/page IDs differ), never
    labels are unique canonical tier names. Each used public tag must exist and be unique in
    Settings before delivery.
 5. `points` ≥ 0 when present.
+6. `supports` entries use `stem_frame`/`verb_bank` string arrays and an optional
+   `scaffold` of `bullet` or `outline`.
+7. Every `corrections` entry sets exactly one non-empty `shared` correction or
+   non-empty `by_tier` correction map, and every correction has non-empty
+   `answer` and `why` strings.
 
 ## 8. FULL EXAMPLE
 ```

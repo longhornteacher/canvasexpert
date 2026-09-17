@@ -18,6 +18,7 @@ from api.nq_report import html_to_text
 from api.platform_services import config, workspace
 from api.powergrader import (
     assignment_refresh,
+    assignmentforge,
     media_recordings,
     scoring_artifacts,
     session_builder,
@@ -447,6 +448,11 @@ def prepare_scoring_session(
     session["feedback_pattern_id"] = "basic"
     session["scoring_basis"] = scoring_basis
     session["scoring_rubric_text"] = complete_guidance if complete_guidance is not None else rubric_text_override
+    assignmentforge_metadata = assignmentforge.for_assignment(course_id, assignment_id)
+    if assignmentforge_metadata.get("corrections"):
+        session["assignmentforge_corrections"] = assignmentforge_metadata["corrections"]
+        if assignmentforge_metadata.get("tier"):
+            session["assignmentforge_tier"] = assignmentforge_metadata["tier"]
     if guidance_projection is not None:
         session["effective_scoring_rubric_text"] = rubric_text_override
         session["scoring_guidance_projection"] = guidance_projection

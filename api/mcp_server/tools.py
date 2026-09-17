@@ -2102,7 +2102,7 @@ def _submit_scoring_results_locked(scoring_session_id: str, results: list,
     No result content or real identity is returned, including on failure.
     """
     from api import feedback_pipeline as fp
-    from api.powergrader import scoring_packet as sp, session_store
+    from api.powergrader import corrections, scoring_packet as sp, session_store
 
     # The caller holds the scope lock from the first authoritative currentness
     # check through validation, planning, Canvas apply, and terminal recording.
@@ -2142,6 +2142,12 @@ def _submit_scoring_results_locked(scoring_session_id: str, results: list,
                 "error": "Results must match the supplied pseudonyms and item ids and contain valid feedback.",
                 "validation": {"errors": len(verdict.get("errors") or []),
                                "warnings": len(verdict.get("warnings") or [])}}
+    results = corrections.inject(
+        results,
+        safe_bundle,
+        corrections=session.get("assignmentforge_corrections") or {},
+        tier=str(session.get("assignmentforge_tier") or ""),
+    )
     try:
         rows = fp.reidentify(results, vault)
     except Exception:

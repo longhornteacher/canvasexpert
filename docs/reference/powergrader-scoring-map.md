@@ -63,6 +63,9 @@ write authorization. Canvas Live is the only review/edit surface.
   unchanged results, packet digest, and exact review digest. Failures and ambiguous
   writes fail closed and are never blindly retried.
 - Student-facing feedback is not labeled AI unless the teacher asked. Glows & Grows is the default feedback shape.
+- AssignmentForge correction libraries remain private in the local operation/session records;
+  the submit path may append one `📋 COPY THIS:` answer/why block to a missed exact packet
+  item before the existing `comment[text_comment]` write. They never enter SAFE packet output.
 - Canvas Expert has no hosted scoring model, teacher-facing scoring queue, local approval screen,
   manual result-import flow, scheduled auto-score, late AI catch-up, or teacher-facing
   PowerGrader HTTP/UI surface.

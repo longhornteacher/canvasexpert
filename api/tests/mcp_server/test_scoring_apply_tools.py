@@ -125,6 +125,29 @@ def test_ordinary_results_submit_once_without_exposing_private_identity(
     assert session["students"][0]["ai_score"] == 8
 
 
+def test_submit_injects_private_assignmentforge_correction_before_canvas_feedback(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    session["assignmentforge_corrections"] = {
+        "item-1": {"shared": {"answer": "Use walk.", "why": "Present tense."}, "by_tier": None},
+    }
+    from api.powergrader import scoring_apply
+    monkeypatch.setattr(scoring_apply, "build_plan", lambda candidate, **_kw: (
+        {"ok": True, "candidate_ids": [REAL_ID], "questions": [],
+         "digest": "frozen-review", "notes": []}
+    ))
+    monkeypatch.setattr(scoring_apply, "apply_plan", lambda *_args, **_kwargs: (
+        {"ok": True, "pushed": [REAL_ID], "results": [{"user_id": REAL_ID, "status": "pushed"}]}, 200
+    ))
+
+    result = tools.submit_scoring_results("session-1", _result(8), _digest(bundle))
+
+    assert result["counts"]["finalized"] == 1
+    assert "📋 COPY THIS:" in session["students"][0]["ai_feedback"]
+    assert session["students"][0]["ai_feedback"].endswith("Why: Present tense.")
+
+
 def test_question_blocks_write_then_matching_digest_and_answer_submit_same_results(
     monkeypatch, tmp_path, _set_active_courses,
 ):
