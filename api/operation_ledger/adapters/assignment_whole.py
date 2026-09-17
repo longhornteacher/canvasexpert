@@ -24,6 +24,7 @@ from .module_placement import attach_assignment_type_module_item
 from api import operational_log
 from api.platform_services import canvas_client
 from api.platform_services import config
+from api.student_text import normalize_student_text
 
 
 def execute(
@@ -38,7 +39,7 @@ def execute(
     read_modules,
 ) -> dict:
     course_id = target["course_id"]
-    name = payload.get("name", "Untitled assignment")
+    name = normalize_student_text(payload.get("name", "Untitled assignment"))
     steps = ordered_steps(target)
     step = prepend_step(steps, "create_assignment")
     assignment_id = target.get("returned_object_id") or step.get("returned_object_id")
@@ -146,7 +147,7 @@ def _create_assignment(
     find_assignment_group,
 ) -> tuple[str | None, str | None, dict | None]:
     printable_path = payload.get("printable_path")
-    description = payload.get("description")
+    description = normalize_student_text(payload.get("description"))
     if printable_path:
         uploaded, upload_err = upload_course_file(course_id, printable_path)
         if upload_err:
@@ -157,7 +158,9 @@ def _create_assignment(
                 private_diagnostic=upload_err,
             )
         file_link = file_link_html(uploaded)
-        description = "\n".join(part for part in (description, file_link) if part)
+        description = normalize_student_text(
+            "\n".join(part for part in (description, file_link) if part)
+        )
 
     assignment_data = {"name": name, "submission_types": payload.get("submission_types", ["online_text_entry"])}
     if description:

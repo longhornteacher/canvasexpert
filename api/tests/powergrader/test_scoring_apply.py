@@ -40,6 +40,15 @@ def _answer_all(plan, choice_index=0):
     return {q["id"]: q["options"][choice_index] for q in plan["questions"]}
 
 
+def test_scoring_session_canvas_feedback_contains_no_em_dashes():
+    payload = session_actions._payload({
+        "teacher_score": 8,
+        "teacher_feedback": "Strong claim \u2014 add evidence.",
+    })
+
+    assert payload["comment"]["text_comment"] == "Strong claim - add evidence."
+
+
 # ── The plan ────────────────────────────────────────────────────────────────
 
 

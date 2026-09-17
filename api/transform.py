@@ -10,6 +10,8 @@ their HTML into the attached items' bodies before transform runs.
 import re
 import uuid
 
+from api.student_text import normalize_student_text
+
 
 def _u():
     return str(uuid.uuid4())
@@ -403,8 +405,19 @@ BUILDERS = {
 }
 
 
+def _normalize_canvas_payload(value):
+    """Normalize every text value that will be displayed by New Quizzes."""
+    if isinstance(value, dict):
+        return {key: _normalize_canvas_payload(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_canvas_payload(item) for item in value]
+    if isinstance(value, str):
+        return normalize_student_text(value)
+    return value
+
+
 def build_item(qf_item, position):
     t = qf_item["type"]
     if t not in BUILDERS:
         raise ValueError(f"No transformer for QF type {t!r}")
-    return BUILDERS[t](qf_item, position)
+    return _normalize_canvas_payload(BUILDERS[t](qf_item, position))

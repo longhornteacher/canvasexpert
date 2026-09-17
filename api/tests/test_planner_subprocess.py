@@ -61,6 +61,28 @@ def test_plan_round_trips_glyphs_the_windows_codepage_cannot_encode():
         assert glyph in str(plan["items"])
 
 
+def test_quiz_plan_normalizes_title_and_item_text(tmp_path):
+    path = tmp_path / "student-facing.quizforge.txt"
+    path.write_text(
+        "<QUIZFORGE_JSON>\n" + json.dumps({
+            "version": "3.0-json",
+            "title": "Unit \u2014 check",
+            "items": [{
+                "id": "q1", "type": "TF",
+                "prompt": "The claim \u2014 is it true?", "answer": True,
+            }],
+            "rationales": [],
+        }) + "\n</QUIZFORGE_JSON>\n",
+        encoding="utf-8",
+    )
+
+    plan = qf_pusher.build_push_plan(path)
+
+    assert plan["title"] == "Unit - check"
+    assert plan["quiz_payload"]["quiz"]["title"] == "Unit - check"
+    assert "\u2014" not in repr(plan)
+
+
 def test_planner_child_gets_utf8_no_stdin_and_no_canvas_credentials(monkeypatch):
     seen = {}
 

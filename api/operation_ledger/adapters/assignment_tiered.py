@@ -10,6 +10,7 @@ from .adapter_support import (
     is_uncertain as _is_uncertain,
 )
 from api.platform_services import canvas_client
+from api.student_text import normalize_student_text
 
 
 def execute(
@@ -143,7 +144,7 @@ def _assignment_data(
     find_assignment_group,
 ) -> dict:
     data = {
-        "name": title,
+        "name": normalize_student_text(title),
         "submission_types": payload.get("submission_types", ["online_text_entry"]),
         "grading_type": "points",
         "only_visible_to_overrides": False,
@@ -153,7 +154,7 @@ def _assignment_data(
         "published": False,
     }
     if description:
-        data["description"] = description
+        data["description"] = normalize_student_text(description)
     if payload.get("points") is not None:
         data["points_possible"] = float(payload["points"])
     for key in ("allowed_extensions", "external_tool_tag_attributes"):

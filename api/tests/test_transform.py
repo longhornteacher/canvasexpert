@@ -1,5 +1,26 @@
 """Examples for the auto-graded Canvas New Quiz transforms."""
-from api.transform import t_fitb
+from api.transform import build_item, t_fitb
+
+
+def test_new_quiz_student_payload_contains_no_em_dashes():
+    item = {
+        "id": "q1",
+        "type": "MC",
+        "prompt": "<p>Which path \u2014 if any \u2014 is correct?</p>",
+        "choices": [
+            {"id": "A", "text": "This one \u2014 yes", "correct": True},
+            {"id": "B", "text": "That one", "correct": False},
+        ],
+        "_rationale": {
+            "item_id": "q1",
+            "choices": [
+                {"id": "A", "correct": True, "rationale": "It fits \u2014 exactly."},
+                {"id": "B", "correct": False, "rationale": "It does not fit."},
+            ],
+        },
+    }
+
+    assert "\u2014" not in repr(build_item(item, 1))
 
 
 def test_per_choice_feedback_reads_as_sentences_not_a_because_clause():

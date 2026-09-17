@@ -18,6 +18,7 @@ from .adapter_support import (
     replace_step as _replace_local_step,
 )
 from api.platform_services import canvas_client, config
+from api.student_text import normalize_student_text
 
 
 KIND = "content.quick_assignment"
@@ -29,7 +30,7 @@ class QuickAssignmentAdapter:
     # ── Payload ──────────────────────────────────────────────────────────
 
     def build_payload(self, prepare_request: dict) -> dict:
-        name = str(prepare_request.get("name") or "").strip()
+        name = normalize_student_text(prepare_request.get("name") or "").strip()
         if not name:
             raise ValueError("name is required")
         points = float(prepare_request.get("points") or 100)
@@ -162,7 +163,7 @@ class QuickAssignmentAdapter:
         claim: dict, context,
     ) -> dict:
         course_id = target["course_id"]
-        name = payload.get("name", "Untitled")
+        name = normalize_student_text(payload.get("name", "Untitled"))
         steps = _ordered_steps(target)
         step = _step(steps, "create_assignment")
         assignment_id = target.get("returned_object_id") or step.get(

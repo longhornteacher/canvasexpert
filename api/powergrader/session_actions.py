@@ -11,6 +11,7 @@ from functools import wraps
 from api.powergrader import attribution
 from api.powergrader import blind_first
 from api.powergrader import session_store
+from api.student_text import normalize_student_text
 
 
 REVIEW_TTL = timedelta(minutes=15)
@@ -75,8 +76,10 @@ def _payload(student: dict) -> dict:
     # ``posted_grade`` (curve/late/extension) but never writes feedback here.
     # See docs/reference/powergrader-scoring-map.md (Guardrails: single grading surface).
     score = student.get("teacher_score")
-    feedback = attribution.attribute(
-        _strip_draft_banner((student.get("teacher_feedback") or "").strip())
+    feedback = normalize_student_text(
+        attribution.attribute(
+            _strip_draft_banner((student.get("teacher_feedback") or "").strip())
+        )
     )
     payload: dict = {}
     if score is not None:

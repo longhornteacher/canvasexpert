@@ -23,6 +23,7 @@ from .adapter_support import (
     replace_step as _replace_local_step,
 )
 from api.platform_services import canvas_client, config
+from api.student_text import normalize_student_text
 from api.webui import af
 
 
@@ -41,7 +42,7 @@ class AssignmentAdapter:
         data, problems = af.parse_file(path)
         if data is None or problems:
             raise ValueError("; ".join(problems or ["unreadable file"]))
-        name = str(data.get("title") or "").strip()
+        name = normalize_student_text(data.get("title") or "").strip()
         if not name:
             raise ValueError("AssignmentForge file must have a title")
 
@@ -72,7 +73,7 @@ class AssignmentAdapter:
                     base_title, row["tag"]
                 )
 
-        description = str(data.get("description") or "")
+        description = normalize_student_text(data.get("description") or "")
         if af.PLACEHOLDER_RE.search(description):
             raise ValueError(
                 "Course-resource placeholders ({{file:...}} / {{page:...}}) "

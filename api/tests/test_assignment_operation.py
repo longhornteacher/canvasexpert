@@ -96,6 +96,37 @@ def test_payload_build_from_file(tmp_path, monkeypatch):
     assert payload["post_to_sis"] is False
 
 
+def test_assignment_canvas_text_contains_no_em_dashes(tmp_path, monkeypatch):
+    af_file = tmp_path / "student-facing.assignmentforge.txt"
+    af_file.write_text(
+        """<ASSIGNMENTFORGE_JSON>
+{"version":"1.0-json","type":"ASSIGNMENT",
+ "title":"Argument \u2014 draft","description":"<p>Read \u2014 respond.</p>",
+ "tiers":[{"label":"Support","description":"<p>Use \u2014 evidence.</p>"},
+          {"label":"Core","description":"<p>Explain \u2014 evidence.</p>"}]}
+</ASSIGNMENTFORGE_JSON>""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("api.platform_services.config.get_tier_tags", lambda: {
+        "Support": "Red", "Core": "Blue",
+    })
+    monkeypatch.setattr("api.platform_services.config.get_canvas_base",
+                        lambda: "https://canvas.invalid")
+
+    payload = AssignmentAdapter().build_payload({"path": str(af_file)})
+
+    assert payload["name"] == "Argument - draft"
+    assert "\u2014" not in payload["description"]
+    assert all("\u2014" not in tier["description"] for tier in payload["tiers"])
+
+    from api.operation_ledger.adapters.assignment_tiered import _assignment_data
+    canvas_body = _assignment_data(
+        payload, "Argument \u2014 Support", payload["tiers"][0]["description"],
+        "course-1", lambda *_args: None,
+    )
+    assert "\u2014" not in repr(canvas_body)
+
+
 def test_payload_build_with_overrides(tmp_path, monkeypatch):
     af_file = tmp_path / "poetry.assignmentforge.json"
     af_file.write_text(SAMPLE_AF_JSON, encoding="utf-8")
@@ -308,9 +339,15 @@ def test_freeze_review(monkeypatch):
 
 def test_execute_creates_assignment(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
+    sent = []
+
+    def capture_send(method, path, payload, timeout=30):
+        sent.append(payload)
+        return _fake_canvas_send(method, path, payload, timeout)
+
     monkeypatch.setattr(
-        "api.operation_ledger.adapters.assignment.canvas_client._canvas_send",
-        _fake_canvas_send,
+        "api.operation_ledger.adapters.assignment_whole.canvas_client._canvas_send",
+        capture_send,
     )
     monkeypatch.setattr(
         "api.operation_ledger.adapters.assignment.canvas_client.canvas_get",
@@ -322,7 +359,7 @@ def test_execute_creates_assignment(tmp_path, monkeypatch):
     )
 
     adapter = AssignmentAdapter()
-    payload = {"name": "Found Poetry", "description": "<h2>Found Poetry</h2><p>Create a poem.</p>",
+    payload = {"name": "Found \u2014 Poetry", "description": "<h2>Found Poetry</h2><p>Create \u2014 a poem.</p>",
                "points": 100, "submission_types": ["online_text_entry"],
                "published": True, "post_to_sis": False}
 
@@ -365,6 +402,9 @@ def test_execute_creates_assignment(tmp_path, monkeypatch):
     assert result["state"] == "applied"
     assert result["returned_object_id"] == "24680"
     assert "assignments/24680" in (result.get("returned_object_url") or "")
+    assignment_body = sent[0]["assignment"]
+    assert assignment_body["name"] == "Found - Poetry"
+    assert "\u2014" not in assignment_body["description"]
 
 
 def test_execute_handles_canvas_error(tmp_path, monkeypatch):

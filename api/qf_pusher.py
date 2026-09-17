@@ -23,6 +23,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from api import codefmt, teks, transform
+from api.student_text import normalize_student_text
 
 ENVELOPE = re.compile(r"<QUIZFORGE_JSON>(.*?)</QUIZFORGE_JSON>", re.DOTALL)
 STATE_PATH = ".experiment_state.json"
@@ -188,7 +189,9 @@ def build_push_plan(path, settings=None):
     push_settings = _normalized_settings(settings or {})
     data = load_qf(path)
     _reject_writing_items(data)
-    title = data.get("title", os.path.basename(path))
+    title = normalize_student_text(
+        data.get("title", os.path.basename(path))
+    ).strip()
     prepared = prepare_items(data)
     points = distribute_points(prepared)
     items = []
@@ -389,7 +392,7 @@ def push_file(path, dry_run=False):
 
     plan = build_push_plan(path, push_settings)
     data = load_qf(path)
-    title = data.get("title", os.path.basename(path))
+    title = plan["title"]
     items = prepare_items(data)
     print(f"\n=== {os.path.basename(path)} -> '{title}'  ({len(items)} items) ===")
     teks.coverage_report(items)  # always: pure-local TEKS tracking

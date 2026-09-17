@@ -8,6 +8,8 @@ import html
 import json
 import re
 
+from api.student_text import normalize_student_text
+
 ENVELOPE_RE = re.compile(
     r"<ASSIGNMENTFORGE_JSON>\s*(\{.*\})\s*</ASSIGNMENTFORGE_JSON>", re.S)
 
@@ -201,10 +203,12 @@ def _support_for(supports, label, public_tag=""):
 def _support_html(support, support_key=""):
     if not isinstance(support, dict):
         return ""
-    stem_frame = [str(item).strip() for item in support.get("stem_frame") or []
-                  if str(item).strip()]
-    verb_bank = [str(item).strip() for item in support.get("verb_bank") or []
-                 if str(item).strip()]
+    stem_frame = [normalize_student_text(item).strip()
+                  for item in support.get("stem_frame") or []
+                  if normalize_student_text(item).strip()]
+    verb_bank = [normalize_student_text(item).strip()
+                 for item in support.get("verb_bank") or []
+                 if normalize_student_text(item).strip()]
     if not stem_frame and not verb_bank:
         return ""
 
@@ -239,8 +243,11 @@ def add_supports(tier_rows, supports, resolved_tiers=None):
             supports, current.get("label"), resolved.get("tag"),
         )
         block = _support_html(support, support_key)
-        if block and block not in (current.get("description") or ""):
-            current["description"] = f"{current.get('description') or ''}{block}"
+        current["description"] = normalize_student_text(
+            current.get("description") or ""
+        )
+        if block and block not in current["description"]:
+            current["description"] = f"{current['description']}{block}"
         out.append(current)
     return out
 
@@ -251,15 +258,15 @@ def tier_payloads(d):
     Returns [{label, title, description}]; a single entry with label None when
     the payload has no tiers (whole-class).
     """
-    title = str(d.get("title", "")).strip()
-    base = str(d.get("description", ""))
+    title = normalize_student_text(d.get("title", "")).strip()
+    base = normalize_student_text(d.get("description", ""))
     tiers = d.get("tiers") or []
     if not tiers:
         return [{"label": None, "title": title, "description": base}]
     out = []
     for t in tiers:
-        desc = str(t.get("description") or base)
-        scaffold = str(t.get("scaffolding") or "").strip()
+        desc = normalize_student_text(t.get("description") or base)
+        scaffold = normalize_student_text(t.get("scaffolding") or "").strip()
         if scaffold:
             desc += _SCAFFOLD_WRAP.format(inner=scaffold)
         out.append({

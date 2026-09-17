@@ -10,6 +10,7 @@ from datetime import datetime, time
 from urllib.parse import urlsplit, urlunsplit
 
 from api.platform_services import canvas_client, config
+from api.student_text import normalize_student_text
 
 from .. import models
 from . import adapter_support
@@ -66,7 +67,7 @@ def resolve_public_tags(labels: list[object]) -> list[dict]:
 
 
 def normalize_base_title(value: object) -> str:
-    title = str(value or "").strip()
+    title = normalize_student_text(value or "").strip()
     if not title:
         raise ValueError("Differentiated content requires a base title")
     if re.search(r"(?:^|[\s_:/|\\\-‐‑‒–—−])+bridge\s*$", title, flags=re.IGNORECASE):
@@ -77,7 +78,7 @@ def normalize_base_title(value: object) -> str:
 
 
 def source_title(base_title: str, tag: str) -> str:
-    return f"{base_title} - {tag}"
+    return f"{normalize_student_text(base_title)} - {normalize_student_text(tag)}"
 
 
 def bridge_title(base_title: str) -> str:

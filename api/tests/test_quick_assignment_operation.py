@@ -70,9 +70,9 @@ def test_adapter_is_registered():
 def test_payload_build_minimal(monkeypatch):
     adapter = QuickAssignmentAdapter()
     payload = adapter.build_payload({
-        "name": "Exit Ticket",
+        "name": "Exit \u2014 Ticket",
     })
-    assert payload["name"] == "Exit Ticket"
+    assert payload["name"] == "Exit - Ticket"
     assert payload["points"] == 100.0
     assert payload["submission_type"] == "none"
     assert payload["published"] is False
