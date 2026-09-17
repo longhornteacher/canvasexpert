@@ -256,7 +256,11 @@ def get_gradebook_snapshot(course_id: str) -> str:
 
 @mcp.tool(structured_output=False)
 def get_authoring_contract(kind: str) -> str:
-    """Canonical Forge authoring contract. No student data."""
+    """Canonical Forge authoring contract. No student data.
+
+    For AssignmentForge authoring: also read AssignmentForge/ASSIGNMENTFORGE.md
+    in your workspace root for workflows, differentiation, supports, corrections,
+    and auto-scoring eligibility rules."""
     return _compact(tools.get_authoring_contract(kind))
 
 
@@ -353,7 +357,10 @@ def apply_assignment_update(operation_id: str, batch_id: str, review_digest: str
 def stage_content(kind: str, label: str, content: str) -> str:
     """Stage one authored draft in the teacher's review Inbox.
     kind is quiz/assignment/page; content is the completed envelope
-    from get_authoring_contract. No Canvas write."""
+    from get_authoring_contract. No Canvas write.
+
+    For AssignmentForge: use the content output from get_authoring_contract
+    (see AssignmentForge/ASSIGNMENTFORGE.md in your workspace root)."""
     return _compact(tools.stage_content(kind, label, content))
 
 

@@ -10,8 +10,19 @@ For canonical AI-agent guidance and safety rules, read `../AGENTS.md` first.
 - `docs/handoffs/` - active execution briefs.
 - `docs/reference/` - stable reference notes and extracted facts.
 - `docs/mcp-server.md` - the MCP tool surface, its gating posture, and client setup. Its
-  tool table is pinned to the live registry by a test.
+  tool table is pinned to the live registry by a test. See **Agent-agnostic workspace resources**
+  for references to workspace-based documents readable by any agent.
 - `docs/mirror.md` - CanvasMirror's current behavior, its laws, and freshness and staleness rules.
+
+## Agent-agnostic workspace resources
+
+Before starting Scoring Sessions or AssignmentForge authoring, every agent should read:
+- `ScoringSession/SCORING_SESSIONS.md` (in the teacher's workspace root) — canonical Scoring Session reference
+- `AssignmentForge/ASSIGNMENTFORGE.md` (in the teacher's workspace root) — canonical AssignmentForge authoring reference
+
+These files live in the synced workspace (not in the repo) so they are discoverable by any agent tool
+(Claude, ChatGPT, Copilot, human) without private assistant memory. They are maintained by the teacher
+and updated with new patterns, failures, and corrections as they emerge.
 
 Useful starting references for new debugging and refactor sessions:
 
