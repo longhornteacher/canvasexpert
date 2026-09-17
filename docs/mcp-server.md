@@ -4,6 +4,15 @@ A local, stdio-only [Model Context Protocol](https://modelcontextprotocol.io) se
 lets any MCP-capable assistant help plan lessons and manage rosters conversationally,
 while CanvasExpert keeps sole custody of the Canvas PAT and almost every write path.
 
+## Agent-agnostic workspace resources
+
+Before starting Scoring Sessions or AssignmentForge authoring, every agent (Claude, ChatGPT, Copilot, or human) should read:
+
+- **ScoringSession/SCORING_SESSIONS.md** — canonical reference for Scoring Session workflows, known failure modes, and verified patterns
+- **AssignmentForge/ASSIGNMENTFORGE.md** — canonical reference for AssignmentForge authoring, differentiation tiers, supports, and corrections
+
+These files live in the teacher's workspace root (not in the repo) so they're discoverable by any agent without private memory. They are maintained by the teacher and updated with new incidents, corrections, and lessons learned.
+
 - **Local and indirect.** Serves this teacher's own Canvas data from Canvas Expert's
   local copy on their computer. It never holds the Canvas token. Canvas writes use
   bounded preview/apply or operation-ledger paths, except a teacher-requested
@@ -12,6 +21,7 @@ while CanvasExpert keeps sole custody of the Canvas PAT and almost every write p
   server privately selects the Canvas transport. `submit_scoring_results` keeps
   the SAFE packet binding, per-student review, drift, idempotency, verification, and
   receipt safeguards. Everything else writes only to local CanvasExpert state.
+- **Agent-agnostic, not assistant-specific.** Workspace reference docs (ScoringSession/SCORING_SESSIONS.md, AssignmentForge/ASSIGNMENTFORGE.md) are readable by any agent and are the canonical source of operational knowledge, not private assistant memory. They prevent each new agent from starting at zero when issues or new patterns emerge.
 - **Pseudonymized, not anonymous.** Every student-data tool routes its result through the identity vault
   (`api/feedback_vault.py`) before returning it. Students are identified only by a stable
   one-word pseudonym (e.g. "Pikachu") — never a real name, Canvas user ID, or SIS ID. See

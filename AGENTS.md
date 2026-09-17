@@ -11,6 +11,10 @@ Every agent reads this file. An implementation executor then reads:
 1. the single direct brief in `docs/handoffs/`;
 2. only the files and exact document sections named by that brief.
 
+**Before starting Scoring Sessions or AssignmentForge work**, read these agent-agnostic workspace resources (they persist across assistants and tools):
+- `ScoringSession/SCORING_SESSIONS.md` — canonical Scoring Session reference
+- `AssignmentForge/ASSIGNMENTFORGE.md` — canonical AssignmentForge authoring reference
+
 Do not preload archived handoffs, every module map, `tools/TOOLS.md`, or a whole architecture
 vision. A handoff that cites a long document must name the required numbered sections.
 Historical handoffs are never implementation authority.
