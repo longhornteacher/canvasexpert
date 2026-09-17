@@ -1904,17 +1904,34 @@ def _load_scoring_assignment_session(scoring_session_id: str) -> dict | None:
     return session
 
 
+def _session_superseded(scoring_session_id: str) -> dict:
+    """The one identity-safe refusal for a non-current session record."""
+    return {
+        "ok": False, "code": "session_superseded",
+        "error": "A newer preparation replaced this Scoring Session. "
+                 "Use the current Scoring Session for this assignment.",
+    }
+
+
+def _is_current_scoring_session(session: dict) -> bool:
+    """True only when this record is the current one for its exact scope."""
+    from api.powergrader import session_store
+
+    return session_store.is_current_session(str(session.get("session_id") or ""))
+
+
 def list_scoring_sessions() -> dict:
-    """List identity-free summaries for current assignment-scoped sessions."""
+    """List identity-free summaries for current assignment-scoped sessions.
+
+    Exactly one resumable row per exact course/assignment scope: the lifecycle
+    owner resolves the deterministic current record, and terminal or superseded
+    history is not returned.
+    """
     from api.powergrader import session_store
 
     active_course_ids = {str(c.get("id") or "") for c in config.active_courses()}
     rows = []
-    for summary in session_store.list_session_summaries():
-        if summary.get("session_kind") != "scoring_assignment":
-            continue
-        if str(summary.get("course_id") or "") not in active_course_ids:
-            continue
+    for summary in session_store.current_actionable_sessions(course_ids=active_course_ids):
         rows.append([
             summary.get("session_id"), summary.get("created"),
             summary.get("status"), summary.get("assignment_name"),
@@ -1986,6 +2003,8 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     if not session:
         return {"ok": False, "code": "session_not_found",
                 "error": "The assignment-scoped Scoring Session was not found."}
+    if not _is_current_scoring_session(session):
+        return _session_superseded(scoring_session_id)
     if session.get("status") == "needs_teacher_input":
         return {"ok": False, "code": "needs_teacher_input",
                 "error": "Prepare this exact assignment with an attached Canvas rubric or bounded guidance before requesting its packet."}
@@ -2056,6 +2075,27 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
 def submit_scoring_results(scoring_session_id: str, results: list,
                            expected_packet_digest: str, review_digest: str = "",
                            answers: dict | None = None) -> dict:
+    """Submit one session while holding its scope lifecycle lock throughout."""
+    from api.powergrader import session_store
+
+    session = _load_scoring_assignment_session(scoring_session_id)
+    if not session:
+        return {"ok": False, "code": "session_not_found",
+                "error": "The assignment-scoped Scoring Session was not found."}
+    # The scope is established from the private record, then held across the
+    # complete helper. This prevents activation from superseding the checked
+    # session between validation, planning, Canvas apply, and outcome save.
+    with session_store.scope_lock(session.get("course_id"),
+                                  session.get("assignment_id")):
+        return _submit_scoring_results_locked(
+            scoring_session_id, results, expected_packet_digest,
+            review_digest=review_digest, answers=answers)
+
+
+def _submit_scoring_results_locked(scoring_session_id: str, results: list,
+                                   expected_packet_digest: str,
+                                   review_digest: str = "",
+                                   answers: dict | None = None) -> dict:
     """Validate SAFE results, ask only bounded risk questions, then write them.
 
     The Canvas transport and identity lookup stay below this MCP boundary.
@@ -2064,10 +2104,15 @@ def submit_scoring_results(scoring_session_id: str, results: list,
     from api import feedback_pipeline as fp
     from api.powergrader import scoring_packet as sp, session_store
 
+    # The caller holds the scope lock from the first authoritative currentness
+    # check through validation, planning, Canvas apply, and terminal recording.
+    # Lock order remains scope, then session.
     session = _load_scoring_assignment_session(scoring_session_id)
     if not session:
         return {"ok": False, "code": "session_not_found",
                 "error": "The assignment-scoped Scoring Session was not found."}
+    if not _is_current_scoring_session(session):
+        return _session_superseded(scoring_session_id)
     gate_error = _course_gate_check(str(session.get("course_id") or ""))
     if gate_error:
         return {"ok": False, "code": "course_unavailable", "error": gate_error}
@@ -2152,8 +2197,13 @@ def submit_scoring_results(scoring_session_id: str, results: list,
                     "review_digest": plan["digest"], "questions": safe["questions"],
                     "counts": {"ready": len(plan["candidate_ids"]),
                                "held": held_count}}
-                return _record_scoring_session_result(
-                    scoring_session_id, pseudonym.gate(response, vault))
+                with session_store.scope_lock(session.get("course_id"),
+                                              session.get("assignment_id")):
+                    if not _is_current_scoring_session(
+                            _load_scoring_assignment_session(scoring_session_id) or {}):
+                        return _session_superseded(scoring_session_id)
+                    return _record_scoring_session_result(
+                        scoring_session_id, pseudonym.gate(response, vault))
             if str(review_digest) != str(plan.get("digest")):
                 return {"ok": False, "code": "review_changed", "error": "The scoring review changed. Submit the current review again."}
         elif review_digest:
@@ -2163,33 +2213,42 @@ def submit_scoring_results(scoring_session_id: str, results: list,
         if not resolved.get("ok"):
             return {"ok": False, "code": resolved.get("code") or "invalid_answer",
                     "error": "Answer every listed scoring question with one of its offered options."}
-        # Preserve the scoring_apply caller-held lock contract across both the
-        # staged-result update and the complete plan/freeze/push sequence.
-        # session_store uses an RLock and re-entrant interprocess lock, so the
-        # guarded helpers can safely acquire the same session lock again.
-        with session_store.session_lock(scoring_session_id):
-            current = session_store.load_session(scoring_session_id)
-            if not current:
-                return {"ok": False, "code": "session_not_found", "error": "Scoring Session not found."}
-            current_by_uid = {str(st.get("user_id")): st for st in current.get("students") or []}
-            for uid, staged in students_by_uid.items():
-                target = current_by_uid.get(uid)
-                if target and uid in by_uid:
-                    target["ai_score"] = staged.get("ai_score")
-                    target["ai_feedback"] = staged.get("ai_feedback")
-                    target["ai_item_results"] = staged.get("ai_item_results") or []
-            session_store.save_session(current)
-            payload, _status = scoring_apply.apply_plan(
-                scoring_session_id, expected_digest=plan["digest"], answers=answers,
-                load_session=session_store.load_session, save_session=session_store.save_session,
-                pseudonyms=every_pseudonym,
-            )
-        held_user_ids = {str(st.get("user_id") or "") for st in session.get("students") or []
-                         if str(st.get("user_id") or "") not in set(plan.get("candidate_ids") or [])}
-        held_user_ids.update(str(uid) for uid in resolved.get("skipped") or [])
-        return _record_scoring_session_result(
-            scoring_session_id,
-            _scoring_apply_result(payload, names, vault, held_user_ids=held_user_ids))
+        # Lock order is scope, then session. The scope lock spans the final
+        # currentness check, the staged-result mutation, the Canvas apply, and
+        # the terminal outcome save, so an activation for the same exact scope
+        # cannot slip a supersession between the check and the write. If
+        # activation won the race, submission refuses here before any Canvas
+        # call. The session lock is still held inside for the apply sequence;
+        # session_store uses re-entrant locks, so the guarded helpers can
+        # safely acquire the same session lock again.
+        with session_store.scope_lock(session.get("course_id"),
+                                      session.get("assignment_id")):
+            if not _is_current_scoring_session(
+                    _load_scoring_assignment_session(scoring_session_id) or {}):
+                return _session_superseded(scoring_session_id)
+            with session_store.session_lock(scoring_session_id):
+                current = session_store.load_session(scoring_session_id)
+                if not current:
+                    return {"ok": False, "code": "session_not_found", "error": "Scoring Session not found."}
+                current_by_uid = {str(st.get("user_id")): st for st in current.get("students") or []}
+                for uid, staged in students_by_uid.items():
+                    target = current_by_uid.get(uid)
+                    if target and uid in by_uid:
+                        target["ai_score"] = staged.get("ai_score")
+                        target["ai_feedback"] = staged.get("ai_feedback")
+                        target["ai_item_results"] = staged.get("ai_item_results") or []
+                session_store.save_session(current)
+                payload, _status = scoring_apply.apply_plan(
+                    scoring_session_id, expected_digest=plan["digest"], answers=answers,
+                    load_session=session_store.load_session, save_session=session_store.save_session,
+                    pseudonyms=every_pseudonym,
+                )
+            held_user_ids = {str(st.get("user_id") or "") for st in session.get("students") or []
+                             if str(st.get("user_id") or "") not in set(plan.get("candidate_ids") or [])}
+            held_user_ids.update(str(uid) for uid in resolved.get("skipped") or [])
+            return _record_scoring_session_result(
+                scoring_session_id,
+                _scoring_apply_result(payload, names, vault, held_user_ids=held_user_ids))
 
     return {
         "ok": False,

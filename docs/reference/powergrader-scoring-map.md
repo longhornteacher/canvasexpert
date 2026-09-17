@@ -8,11 +8,22 @@ write authorization. Canvas Live is the only review/edit surface.
 
 ## Current ownership
 
+- `session_store.py` is the single lifecycle owner for assignment-scoped
+  Scoring Sessions. It holds the deterministic scope lock (order: scope, then
+  session) and resolves the one current session per exact
+  `(course_id, assignment_id)`. A successful preparation persists its new record
+  with the next private positive scope generation and supersedes every other
+  actionable record for that scope; terminal and already-superseded records are
+  untouched. Generated records resolve by `(scope_generation, created,
+  session_id)` at the call boundary. Existing records without a generation use
+  `(created, session_id)` as the fallback regardless of status, with no migration
+  or deletion.
 - `scoring_preparation.py` delegates canonical SAFE construction to
   `scoring_artifacts.py`; `session_builder.py` assembles the one private
   assignment-scoped session. Together with the mirror acquisition modules they
   expose the session only after its scoring basis is resolved. A new run writes
-  only that session JSON and one scrubbed SAFE bundle JSON.
+  only that session JSON and one scrubbed SAFE bundle JSON, then routes its save
+  through the `session_store` activation owner.
 - `scoring_packet.py` validates the session-bound SAFE bundle, pages full text, and
   provides the server-authored contract and resolved basis on the first page.
 - `api/mcp_server/tools.py` validates pseudonym/item results against the bundle,
@@ -37,7 +48,12 @@ write authorization. Canvas Live is the only review/edit surface.
   credential, private path, operation token, or live Canvas response crosses MCP.
 - A teacher's request authorizes valid results only for the exact course/assignment
   saved in that assignment-scoped session. It never extends to later-discovered work,
-  another Scoring Session, arbitrary grade edit, or SIS action.
+  another Scoring Session, arbitrary grade edit, or SIS action. A superseded or
+  non-current session returns the identity-safe `session_superseded` code for both the
+  packet and the submit call, and the submit refusal happens before result validation,
+  re-identification, Canvas planning, or any Canvas call. Supersession deletes nothing:
+  earlier session JSON, SAFE bundles, and receipts stay as teacher history, and no
+  supersession metadata, private path, or Canvas id crosses MCP.
 - Ordinary assignments retain a fresh baseline, question digest, drift check,
   per-student idempotency, PUT-then-GET verification, and minimized receipt. GET failure,
   mismatch, or possibly-accepted transport remains durable Attention/`sent_unknown` without
@@ -53,7 +69,8 @@ write authorization. Canvas Live is the only review/edit surface.
 
 ## Tests
 
-Start with `api/tests/powergrader/test_scoring_preparation.py`,
+Start with `api/tests/powergrader/test_session_store.py`,
+`api/tests/powergrader/test_scoring_preparation.py`,
 `api/tests/mcp_server/test_prepare_scoring_session.py`,
 `test_scoring_apply_tools.py`,
 `test_new_quiz_scoring_tools.py`, `api/tests/powergrader/test_scoring_packet.py`,

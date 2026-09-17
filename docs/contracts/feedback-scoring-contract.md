@@ -84,6 +84,28 @@ then resubmits the unchanged results and packet digest with every explicit answe
 the exact review digest. A changed review plan or invalid answer fails closed.
 ## Session consumption and write safety
 
+One exact course-and-assignment scope has at most one actionable Scoring Session. A successful
+preparation activates its newly saved session and marks every earlier actionable session for that
+exact `(course_id, assignment_id)` as `superseded` with private `superseded_by_session_id` and
+`superseded_at` fields. Actionable means `ready` or the submit-stage `needs_teacher_input`;
+terminal `completed`/`completed_with_holds` sessions remain unchanged. A failed preparation, a
+typed blocker, and the basis-stage `needs_scoring_norms` state neither save a session nor
+supersede one. `list_scoring_sessions()` is an identity-free resume aid and returns at most one
+row per exact scope.
+
+Supersession never deletes: earlier session JSON, SAFE bundles, receipts, and Canvas objects
+remain as teacher history, and supersession metadata stays private. Activated sessions carry a
+private positive scope generation; current-session resolution ranks generated records by
+`(scope_generation, created, session_id)`, so a newer terminal outcome suppresses older
+actionable duplicates. For pre-lifecycle records with no generation, the deterministic fallback
+is newest by `(created, session_id)` regardless of status. Older records are treated as
+superseded at the call boundary without a migration.
+`get_scoring_packet()` and `submit_scoring_results()` return identity-safe
+`{"ok": false, "code": "session_superseded", ...}` for a superseded or non-current duplicate; the
+submit refusal occurs before result validation, re-identification, Canvas planning, or any Canvas
+call. Activation and final submission are serialized by one deterministic course/assignment
+scope lock, and the lock order is scope, then session.
+
 Teacher guidance remains available privately in full for the session record. When oversized,
 its effective model and packet projection carries the compaction marker and counts above;
 those counts are the signal that effective text was omitted. Ordinary assignments use the

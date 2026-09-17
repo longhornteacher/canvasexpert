@@ -263,9 +263,17 @@ def prepare_scoring_session(
     scoring_guidance: str = "",
     *,
     refresh_course,
-    save_session=session_store.save_session,
+    save_session=None,
+    activate_session=None,
 ) -> dict:
-    """Refresh once, classify and prepare one exact assignment from the mirror."""
+    """Refresh once, classify and prepare one exact assignment from the mirror.
+
+    The successful save goes through the lifecycle owner so the newest
+    preparation becomes the one current session and earlier actionable records
+    for the same exact scope are superseded. ``save_session`` remains an
+    injectable seam for focused tests; it is passed to the owner rather than
+    used directly, so production preparation cannot bypass activation.
+    """
     course_id = str(course_id or "").strip()
     assignment_id = str(assignment_id or "").strip()
     if not course_id or not assignment_id:
@@ -443,7 +451,7 @@ def prepare_scoring_session(
         session["effective_scoring_rubric_text"] = rubric_text_override
         session["scoring_guidance_projection"] = guidance_projection
     try:
-        save_session(session)
+        _activate(session, activate_session=activate_session, save_session=save_session)
     except Exception:
         return _typed_failure(
             "session_store_unavailable", "persist", retryable=True,
@@ -452,3 +460,12 @@ def prepare_scoring_session(
             assignment_name=assignment_name,
         )
     return _ready_payload(session)
+
+
+def _activate(session: dict, *, activate_session, save_session) -> list[dict]:
+    """Save a prepared session through the single lifecycle owner."""
+    if activate_session is not None:
+        return activate_session(session) or []
+    if save_session is None:
+        save_session = session_store.save_session
+    return session_store.activate_scoring_session(session, save_session=save_session)

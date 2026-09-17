@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from api.powergrader import scoring_preparation
 
 
@@ -55,6 +57,147 @@ def _wire(monkeypatch, tmp_path, *, assignment=None, submissions=None):
         "c1", "a1", "Guidance", refresh_course=lambda _course: True,
         save_session=lambda session: saved.setdefault(session["session_id"], session),
     )
+
+
+def _wire_with_activation(monkeypatch, tmp_path, *, assignment=None, guidance="Guidance"):
+    """Wire preparation through an injected lifecycle-activation seam."""
+    monkeypatch.setattr(scoring_preparation.workspace, "workspace_root", lambda: str(tmp_path))
+    monkeypatch.setattr(scoring_preparation.config, "course_display_name", lambda _id: "Course")
+    monkeypatch.setattr(scoring_preparation.config, "get_roster_student_settings", lambda _id: {})
+    monkeypatch.setattr(scoring_preparation.config, "roster_tier_by_id", lambda _id: {})
+    monkeypatch.setattr(scoring_preparation.config, "get_monitored_students", lambda: {})
+    monkeypatch.setattr(scoring_preparation.config, "get_extra_time", lambda _id: [])
+    monkeypatch.setattr(scoring_preparation.gradebook_snapshot, "needs_grading", lambda _row: True)
+    monkeypatch.setattr(
+        scoring_preparation.assignment_refresh,
+        "prepare_assignment_from_mirror",
+        lambda _course, _assignment: (
+            [_submission()], assignment or _assignment(),
+            {"status": "mirror", "manifest_path": None},
+        ),
+    )
+    bundle_path = tmp_path / "safe-bundle.json"
+    bundle_path.write_text(json.dumps({"students": [{"pseudonym": "Pikachu", "responses": [{
+        "item_id": "item-1", "prompt": "Explain.", "response": "A response.", "possible": 10,
+    }]}]}), encoding="utf-8")
+    monkeypatch.setattr(scoring_preparation.scoring_artifacts, "build_scoring_artifacts", lambda **_kwargs: {
+        "ok": True, "privacy_steps": [], "privacy_artifacts": {"safe_bundle": str(bundle_path)},
+        "ai_by_uid": {}, "ai_item_by_uid": {}, "copilot_packet": None,
+    })
+    monkeypatch.setattr(scoring_preparation.session_builder, "build_students", lambda **_kwargs: [{
+        "user_id": "u1", "status": "pending", "posted": False,
+    }])
+    activated = []
+    saved = {}
+
+    def activate(session):
+        activated.append(session["session_id"])
+        saved.setdefault(session["session_id"], session)
+        return []
+
+    return saved, activated, lambda: scoring_preparation.prepare_scoring_session(
+        "c1", "a1", guidance, refresh_course=lambda _course: True,
+        save_session=lambda session: saved.setdefault(session["session_id"], session),
+        activate_session=activate,
+    )
+
+
+def test_successful_preparation_activates_through_the_lifecycle_owner(monkeypatch, tmp_path):
+    saved, activated, prepare = _wire_with_activation(
+        monkeypatch, tmp_path, assignment=_assignment(
+            rubric=[{"description": "Reasoning", "points": 10, "ratings": []}],
+        ))
+    result = prepare()
+
+    assert result["ok"] is True
+    assert activated == [result["scoring_session_id"]]
+    assert set(saved) == set(activated)
+
+
+def test_successful_preparation_defaults_to_the_store_lifecycle_owner(monkeypatch, tmp_path):
+    """Production preparation cannot bypass activation."""
+    _wire(monkeypatch, tmp_path, assignment=_assignment(
+        rubric=[{"description": "Reasoning", "points": 10, "ratings": []}],
+    ))
+    calls = []
+
+    def activate(session, **_kwargs):
+        calls.append(session["session_id"])
+        return ["older"]
+
+    monkeypatch.setattr(scoring_preparation.session_store, "activate_scoring_session", activate)
+    result = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", "Guidance", refresh_course=lambda _course: True,
+        save_session=lambda _session: pytest.fail("activation must own the save"),
+    )
+
+    assert result["ok"] is True
+    assert calls == [result["scoring_session_id"]]
+
+
+def test_basis_stage_teacher_input_never_activates_or_saves(monkeypatch, tmp_path):
+    saved, activated, prepare = _wire_with_activation(
+        monkeypatch, tmp_path, assignment=_assignment(rubric=[]), guidance="")
+    result = prepare()
+
+    assert result["code"] == "needs_scoring_norms"
+    assert result["stage"] == "basis"
+    assert activated == []
+    assert saved == {}
+
+
+@pytest.mark.parametrize("assignment, submissions, code", [
+    ({"quiz_kind": "new_quiz", "is_quiz_lti_assignment": True}, None,
+     "new_quiz_writing_requires_assignment"),
+    ({"rubric": [{"description": "Reasoning", "points": 10, "ratings": []}]}, [],
+     "nothing_to_grade"),
+])
+def test_typed_blockers_never_activate_a_session(monkeypatch, tmp_path, assignment,
+                                                 submissions, code):
+    saved, activated, _prepare = _wire_with_activation(
+        monkeypatch, tmp_path, assignment=_assignment(**assignment))
+    if submissions is not None:
+        monkeypatch.setattr(
+            scoring_preparation.assignment_refresh, "prepare_assignment_from_mirror",
+            lambda _c, _a: ([], _assignment(**assignment), {"status": "mirror"}))
+
+    result = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", "Guidance", refresh_course=lambda _course: True,
+        save_session=lambda session: saved.setdefault(session["session_id"], session),
+        activate_session=lambda session: activated.append(session["session_id"]) or [])
+
+    assert result["code"] == code
+    assert activated == []
+    assert saved == {}
+
+
+def test_mirror_failure_never_activates_a_session(monkeypatch, tmp_path):
+    saved, activated, _prepare = _wire_with_activation(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        scoring_preparation.assignment_refresh, "prepare_assignment_from_mirror",
+        lambda _c, _a: (None, None, {"code": "mirror_projection_unavailable"}))
+
+    result = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", refresh_course=lambda _course: True,
+        save_session=lambda session: saved.setdefault(session["session_id"], session),
+        activate_session=lambda session: activated.append(session["session_id"]) or [])
+
+    assert result["ok"] is False
+    assert result["code"] == "mirror_projection_unavailable"
+    assert activated == []
+    assert saved == {}
+
+
+def test_refresh_failure_never_activates_a_session(monkeypatch, tmp_path):
+    saved, activated, _prepare = _wire_with_activation(monkeypatch, tmp_path)
+
+    result = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", refresh_course=lambda _course: False,
+        save_session=lambda session: saved.setdefault(session["session_id"], session),
+        activate_session=lambda session: activated.append(session["session_id"]) or [])
+
+    assert result["code"] == "mirror_refresh_failed"
+    assert activated == []
 
 
 def test_guidance_projection_is_deterministic_and_bounded():

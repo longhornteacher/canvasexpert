@@ -24,7 +24,10 @@ persists no backlog queue.
    then retry the same exact preparation with bounded guidance.
 2. A successful preparation returns one `scoring_session_id` with
    `session_kind: scoring_assignment`. If it returns a typed blocker, follow its
-   `user_action`; every blocker names its actual preparation cause.
+   `user_action`; every blocker names its actual preparation cause. A new
+   preparation makes its session the current one for that exact assignment and
+   supersedes earlier unfinished sessions for the same assignment. Older records
+   remain private history but are not resumable.
 3. Read page zero with `get_scoring_packet`, including its scoring contract and
    basis, then follow `next_offset` through every page. Report held or otherwise
    unscorable work before scoring. Item/catalog or evidence gaps are not an empty
@@ -39,7 +42,9 @@ persists no backlog queue.
    and resubmit unchanged results with the review digest and explicit answers.
 7. To score another assignment, prepare that exact assignment explicitly.
    `list_scoring_sessions()` is an identity-free resume aid for assignment-scoped
-   sessions only.
+   sessions only. It lists at most one resumable row per exact assignment and
+   never lists terminal or superseded history. Using an older session id returns
+   `session_superseded` instead of paging or posting stale work.
 
 ## Privacy and review boundary
 
@@ -50,6 +55,8 @@ response content; pseudonymized does not mean anonymous.
 Canvas Live is the review surface. The private Scoring Session record is an
 assignment-bounded SAFE packet and write authorization. A new preparation has
 one private session record and one scrubbed SAFE bundle; the agent receives no
-storage details or identity mapping. It is not a multi-assignment
+storage details or identity mapping. Superseding an earlier session keeps its
+private record and bundle on disk as teacher history and exposes only the
+identity-safe `session_superseded` code. It is not a multi-assignment
 queue or local grading UI. Canvas Expert has no hosted AI grader, manual import
 workflow, or New Quiz write path.

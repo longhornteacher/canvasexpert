@@ -132,15 +132,34 @@ def _bind_session_store(monkeypatch, sessions: dict) -> dict:
                         lambda s: sessions.__setitem__(s["session_id"], s))
     monkeypatch.setattr("api.powergrader.session_store.session_lock",
                         lambda _sid: nullcontext())
-    monkeypatch.setattr("api.powergrader.session_store.list_session_summaries", lambda: [
-        {"session_id": session["session_id"],
-         "session_kind": session.get("session_kind", ""),
-         "course_id": session.get("course_id", ""),
-         "created": session.get("created", ""),
-         "total": len(session.get("students") or [])}
-        for session in sessions.values()
-    ])
+    monkeypatch.setattr("api.powergrader.session_store.scope_lock",
+                        lambda _course, _assignment: nullcontext())
+    monkeypatch.setattr("api.powergrader.session_store.list_session_summaries",
+                        lambda: [_scoring_summary(session)
+                                 for session in sessions.values() if session])
     return sessions
+
+
+def _scoring_summary(session: dict) -> dict:
+    """One summary with the same fields ``session_store`` exposes on disk.
+
+    The lifecycle owner resolves the current record from these summaries, so a
+    stub that omits ``assignment_id`` or ``status`` cannot express a scope.
+    """
+    students = session.get("students") or []
+    return {
+        "session_id": session["session_id"],
+        "session_kind": session.get("session_kind", ""),
+        "assignment_name": session.get("assignment_name", ""),
+        "course_id": session.get("course_id", ""),
+        "assignment_id": session.get("assignment_id", ""),
+        "created": session.get("created", ""),
+        "status": session.get("status", ""),
+        "mode": session.get("mode", ""),
+        "total": len(students),
+        "approved": sum(1 for st in students if st.get("status") == "approved"),
+        "posted": sum(1 for st in students if st.get("posted")),
+    }
 
 
 # --- build_packet -----------------------------------------------------------
@@ -468,8 +487,28 @@ def test_list_scoring_sessions_uses_compact_neutral_columns(monkeypatch, tmp_pat
     assert row[5:] == [0, 0]
 
 
-# --- get_scoring_packet -----------------------------------------------------
+def test_list_scoring_sessions_hides_terminal_and_superseded_history(monkeypatch, tmp_path):
+    """The resume aid lists current work only, never history."""
+    people = _seed_vault(monkeypatch, tmp_path, count=1)
+    _set_active_courses(monkeypatch, ["111"])
 
+    current = _fake_session("current", "111", people)
+    _attach_bundle(current, tmp_path, _fake_safe_bundle(people, items=1), "cur.json")
+    done = _fake_session("done", "111", people)
+    done.update({"assignment_id": "700011", "status": "completed"})
+    _attach_bundle(done, tmp_path, _fake_safe_bundle(people, items=1), "done.json")
+    superseded = _fake_session("superseded", "111", people)
+    superseded.update({"assignment_id": "700012", "status": "superseded"})
+    _attach_bundle(superseded, tmp_path, _fake_safe_bundle(people, items=1), "sup.json")
+
+    _bind_session_store(monkeypatch, {"current": current, "done": done,
+                                      "superseded": superseded})
+    result = tools.list_scoring_sessions()
+
+    assert [row[0] for row in result["sessions"]["rows"]] == ["current"]
+
+
+# --- get_scoring_packet -----------------------------------------------------
 def test_get_scoring_packet_missing_session(monkeypatch, tmp_path):
     _seed_vault(monkeypatch, tmp_path, count=1)
     _set_active_courses(monkeypatch, ["111"])
@@ -747,6 +786,61 @@ def test_packet_digest_does_not_depend_on_page_projection_choices():
         include_context=False,
     )
     assert first["packet_digest"] == later["packet_digest"]
+
+
+# --- current/superseded contract --------------------------------------------
+
+def test_packet_refuses_a_superseded_record_identity_safely(monkeypatch, tmp_path):
+    people = _seed_vault(monkeypatch, tmp_path, count=1)
+    _set_active_courses(monkeypatch, ["111"])
+    stale = _fake_session("stale-session", "111", people)
+    stale["status"] = "superseded"
+    stale["superseded_by_session_id"] = "current-session"
+    _attach_bundle(stale, tmp_path, _fake_safe_bundle(people, items=1))
+    _bind_session_store(monkeypatch, {"stale-session": stale})
+
+    result = tools.get_scoring_packet("stale-session")
+
+    assert result["ok"] is False
+    assert result["code"] == "session_superseded"
+    # Supersession metadata stays private: no id, path, or bundle detail leaks.
+    assert "stale-session" not in str(result)
+    assert "current-session" not in str(result)
+    assert str(tmp_path) not in str(result)
+
+
+def test_packet_refuses_the_older_duplicate_of_one_scope(monkeypatch, tmp_path):
+    people = _seed_vault(monkeypatch, tmp_path, count=1)
+    _set_active_courses(monkeypatch, ["111"])
+    older = _fake_session("dup-older", "111", people, assignment_name="Quiz 1")
+    older["created"] = "2026-01-01T08:00:00"
+    _attach_bundle(older, tmp_path, _fake_safe_bundle(people, items=1), "old.json")
+    newer = _fake_session("dup-newer", "111", people, assignment_name="Quiz 1")
+    newer["created"] = "2026-02-01T08:00:00"
+    _attach_bundle(newer, tmp_path, _fake_safe_bundle(people, items=1), "new.json")
+    _bind_session_store(monkeypatch, {"dup-older": older, "dup-newer": newer})
+
+    assert tools.get_scoring_packet("dup-older")["code"] == "session_superseded"
+    assert tools.get_scoring_packet("dup-newer")["ok"] is True
+
+
+def test_submit_refuses_a_superseded_record_before_any_validation(monkeypatch, tmp_path):
+    people = _seed_vault(monkeypatch, tmp_path, count=1)
+    _set_active_courses(monkeypatch, ["111"])
+    stale = _fake_session("stale-session", "111", people)
+    stale["status"] = "superseded"
+    _attach_bundle(stale, tmp_path, _fake_safe_bundle(people, items=1))
+    _bind_session_store(monkeypatch, {"stale-session": stale})
+
+    from api import feedback_pipeline as fp
+    monkeypatch.setattr(fp, "validate_results",
+                        lambda *_a, **_kw: pytest.fail("validation must not run"))
+
+    result = tools.submit_scoring_results("stale-session", [], "digest")
+
+    assert result["ok"] is False
+    assert result["code"] == "session_superseded"
+    assert "stale-session" not in str(result)
 
 
 def test_segment_budget_accounts_for_long_public_keys():

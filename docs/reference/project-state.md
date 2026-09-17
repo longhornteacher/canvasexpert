@@ -8,32 +8,35 @@ handoffs and getting lost.
 Keep it short and current. When a fact here changes (a launch date, a user
 count), edit it — do not append a log.
 
-## Status: pre-launch
+## Status: active single-teacher pilot
 
-Canvas Expert has **not launched**. It is weeks away from any real launch, and
-nothing in it has been used in production.
+Canvas Expert is not generally launched. During the first-semester pilot it is used by
+exactly one teacher: the developer. That use includes real Canvas courses, assignments,
+submissions, scoring work, and grade history.
 
-## Userbase: 0 today, 1 for the first semester
+## Userbase: 1 for the first semester
 
-- As of **2026-07-23** there are **0 users**.
-- For the entire **first semester (roughly through December 2026)** the userbase
-  is exactly **1 — the developer, who is also the first teacher**.
-- The earliest additional users come no sooner than the following semester, and
-  only after a deliberate decision to widen the pilot.
+- As of **2026-09-16** the active userbase is exactly **1 — the developer, who is also
+  the pilot teacher**.
+- The userbase remains one through roughly December 2026. Additional users come only
+  after a deliberate decision to widen the pilot.
 
 ## What this means for scope (the load-bearing consequence)
 
-Because no one has ever run this software, **no legacy state exists.** Therefore:
+There is no multi-user compatibility population, but the pilot now has live teacher state.
+Therefore:
 
 - **No migration code.** Do not write folder-rename migrations, dual-read
   shims, retirement notices, backward-compatibility mappings, or "URL stability"
-  indirection. There is no old state to preserve. When a change is cleaner as a
-  rename or restructure than as a migration, **take the clean break.**
-- **No legacy records.** Retired names, deprecated features, and superseded
-  layouts should be *deleted*, not carried with a compatibility note. Git history
-  is the record.
-- Anything guarding a pre-existing user's data or configuration is dead code for
-  a population of zero — do not write it, and remove it when found.
+  indirection for hypothetical future users. Source and unsupported local formats may
+  still take clean breaks when the active brief explicitly establishes that no live pilot
+  state depends on them.
+- **Protect live pilot state.** Never assume Canvas objects, submissions, grades,
+  operation receipts, scoring sessions, or the private workspace are disposable. A clean
+  source break does not authorize destructive cleanup or loss of teacher history.
+- **No speculative legacy support.** Retired names and deprecated source paths should not
+  remain for hypothetical users. Preserve or reconcile an existing pilot artifact only
+  when the current task names that artifact and its safety boundary.
 
 ## Standing product principles
 

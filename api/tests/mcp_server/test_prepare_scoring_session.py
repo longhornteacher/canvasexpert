@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 
+import pytest
+
 from api.mcp_server import tools
 from api.powergrader import session_store
 
@@ -58,11 +60,13 @@ def test_list_ignores_unsupported_records_and_lists_assignment_sessions(monkeypa
         "root": {"session_id": "root", "session_kind": "scoring_session", "course_id": "c1"},
         "legacy": {"session_id": "legacy", "session_kind": "legacy_root", "course_id": "c1"},
         "s1": {"session_id": "s1", "session_kind": "scoring_assignment", "course_id": "c1",
-               "assignment_name": "Essay", "created": "2026-01-01", "status": "ready",
+               "assignment_id": "a1", "assignment_name": "Essay",
+               "created": "2026-01-01", "status": "ready",
                "students": [{"status": "approved", "posted": True}]},
     }
     monkeypatch.setattr(session_store, "list_session_summaries", lambda: [
         {"session_id": sid, "session_kind": value.get("session_kind"), "course_id": value.get("course_id"),
+         "assignment_id": value.get("assignment_id"),
          "assignment_name": value.get("assignment_name"), "created": value.get("created"),
          "status": value.get("status"), "total": len(value.get("students") or []),
          "approved": 1, "posted": 1} for sid, value in sessions.items()
@@ -78,3 +82,128 @@ def test_packet_rejects_historical_root_record_directly(monkeypatch):
         "session_id": "root", "session_kind": "scoring_session",
     })
     assert tools.get_scoring_packet("root")["code"] == "session_not_found"
+
+
+# --- Superseded and non-current refusals ------------------------------------
+
+def _scope_sessions(monkeypatch, **overrides):
+    """Bind two actionable sessions for one exact scope against the store."""
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "c1"}])
+    sessions = {
+        "sess-old": {"session_id": "sess-old", "session_kind": "scoring_assignment",
+                  "course_id": "c1", "assignment_id": "a1", "created": "2026-01-01",
+                  "status": "ready", "privacy_artifacts": {}},
+        "sess-new": {"session_id": "sess-new", "session_kind": "scoring_assignment",
+                  "course_id": "c1", "assignment_id": "a1", "created": "2026-01-05",
+                  "status": "ready", "privacy_artifacts": {}},
+    }
+    sessions.update(overrides)
+    monkeypatch.setattr(session_store, "load_session", lambda sid: sessions.get(sid))
+    monkeypatch.setattr(session_store, "save_session",
+                        lambda value: sessions.__setitem__(value["session_id"], value))
+    monkeypatch.setattr(session_store, "list_session_summaries", lambda: [
+        {"session_id": value["session_id"], "session_kind": value.get("session_kind"),
+         "course_id": value.get("course_id"), "assignment_id": value.get("assignment_id"),
+         "created": value.get("created"), "status": value.get("status"),
+         "assignment_name": "Essay", "total": 0, "approved": 0, "posted": 0}
+        for value in sessions.values()
+    ])
+    return sessions
+
+
+def test_list_returns_only_the_current_row_for_a_duplicated_scope(monkeypatch):
+    _scope_sessions(monkeypatch)
+
+    rows = tools.list_scoring_sessions()["sessions"]["rows"]
+
+    assert [row[0] for row in rows] == ["sess-new"]
+
+
+@pytest.mark.parametrize("tool", ["get_scoring_packet", "submit_scoring_results"])
+def test_non_current_duplicate_is_refused_as_session_superseded(monkeypatch, tool):
+    _scope_sessions(monkeypatch)
+
+    if tool == "get_scoring_packet":
+        result = tools.get_scoring_packet("sess-old")
+    else:
+        result = tools.submit_scoring_results("sess-old", [], "whatever")
+
+    assert result["ok"] is False
+    assert result["code"] == "session_superseded"
+    assert "sess-old" not in str(result) and "sess-new" not in str(result)
+
+
+def test_newer_terminal_duplicate_suppresses_older_ready_before_submit_planning(monkeypatch):
+    _scope_sessions(monkeypatch, **{
+        "sess-new": {"session_id": "sess-new", "session_kind": "scoring_assignment",
+                  "course_id": "c1", "assignment_id": "a1", "created": "2026-01-05",
+                  "status": "completed", "privacy_artifacts": {}},
+    })
+    from api import feedback_pipeline as fp
+    from api.powergrader import scoring_apply
+
+    monkeypatch.setattr(fp, "validate_results",
+                        lambda *_a, **_kw: pytest.fail("validation must not run"))
+    monkeypatch.setattr(scoring_apply, "build_plan",
+                        lambda *_a, **_kw: pytest.fail("Canvas planning must not run"))
+
+    result = tools.submit_scoring_results("sess-old", [{"pseudonym": "X"}], "digest")
+
+    assert result["ok"] is False
+    assert result["code"] == "session_superseded"
+
+
+def test_superseded_record_is_refused_as_session_superseded(monkeypatch):
+    _scope_sessions(monkeypatch, **{
+        "sess-old": {"session_id": "sess-old", "session_kind": "scoring_assignment",
+                  "course_id": "c1", "assignment_id": "a1", "created": "2026-01-01",
+                  "status": "superseded", "privacy_artifacts": {}},
+    })
+
+    assert tools.get_scoring_packet("sess-old")["code"] == "session_superseded"
+    assert tools.submit_scoring_results("sess-old", [], "whatever")["code"] == "session_superseded"
+
+
+def test_submit_refusal_happens_before_result_validation_or_canvas_work(monkeypatch):
+    _scope_sessions(monkeypatch, **{
+        "sess-old": {"session_id": "sess-old", "session_kind": "scoring_assignment",
+                  "course_id": "c1", "assignment_id": "a1", "created": "2026-01-01",
+                  "status": "superseded", "privacy_artifacts": {}},
+    })
+    from api import feedback_pipeline as fp
+    from api.powergrader import scoring_apply
+
+    monkeypatch.setattr(fp, "validate_results",
+                        lambda *_a, **_kw: pytest.fail("validation must not run"))
+    monkeypatch.setattr(scoring_apply, "build_plan",
+                        lambda *_a, **_kw: pytest.fail("Canvas planning must not run"))
+    monkeypatch.setattr(tools, "_open_vault",
+                        lambda: pytest.fail("re-identification must not run"))
+
+    result = tools.submit_scoring_results("sess-old", [{"pseudonym": "X"}], "digest")
+
+    assert result["code"] == "session_superseded"
+
+
+def test_submit_holds_the_scope_lock_across_the_currentness_check(monkeypatch):
+    _scope_sessions(monkeypatch)
+    acquired = []
+
+    class _TrackedScopeLock:
+        def __enter__(self):
+            acquired.append(True)
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+    monkeypatch.setattr(session_store, "scope_lock",
+                        lambda course_id, assignment_id: acquired.append(
+                            (course_id, assignment_id)) or _TrackedScopeLock())
+    monkeypatch.setattr(session_store, "session_lock", lambda _sid: nullcontext())
+
+    result = tools.submit_scoring_results("sess-new", [], "digest")
+
+    # The lock is taken for the exact private scope before any validation.
+    assert acquired[0] == ("c1", "a1")
+    assert result["code"] != "session_superseded"
