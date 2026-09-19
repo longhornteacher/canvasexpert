@@ -25,6 +25,12 @@ permission to redesign the repository.
 state. When the target becomes current behavior, the implementation batch must update the
 current contract and module maps in the same change.
 
+**Product-center scope:** the local runtime and its host-neutral MCP cooperation boundary
+are the primary product surface. Browser and UI references below describe retained control-
+console consumers, local state views, or implementation ownership; they do not require
+browser parity with a connected desktop agent. Host agents own conversation and rendered
+assignment or scoring previews from Canvas Expert's semantic, safety-bounded results.
+
 ## Reading map (senior routing only)
 
 - Sections 1–5 lock the product decision, evidence, existing foundation, and design laws.
@@ -74,8 +80,8 @@ For the teacher, the transition is successful when:
 
 1. Canvas Expert opens immediately from last-good local state. Background synchronization
    is visible but is not a launch barrier.
-2. Moving among Home, Create, Grade, Students, Automations, and reports does not repeatedly
-   download the same assignments, roster, or submissions.
+2. Moving among retained console surfaces, or making bounded requests through the connected
+   agent, does not repeatedly download the same assignments, roster, or submissions.
 3. A normal no-change refresh is short and quiet. A concluded course with unavailable New
    Quiz endpoints does not tax every heartbeat.
 4. Selecting one assignment refreshes that assignment's grading context. It does not
@@ -83,8 +89,9 @@ For the teacher, the transition is successful when:
 5. New, changed, and deleted Canvas objects are reflected predictably. A page remains absent
    only because page content is explicitly outside the mirrored contract, not because the
    system failed silently.
-6. Every surface states whether data is current, stale, incomplete, unavailable, or live.
-   The teacher never has to guess whether a gradebook is old.
+6. Every retained console surface and agent-facing result states whether data is current,
+   stale, incomplete, unavailable, or live. The teacher never has to guess whether a
+   gradebook is old.
 7. Read-only work remains useful during a Canvas outage. Write controls remain conservative
    and refuse to treat local state as a live preflight.
 8. A CanvasExpert write appears in the local read model promptly through targeted
@@ -189,8 +196,9 @@ local display read into a multi-minute global fetch.
 
 ### 5.7 Reads that can cause a write remain live at the decision boundary
 
-Local data may populate pickers, dashboards, and provisional previews. Before any Canvas
-mutation, the owning adapter obtains authoritative live state under its existing lock,
+Local data may populate retained control-console pickers and host-neutral agent results,
+including bounded preview data. Before any Canvas mutation, the owning adapter obtains
+authoritative live state under its existing lock,
 drift, idempotency, and receipt rules. The mirror never authorizes a grade, comment,
 extension, group change, late-policy change, or content mutation.
 
@@ -240,7 +248,7 @@ flowchart LR
     Views["Derived local views<br/>gradebook, work, reports, revision chains"]
 
     ReadService["Typed Canvas read service<br/>source + state + synced_at"]
-    UI["Home · Create · Grade · Students<br/>Automations · Reports · MCP"]
+    UI["Retained console views<br/>MCP semantic results"]
 
     Commands["Live command boundary<br/>preflight · lock · execute · verify · receipt"]
 
@@ -265,7 +273,7 @@ flowchart LR
 The arrows are intentionally asymmetric:
 
 - the mirror receives facts from Canvas;
-- UI and reports receive facts from typed local reads;
+- retained console views and agent-facing results receive facts from typed local reads;
 - commands bypass the mirror for authority;
 - successful commands teach the mirror what to refresh;
 - derived views never write Canvas directly.
@@ -324,7 +332,7 @@ teacher-selected object or write workflow. “Deferred” means do not add merel
 | Attachment/file bytes | Focused only | Canonical private evidence owner | PowerGrader, explicit open/download, portfolios | Never background-prefetch all files |
 | Assignment overrides | Focused/live | Command or focused report owner | Extensions, differentiation, write preflight | Do not globally mirror override trees for 1.0 beta |
 | Page/module item stubs | Required through modules | Student-free catalog | Course structure/navigation | Title/type/content ID only |
-| Page bodies | Required since 2026-08-01 | Student-free catalog `pages` scope | `get_course_pages` MCP course context, web UI course-catalog route | Normalized plain text only; every URL rewritten to `[link]` |
+| Page bodies | Required since 2026-08-01 | Student-free catalog `pages` scope | `get_course_pages` MCP course context, retained control-console course-catalog route | Normalized plain text only; every URL rewritten to `[link]` |
 | Classic Quiz questions and detailed responses | Live/focused or Canvas-native | PowerGrader/SpeedGrader boundary | Grading | No broad mirror in 1.0 beta |
 | Teacher/TA/observer directory | Deferred/minimal classification only | None unless a current consumer proves need | Comment authorship edge cases | Do not mirror emails for convenience |
 | Student email and avatars | Live explicit action or remove consumer | No default persistence | Course Info edge case | Privacy cost exceeds routine value |
@@ -451,7 +459,9 @@ pagination, invalid root, or rejected record cannot.
 
 The product map the senior should preserve while writing briefs. The module maps under
 `docs/reference/` own the per-route implementation detail; this table owns the durable
-routing law.
+routing law. Browser entries are retained control-console consumers. Agent-facing work
+starts at the MCP/runtime boundary and may consume the same typed read service without
+creating a browser workflow.
 
 | Surface | Local spine | Canvas live / focused | After write |
 |---|---|---|---|

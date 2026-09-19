@@ -1,55 +1,64 @@
-# AssignmentForge differentiation design
+# AssignmentForge differentiated-family design
 
-**Decision date:** 2026-09-15
-
-**Status:** Accepted content-only design.
+**Decision date:** 2026-09-19
+**Status:** Current shared renderer-neutral family design.
 
 ## Boundary
 
-AssignmentForge tiers identify authored pedagogical variants only. `Support`, `Core`,
-`Accelerate`, and `Extend` are canonical labels used to select Settings-backed public
-title tags. They do not identify a Canvas group, student, pod, membership, or placement.
+AssignmentForge tiers are authored pedagogical variants. A tier label is not a
+Canvas delivery instruction and does not authorize student placement. Assignment
+and Quiz Forge are two renderers under one differentiated-family contract. The
+shared owner is `api/operation_ledger/adapters/differentiated_bridge.py`.
 
-The teacher owns all Canvas assignment decisions after delivery: assigning each draft to
-students or groups, editing it, and publishing it. AssignmentForge never reads roster
-placement or creates or changes groups, overrides, modules, bridges, families, or SIS
-registrations.
+The family owner is responsible for exact group coverage, source safety, module
+placement, bridge creation and activation, verification, recovery, reconciliation,
+and the private family link. Renderer adapters create and verify their source
+objects, then call the shared family tail.
 
-## Payload and preparation
+## Preparation and payload
 
-`api/webui/af.py::tier_payloads` returns content identity (`label`, title, description) only.
-The adapter resolves public tags and appends ` - <tag>` to each source title. Tiered payloads
-retain the ordinary assignment fields supplied by the teacher: points, dates, submission
-settings, grading category, `post_to_sis`, and ordinary final-grade semantics.
+The authored envelope contains content only. Delivery preview requires at least
+two unique tiers and an exact `tier_targets` list with one Canvas group name per
+tier. The teacher must also choose the due date, module placement, and publication
+intent. A module is either an exact existing `module_id` or an explicit
+`create_module` request with a name; the runtime never guesses.
 
-Preparation captures only exact same-title assignment collisions for the authored source
-titles. It does not read group sets, groups, memberships, enrollments, or student IDs.
-`assignment_group_name` remains the ordinary Canvas grading-category option and may resolve
-through the existing assignment-group lookup.
+Preparation resolves the named groups and captures only safe labels, counts, and
+course-scoped identity facts. Raw membership IDs are transient operation inputs
+and are never returned in MCP results, receipts, docs, or durable family facts.
 
 ## Canvas delivery
 
-Each tier is one independent real Canvas assignment object. It is created unpublished,
-with `only_visible_to_overrides=false`, and with no assignment override. No tier is added
-to a module. The created object preserves its authored description and ordinary assignment
-fields, including points, dates, submission settings, grading category, SIS setting, and
-final-grade setting. The teacher assigns and publishes the drafts in Canvas.
+Each tier becomes an ordinary Assignment with the authored title, content, points,
+submission settings, dates, and assignment group. The server owns the safety
+fields: the source is created unpublished, restricted to the exact target group,
+override-only, omitted from the final grade, and SIS-disabled. The source is
+re-read after each mutation before the next step.
 
-Write-ahead checkpoints, exact returned IDs, uncertain-send handling, retry, and reconcile
-remain unchanged. Retry resumes only from exact verified assignment IDs and never guesses
-from titles.
+After all sources are verified, the shared tail attaches each source exactly once
+to the selected module, proves that bridge items are absent from every module, creates
+or adopts the family bridge, activates it with safe final settings, re-reads every
+postcondition, and saves the family link last. Failed verification leaves a
+recoverable operation rather than claiming a complete family.
 
-## Review and result
+## Review, result, and recovery
 
-Reviews and assistant results expose each variant label, public-tagged title, Canvas
-assignment ID, and Canvas HTML URL when supplied. They include the explicit teacher action:
-assign students/groups and publish the drafts in Canvas. AssignmentForge projections contain
-no group names, counts, member or student IDs, bridge, family, or module fields.
+Preview and apply results expose exact source assignment IDs and URLs, safe tier
+labels and group facts, the exact module, the bridge, and the family-link state.
+Discovery, scoring, and reconciliation consume the verified family link and are
+renderer-neutral. A missing or unverifiable link is actionable `needs_repair`, not
+an inferred family link.
+
+Recovery and reconciliation re-read live Canvas state, repair only the frozen
+family invariants, remove legacy bridge-module placement when required, and save a
+link only after the complete family is verified. No result contains student IDs,
+names, or raw membership data.
 
 ## Non-goals
 
-- QuizForge differentiated delivery remains group-restricted and bridge-based.
-- Roster tools, grade projection, and SIS bridge semantics are unchanged.
-- AssignmentForge does not create module items, differentiated bridge/family tails, or
-  automatic grade synchronization.
-- Ordinary whole-class AssignmentForge delivery remains unchanged.
+- Do not merge the AssignmentForge and QuizForge authoring grammars.
+- Do not infer groups, modules, due dates, publication, or bridge ownership.
+- Do not create unrestricted tier drafts or leave family placement incomplete.
+- Do not place the bridge in a module or duplicate a source module item.
+- Do not enable SIS posting or write New Quiz item scores.
+- Do not change whole-class delivery or build browser UI parity with the host agent.

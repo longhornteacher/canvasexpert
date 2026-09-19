@@ -24,47 +24,35 @@ from mcp.server.fastmcp import FastMCP
 from . import tools
 
 _SERVER_INSTRUCTIONS = (
-    "CanvasExpert reads this teacher's Canvas courses and student data from a "
-    "local mirror. Call list_courses for course_id. Student records use stable "
-    "one-word stand-ins; real names and Canvas/SIS ids stay local. get_roster, "
-    "get_submissions, and get_gradebook_snapshot refuse stale mirror data; call "
-    "refresh_mirror once, then retry. refresh_mirror returns an operation_id, "
-    "status, and usable mirror_revision when the sync completes. Results are compact JSON tables or arrays; "
-    "refusals are {ok:false} text with isError=false. Prefer narrow calls and "
+    "CanvasExpert is a local teacher-controlled runtime. It reads bounded Canvas "
+    "projections; real names, Canvas/SIS ids, credentials, and private paths stay "
+    "local. Student rows use stable stand-ins. Stale roster, submission, and "
+    "gradebook reads refuse; use refresh_mirror once, then retry. Results are compact "
+    "JSON tables or arrays; refusals are {ok:false}. Prefer narrow calls and "
     "include_text=false. "
-    "For content, call get_authoring_contract. push_content_live stages and "
-    "creates in one call; stage_content leaves a draft for review. Use the "
-    "preview_content_push/apply_content_push pair for due, unlock, or lock dates. "
-    "For a broad request such as 'what needs grading', list Current courses, call "
-    "refresh_mirror for each Current course, then read get_gradebook_snapshot for "
-    "each and loop over exact assignments. Report assignments with ungraded greater "
-    "than zero and partially_scored counts; do not ask the teacher to pick an assignment. "
-    "Call prepare_scoring_session with both "
-    "course_id and assignment_id for one assignment. It performs one private full "
-    "scoring refresh; never ask the teacher to choose a scoring transport or use "
-    "assignment type. For needs_scoring_norms, ask its question, then retry the "
-    "same exact preparation with bounded scoring guidance. If empty, report nothing_to_grade. Disclose held work; item/catalog "
-    "or evidence gaps do not mean the assignment is empty. Read every SAFE page "
-    "with get_scoring_packet, including first-page contract and rubric. Score only "
-    "those pseudonymized responses; submit_scoring_results with expected_packet_digest. "
-    "Each result needs pseudonym, item_id, score, and feedback; valid rows post to Canvas. "
-    "For needs_teacher_input, ask only its listed "
-    "questions and resubmit the same results with the review digest and answers. "
-    "After a terminal submit, the exact assignment session is complete; prepare "
-    "another assignment explicitly if needed. list_scoring_sessions is an identity-free resume aid. "
-    "SIS grade bridges are separate: reconcile_sis_grade_bridges discovers families; "
-    "preview_sis_grade_bridge_reconciliation reviews missing or drifted families; "
-    "preview_sis_grade_bridge reviews an existing registered family; "
-    "apply_sis_grade_bridge writes. Asking for a write is the authorization; "
-    "it covers only its named target and course, never another session or "
-    "assignment; ask if unclear and "
-    "stop on invariant failures. For the explicitly authorized local cleanup, call "
-    "preview_workspace_reset, then apply_workspace_reset with its unchanged "
-    "preview_digest; never clean up as a side effect of refresh_mirror. "
-    "For product capabilities or writing plans, call get_product_guide. "
-    "get_writing_history reads a separate private per-student coaching record; "
-    "use a stand-in and no course_id. Read "
-    "get_product_guide(topic=\"writing_record\") before assuming it does not exist."
+    "For broad grading requests, call discover_scoring_work first. It strictly "
+    "refreshes every Current course, reads only each refreshed local mirror, and "
+    "returns the complete assignment and attention set without preparation or writes. "
+    "Report all rows, wait for teacher direction, then loop only the selected exact "
+    "course_id and assignment_id rows; do not ask the teacher to pick before discovery. "
+    "A partial result keeps usable courses visible. "
+    "A refreshing result is successful but incomplete: for mirror_refresh_in_progress, "
+    "retry discovery only within at most four total calls for this teacher request "
+    "(initial plus three continuations), without teacher interruption; "
+    "then report remaining attention and wait. "
+    "Call prepare_scoring_session for one exact assignment. It performs one private "
+    "full scoring refresh. For needs_scoring_norms, ask its bounded question and retry "
+    "the same preparation with bounded scoring guidance; never ask the teacher to "
+    "choose a scoring transport or assignment type. Read every SAFE page with get_scoring_packet, including "
+    "its contract and rubric; held work and evidence gaps are not empty. Submit only "
+    "that packet's pseudonym/item results with expected_packet_digest through "
+    "submit_scoring_results. valid rows post to Canvas. For needs_teacher_input, ask "
+    "only its questions and resubmit the same results with the review digest and answers. "
+    "Canvas Live is the review surface; list_scoring_sessions is an identity-free resume "
+    "aid. A teacher's explicit score/post direction authorizes the selected discovery "
+    "rows together without reconfirming each assignment; it never extends beyond those "
+    "rows or another session. For content or product capabilities, call get_authoring_contract "
+    "or get_product_guide."
 )
 
 mcp = FastMCP("canvas-expert", instructions=_SERVER_INSTRUCTIONS)
@@ -285,11 +273,7 @@ def get_gradebook_snapshot(course_id: str) -> str:
 
 @mcp.tool(structured_output=False)
 def get_authoring_contract(kind: str) -> str:
-    """Canonical Forge authoring contract. No student data.
-
-    For AssignmentForge authoring: also read AssignmentForge/ASSIGNMENTFORGE.md
-    in your workspace root for workflows, differentiation, supports, corrections,
-    and auto-scoring eligibility rules."""
+    """Return the canonical Forge authoring contract; no student data."""
     return _compact(tools.get_authoring_contract(kind))
 
 
@@ -312,24 +296,25 @@ def preview_content_push(
     course_id: str,
     kind: str,
     label: str,
-    published: bool = False,
+    published: bool | None = None,
     module_name: str = "",
     assignment_group_name: str = "",
     due_at: str = "",
     unlock_at: str = "",
     lock_at: str = "",
-    post_to_sis: bool = False,
+    post_to_sis: bool | None = None,
+    module_id: str = "",
+    create_module: bool = False,
+    tier_targets: list | None = None,
 ) -> str:
-    """Persist a local frozen review of one staged draft before anything reaches Canvas.
-    kind is quiz/assignment/page; label comes from list_staged_content. Quizzes take
-    differentiated grouping options; assignments take ordinary grading-category options,
-    and pages take module_name. A kind refuses an option it cannot carry. Dates are ISO 8601."""
+    """Persist a local frozen staged quiz, assignment, or page draft; no Canvas write."""
     return _compact(tools.preview_content_push(
         course_id, kind, label,
         published=published, module_name=module_name,
         assignment_group_name=assignment_group_name,
         due_at=due_at, unlock_at=unlock_at, lock_at=lock_at,
-        post_to_sis=post_to_sis,
+        post_to_sis=post_to_sis, module_id=module_id,
+         create_module=create_module, tier_targets=tier_targets,
     ))
 
 
@@ -338,13 +323,14 @@ def preview_differentiated_quiz_push(
     course_id: str, variants: list, published: bool = False,
     module_name: str = "", assignment_group_name: str = "", due_at: str = "",
     unlock_at: str = "", lock_at: str = "", post_to_sis: bool = False,
+    module_id: str = "", create_module: bool = False,
 ) -> str:
-    """Freeze staged QuizForge labels into a reviewed group-restricted quiz plan.
-    Use apply_content_push with the unchanged coordinates returned here."""
+    """Freeze staged QuizForge labels into a reviewed group-restricted plan."""
     return _compact(tools.preview_differentiated_quiz_push(
         course_id, variants, published=published, module_name=module_name,
         assignment_group_name=assignment_group_name, due_at=due_at,
         unlock_at=unlock_at, lock_at=lock_at, post_to_sis=post_to_sis,
+        module_id=module_id, create_module=create_module,
     ))
 
 
@@ -384,12 +370,7 @@ def apply_assignment_update(operation_id: str, batch_id: str, review_digest: str
 
 @mcp.tool(structured_output=False)
 def stage_content(kind: str, label: str, content: str) -> str:
-    """Stage one authored draft in the teacher's review Inbox.
-    kind is quiz/assignment/page; content is the completed envelope
-    from get_authoring_contract. No Canvas write.
-
-    For AssignmentForge: use the content output from get_authoring_contract
-    (see AssignmentForge/ASSIGNMENTFORGE.md in your workspace root)."""
+    """Stage one completed Forge envelope in the teacher's review Inbox; no Canvas write."""
     return _compact(tools.stage_content(kind, label, content))
 
 
@@ -399,20 +380,18 @@ def push_content_live(
     kind: str,
     label: str,
     content: str,
-    published: bool = False,
+    published: bool | None = None,
     module_name: str = "",
     assignment_group_name: str = "",
-    post_to_sis: bool = False,
+    post_to_sis: bool | None = None, module_id: str = "", create_module: bool = False,
 ) -> str:
-    """Stage one authored draft and create it in the Canvas course, in one call.
-    The route for a teacher who asked for content in Canvas: their ask is the
-    authorization, so do not stage it and ask instead. Unpublished unless
-    published=true. Dates go through the preview_content_push pair."""
+    """Stage and create one authored draft in Canvas; dates use the preview pair."""
     return _compact(tools.push_content_live(
         course_id, kind, label, content,
         published=published, module_name=module_name,
         assignment_group_name=assignment_group_name,
-        post_to_sis=post_to_sis,
+        post_to_sis=post_to_sis, module_id=module_id,
+        create_module=create_module,
     ))
 
 
@@ -424,13 +403,22 @@ def refresh_mirror(course_id: str) -> str:
 
 
 @mcp.tool(structured_output=False)
+def refresh_course_structure(course_id: str) -> str:
+    """Refresh the local student-free Course Catalog module structure."""
+    return _compact(tools.refresh_course_structure(course_id))
+
+
+@mcp.tool(structured_output=False)
+def discover_scoring_work() -> str:
+    """Discover outstanding grading work across every Current course without preparing or writing."""
+    return _compact(tools.discover_scoring_work())
+
+
+@mcp.tool(structured_output=False)
 def prepare_scoring_session(course_id: str, assignment_id: str,
                             scoring_guidance: str = "") -> str:
     """Prepare one exact assignment after one private full mirror refresh.
-    Returns a session id ready for packet paging, or a typed identity-safe blocker.
-
-    Before starting: read ScoringSession/SCORING_SESSIONS.md in your workspace root
-    for workflows, known patterns, and failure modes."""
+    Returns a session id ready for packet paging, or a typed identity-safe blocker."""
     return _compact(tools.prepare_scoring_session(
         course_id, assignment_id, scoring_guidance))
 
@@ -462,9 +450,7 @@ def submit_scoring_results(
 ) -> str:
     """Post one score and feedback per SAFE packet row to Canvas.
     Each results item needs pseudonym, item_id, score, and feedback from get_scoring_packet.
-    If teacher judgment is needed, resubmit the same results with review_digest and answers.
-
-    See ScoringSession/SCORING_SESSIONS.md (§2, steps 5–6) for the submit workflow."""
+    If teacher judgment is needed, resubmit the same results with review_digest and answers."""
     return _compact(tools.submit_scoring_results(
         scoring_session_id, results, expected_packet_digest, review_digest, answers,
         idempotency_key))

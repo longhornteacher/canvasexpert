@@ -1,13 +1,15 @@
 About this folder
 
-Paste-ready single-file skills for whatever AI assistant you already use:
-Claude, ChatGPT, MagicSchool.ai, M365 Copilot. Paste one whole file into your
-chat, then keep that conversation inside that one file's instructions.
+Reference and authoring files for whatever AI assistant you already use: Claude,
+ChatGPT, MagicSchool.ai, or M365 Copilot. Chat-only users may use a whole file as
+reference; connected desktop agents should use CanvasExpert's runtime and request
+only the contract or appendix they need.
 
 File categories:
 - START HERE - CanvasAgent: what CanvasExpert is and how an assistant should
-  work with it. Paste the whole file into a chat, or just its CORE block into a
-  custom-instructions box if yours has a length limit. Read this one first.
+  work with it. Use its CORE block for a compact custom-instructions box, or use
+  an appendix as needed for chat-only setup and authoring. Connected agents use
+  the runtime as their primary working surface. Read this one first.
 - Authoring skills: one file each for QuizForge, AssignmentForge, and PageForge,
   plus files for a Class Schedule and a Learning Objective.
 - Scoring uses the reviewed rubric attached to each Canvas assignment.

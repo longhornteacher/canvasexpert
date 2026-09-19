@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import html
 import math
 import re
@@ -18,6 +19,7 @@ from .module_placement import attach_assignment_type_module_item
 
 
 CANONICAL_TIERS = ("Support", "Core", "Accelerate", "Extend")
+SUPPORTED_RENDERERS = ("assignment", "quiz")
 BRIDGE_SHAPE_FIELDS = (
     "name", "description", "points_possible", "assignment_group_id", "due_at",
     "grading_type", "submission_types", "published", "only_visible_to_overrides",
@@ -27,6 +29,51 @@ RECONCILIATION_FIELDS = ("name", "description", "due_at")
 
 _FAMILY_KEYS = ("family_id", "differentiation_family_id", "canonical_family_id")
 _TIER_KEYS = ("tier", "canonical_tier", "variant", "variant_label")
+
+
+def supported_renderers() -> tuple[str, ...]:
+    """Return the renderer registry for the shared family contract."""
+    return SUPPORTED_RENDERERS
+
+
+def normalize_tier_targets(labels: list[object], tier_targets: object) -> list[dict]:
+    """Validate teacher-supplied Canvas group targets without exposing students.
+
+    ``tier_targets`` is delivery input, not authoring content.  The returned
+    rows intentionally contain only canonical tiers and group names; the live
+    resolver adds transient membership evidence later.
+    """
+    if not isinstance(tier_targets, list):
+        raise ValueError("tier_targets is required for tiered AssignmentForge delivery")
+    expected = [canonical_tier(value) for value in labels]
+    if len(expected) < 2:
+        raise ValueError("Differentiated delivery requires at least two tiers")
+    if len(set(expected)) != len(expected):
+        raise ValueError("authored tiers must use each canonical tier at most once")
+    normalized = []
+    seen = set()
+    for row in tier_targets:
+        if not isinstance(row, dict) or set(row) != {"tier", "group_name"}:
+            raise ValueError("each tier_target must contain exactly tier and group_name")
+        tier = canonical_tier(row.get("tier"))
+        group_name = str(row.get("group_name") or "").strip()
+        if not group_name:
+            raise ValueError(f"tier target for {tier} requires a non-empty group_name")
+        if tier in seen:
+            raise ValueError(f"tier_targets contains duplicate tier {tier!r}")
+        seen.add(tier)
+        normalized.append({"tier": tier, "group_name": group_name})
+    if set(seen) != set(expected) or len(normalized) != len(expected):
+        missing = [tier for tier in expected if tier not in seen]
+        extra = [row["tier"] for row in normalized if row["tier"] not in expected]
+        detail = []
+        if missing:
+            detail.append(f"missing {', '.join(missing)}")
+        if extra:
+            detail.append(f"unknown {', '.join(extra)}")
+        raise ValueError("tier_targets must cover exactly every authored tier" + (f" ({'; '.join(detail)})" if detail else ""))
+    by_tier = {row["tier"]: row for row in normalized}
+    return [{"tier": tier, "group_name": by_tier[tier]["group_name"]} for tier in expected]
 
 
 def _metadata_value(assignment: dict, keys: tuple[str, ...]):
@@ -55,58 +102,130 @@ def canonical_assignment_tier(assignment: dict) -> str | None:
         return None
 
 
-def normalized_family_title(value: object) -> str:
-    """Normalize only for the legacy title fallback, never as primary identity."""
+def _public_tags(tier_tags: dict | None = None) -> list[str]:
+    """Return configured public suffixes, longest first.
+
+    Discovery is intentionally driven by Settings.  The canonical pedagogical
+    labels remain useful metadata, but they are not a title vocabulary and must
+    never make a one-off colour (or any other teacher tag) special.
+    """
+    configured = tier_tags if tier_tags is not None else config.get_tier_tags()
+    values = []
+    for value in (configured or {}).values():
+        text = str(value or "").strip()
+        if text and text.casefold() not in {item.casefold() for item in values}:
+            values.append(text)
+    return sorted(values, key=lambda value: (-len(value), value.casefold()))
+
+
+def title_tag_parts(value: object, tier_tags: dict | None = None) -> tuple[str, str | None]:
+    """Split an exact configured ``Base - <tag>`` title.
+
+    This is candidate discovery only.  Callers still have to prove the live
+    assignment structure before treating the result as a source or bridge.
+    """
     title = normalize_student_text(value or "").strip()
-    title = re.sub(r"\s*[-–—:]\s*(?:Support|Core|Accelerate|Extend|Bridge)\s*$", "", title, flags=re.I)
-    return title.strip()
+    folded = title.casefold()
+    for tag in _public_tags(tier_tags):
+        suffix = f" - {tag}".casefold()
+        if folded.endswith(suffix) and len(title) > len(suffix):
+            return title[:len(title) - len(suffix)].rstrip(), tag
+    return title, None
 
 
-def discover_families(assignments: list[dict], registrations: list[dict] | None = None) -> list[dict]:
+def normalized_family_title(value: object, tier_tags: dict | None = None) -> str:
+    """Normalize a candidate title using configured tags and the bridge suffix."""
+    title = normalize_student_text(value or "").strip()
+    if title.casefold().endswith(" - bridge"):
+        return title[:-len(" - bridge")].rstrip()
+    return title_tag_parts(title, tier_tags)[0].strip()
+
+
+def discover_families(
+    assignments: list[dict], registrations: list[dict] | None = None,
+    tier_tags: dict | None = None,
+) -> list[dict]:
     """Return student-free CE-owned family candidates from assignment metadata.
 
     Stable family/tier metadata wins. Title normalization is used only when an
     assignment has no stable family metadata at all.
     """
+    registrations = [row for row in (registrations or []) if isinstance(row, dict)]
+    by_source_id = {
+        str(value): row
+        for row in registrations
+        for value in (row.get("source_assignment_ids") or [])
+        if str(value).strip()
+    }
+    by_bridge_id = {
+        str(row.get("bridge_assignment_id")): row
+        for row in registrations
+        if str(row.get("bridge_assignment_id") or "").strip()
+    }
     groups: dict[tuple[str, str], list[dict]] = {}
     for assignment in assignments or []:
         if not isinstance(assignment, dict) or not assignment.get("id"):
             continue
+        assignment_id = str(assignment.get("id"))
+        registration = by_source_id.get(assignment_id) or by_bridge_id.get(assignment_id)
         family_key = canonical_family_key(assignment)
         tier = canonical_assignment_tier(assignment)
+        base_title, public_tag = title_tag_parts(assignment.get("name"), tier_tags)
         identity = "metadata"
         is_bridge = (
             _metadata_value(assignment, ("bridge", "is_bridge", "bridge_assignment")) is True
             or str(assignment.get("name") or "").strip().casefold().endswith(" - bridge")
         )
-        if assignment.get("post_to_sis") is True and canonical_assignment_tier(assignment) is None and not is_bridge:
-            continue
+        if registration:
+            family_key = str(registration.get("family_key") or registration.get("family_title") or "").strip()
+            base_title = str(registration.get("family_title") or base_title).strip()
+            tier = tier or public_tag or "registered"
+            identity = "family_link"
         if not family_key or not tier:
             if family_key and is_bridge:
-                groups.setdefault((family_key, identity), []).append(assignment)
+                tier = "registered"
+                copy_row = dict(assignment)
+                copy_row["_family_key_display"] = family_key
+                copy_row["_family_base_title"] = base_title
+                copy_row["_discovery_tier"] = tier
+                copy_row["_discovery_bridge"] = True
+                groups.setdefault((family_key.casefold(), identity), []).append(copy_row)
                 continue
-            family_key = normalized_family_title(assignment.get("name"))
-            tier = canonical_assignment_tier({"tier": assignment.get("tier")}) or "unknown"
+            family_key = normalized_family_title(assignment.get("name"), tier_tags) if is_bridge else base_title
+            # An exact unsuffixed title is a structural candidate source, not
+            # a bridge. The reconciliation service decides whether its live
+            # shape is acceptable; discovery must not discard or reclassify it.
+            tier = public_tag or ("unsuffixed" if not is_bridge else "unknown")
             identity = "title_fallback"
-        if not family_key or tier == "unknown":
+        if not family_key or (tier == "unknown" and not is_bridge):
             continue
-        groups.setdefault((family_key, identity), []).append(assignment)
+        copy_row = dict(assignment)
+        copy_row["_family_key_display"] = family_key
+        copy_row["_family_base_title"] = base_title
+        copy_row["_discovery_tier"] = tier
+        copy_row["_discovery_bridge"] = is_bridge
+        groups.setdefault((family_key.casefold(), identity), []).append(copy_row)
     result = []
     for (family_key, identity), rows in sorted(groups.items(), key=lambda item: item[0]):
         tiers = {}
         bridges = []
         for row in rows:
             tier = canonical_assignment_tier(row)
-            if tier:
+            if not tier and row.get("_discovery_tier") not in (None, "unknown", "registered"):
+                tier = str(row["_discovery_tier"])
+            if tier and not row.get("_discovery_bridge"):
                 tiers.setdefault(tier, []).append(row)
             marker = _metadata_value(row, ("bridge", "is_bridge", "bridge_assignment"))
-            if marker is True or str(row.get("name") or "").strip().casefold().endswith(" - bridge"):
+            if row.get("_discovery_bridge") or marker is True or str(row.get("name") or "").strip().casefold().endswith(" - bridge"):
                 bridges.append(row)
         source_rows = [row for values in tiers.values() for row in values]
+        registration = next((r for r in registrations if str(r.get("family_key") or r.get("family_title") or "").casefold() == str(family_key).casefold()), None)
+        family_title = str((registration or {}).get("family_title") or rows[0].get("_family_base_title") or normalized_family_title(rows[0].get("name"), tier_tags)).strip()
+        display_family_key = str((registration or {}).get("family_key") or rows[0].get("_family_key_display") or family_key).strip()
         result.append({
-            "family_key": family_key,
-            "family_title": normalized_family_title(rows[0].get("name")),
-            "identity_source": identity,
+            "family_key": display_family_key,
+            "family_title": family_title,
+            "identity_source": "family_link" if registration else identity,
             "source_assignment_ids": sorted(str(row.get("id")) for row in source_rows),
             "source_titles": [str(row.get("name") or "") for row in sorted(source_rows, key=lambda row: str(row.get("id")))],
             "source_tiers": sorted(tiers),
@@ -178,13 +297,29 @@ def bridge_title(base_title: str) -> str:
     return f"{normalize_base_title(base_title)} - Bridge"
 
 
-def require_family_delivery(due_at: object, module_name: object) -> tuple[str, str, str]:
+def require_family_delivery(
+    due_at: object,
+    module_name: object = "",
+    module_id: object = "",
+    *,
+    require_exact_module: bool = False,
+    create_module: bool = False,
+) -> tuple[str, str, str]:
     due_text = str(due_at or "").strip()
     module_text = str(module_name or "").strip()
     if not due_text:
         raise ValueError("Differentiated delivery requires due_at")
-    if not module_text:
-        raise ValueError("Differentiated delivery requires module_name")
+    module_id_text = str(module_id or "").strip()
+    if require_exact_module:
+        if module_id_text and create_module:
+            raise ValueError("module_id and create_module cannot be used together")
+        if not module_id_text and not (create_module and module_text):
+            raise ValueError(
+                "Differentiated AssignmentForge delivery requires module_id or "
+                "create_module=true with a non-empty module_name"
+            )
+    elif not module_text and not module_id_text:
+        raise ValueError("Differentiated delivery requires module_id or module_name")
     try:
         parsed = datetime.fromisoformat(due_text.replace("Z", "+00:00"))
     except ValueError as exc:
@@ -207,8 +342,8 @@ def bridge_description() -> str:
     url = html.escape(dashboard_url(), quote=True)
     return (
         "<p><strong>No submission is made here.</strong> This bridge keeps the "
-        "assignment visible in the module and gradebook. Open your "
-        f'<a href="{url}">Canvas Dashboard</a> and complete the color-suffixed '
+        "assignment visible in the gradebook (the source assignments are in the selected module). Open your "
+        f'<a href="{url}">Canvas Dashboard</a> and complete the configured-tag-suffixed '
         "version assigned to you.</p>"
     )
 
@@ -285,6 +420,39 @@ def execute_family_tail(
             failure_state, steps=steps, error_code=error,
         )
 
+    # Attach and verify every source before creating or repairing the bridge.
+    # This ordering means a legacy bridge item can never be removed or
+    # replaced before the source navigation is complete.
+    module_id = str(payload.get("module_id") or "").strip() or None
+    module_name = str(payload.get("module_name") or "").strip()
+    for index, (source_id, source_title) in enumerate(zip(source_ids, source_titles)):
+        module_result = attach_assignment_type_module_item(
+            course_id=course_id,
+            content_id=str(source_id),
+            title=source_title,
+            module_name=module_name,
+            module_id=module_id,
+            create_module=bool(payload.get("create_module")) and not module_id,
+            steps=steps,
+            context=context,
+            attach_step_key=f"attach_source_module:{index}",
+            returned_object_id=str(source_id),
+            deterministic_failure_state=failure_state,
+        )
+        if module_result.get("state") != "applied":
+            return module_result
+        module_id = str(
+            adapter_support.find_step(steps, f"attach_source_module:{index}").get("module_id")
+            or module_id or ""
+        ) or None
+
+    layout_error = _verify_source_module_layout(course_id, source_ids, "", steps)
+    if layout_error:
+        return adapter_support.build_result(
+            failure_state, steps=steps,
+            error_code=layout_error,
+        )
+
     create_step = adapter_support.ensure_step(steps, "create_bridge")
     bridge_id = create_step.get("returned_object_id")
     bridge_url = create_step.get("returned_object_url")
@@ -292,9 +460,7 @@ def execute_family_tail(
         assignment, read_error = adapter_support.get_assignment(course_id, str(bridge_id))
         activate_state = adapter_support.find_step(steps, "activate_bridge").get("state")
         expected_active = activate_state in {"applied", "skipped"}
-        if read_error or not bridge_matches(
-            assignment or {}, family, active=expected_active
-        ):
+        if read_error or not bridge_matches(assignment or {}, family, active=expected_active):
             return adapter_support.build_result(
                 "sent_unknown", steps=steps, error_code="bridge_exact_id_unverified",
             )
@@ -349,19 +515,14 @@ def execute_family_tail(
         )
         adapter_support.replace_step(steps, marked)
 
-    module_result = attach_assignment_type_module_item(
-        course_id=course_id,
-        content_id=str(bridge_id),
-        title=bridge_title(family["base_title"]),
-        module_name=payload["module_name"],
-        steps=steps,
-        context=context,
-        attach_step_key="attach_bridge_module",
-        returned_object_id=str(bridge_id),
-        deterministic_failure_state=failure_state,
-    )
-    if module_result.get("state") != "applied":
-        return module_result
+    # The bridge is gradebook-only. Prove it is absent from every module after
+    # source attachment and again after any exact-ID bridge adoption.
+    layout_error = _verify_source_module_layout(course_id, source_ids, str(bridge_id), steps)
+    if layout_error:
+        return adapter_support.build_result(
+            "sent_unknown", steps=steps, returned_object_id=str(bridge_id),
+            error_code=layout_error,
+        )
 
     activate_step = adapter_support.ensure_step(steps, "activate_bridge")
     assignment, read_error = adapter_support.get_assignment(course_id, str(bridge_id))
@@ -406,7 +567,7 @@ def execute_family_tail(
     else:
         activate_step["state"] = "skipped"
 
-    # Registration is the final proof-bearing step. Re-read every required
+    # The family link is the final proof-bearing step. Re-read every required
     # Canvas postcondition before any family record is saved.
     family, source_rows, error = _verified_family_sources(
         course_id, payload, source_ids, source_titles
@@ -438,7 +599,12 @@ def execute_family_tail(
         "source_titles": list(source_titles),
         "bridge_assignment_id": str(bridge_id),
         "bridge_state_digest": structural_digest(state),
+        "module_id": module_id,
+        "module_name": module_name,
     }
+    # ``register_family`` is retained as implementation-private storage
+    # terminology so interrupted pilot operations remain readable. It is
+    # surfaced as ``family_link`` at the agent boundary.
     register_step = adapter_support.ensure_step(steps, "register_family")
     try:
         config.save_sis_grade_bridge(course_id, registration)
@@ -451,7 +617,7 @@ def execute_family_tail(
         adapter_support.replace_step(steps, register_step)
         return adapter_support.build_result(
             "blocked", steps=steps, returned_object_id=str(bridge_id),
-            error_code="family_registration_failed",
+            error_code="family_link_save_failed",
         )
     if saved != registration:
         register_step["state"] = "blocked"
@@ -460,7 +626,7 @@ def execute_family_tail(
         adapter_support.replace_step(steps, register_step)
         return adapter_support.build_result(
             "blocked", steps=steps, returned_object_id=str(bridge_id),
-            error_code="family_registration_unverified",
+            error_code="family_link_unverified",
         )
     register_step["state"] = "applied"
     register_step["bridge_state_digest"] = registration["bridge_state_digest"]
@@ -491,25 +657,21 @@ def reconcile_family_tail(
         return {"state": "sent_unknown", "steps": projected}
     projected.append(_safe_step(create_step, bridge.get("html_url")))
 
-    attach_step = by_key.get("attach_bridge_module") or {}
-    item_id = str(attach_step.get("returned_object_id") or "")
-    module_id = str(attach_step.get("module_id") or "")
-    if not item_id or not module_id:
-        return {"state": _unfinished_state(attach_step), "steps": projected}
-    item, item_error = canvas_client.canvas_get(
-        f"/api/v1/courses/{course_id}/modules/{module_id}/items/{item_id}"
-    )
-    if (
-        item_error or not isinstance(item, dict)
-        or str(item.get("id") or "") != item_id
-        or str(item.get("type") or "").casefold() != "assignment"
-        or str(item.get("content_id") or "") != bridge_id
-    ):
-        return {"state": "sent_unknown", "steps": projected}
+    source_module_steps = []
+    for index, source_id in enumerate(source_ids):
+        attach_step = by_key.get(f"attach_source_module:{index}") or {}
+        if not attach_step.get("returned_object_id") or not attach_step.get("module_id"):
+            return {"state": _unfinished_state(attach_step), "steps": projected}
+        item, item_error = canvas_client.canvas_get(
+            f"/api/v1/courses/{course_id}/modules/{attach_step['module_id']}/items/{attach_step['returned_object_id']}"
+        )
+        if item_error or not isinstance(item, dict) or str(item.get("content_id") or "") != str(source_id):
+            return {"state": "sent_unknown", "steps": projected}
+        source_module_steps.append(_safe_step(attach_step))
     module_step = by_key.get("create_module")
     if module_step:
         projected.append(_safe_step(module_step))
-    projected.append(_safe_step(attach_step))
+    projected.extend(source_module_steps)
 
     activate_step = by_key.get("activate_bridge") or {}
     if activate_step.get("state") not in {"applied", "skipped"}:
@@ -530,6 +692,8 @@ def reconcile_family_tail(
         "source_titles": list(source_titles),
         "bridge_assignment_id": bridge_id,
         "bridge_state_digest": structural_digest(assignment_shape(bridge, [])),
+        "module_id": payload.get("module_id") or (source_module_steps[0].get("module_id") if source_module_steps else None),
+        "module_name": payload.get("module_name") or None,
     }
     register_step = by_key.get("register_family") or {}
     if registration != expected_registration:
@@ -541,6 +705,53 @@ def reconcile_family_tail(
         "returned_object_id": bridge_id,
         "returned_object_url": bridge.get("html_url"),
     }
+
+
+def _verify_source_module_layout(
+    course_id: str, source_ids: list[str], bridge_id: str,
+    steps: list[dict],
+) -> str | None:
+    """Re-read every module and prove exact source/bridge placement laws."""
+    module_ids = {
+        str(adapter_support.find_step(steps, f"attach_source_module:{index}").get("module_id") or "")
+        for index in range(len(source_ids))
+    }
+    module_ids.discard("")
+    if len(module_ids) != 1:
+        return "source_module_identity_unverified"
+    module_id = next(iter(module_ids))
+    modules, error = canvas_client.canvas_get_all(
+        f"/api/v1/courses/{course_id}/modules", {"per_page": 100}
+    )
+    if error:
+        return "source_module_layout_unverified"
+    source_set = {str(value) for value in source_ids}
+    occurrences = {source_id: [] for source_id in source_set}
+    bridge_occurrences = []
+    for module in modules or []:
+        current_module_id = str(module.get("id") or "")
+        if not current_module_id:
+            return "source_module_layout_unverified"
+        items, item_error = canvas_client.canvas_get_all(
+            f"/api/v1/courses/{course_id}/modules/{current_module_id}/items",
+            {"per_page": 100},
+        )
+        if item_error:
+            return "source_module_layout_unverified"
+        for item in items or []:
+            content_id = str(item.get("content_id") or "")
+            if content_id in occurrences:
+                occurrences[content_id].append((current_module_id, str(item.get("id") or "")))
+            if bridge_id and content_id == str(bridge_id):
+                bridge_occurrences.append((current_module_id, str(item.get("id") or "")))
+    if any(
+        len(found) != 1 or found[0][0] != module_id
+        for found in occurrences.values()
+    ):
+        return "source_module_membership_invalid"
+    if bridge_occurrences:
+        return "bridge_module_item_present"
+    return None
 
 
 def _safe_step(step: dict, url: str | None = None) -> dict:
@@ -566,7 +777,9 @@ def _verified_family_sources(
     rows = []
     points = []
     groups = []
-    for source_id, title in zip(source_ids, source_titles):
+    safe_tiers = ((payload.get("group_snapshot") or {}).get("tiers")
+                  if isinstance(payload.get("group_snapshot"), dict) else None)
+    for index, (source_id, title) in enumerate(zip(source_ids, source_titles)):
         assignment, error = adapter_support.get_assignment(course_id, str(source_id))
         if error or assignment is None:
             return {}, rows, "source_exact_id_unverified"
@@ -587,6 +800,21 @@ def _verified_family_sources(
         )
         if override_error or not overrides:
             return {}, rows, "source_override_unverified"
+        if safe_tiers and index < len(safe_tiers):
+            expected_group = safe_tiers[index]
+            expected_group_id = str(expected_group.get("group_id") or "")
+            actual_group_ids = {
+                str(row.get("group_id") or "") for row in overrides
+                if row.get("group_id") not in (None, "")
+            }
+            override_ids = _override_student_ids(overrides)
+            expected_digest = str(expected_group.get("membership_digest") or "")
+            if expected_group_id and actual_group_ids and expected_group_id not in actual_group_ids:
+                return {}, rows, "source_group_override_unverified"
+            if expected_digest and override_ids and _membership_digest(override_ids) != expected_digest:
+                return {}, rows, "source_group_override_unverified"
+            if expected_digest and not actual_group_ids and not override_ids:
+                return {}, rows, "source_group_override_unverified"
         points.append(_number(assignment.get("points_possible")))
         groups.append(str(assignment.get("assignment_group_id") or ""))
         rows.append(assignment)
@@ -618,6 +846,22 @@ def _fields_match(actual: dict, expected: dict) -> bool:
         elif current != value:
             return False
     return True
+
+
+def _override_student_ids(overrides: list[dict]) -> list[str]:
+    values = []
+    for override in overrides or []:
+        for key in ("student_ids", "students"):
+            raw = override.get(key)
+            if isinstance(raw, dict):
+                raw = raw.keys()
+            if isinstance(raw, list):
+                values.extend(str(value) for value in raw if str(value).strip())
+    return sorted(set(values))
+
+
+def _membership_digest(student_ids: list[str]) -> str:
+    return hashlib.sha256("\n".join(sorted(student_ids)).encode("utf-8")).hexdigest()
 
 
 def _stop(
@@ -676,6 +920,8 @@ __all__ = [
     "require_family_delivery",
     "reconcile_family_tail",
     "resolve_public_tags",
+    "normalize_tier_targets",
+    "supported_renderers",
     "source_title",
     "structural_digest",
 ]

@@ -1,5 +1,9 @@
 # Writing Record Route Card
 
+This card maps the private runtime service and its retained control-console trigger. The
+primary agent-facing read path is MCP `get_writing_history`; the browser/CLI entries below
+are local acquisition and maintenance surfaces, not a separate scoring workflow.
+
 ## What this subsystem is
 
 Writing Record privately preserves scrubbed writing evidence for later

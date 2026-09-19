@@ -1,4 +1,4 @@
-"""Student-free synced registration for SIS grade bridges."""
+"""Student-free synced family-link storage for SIS grade bridges."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from . import _io as _io_mod
 
 
 SETTINGS_KEY = "sis_grade_bridges"
+# These private key names remain stable for persisted pilot state. Product and
+# MCP language calls the record a verified family link.
 _REGISTRATION_KEYS = (
     "family_title",
     "source_assignment_ids",
@@ -15,7 +17,7 @@ _REGISTRATION_KEYS = (
     "bridge_assignment_id",
     "bridge_state_digest",
 )
-_OPTIONAL_REGISTRATION_KEYS = ("family_key", "grading_excluded")
+_OPTIONAL_REGISTRATION_KEYS = ("family_key", "grading_excluded", "module_id", "module_name")
 
 
 def _clean_text(value, field: str) -> str:
@@ -57,6 +59,9 @@ def _normalize_registration(registration: dict) -> dict:
         clean["family_key"] = _clean_text(registration.get("family_key"), "family_key")
     if registration.get("grading_excluded") is not None:
         clean["grading_excluded"] = bool(registration.get("grading_excluded"))
+    for key in ("module_id", "module_name"):
+        if registration.get(key) not in (None, ""):
+            clean[key] = _clean_text(registration.get(key), key)
     return clean
 
 

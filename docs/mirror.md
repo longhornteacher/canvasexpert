@@ -11,7 +11,13 @@ Reads that used to cost live Canvas round trips are served from disk in
 milliseconds when the mirror is fresh. Two different rules apply to what
 happens when it isn't fresh, by design:
 
-- **The web UI's own gradebook snapshot route** (`gradebook_snapshot.load_snapshot`,
+This document covers the runtime's read-safety boundary. The connected agent/MCP path is
+strictly mirror-only and is the primary agent-facing read surface. The browser is a
+retained control console, so its teacher-in-the-loop diagnostics and decision surfaces
+may use the explicitly documented live fallback; that exception must not leak into MCP
+results or become a generic browser-first architecture.
+
+- **The retained control console's gradebook snapshot route** (`gradebook_snapshot.load_snapshot`,
   used by CanvasExpert's own grading screens) falls back to a live Canvas
   fetch, visibly labeled `source: "canvas"` — the teacher is in the loop and
   reads there can feed a write decision, so staleness should never block them.
@@ -206,7 +212,7 @@ heartbeat) ticks every 15 minutes for Current courses only:
   freshness authority.
 
 Config (machine-local): `mirror_enabled` (default true),
-`mirror_serve_max_age_hours` (default 6 — older than this, the web UI's own
+`mirror_serve_max_age_hours` (default 6 — older than this, the control console's own
 readers fall back to live Canvas; the MCP tools refuse instead, per law 6).
 
 Routes: `GET /api/mirror/status` (per-course pass envelopes + watermarks, and
@@ -288,17 +294,17 @@ Consumers flipped in v1:
 
 - `gradebook_snapshot.load_snapshot` — mirror-first when fresh, live
   fallback; snapshot carries `source` + `synced_at` either way. This is the
-  web UI gradebook route's own loader.
+  control-console gradebook route's own loader.
 - MCP `get_roster` / `get_submissions` / `get_gradebook_snapshot` — served
   from the mirror when fresh (zero Canvas calls, works offline),
   pseudonymized and gated exactly as before; payloads carry `source` +
-  `synced_at`. Unlike the web UI route above, these three tools call
+  `synced_at`. Unlike the control-console route above, these three tools call
   `mirror_queries` directly and refuse (a structured `{"ok": false, "error":
   ...}`) rather than falling through to a live fetch when the mirror can't
   serve — see "MCP reads and the refresh tool" below.
 
 Explicit `queries=` overrides and monkeypatched test seams always bypass the
-mirror in the web UI's loader, so offline tests exercise the live path
+mirror in the control-console loader, so offline tests exercise the live path
 unchanged; the MCP tools' seam guard (`api/mcp_server/tools.py::_cache_safe`)
 instead makes a monkeypatched fetch seam a reason to *refuse*, since there is
 no live path left for it to fall into.
@@ -310,7 +316,7 @@ mirror-only (design law 6): a stale or missing mirror returns
 `{"ok": false, "error": "..."}` naming the problem, never a live Canvas
 payload. `refresh_mirror(course_id)` is the assistant's only lever to move
 past that: it calls `mirror_service.enqueue_sync` (the same manual-priority
-coordinator plan behind the web UI's "Sync now") and waits up to
+coordinator plan behind the control console's "Sync now") and waits up to
 `tools._REFRESH_TIMEOUT_SECONDS` (25s) via `mirror_service.wait_for_plan`,
 then reports `{"ok": true, "status": "synced"}`, `{"ok": true, "status":
 "syncing"}` (still running past the timeout — safe to retry shortly), or

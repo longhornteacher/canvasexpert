@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 
 
-TOOL_SCHEMA_VERSION = 50
-_SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50)
+TOOL_SCHEMA_VERSION = 53
+_SUPPORTED_SCHEMA_VERSIONS = tuple(range(1, TOOL_SCHEMA_VERSION + 1))
 _SCHEMA_DIR = Path(__file__).resolve().parent
 
 
@@ -31,8 +31,16 @@ def live_contract(mcp) -> dict:
     for name, tool in sorted(registry.items()):
         parameters = getattr(tool, "parameters", {}) or {}
         properties = parameters.get("properties") or {}
+        def property_type(schema: dict) -> str:
+            direct = schema.get("type")
+            if direct:
+                return str(direct)
+            choices = schema.get("anyOf") or schema.get("oneOf") or []
+            types = [str(item.get("type")) for item in choices if item.get("type") != "null"]
+            return types[0] if len(set(types)) == 1 else ""
+
         normalized_properties = {
-            key: str((properties[key] or {}).get("type") or "")
+            key: property_type(properties[key] or {})
             for key in sorted(properties)
         }
         tools.append({

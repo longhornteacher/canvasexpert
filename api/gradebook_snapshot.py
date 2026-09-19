@@ -32,7 +32,7 @@ def build_snapshot(students, assignments, subs) -> dict:
             "points":   a.get("points_possible") or 0,
             "html_url": a.get("html_url", ""),
             "submitted": 0, "graded": 0, "missing": 0, "late": 0,
-            "ungraded": 0, "partially_scored": 0,
+            "ungraded": 0, "partially_scored": 0, "late_ungraded": 0,
             "score_sum": 0.0, "score_n": 0,
         }
 
@@ -65,6 +65,8 @@ def build_snapshot(students, assignments, subs) -> dict:
         if ungraded:
             a["ungraded"] += 1
             s["ungraded"] += 1
+            if sub.get("late"):
+                a["late_ungraded"] += 1
             if sub.get("score") is not None:
                 a["partially_scored"] += 1
 
@@ -78,7 +80,8 @@ def build_snapshot(students, assignments, subs) -> dict:
             "submitted": a["submitted"], "graded": a["graded"],
             "ungraded": a["ungraded"],
             "partially_scored": a["partially_scored"],
-            "missing": a["missing"], "late": a["late"], "avg_pct": avg,
+            "late_ungraded": a["late_ungraded"], "missing": a["missing"],
+            "late": a["late"], "avg_pct": avg,
         })
     out_assignments.sort(key=lambda a: a["due_at"] or "0000-00-00", reverse=True)
 

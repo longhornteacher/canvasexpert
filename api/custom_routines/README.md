@@ -1,6 +1,10 @@
 # Custom Routines
 
-Drop a `.py` file here and it shows up in the Dashboard → Routines table the next time
+Custom routines run inside CanvasExpert's local runtime. The retained control console
+configures and displays them; they are not a hosted agent surface or a replacement for
+the connected assistant's conversation.
+
+Drop a `.py` file here and it shows up in the control console's Routines table the next time
 you start Canvas Expert. Each file registers one or more routines with the `@routine`
 decorator. No imports needed — the helpers listed in `AUTHORING.md` are already in scope.
 

@@ -3,6 +3,11 @@
 This directory contains durable project documentation and senior-authored execution briefs.
 For canonical AI-agent guidance and safety rules, read `../AGENTS.md` first.
 
+The locked product direction is in
+[`contracts/agent-runtime-product-contract.md`](contracts/agent-runtime-product-contract.md):
+Canvas Expert is a local teacher-controlled agent runtime, while the browser is a small
+control console around it. Future architecture and agent-facing work should start there.
+
 ## Sections
 
 - `docs/contracts/` - durable data contracts and interface agreements.
@@ -16,25 +21,27 @@ For canonical AI-agent guidance and safety rules, read `../AGENTS.md` first.
 
 ## Agent-agnostic workspace resources
 
-Before starting Scoring Sessions or AssignmentForge authoring, every agent should read:
-- `ScoringSession/SCORING_SESSIONS.md` (in the teacher's workspace root) — canonical Scoring Session reference
-- `AssignmentForge/ASSIGNMENTFORGE.md` (in the teacher's workspace root) — canonical AssignmentForge authoring reference
+The connected MCP tools, results, and the focused guides below carry the supported
+operational contract. Optional teacher workspace notes may add local context, but a
+fresh agent must not be required to read the repository or an arbitrary workspace file
+before using the scoring tools.
 
-These files live in the synced workspace (not in the repo) so they are discoverable by any agent tool
-(Claude, ChatGPT, Copilot, human) without private assistant memory. They are maintained by the teacher
-and updated with new patterns, failures, and corrections as they emerge.
+- [`guides/scoring-sessions.md`](guides/scoring-sessions.md) — cross-course discovery,
+  assignment-bounded SAFE packets, and write safeguards.
+- [`guides/scoring-session-fresh-client-probe.md`](guides/scoring-session-fresh-client-probe.md)
+  — copy-ready ChatGPT Desktop and Claude Desktop/Cowork readiness probe.
 
 Useful starting references for new debugging and refactor sessions:
 
 - [`docs/guides/sis-grade-bridges.md`](guides/sis-grade-bridges.md) - teacher workflow,
-  automatic differentiated family registration, grade projection, privacy boundary,
+  automatic differentiated family linking, grade projection, privacy boundary,
   recurring updates, and safe exact-ID Attention recovery for SIS grade bridges;
   the linked contract remains normative.
 - `docs/reference/canvasmirror-1.0beta-information-spine.md` - grand vision, migration order,
   tool-to-Canvas routing, and release gates for making CanvasMirror the default project read
   spine without weakening live write preflights.
 - `docs/contracts/canonical-school-calendar-contract.md` - target authority for school dates,
-  bell/teacher schedule relationships, Calendar UI/MCP edits, and dependent-feature gates.
+  bell/teacher schedule relationships, Calendar UI edits, and dependent-feature gates.
 - `docs/reference/course-expert-module-map.md` - Work tools push/download route, script, and template ownership map.
 - `docs/reference/settings-module-map.md` - Settings route/script/config ownership map.
 - `docs/reference/powergrader-scoring-map.md` - internal/private Scoring Session packet, privacy, and guarded-write implementation map (legacy filename).

@@ -213,7 +213,6 @@ def _finish_operation(operation_id: str, target_results: list[dict]) -> dict:
         status=_receipt_status(final_status),
         targets=_receipt_targets(op.get("targets", [])),
         **({"variants": variants} if variants else {}),
-        **({"teacher_action": "Teacher action: in Canvas, assign each draft to the intended students, groups, or pods, then publish the drafts."} if variants else {}),
     )
     create_receipt(receipt)
     return {
@@ -225,7 +224,7 @@ def _finish_operation(operation_id: str, target_results: list[dict]) -> dict:
 
 
 def _assignment_variants(operation: dict) -> list[dict]:
-    """Expose content-only AssignmentForge tier results in the receipt."""
+    """Expose exact differentiated-family source results in the receipt."""
     if operation.get("kind") != "content.assignment":
         return []
     tiers = (operation.get("normalized_payload") or {}).get("tiers") or []

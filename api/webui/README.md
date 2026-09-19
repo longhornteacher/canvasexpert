@@ -1,6 +1,7 @@
-# Canvas Expert Web UI — Feature Reference
+# Canvas Expert Control Console — Feature Reference
 
-**Audience:** teachers using the local web UI; developers building or extending UI features.
+**Audience:** teachers using the local control console; developers maintaining setup,
+trust, review, recovery, diagnostics, and genuinely local-only surfaces.
 **Implementation:** `api/webui/server.py` (FastAPI), `api/webui/templates/` (Jinja2),
 `api/webui/static/` (`push.js` + `push/*.js`, `course_expert/*.js`,
 `gradebook.js` + `gradebook/*.js`, `roster.js` + `roster/*.js`,
@@ -10,6 +11,11 @@
 For backend overview, setup, files table, and confirmed Canvas API facts, see `api/README.md`.
 For the shared layout/template API and presentation ownership, see
 `docs/reference/webui-presentation-system.md`.
+
+The primary working surface is a connected desktop agent through the local MCP server.
+The control console is intentionally smaller: it must not grow toward feature parity with
+ChatGPT Desktop, Claude Desktop, or another agent host. Host-rendered previews are backed
+by host-neutral MCP results and runtime state; they are not browser UI requirements.
 
 `api/README.md` owns the backend, CLI, packaging, setup, credentials, workspace, and the
 `api/` files table. This document owns routes, pages, templates, static assets, per-route
@@ -51,7 +57,7 @@ Source tests never substitute for rendered verification.
 | `/students/reports` | **Student reports** — packet and portfolio tools under Students | `student_reports.html` + `course_expert/student_reports.js` + `course_expert/portfolio.js` |
 | `/gradebook` | **Gradebook tools** — single-course grade operations | `gradebook.js` + `gradebook/*.js` |
 | `/roster` | **Rosters** — student-level Canvas-group and local settings console | `roster.js`, `roster/*.js` |
-| Scoring Sessions | MCP only; one frozen Current-course backlog session with assignment-bounded packets. No Canvas Expert scoring page or browser assets; review and edit posted results in Canvas Live. | `docs/reference/powergrader-scoring-map.md` |
+| Scoring Sessions | MCP only; cross-course discovery followed by teacher-selected assignment-bounded packets. No Canvas Expert scoring page or browser assets; review and edit posted results in Canvas Live. | `docs/reference/powergrader-scoring-map.md` |
 | `/ai-expert` | **AI helper files** — paste-ready LLM skill files | inline |
 | `/course` | Course Info detail page | `course_info.js` |
 | `/settings` | Settings | `settings.js` |
@@ -63,6 +69,11 @@ CanvasAgent's secondary Canvas refresh queues local read-only coordinator work a
 opaque plan status. It does not scan or refresh retired Home work cards.
 
 ### Create module routing
+
+Create contains retained browser workflows and artifact controls, but new agent-facing
+work should begin at the MCP/runtime boundary. Do not add a browser preview or dashboard
+only to duplicate a capable agent host; keep browser changes limited to the control-console
+purpose in the product contract.
 
 Create is split for low-token debugging.
 
@@ -105,9 +116,10 @@ For the full ownership map, see `docs/reference/settings-module-map.md`.
 
 ### Scoring Sessions
 
-Scoring Sessions are available through MCP only. The agent starts one frozen
-Current-course backlog session and continues across assignments, while every SAFE
-pseudonymized packet and result submission remains assignment-bounded. Ordinary assignment
+Scoring Sessions are available through MCP only. The agent first calls
+`discover_scoring_work` across Current courses, reports the digest, and waits for teacher
+direction. Every selected SAFE pseudonymized packet and result submission remains
+assignment-bounded. Ordinary assignment
 scores and comments use the reviewed write lane; New Quiz writing stops with
 `new_quiz_writing_requires_assignment` and is graded in Canvas. Canvas Live is the only
 review/edit surface. See
@@ -221,9 +233,9 @@ Activity Log under action `routine`.
 **Auto-curve idempotency:** the curve routine skips any assignment that already has a
 non-reverted curve event, so weekly runs don't re-lift grades as new scores come in.
 
-**Differentiated bridge grade sync:** each run visits registered families in Current courses
+**Differentiated bridge grade sync:** each run visits linked families in Current courses
 and uses one Operation Ledger preview/apply cycle per family. It copies an unambiguous posted
-final from whichever registered source contains it, ignores tier membership as grade authority,
+final from whichever linked source contains it, ignores tier membership as grade authority,
 holds submitted-but-ungraded, hidden, or conflicting work, and writes a missing zero only after
 the bridge due time. It never invokes Canvas Grade Sync; review the bridge in Canvas Live and
 run SIS sync yourself.
@@ -287,8 +299,9 @@ The Quiz tab also links the standalone QuizForge app for QTI-ZIP manual import.
 **Whole class:** pick a QuizForge file, then **Validate**, **Dry-run preview** (no
 live calls), or **Push live quiz…** (confirmation → streamed log).
 **Differentiated:** a quiz file per Canvas group, delivered through the reviewed
-Operation Ledger family path. Settings supplies public title tags; only the
-server-named `<family> - Bridge` no-submission bridge is attached to the selected module.
+Operation Ledger family path. Settings supplies public title tags; each exact source
+assignment is attached to the selected module and the server-named `<family> - Bridge`
+remains gradebook-only with no module item.
 Delivery options: due / unlock / lock dates, grading category, add-to-module
 (or create one), shuffle answers/questions, SIS sync, publish, hide results,
 access code, multiple attempts (+ cooldown, score-to-keep, build-on-last), time
@@ -303,10 +316,10 @@ Microsoft Edge through Playwright; DOCX files are rendered through bundled Pando
 ### Assignment tab
 Pick an `<ASSIGNMENTFORGE_JSON>` file, then **Validate** / **Push assignment…**.
 Delivery: dates, grading category, module, SIS, and publish for ordinary assignments.
-Authored tiers are content-only: each becomes an independent unpublished, unrestricted
-Canvas assignment draft with its configured public tag. The teacher assigns students/groups/pods
-and publishes the drafts in Canvas; no Roster group set or bridge is involved. Rubric
-association is not part of this operation path.
+Authored tiers are differentiated-family sources. Each uses an exact named group target,
+override-only and server-owned final-grade/SIS safety, the selected source-only module
+placement, and the shared verified bridge/link path. Rubric association is not part of this
+operation path.
 
 ### Page tab
 Pick a `<PAGEFORGE_JSON>` file, then **Validate** / **Push page…**. Module placement
@@ -403,9 +416,10 @@ Read-only grade distribution view.
 ## Scoring Sessions (MCP)
 
 Canvas Expert has no local scoring queue, result-import panel, or hosted grader. The
-connected agent starts one frozen Current-course backlog session and continues it across
-assignments; every SAFE pseudonymized packet and result submission remains limited to its
-active assignment. Canvas Live is the only review/edit surface. See
+connected agent starts with the cross-course `discover_scoring_work` digest, reports it,
+and waits for teacher direction. Each selected assignment then receives its own SAFE
+pseudonymized packet and result submission, bounded to that assignment. Canvas Live is the
+only review/edit surface. See
 `docs/guides/scoring-sessions.md` and `docs/reference/powergrader-scoring-map.md`.
 
 ---

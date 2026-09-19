@@ -87,7 +87,7 @@ def test_builtin_bridge_sync_reports_blocked_family_and_continues(monkeypatch):
     def preview(_course_id, family_title, *, write_origin):
         assert write_origin == "routine"
         if family_title == "Blocked Family":
-            return {"ok": False, "error": "registered_bridge_drift"}
+            return {"ok": False, "error": "family_link_bridge_drift"}
         return {
             "ok": True, "operation_id": "operation-2",
             "batch_id": "batch-2", "review_digest": "digest-2",
@@ -104,5 +104,5 @@ def test_builtin_bridge_sync_reports_blocked_family_and_continues(monkeypatch):
 
     assert result["ok"] is False
     assert len(result["lines"]) == 2
-    assert result["lines"][0] == "✗ Blocked Family: registered_bridge_drift"
+    assert result["lines"][0] == "✗ Blocked Family: family_link_bridge_drift"
     assert result["lines"][1].startswith("✓ Safe Family:")

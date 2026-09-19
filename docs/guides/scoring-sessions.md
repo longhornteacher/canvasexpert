@@ -2,27 +2,49 @@
 
 Status: target workflow for the current pre-launch implementation
 
-A Scoring Session is one exact course-and-assignment run prepared through an
-MCP-connected agent. The agent discovers candidates with mirror-backed gradebook
-tools, then prepares, pages, and submits one assignment at a time. Existing New
-Quizzes with writing stop with `new_quiz_writing_requires_assignment` and are
-graded in Canvas.
+A Scoring Session begins with cross-course discovery through the MCP runtime. The
+agent reports one compact, student-free digest for every configured Current course,
+waits for teacher direction, and then prepares, pages, and submits only the exact
+assignment(s) selected by the teacher. Each prepared session remains one exact
+course-and-assignment SAFE/write boundary. Existing New Quizzes with writing stop
+with `new_quiz_writing_requires_assignment` and are graded in Canvas.
 
 This guide is the canonical description of the workflow and its failure modes.
 `docs/contracts/feedback-scoring-contract.md` is normative for the data shapes.
+For a fresh desktop-client readiness check, use
+[`scoring-session-fresh-client-probe.md`](scoring-session-fresh-client-probe.md).
 
 ## Before scoring
 
-For "what needs grading," the agent lists Current courses, refreshes their
-mirrors when needed, and reads `get_gradebook_snapshot`. It loops over the exact
-assignments with positive `ungraded` or `partially_scored` work. Canvas Expert
-persists no backlog queue, so a broad request has to be decomposed into a list of
-exact assignments first and then worked one at a time. There is no "do the rest"
-shortcut.
+For "what needs grading," the agent calls `discover_scoring_work()` with no
+arguments. Canvas Expert strictly refreshes every Current course through the
+existing CanvasMirror coordinator, whose physical limit is two workers, reads only
+the refreshed local mirror, and returns the complete
+assignment and attention tables. The result includes assignments with positive
+`ungraded` or `partially_scored` work, an accurate `late_ungraded` aggregate, and
+at most one current actionable session joined to its exact row. The agent reports
+the full digest and waits for teacher direction. Discovery persists no backlog
+queue, parent session, authorization record, packet, or write.
+
+The per-call wait is bounded. A refresh that remains `queued` or `running` is
+reported as retryable `mirror_refresh_in_progress` with an opaque operation id,
+its refresh status, and an instruction to retry discovery without teacher
+interruption. If any course is still refreshing, the discovery status is
+`refreshing`; usable assignment rows remain visible, but they are not the
+complete teacher decision set. The host may make at most four total discovery
+calls for the current teacher request (the initial call plus three continuations),
+then reports remaining attention and waits for teacher direction; a repeated
+advisory does not reset that cap. Repeated calls use the same coordinator
+course/scope job.
 
 ## Agent workflow
 
-1. Call `prepare_scoring_session(course_id, assignment_id)` with both exact IDs.
+1. After the teacher selects one or more exact rows from discovery, call
+   `prepare_scoring_session(course_id, assignment_id)` with both exact IDs for each
+   selected assignment. An explicit teacher direction to score/post that selected set
+   authorizes submission for the set; do not request a new blanket confirmation per
+   assignment. A review-only or no-submit direction stops before
+   `submit_scoring_results`.
    It performs one private full scoring refresh and reads only current local
    mirror projections. A Canvas rubric wins; otherwise a missing basis returns
    `needs_teacher_input` with `needs_scoring_norms`. Ask the concise question,
@@ -48,8 +70,10 @@ shortcut.
 7. Verify rather than assume. After submitting, refresh the mirror and re-read the
    gradebook snapshot or submissions to confirm the counts moved. This matters most
    after a client-side timeout; see `canvas_write_attention` below.
-8. To score another assignment, prepare that exact assignment explicitly.
-   `list_scoring_sessions()` is an identity-free resume aid for assignment-scoped
+8. Continue through the other rows in the teacher-selected set by preparing each
+   exact assignment in turn, without a new blanket confirmation per assignment.
+   A newly discovered assignment requires new teacher direction. `list_scoring_sessions()`
+   is an identity-free resume aid for assignment-scoped
    sessions only. It lists at most one resumable row per exact assignment and
    never lists terminal or superseded history. Check it before starting a new
    session mid-task, but inspect an existing session's packet before reusing it —
@@ -59,14 +83,13 @@ shortcut.
 
 ## Adjacent mechanisms, not part of this flow
 
-**SIS Grade Bridges** (`preview_sis_grade_bridge` / `apply_sis_grade_bridge`)
-project a differentiated family's scores into one SIS-synced gradebook column.
-Only a differentiated QuizForge delivery auto-registers a bridge family.
-AssignmentForge tier drafts are content-only and never register one. A family
-assembled as independent assignments outside the `tiers` mechanism cannot use the
-bridge tools and has no backfill path; see
-`docs/reference/authoring-contract-drift.md`. Scoring one variant does not flow
-into its bridge.
+**SIS Grade Bridges** (`reconcile_sis_grade_bridges`, `preview_sis_grade_bridge` /
+`apply_sis_grade_bridge`) project a differentiated family's scores into one SIS-synced
+gradebook column. Reconciliation can adopt an existing structurally safe family or create
+its missing bridge after teacher review; the verified family link is required only for later
+projection. AssignmentForge tier delivery uses the same reviewed family path as QuizForge.
+Scoring sessions may score each source independently; scoring one variant does not flow into
+its bridge.
 
 **New Quiz auto-grading** is Canvas's own scoring for purely objective quizzes,
 a different path from this one.
@@ -82,7 +105,8 @@ beyond what the packet surfaces.
 | Signal | Meaning | What to do |
 |---|---|---|
 | `needs_scoring_norms` | No rubric or guidance available | Ask the teacher for bounded guidance; retry the same preparation call with `scoring_guidance` set |
-| `mirror_refresh_failed` | Transient; observed intermittently | Retry 1-3 times. Has self-resolved in every observed case |
+| `mirror_refresh_in_progress` | The bounded discovery wait ended while a Current-course refresh was still queued or running | Call `discover_scoring_work()` only within the at-most-four-total-call cap for the current teacher request (initial plus three continuations), without teacher interruption; then report remaining attention and wait |
+| `mirror_refresh_failed` | A Current-course refresh reached a terminal failure | Preserve the typed partial or `scoring_discovery_failed` result; report the attention and wait for teacher direction |
 | `start_failed` | The active assignment could not be prepared safely. **Not self-resolving.** Observed reproducing on specific assignments across multiple days, surviving fresh sessions and mirror refreshes | Do not retry blind. It is assignment-isolated, not course- or tool-wide. The open session stays resumable. Escalate; the teacher grades those assignments in Canvas meanwhile |
 | `signed_launch_shape` on New Quiz score preview | Canvas could not freeze a student's New Quiz result during finalization. Observed platform-wide across unrelated quizzes | Staged scores remain safe locally. Treat as a standing platform condition, not a per-assignment retry |
 | `new_quiz_writing_requires_assignment` | A New Quiz mixes a writing item with auto-graded items | Grade that writing in Canvas. Author future writing portions as separate 100-point AssignmentForge assignments |

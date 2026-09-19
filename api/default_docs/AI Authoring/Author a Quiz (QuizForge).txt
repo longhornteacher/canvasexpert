@@ -51,16 +51,16 @@
 ### Differentiated live delivery
 
 Author one QuizForge file per tier and use at least two files. Every file in the family
-must carry the same exact trimmed, unsuffixed base `title`; do not add a color, tier, form,
+must carry the same exact trimmed, unsuffixed base `title`; do not add a public tag, tier, form,
 or group suffix. Canvas Expert resolves the declared metadata tier through Settings and
 appends the configured public tag when it creates the real quiz, for example
-`Reading Check - Silver`.
+`Reading Check - <configured-tag>`.
 
 The Canvas group is chosen separately at delivery time. Differentiated delivery requires a
 timezone-aware due date, a module, equal point totals, and one assignment group. Canvas
 Expert publishes each real quiz only to its group, omits it from the final grade, disables
 its SIS Sync setting, and keeps it out of modules. It also creates one unsuffixed
-no-submission bridge as the only module item. The teacher reviews the family in Canvas Live
+no-submission bridge as a gradebook-only record; the configured-tag source assignments are the module items. The teacher reviews the family in Canvas Live
 and owns Canvas Grade Sync.
 
 ## 4. COMMON ITEM FIELDS (APPLY TO ALL ITEMS)

@@ -3,13 +3,19 @@
 This guide explains differentiated family delivery and later grade projection. The
 [SIS Grade Bridge Contract](../contracts/sis-grade-bridge-contract.md) is normative.
 
+The connected agent is the primary working surface for bridge discovery, reconciliation,
+review, and grade projection through the MCP/runtime contract. The retained control
+console may expose local configuration, routine scheduling, and attention/recovery
+controls; it is not a second bridge workflow.
+
 ## 1. Outcome and family model
 
 A differentiated AssignmentForge or QuizForge delivery creates one Canvas family. The real
-student work uses the base title plus a public color tag, such as `Reading Check - Silver` and
-`Reading Check - Blue`. The unsuffixed `Reading Check` is a no-submission bridge.
+student work uses the base title plus a configured public tag, such as `Reading Check - Blue`
+or a teacher-defined suffix. The unsuffixed `Reading Check` may be a source or a bridge;
+Canvas structure decides which role it has.
 
-Only the bridge appears in the selected module. Each student opens the color-suffixed source
+Only the configured-tag-suffixed source assignments appear in the selected module; the bridge is gradebook-only. Each student opens the
 assigned to their Canvas group. The bridge keeps one whole-course gradebook column available
 for teacher-owned Canvas Grade Sync.
 
@@ -42,44 +48,47 @@ Live to review them and make any teacher-owned changes.
 
 ## 4. What CanvasExpert verifies
 
-Before registration, CanvasExpert verifies:
+Before saving a family link, CanvasExpert verifies:
 
-- every exact `Base - <tag>` source is published, points-graded, group-restricted,
-  override-only, omitted from the final grade, SIS-disabled, and absent from module writes;
-- the exact `Base` bridge is a published, counted, SIS-enabled no-submission assignment with no
-  overrides and whole-course visibility;
+- every exact `Base - <configured-tag>` source is published, points-graded, group-restricted,
+  override-only, omitted from the final grade, SIS-disabled, and attached exactly once to
+  the selected module;
+- an existing exact `Base` or `Base - Bridge` bridge is a published, counted, SIS-enabled
+  no-submission assignment with no overrides and whole-course visibility; a missing bridge is
+  created as `Base - Bridge`;
 - the bridge description links to the runtime Canvas Dashboard and directs students to their
-  color-suffixed work;
-- exactly one Assignment-type module item points to the exact bridge ID; and
+  configured-tag-suffixed work;
+- every exact source has exactly one Assignment-type item in the selected module, and
+  no module item points to the bridge ID; and
 - all exact IDs, titles, and the bridge structural digest can be saved and read back without
   student data.
 
 Unknown same-title objects block delivery. Retry uses only checkpointed exact IDs, so it does
-not duplicate sources, overrides, bridge, module, or module item.
+not duplicate sources, overrides, bridge, module, or source module item.
 
 ## 5. Grade-projection tools
 
 | Tool | Purpose |
 |---|---|
-| `list_sis_grade_bridges(course_id)` | List student-free registrations for one Current course. |
+| `list_sis_grade_bridges(course_id)` | List student-free family links for one Current course. |
 | `reconcile_sis_grade_bridges(course_id)` | Discover CE-owned differentiated families and return a student-free missing/drifted/incomplete matrix. |
 | `preview_sis_grade_bridge_reconciliation(course_id, family_title)` | Turn one discovered missing or drifted family into the reviewed repair path. |
-| `preview_sis_grade_bridge(course_id, family_title)` | Re-read one exact registered family, enforce its laws, and freeze an aggregate review. |
-| `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | Copy the unchanged eligible final scores to the exact registered bridge through the Operation Ledger. |
+| `preview_sis_grade_bridge(course_id, family_title)` | Re-read one exact linked family, enforce its laws, and freeze an aggregate review. |
+| `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | Copy the unchanged eligible final scores to the exact linked bridge through the Operation Ledger. |
 
-Grade projection is available only after the differentiated content operation has registered the
-family. An unregistered title fails closed. Reconciliation may discover a missing or drifted
-CE-owned family and prepare a reviewed repair, but it never adopts arbitrary same-title Canvas
-objects, renames a family, or bypasses the Operation Ledger.
+Grade projection is available only after the exact family link exists. Calling projection
+for an unlinked family returns typed guidance to run reconciliation. Reconciliation may
+repair or adopt an existing bridge only after source laws, exact IDs, coverage, and bridge structure pass;
+ambiguous or unsafe same-title objects fail closed and all actions use the Operation Ledger.
 
-The Routines page also provides **Differentiated bridge grade sync**. It is a built-in Canvas
+The retained control console's Routines page also provides **Differentiated bridge grade sync**. It is a built-in Canvas
 write routine, disabled by default, with manual Run and the existing local interval schedule.
 
 ## 6. Which grades move
 
 A posted final numeric source score copies as the same number of points. Multiple agreeing finals
 resolve to that same value. One or more agreeing posted excused finals excuse the bridge. The
-routine checks every registered source for every active student; the student's tier membership
+routine checks every linked source for every active student; the student's tier membership
 does not choose the grade.
 
 Differing final values are reported as `conflicting_final_values` and left unchanged. Hidden or
@@ -90,9 +99,9 @@ proves the unchanged value came from an earlier run of this routine. Teacher edi
 without that provenance are held. Comments, rubrics, attempts, submission text, feedback, and
 New Quiz item scores do not move.
 
-## 7. Update all registered families
+## 7. Update all linked families
 
-One Routine run visits every registered family in Current courses and performs a separate frozen
+One Routine run visits every linked family in Current courses and performs a separate frozen
 preview/apply cycle for each. Each operation has its own drift check, checkpoints, verification,
 targeted CanvasMirror submissions refresh, and receipt. A blocked or Attention family does not
 prevent another safe family from running.
@@ -111,7 +120,7 @@ Routine lines and the aggregate Last run summary distinguish copied scores, miss
 cleared prior routine values, already matching rows, held rows, and conflicting rows. A repeated
 run against unchanged Canvas state performs no grade or status mutation.
 
-Do not create a replacement bridge for an Attention operation. Registration is written only after
+Do not create a replacement bridge for an Attention operation. The family link is written only after
 all family postconditions pass, so its absence is not evidence that no Canvas object exists.
 
 ## 9. Privacy and storage
@@ -119,7 +128,7 @@ all family postconditions pass, so its absence is not evidence that no Canvas ob
 Live roster, group membership, overrides, submissions, and scores remain inside the local
 token-holding process and private Operation Ledger. Reviews and assistant results contain only
 aggregate counts, warnings, opaque coordinates, content-free step states, and the bridge reference.
-The synced registration contains only course-scoped family/source/bridge identity and the verified
+The synced family link contains only course-scoped family/source/bridge identity and the verified
 bridge digest.
 
 CanvasMirror may provide local context and receives targeted refresh requests after grade writes,

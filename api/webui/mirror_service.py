@@ -18,6 +18,7 @@ import time
 
 from api import operational_log
 from api.mirror import coordinator, course_context, new_quizzes, store, sync
+from api import course_catalog
 
 from api.platform_services import config, workspace
 from api.platform_services.canvas_client import (
@@ -149,6 +150,22 @@ def _run_course_refresh(course_id: str):
         )
 
 
+def _run_structure_refresh(course_id: str):
+    """Refresh the student-free v3 Course Catalog, including full modules."""
+    with _telemetry("course.structure_refresh"):
+        course = next((item for item in config.active_courses()
+                       if str(item.get("id")) == str(course_id)), None)
+        if not course:
+            return {"ok": False, "error_class": "course_unavailable"}
+        result = course_catalog.refresh_catalog(
+            course_id,
+            course.get("name") or course_id,
+            canvas_get_all=canvas_get_all,
+            canvas_get_all_complete=canvas_get_all_complete,
+        )
+        return {"ok": True, "state": "current", "source": result.get("source")}
+
+
 def _run_scoring_course_refresh(course_id: str):
     """Rebuild the course projections used by a scoring session.
 
@@ -182,6 +199,7 @@ def coordinator_instance() -> coordinator.MirrorCoordinator:
         "course.scoring_refresh": _run_scoring_course_refresh,
         "submissions.course_delta": _run_submission_delta,
         "new_quizzes.metadata": _run_new_quiz_metadata,
+        "course.structure_refresh": _run_structure_refresh,
     })
 
 
@@ -193,6 +211,27 @@ def enqueue_sync(course_id: str | None = None, scopes: list[str] | None = None) 
         raise ValueError("Not a saved course.")
     return coordinator_instance().submit((str(course.get("id")) for course in courses), scopes,
                                          priority="manual")
+
+
+def refresh_course_structure(course_id: str, *, timeout_seconds: float = 30.0) -> dict:
+    """Refresh only through the coordinator and expose no Canvas rows."""
+    if not any(str(course.get("id")) == str(course_id)
+               for course in config.active_courses()):
+        raise ValueError("Course is not in Current courses.")
+    plan_id = coordinator_instance().submit(
+        [str(course_id)], ["course.structure_refresh"], priority="manual",
+    )
+    plan = wait_for_plan(plan_id, timeout_seconds=timeout_seconds)
+    catalog = course_catalog.read_catalog(str(course_id)).get("catalog") or {}
+    module_scope = catalog.get("modules") if isinstance(catalog, dict) else {}
+    return {
+        "ok": plan.get("state") == "succeeded",
+        "status": plan.get("status") or plan.get("state"),
+        "operation_id": plan_id,
+        "revision": str((module_scope or {}).get("last_success_at") or ""),
+        "state": (module_scope or {}).get("state", "unavailable"),
+        "error_code": next((job.get("error_code") for job in plan.get("jobs", []) if job.get("error_code")), ""),
+    }
 
 
 def enqueue_heartbeat_refreshes() -> list[str]:

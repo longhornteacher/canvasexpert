@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from pathlib import Path
 
 import pytest
 
@@ -136,14 +137,21 @@ def test_scoring_session_flow_is_assignment_type_neutral(text):
     assert "get_scoring_packet" in lowered
     assert "submit_scoring_results" in lowered
     assert "never ask the teacher to choose a scoring transport" in lowered
+    assert "loop through the teacher-selected exact assignment set" in lowered
+    assert "per-assignment reconfirmation" in lowered
+    assert "each safe packet and write remains bounded" in lowered
+    assert "assignment; canvas expert persists no backlog queue" in lowered
+    assert "selected exact assignments one at a time" not in lowered
 
 
 def test_connected_guidance_describes_differentiated_delivery_ownership(text):
     lowered = text.lower()
     for phrase in (
         "public color tags",
-        "independent unpublished assignment",
-        "the teacher assigns students/groups and publishes them in canvas",
+        "same renderer-neutral family tail",
+        "exact `tier_targets`",
+        "shared bridge",
+        "family-link repair",
         "canvas live",
         "teacher-owned canvas grade sync",
     ):
@@ -152,23 +160,99 @@ def test_connected_guidance_describes_differentiated_delivery_ownership(text):
     assert "post_grades" not in text
 
 
-def test_mcp_server_instructions_cover_unscoped_scoring_discovery_and_held_work():
+def test_current_bridge_guidance_is_source_in_module_and_bridge_out():
+    """Current authority docs must not teach the retired bridge-in-module rule."""
+    root = Path(REPO_ROOT)
+    authority = [
+        root / "api" / "README.md",
+        root / "api" / "webui" / "README.md",
+        root / "api" / "default_docs" / "AI Authoring" / "START HERE - CanvasAgent.txt",
+        root / "docs" / "guides" / "sis-grade-bridges.md",
+        root / "docs" / "contracts" / "sis-grade-bridge-contract.md",
+        root / "docs" / "reference" / "operation-ledger-module-map.md",
+        root / "docs" / "reference" / "quiz-operation-design.md",
+        root / "docs" / "reference" / "assignment-differentiation-design.md",
+    ]
+    stale_phrases = (
+        "exactly one assignment-type module item points to the exact bridge id",
+        "attach only the exact bridge id",
+        "bridge-only module",
+        "the bridge is attached to the selected module",
+        "only the server-named `<family> - bridge` no-submission bridge is attached",
+        "no tier is added to a module",
+        "assignmentforge does not create module items",
+        "assignmentforge never reads roster placement or creates or changes groups, overrides, modules",
+    )
+    for path in authority:
+        lowered = path.read_text(encoding="utf-8").casefold()
+        assert "source" in lowered and "module" in lowered, path
+        assert "gradebook-only" in lowered or "bridge" in lowered, path
+        for phrase in stale_phrases:
+            assert phrase not in lowered, f"{phrase!r} remains in {path}"
+
+
+def test_current_authority_has_no_retired_assignment_family_direction():
+    """Current docs/code must not teach the retired content-only delivery path."""
+    root = Path(REPO_ROOT)
+    surfaces = [
+        root / "api" / "README.md",
+        root / "api" / "mcp_server" / "tools.py",
+        root / "api" / "operation_ledger" / "executor.py",
+        root / "api" / "sis_grade_bridge.py",
+        root / "docs" / "README.md",
+        root / "docs" / "mcp-server.md",
+        root / "docs" / "guides" / "sis-grade-bridges.md",
+        root / "docs" / "guides" / "scoring-sessions.md",
+        root / "docs" / "guides" / "canvasexpert-agent-capabilities.md",
+        root / "docs" / "contracts" / "sis-grade-bridge-contract.md",
+        root / "docs" / "reference" / "assignment-differentiation-design.md",
+        root / "docs" / "reference" / "course-expert-module-map.md",
+        root / "docs" / "reference" / "operation-ledger-module-map.md",
+        root / "docs" / "reference" / "quiz-operation-design.md",
+        root / "docs" / "reference" / "authoring-contract-drift.md",
+        root / "api" / "default_docs" / "AI Authoring" / AGENT_NAME,
+        root / "api" / "default_docs" / "AI Authoring" / "Author an Assignment (AssignmentForge).txt",
+    ]
+    retired = (
+        re.compile(r"content-only", re.IGNORECASE),
+        re.compile(r"independent unpublished", re.IGNORECASE),
+        re.compile(r"unpublished, unrestricted", re.IGNORECASE),
+        re.compile(r"assignmentforge.{0,120}(?:no bridge|bridge-free)", re.IGNORECASE),
+        re.compile(r"(?:the )?teacher\s+(?:assign|publish)", re.IGNORECASE),
+        re.compile(r"(?:the )?teacher.{0,60}(?:students|groups|pods).{0,60}(?:assign|publish)", re.IGNORECASE),
+    )
+    for path in surfaces:
+        normalized = re.sub(r"\s+", " ", path.read_text(encoding="utf-8"))
+        for pattern in retired:
+            assert not pattern.search(normalized), f"{pattern.pattern!r} remains in {path}"
+
+
+def test_family_contract_distinguishes_creation_and_final_source_safety():
+    contract = (Path(REPO_ROOT) / "docs" / "contracts" / "sis-grade-bridge-contract.md").read_text(
+        encoding="utf-8"
+    )
+    normalized = re.sub(r"\s+", " ", contract).casefold()
+    assert "created unpublished, then published only after exact group restriction" in normalized
+    assert "final source state is published, override-only, omitted from the final grade, and sis-disabled" in normalized
+    assert "server-owned safety fields are unpublished" not in normalized
+
+
+def test_mcp_server_instructions_cover_cross_course_scoring_discovery_and_held_work():
     from api.mcp_server import server
 
     lowered = server._SERVER_INSTRUCTIONS.lower()
     for phrase in (
-        "list current courses",
-        "refresh_mirror for each current course",
-        "get_gradebook_snapshot",
-        "ungraded greater than zero",
-        "partially_scored",
-        "do not ask the teacher to pick an assignment",
+        "discover_scoring_work",
+        "every current course",
+        "complete assignment and attention set",
+        "wait for teacher direction",
+        "selected exact",
         "held work",
-        "item/catalog or evidence gaps",
+        "evidence gaps are not empty",
     ):
         assert phrase in lowered
     assert "never ask the teacher to choose a scoring transport" in lowered
-    assert "use assignment type" in lowered
+    assert "rows or another session" in lowered
 
 
 def test_the_superseded_explainer_is_gone_from_the_shipped_defaults():

@@ -45,11 +45,11 @@ _LEDGER_KINDS = {
 # a page should hear that pages have no due date, not watch it vanish.
 _SCHEDULE_OPTIONS = ("due_at", "unlock_at", "lock_at")
 _KIND_OPTIONS = {
-    "quiz": ("published", "module_name", "assignment_group_name",
+    "quiz": ("published", "module_name", "module_id", "create_module", "assignment_group_name",
              "post_to_sis", *_SCHEDULE_OPTIONS),
-    "assignment": ("published", "module_name", "assignment_group_name",
-                   "post_to_sis", *_SCHEDULE_OPTIONS),
-    "page": ("published", "module_name"),
+    "assignment": ("published", "module_name", "module_id", "create_module", "assignment_group_name",
+                    "post_to_sis", "tier_targets", *_SCHEDULE_OPTIONS),
+    "page": ("published", "module_name", "module_id", "create_module"),
 }
 
 _TEXT_OPTIONS = ("module_name", "assignment_group_name", *_SCHEDULE_OPTIONS)
@@ -111,12 +111,16 @@ def _collect_options(kind: str, options: dict) -> tuple[dict, str | None]:
     """Normalize the delivery options, refusing any this kind cannot carry."""
     named = {}
     for key in _FLAG_OPTIONS:
-        if bool(options.get(key)):
-            named[key] = True
-    for key in _TEXT_OPTIONS:
+        if options.get(key) is not None:
+            named[key] = bool(options.get(key))
+    for key in _TEXT_OPTIONS + ("module_id",):
         value = str(options.get(key) or "").strip()
         if value:
             named[key] = value
+    if options.get("tier_targets") is not None:
+        named["tier_targets"] = options.get("tier_targets")
+    if bool(options.get("create_module")):
+        named["create_module"] = True
 
     allowed = _KIND_OPTIONS[kind]
     unsupported = sorted(key for key in named if key not in allowed)
@@ -125,6 +129,10 @@ def _collect_options(kind: str, options: dict) -> tuple[dict, str | None]:
             f"a {kind} push does not take {', '.join(unsupported)}; "
             f"it takes {', '.join(allowed)}"
         )
+    if named.get("module_id") and named.get("create_module"):
+        return {}, "module_id and create_module cannot be used together"
+    if named.get("create_module") and not named.get("module_name"):
+        return {}, "create_module requires a non-empty module_name"
     # published is always meaningful, and always explicit in the payload.
     named["published"] = bool(options.get("published"))
     return named, None
@@ -147,13 +155,16 @@ def preview_content_push(
     kind: str,
     label: str,
     *,
-    published: bool = False,
+    published: bool | None = None,
     module_name: str = "",
     assignment_group_name: str = "",
     due_at: str = "",
     unlock_at: str = "",
     lock_at: str = "",
-    post_to_sis: bool = False,
+    post_to_sis: bool | None = None,
+    module_id: str = "",
+    create_module: bool = False,
+    tier_targets: list | None = None,
 ) -> dict:
     """Freeze one staged draft into a persisted, digest-protected review.
 
@@ -172,11 +183,14 @@ def preview_content_push(
     named, option_error = _collect_options(content_kind, {
         "published": published,
         "module_name": module_name,
+        "module_id": module_id,
+        "create_module": create_module,
         "assignment_group_name": assignment_group_name,
         "due_at": due_at,
         "unlock_at": unlock_at,
         "lock_at": lock_at,
         "post_to_sis": post_to_sis,
+        "tier_targets": tier_targets,
     })
     if option_error:
         return {"ok": False, "error": option_error}
@@ -191,6 +205,15 @@ def preview_content_push(
         payload = adapter.build_payload(_prepare_request(content_kind, path, named))
         target = adapter.verify_targets(payload, [{"course_id": course_key}])[0]
         baseline = adapter.capture_baseline(payload, target)
+        if isinstance(baseline, dict) and baseline.get("blocking_error"):
+            return {
+                "ok": False,
+                "code": baseline["blocking_error"],
+                "error": baseline.get("error") or "the differentiated family inputs are not valid",
+                "blocking": True,
+            }
+        if isinstance(baseline, dict) and baseline.get("canvas_error"):
+            return {"ok": False, "code": "canvas_read_failed", "error": "Canvas could not be read for this review", "blocking": True}
         target_record = models.new_target(
             target_key=target["target_key"],
             idempotency_key=target["idempotency_key"],
@@ -211,7 +234,16 @@ def preview_content_push(
         batch = batches.freeze_batch([operation_id], {operation_id: [frozen]})
         operations.set_operation_review(operation_id, batch)
     except ValueError as exc:
-        return {"ok": False, "error": str(exc), "blocking": True}
+        message = str(exc)
+        code = None
+        lowered = message.casefold()
+        if "tier_targets" in lowered:
+            code = "tier_targets_required"
+        elif "assignmentforge" in lowered and "module" in lowered:
+            code = "module_selection_required"
+        elif "assignmentforge" in lowered and "due" in lowered:
+            code = "due_at_required"
+        return {"ok": False, **({"code": code} if code else {}), "error": message, "blocking": True}
     except Exception:
         return {"ok": False, "error": f"the {content_kind} push could not be prepared"}
 
@@ -237,6 +269,8 @@ def preview_differentiated_quiz_push(
     unlock_at: str = "",
     lock_at: str = "",
     post_to_sis: bool = False,
+    module_id: str = "",
+    create_module: bool = False,
 ) -> dict:
     """Freeze a group-restricted QuizForge operation from staged labels."""
     course_key = str(course_id or "").strip()
@@ -248,6 +282,7 @@ def preview_differentiated_quiz_push(
         return {"ok": False, "error": "variants must be a list of at least two variants"}
     named, option_error = _collect_options("quiz", {
         "published": published, "module_name": module_name,
+        "module_id": module_id, "create_module": create_module,
         "assignment_group_name": assignment_group_name, "due_at": due_at,
         "unlock_at": unlock_at, "lock_at": lock_at, "post_to_sis": post_to_sis,
     })
@@ -484,10 +519,12 @@ def push_content_live(
     kind: str,
     label: str,
     content: str,
-    published: bool = False,
+    published: bool | None = None,
     module_name: str = "",
     assignment_group_name: str = "",
-    post_to_sis: bool = False,
+    post_to_sis: bool | None = None,
+    module_id: str = "",
+    create_module: bool = False,
 ) -> dict:
     """Stage one authored draft and land it in Canvas in a single call.
 
@@ -514,6 +551,7 @@ def push_content_live(
     review = preview_content_push(
         course_id, kind, staged["label"],
         published=published, module_name=module_name,
+        module_id=module_id, create_module=create_module,
         assignment_group_name=assignment_group_name,
         post_to_sis=post_to_sis,
     )
@@ -617,7 +655,6 @@ def _result_projection(operation: dict, result: dict) -> dict:
     differentiated = (
         normalized.get("mode") == "differentiated" or bool(normalized.get("tiers"))
     )
-    assignment_tiered = bool(normalized.get("tiers")) and operation.get("kind") == ASSIGNMENT_KIND
     variants = normalized.get("variants") or normalized.get("tiers") or []
     for target_index, target in enumerate(result.get("target_results") or []):
         row = {"state": target.get("state")}
@@ -652,43 +689,44 @@ def _result_projection(operation: dict, result: dict) -> dict:
                              and step.get("state") in ("applied", "skipped")
                              and step.get("returned_object_url")), None)
                 if step:
-                    created.append({"group_name": (variant.get("group_name")
-                                                   or variant.get("group")),
-                                    "title": ((variant.get("plan") or {}).get("title")
-                                              or variant.get("title")),
-                                    "url": step["returned_object_url"]})
-            if assignment_tiered:
-                created = []
-                for index, variant in enumerate(variants):
-                    step = next((step for step in step_source
-                                 if step.get("step_key") == f"create_tier_assignment:{index}"
-                                 and step.get("state") in ("applied", "skipped")
-                                 and step.get("returned_object_id")), None)
-                    if step:
-                        created.append({
-                            "label": variant.get("label"),
-                            "assignment_id": step.get("returned_object_id"),
-                            "name": ((variant.get("plan") or {}).get("title")
-                                     or variant.get("title")),
-                            "html_url": step.get("returned_object_url"),
-                        })
-                if created:
-                    row["created"] = created
-                row["teacher_action"] = (
-                    "Teacher action: in Canvas, assign each draft to the intended students, "
-                    "groups, or pods, "
-                    "then publish the drafts."
-                )
-            elif created:
+                    created.append({
+                        "tier": variant.get("tier") or variant.get("label"),
+                        "public_tag": variant.get("tag"),
+                        "group_name": (variant.get("group_name") or variant.get("group")),
+                        "assignment_id": step.get("returned_object_id"),
+                        "title": ((variant.get("plan") or {}).get("title") or variant.get("title")),
+                        "url": step.get("returned_object_url"),
+                    })
+            if created:
                 row["created"] = created
             bridge_step = next((step for step in step_source
                                 if step.get("step_key") == "create_bridge"
                                 and step.get("returned_object_id")), None)
-            if bridge_step and not assignment_tiered:
+            if bridge_step:
                 row["bridge"] = {
                     "title": f"{normalized.get('base_title')} - Bridge",
+                    "assignment_id": bridge_step.get("returned_object_id"),
                     "url": bridge_step.get("returned_object_url"),
                 }
+            module_step = next((step for step in step_source
+                               if step.get("step_key", "").startswith("attach_source_module:")
+                               and step.get("module_id")), None)
+            row["module"] = {
+                "module_id": module_step.get("module_id") if module_step else normalized.get("module_id"),
+                "module_name": normalized.get("module_name"),
+            }
+            safe_groups = ((stored_target.get("baseline") or {}).get("group_snapshot") or {}).get("tiers") or []
+            if safe_groups:
+                row["groups"] = [
+                    {"tier": item.get("label"), "group_name": item.get("group_name"),
+                     "student_count": item.get("student_count")}
+                    for item in safe_groups
+                ]
+            link_step = next((step for step in step_source if step.get("step_key") == "register_family"), None)
+            row["family_link"] = {
+                "state": "linked" if link_step and link_step.get("state") in ("applied", "skipped") else "needs_repair",
+                **({"error_code": link_step.get("error_code")} if link_step and link_step.get("error_code") else {}),
+            }
         targets.append(row)
 
     return {

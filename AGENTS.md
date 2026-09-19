@@ -12,8 +12,8 @@ Every agent reads this file. An implementation executor then reads:
 2. only the files and exact document sections named by that brief.
 
 **Before starting Scoring Sessions or AssignmentForge work**, read these agent-agnostic workspace resources (they persist across assistants and tools):
-- `ScoringSession/SCORING_SESSIONS.md` — canonical Scoring Session reference
-- `AssignmentForge/ASSIGNMENTFORGE.md` — canonical AssignmentForge authoring reference
+- `docs/guides/scoring-sessions.md` — canonical Scoring Session reference
+- `api/default_docs/AI Authoring/Author an Assignment (AssignmentForge).txt` — canonical AssignmentForge authoring reference
 
 Do not preload archived handoffs, every module map, `tools/TOOLS.md`, or a whole architecture
 vision. A handoff that cites a long document must name the required numbered sections.
@@ -24,10 +24,40 @@ Expert is pre-launch with a single user through the first semester, so migration
 backward-compatibility, and legacy-record code is out of scope by default — prefer clean
 breaks, and keep one source of truth per artifact.
 
+For architecture, MCP, agent cooperation, or Web UI decisions, also use the current
+product contract: `docs/contracts/agent-runtime-product-contract.md`. It defines the
+locked direction: Canvas Expert is a local teacher-controlled agent runtime, and the
+browser is a small control console around it.
+
+## Product center: local agent runtime
+
+Canvas Expert's primary interface is the local stdio MCP runtime used by a teacher's
+desktop AI agent. The runtime owns bounded Canvas reads, privacy checks, resumable work
+sessions, explicit approval boundaries, verified Canvas actions, and durable receipts.
+
+The host agent may render previews and interactive HTML in its own conversation surface.
+Core Canvas Expert behavior must therefore return host-neutral semantic data, summaries,
+warnings, artifact references, and stable continuation fields. Do not build a second
+CE-specific presentation framework or make runtime behavior depend on ChatGPT, Claude,
+or another host's rendering features.
+
+The Web UI is a small local control console for setup, readiness, mirror status and
+refresh, operation review/recovery, receipts, diagnostics, and private workspace
+management. It is not the default home for new agent-facing workflows, a substitute for
+Canvas Live, or a reason to add duplicate dashboards, scoring queues, or authoring flows.
+Routes and browser scripts consume shared application services; they do not become the
+canonical owner of business logic.
+
 ## Repository boundary
 
-- `api/` is the live, local-only FastAPI app and CLI surface. It holds the Canvas token,
-  handles private student data, and may perform Canvas writes.
+- `api/` is the local-only runtime, MCP server, control console, and secondary CLI
+  surface. It holds the Canvas token, handles private student data, and may perform
+  Canvas writes.
+- `api/mcp_server/` is the primary agent-facing protocol boundary. Keep its tool
+  contracts, refusal behavior, privacy rules, session lifecycles, and receipts stable
+  and host-neutral.
+- `api/webui/` is the runtime's control console. Keep setup, trust, review, recovery,
+  and diagnostics here; do not move the product center back into browser feature work.
 - `engine/` is the offline parse/validate/render/package library. It has no token, network,
   or student data.
 - `api/default_docs/AI Authoring/Author a *.txt` are the canonical authoring contracts. Do not
@@ -58,11 +88,11 @@ Use only the row relevant to the active handoff.
 | Routines | `api/custom_routines/AUTHORING.md` | Local jobs only; scheduled Canvas posting requires a specific teacher opt-in and the PowerGrader write safeguards. |
 | CanvasMirror | `docs/mirror.md` for current behavior; exact sections of `docs/reference/canvasmirror-1.0beta-information-spine.md` for target design | The vision is section-routed only and never read wholesale for execution; cached state never authorizes a write. |
 | Course Catalog | `docs/contracts/course-catalog-contract.md` | Student-free navigation/search projection only; no PII, raw HTML, URLs, credentials, private paths, evidence, or write preflight. |
-| MCP server | `docs/mcp-server.md` | Pseudonymized reads plus local writes behind preview/apply pairs, and a small number of bounded, documented Canvas write surfaces (also behind preview/apply pairs). Never a live Canvas response handed to the assistant. |
+| Agent runtime / MCP server | `docs/contracts/agent-runtime-product-contract.md`, `docs/mcp-server.md` | Primary agent-facing boundary: pseudonymized reads plus bounded local actions, explicit preparation/review/apply behavior, host-neutral semantic results, and no live Canvas response handed to the assistant. |
 | Learning Objectives | `api/learning_objectives.py`, with `api/default_docs/AI Authoring/Author a Learning Objective.txt` for the authoring grammar | Reviewed objectives are teacher-confirmed and revision-protected; a write applies only the exact reviewed preview. |
 | Operation Ledger | `docs/reference/operation-ledger-module-map.md` | High-risk Canvas write boundary; preserve checkpoints, idempotency, verification, and receipts. |
 | New Quizzes responses | `api/powergrader/new_quiz_fetch.py` | Response acquisition is read-only. Canvas Expert does not write New Quiz item scores or per-item feedback; grade existing writing in Canvas and author future writing portions as separate assignments. |
-| Web UI / teacher surfaces | `api/webui/README.md`, then `docs/reference/webui-presentation-system.md` | Preserve route-specific load order and verify affected rendered routes. These are working surfaces for professionals: no taglines or value-proposition copy, working controls before explanation, and no onboarding-first layout. |
+| Control console / Web UI | `docs/contracts/agent-runtime-product-contract.md`, `api/webui/README.md`, then `docs/reference/webui-presentation-system.md` | Keep the console small and trustworthy: setup, readiness, mirror, review, recovery, receipts, diagnostics, and private workspace controls. Preserve route-specific load order and verify affected rendered routes; do not build UI parity with the agent host. |
 | Physical output | relevant Forge contract and rendering owner named by the handoff | PDF uses installed Microsoft Edge through Playwright; do not add managed browser downloads. DOCX uses `pypandoc-binary`. |
 
 ## Non-negotiable guardrails
@@ -82,6 +112,9 @@ Use only the row relevant to the active handoff.
    external exposure, or public-infrastructure assumptions.
 5. **Describe AI privacy honestly.** SAFE artifacts are pseudonymized and scrubbed, not
    guaranteed anonymous or “FERPA safe.” Teachers review them before external upload.
+6. **Keep the agent boundary host-neutral.** Never make a core workflow depend on a
+   ChatGPT/Claude-specific HTML surface, client extension, hosted model, or conversation
+   behavior. The runtime must retain a useful structured/plain-text contract.
 
 ## Execution model: senior design, one executor
 
@@ -142,6 +175,14 @@ out-of-scope regression appears.
 ## Lean engineering defaults
 
 - Start from the teacher-visible outcome and deliver one vertical batch.
+- For agent-facing work, start from the cooperation loop: discover, prepare, decide,
+  act, verify, and resume. Treat the MCP/runtime path as primary and the browser as a
+  supporting control console.
+- Add a Web UI surface only for setup, trust, review, recovery, diagnostics, private
+  workspace management, or a genuinely local-only operation that an agent cannot safely
+  own. Do not duplicate host-agent previews or build dashboard parity by default.
+- Keep MCP wrappers, routes, and templates thin. Shared application services own business
+  behavior so the agent runtime can operate without starting FastAPI.
 - Add no registry, adapter, persistence format, or durable contract without an immediate
   consumer in the same agreed work.
 - Do not abstract after one implementation or build sibling features for symmetry.
@@ -171,8 +212,9 @@ Two measurements justify this discipline:
 - A mutation that made `data_freshness` always return `"current"`, removing mirror
   staleness entirely, failed only 2 tests out of 1,917. Fifty tests mention `fresh`, `stale`,
   or `zero_live_calls` in their names, but only 2 pin the law.
-- The MCP server registers 37 tools. Only 9 have wrapper-layer tests, while 7 tests
-  redundantly cover the same wrapper mechanism.
+- The MCP registry and versioned schema are a product boundary. Keep the live registry,
+  schema snapshot, generated inventory, and wrapper tests synchronized; do not rely on a
+  hard-coded tool count in this guidance.
 
 Two house-style decisions remain open and must be answered explicitly rather than inferred:
 
@@ -244,7 +286,7 @@ Windows and PowerShell; current local tests use Python 3.14 through `py`. Select
 proportionally rather than running every suite by default.
 
 ```powershell
-# Web UI (http://127.0.0.1:8765)
+# Control console (http://127.0.0.1:8765)
 cd api; py qf_ui.py
 
 # Suites

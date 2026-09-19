@@ -71,12 +71,14 @@ def execute(
             return result
 
     module_name = payload.get("module_name")
-    if module_name and assignment_id:
+    module_id = payload.get("module_id")
+    if (module_name or module_id or payload.get("create_module")) and assignment_id:
         result = attach_assignment_type_module_item(
             course_id=course_id,
             content_id=assignment_id,
             title=name,
-            module_name=module_name,
+            module_name=module_name or "", module_id=module_id,
+            create_module=bool(payload.get("create_module")),
             steps=steps,
             context=context,
             attach_step_key="attach_module",
@@ -263,7 +265,8 @@ def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
         "returned_object_url": assignment.get("html_url"),
     }
     module_name = payload.get("module_name")
-    if not module_name:
+    module_id = payload.get("module_id")
+    if not module_name and not module_id and not payload.get("create_module"):
         return result
 
     create_module_step = find_step(steps, "create_module")

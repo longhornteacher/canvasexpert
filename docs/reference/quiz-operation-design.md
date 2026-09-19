@@ -70,9 +70,9 @@ For each source in request order:
 5. patch and verify the assignment as published, override-only, points-graded, omitted from the
    final grade, SIS-disabled, and due at the requested timestamp.
 
-No source gets a module item. After every source verifies, the shared differentiated-family tail
-creates the unsuffixed bridge in a safe inactive shape, attaches only that exact bridge ID to the
-selected module, activates the bridge, and registers the fully re-verified family. The bridge is
+Each source gets exactly one Assignment-type module item. After every source verifies, the shared differentiated-family tail
+creates the unsuffixed bridge in a safe inactive shape, attaches each exact source assignment ID to the
+selected module, confirms the bridge has no module item, activates the bridge, and registers the fully re-verified family. The bridge is
 due at 23:59 on the same source date and UTC offset and carries the runtime Canvas Dashboard link.
 
 ### Durable progress and recovery
@@ -83,8 +83,8 @@ matches block; only checkpointed exact IDs are excluded during retry.
 
 An uncertain send is `sent_unknown` and is never repeated by guess. A definitive downstream
 failure is partial and resumes only from exact-ID reconciliation. Retry cannot duplicate quizzes,
-overrides, items, bridge, module, or module item. Registration occurs only after all required live
-postconditions pass.
+overrides, items, bridge, module, or module item. The family link is saved only after all required
+live postconditions pass.
 
 ### Browser and teacher workflow
 

@@ -1,5 +1,11 @@
 # WebUI presentation system
 
+This document governs retained pages in CanvasExpert's local control console. It does not
+make the browser the product center or require browser parity for agent-facing work. The
+local runtime and its host-neutral MCP contract are primary; new agent-facing capability
+starts there. Browser changes should support setup, readiness, local state, review,
+recovery, receipts, diagnostics, and other explicitly retained console responsibilities.
+
 The presentation system separates private route behavior from shared visual chrome.
 `base.html` is the private document root. Only templates in `layouts/` extend it.
 Every live page extends a layout and receives only the
@@ -28,9 +34,10 @@ right rail flows below the stage; at 760px all workspace variants become one col
 
 ## Who these pages are for
 
-A teacher opening Canvas Expert is at work, mid-day, often with a class in the room.
-They are a professional using a tool, not a visitor being sold one. Every page is a
-working surface for someone who has already decided to be here.
+A teacher opening a retained Canvas Expert console page is at work, mid-day, often with a
+class in the room. They are a professional using a control surface, not a visitor being
+sold one. Every retained page is a working surface for a task the console still owns; the
+connected desktop agent remains the primary working surface for agent-facing cooperation.
 
 That rules out a whole category of page that is easy to write by reflex:
 
@@ -86,6 +93,8 @@ ID, existing feature class, or `data-ce-hook`.
 
 The enforcement registry is `api/tests/test_presentation_contracts.py`. It is the
 source of truth for route, template, layout, variant, rail count, and migration state.
+This is a retained control-console presentation contract, not a mandate to add browser
+routes or duplicate agent-facing workflows.
 CanvasAgent uses `workspace/full`; Create uses `workspace/three`;
 Gradebook, Students, and Settings use `workspace/left-main`;
 Routines, Course Info, and About use `document/wide`; AI Expert uses

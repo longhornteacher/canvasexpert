@@ -1,8 +1,8 @@
 """Crash-safe SIS grade-bridge operation adapter.
 
-Registered-family validation, private roster/submission reads, exact grade
+Verified-family-link validation, private roster/submission reads, exact grade
 writes, postcondition checks, retry decisions, and reconciliation for
-``gradebook.sis_bridge`` live here. Family creation and registration belong to
+``gradebook.sis_bridge`` live here. Family creation and linking belong to
 the differentiated content operation. Assistant-facing projections are owned by
 ``api.sis_grade_bridge`` and never expose this adapter's private baselines.
 """
@@ -19,6 +19,7 @@ from api.platform_services import canvas_client, config
 
 from .. import models, operations
 from . import adapter_support, differentiated_bridge
+from .module_placement import attach_assignment_type_module_item
 
 
 KIND = "gradebook.sis_bridge"
@@ -47,6 +48,8 @@ class SisGradeBridgeAdapter:
         family_title = _required_text(
             prepare_request.get("family_title"), "family_title"
         )
+        # ``registration`` is the private persisted family-link shape retained
+        # for pilot storage compatibility; the product boundary calls it a link.
         registration = prepare_request.get("registration")
         discovered = prepare_request.get("discovered_family")
         if not registration and isinstance(discovered, dict):
@@ -60,21 +63,29 @@ class SisGradeBridgeAdapter:
                 "source_assignment_ids": source_ids,
                 "source_titles": [str(v or "").strip() for v in discovered.get("source_titles") or []],
                 "bridge_assignment_id": str(discovered.get("bridge_assignment_id") or "").strip() or None,
+                "module_id": str(discovered.get("module_id") or "").strip() or None,
+                "module_name": str(discovered.get("module_name") or "").strip() or None,
                 "write_origin": "assistant",
             }
         if not registration:
             raise ValueError(
-                "Differentiated family is not registered; create it through "
-                "QuizForge first. AssignmentForge tier drafts are content-only."
+                "Differentiated family needs a verified family link; run reconciliation first."
             )
         payload = {
             "course_id": course_id,
             "family_title": family_title,
+            # Private payload terminology mirrors the persisted pilot record.
+            # Private payload compatibility flag; the product surface calls
+            # this state a verified family link.
             "registered": True,
             "source_assignment_ids": [],
             "source_titles": [],
             "bridge_assignment_id": None,
+            # Persisted pilot payload key retained for compatibility; product
+            # language calls this the family-link digest.
             "registered_bridge_digest": None,
+            "module_id": None,
+            "module_name": None,
             "write_origin": (
                 "routine" if prepare_request.get("write_origin") == "routine"
                 else "assistant"
@@ -84,7 +95,7 @@ class SisGradeBridgeAdapter:
             if not isinstance(registration, dict):
                 raise ValueError("registration must be an object")
             if str(registration.get("family_title") or "").strip() != family_title:
-                raise ValueError("registered family title does not match request")
+                raise ValueError("family link title does not match request")
             payload.update({
                 "source_assignment_ids": [
                     _required_text(value, "source_assignment_id")
@@ -102,11 +113,13 @@ class SisGradeBridgeAdapter:
                     registration.get("bridge_state_digest"),
                     "bridge_state_digest",
                 ),
+                "module_id": str(registration.get("module_id") or "").strip() or None,
+                "module_name": str(registration.get("module_name") or "").strip() or None,
             })
             if len(payload["source_assignment_ids"]) < 2:
-                raise ValueError("registered bridge has fewer than two sources")
+                raise ValueError("verified family link has fewer than two source assignments")
             if len(payload["source_assignment_ids"]) != len(payload["source_titles"]):
-                raise ValueError("registered source IDs and titles do not align")
+                raise ValueError("linked source IDs and titles do not align")
         return payload
 
     def freeze_payload(self, payload: dict, baseline: dict) -> dict:
@@ -121,6 +134,10 @@ class SisGradeBridgeAdapter:
                 "bridge_assignment_id": baseline.get("bridge_assignment_id"),
                 "expected_bridge": copy.deepcopy(baseline["expected_bridge"]),
                 "repair_fields": list(baseline.get("drift_fields") or []),
+                "action": baseline.get("action"),
+                "module_id": baseline.get("module_id"),
+                "module_name": baseline.get("module_name"),
+                "module_state": copy.deepcopy(baseline.get("module_state") or {}),
             })
             return frozen
         frozen.update({
@@ -149,6 +166,8 @@ class SisGradeBridgeAdapter:
             "due_at": payload.get("due_at"),
             "bridge_due_at": payload.get("bridge_due_at"),
             "bridge_description": payload.get("bridge_description"),
+            "module_id": payload.get("module_id"),
+            "module_name": payload.get("module_name"),
             "write_origin": payload.get("write_origin", "assistant"),
         })
 
@@ -183,7 +202,15 @@ class SisGradeBridgeAdapter:
 
     def capture_baseline(self, payload: dict, target: dict) -> dict:
         if payload.get("mode") == "reconcile":
-            return self._capture_reconciliation_baseline(payload, target)
+            try:
+                return self._capture_reconciliation_baseline(payload, target)
+            except _BridgeInvariantError as exc:
+                result = {"blocking_error": exc.code, "private_diagnostic": exc.detail or exc.code}
+                if exc.fields:
+                    result["drift_fields"] = exc.fields
+                return result
+            except _BridgeReadError as exc:
+                return {"blocking_error": "canvas_read_failed", "private_diagnostic": str(exc)}
         try:
             return self._capture_baseline(payload, target)
         except _BridgeInvariantError as exc:
@@ -206,20 +233,26 @@ class SisGradeBridgeAdapter:
         for source_id in payload.get("source_assignment_ids") or []:
             source, error = adapter_support.get_assignment(course_id, str(source_id))
             if error or source is None:
-                raise _BridgeInvariantError("registered_source_missing")
+                raise _BridgeInvariantError("family_link_source_missing")
             source_rows.append(source)
         bridge_id = str(payload.get("bridge_assignment_id") or "")
         bridge_row, bridge_error = adapter_support.get_assignment(course_id, bridge_id)
         if bridge_error or bridge_row is None:
-            raise _BridgeInvariantError("registered_bridge_missing_or_renamed")
+            raise _BridgeInvariantError("family_link_bridge_missing_or_renamed")
         _validate_source_identity(payload, source_rows)
 
         bridge_state = None
-        registered_bridge_drift = False
+        family_link_bridge_drift = False
         if str(bridge_row.get("id")) != bridge_id:
-            raise _BridgeInvariantError("registered_bridge_missing_or_renamed")
+            raise _BridgeInvariantError("family_link_bridge_missing_or_renamed")
         bridge_state = _read_bridge_state(course_id, bridge_id, bridge_row)
-        registered_bridge_drift = (
+        module_state = _capture_module_state(course_id)
+        if payload.get("module_id"):
+            module_state = _validate_module_membership(
+                module_state, payload["module_id"],
+                [str(row["id"]) for row in source_rows], bridge_id,
+            )
+        family_link_bridge_drift = (
             _bridge_digest(bridge_state) != payload.get("registered_bridge_digest")
         )
 
@@ -261,7 +294,7 @@ class SisGradeBridgeAdapter:
         _validate_common_source_shape(source_rows, effective_due_dates)
         first = source_rows[0]
         _due, _module, bridge_due_at = differentiated_bridge.require_family_delivery(
-            effective_due_dates[0], "registered family"
+            effective_due_dates[0], "linked family"
         )
         expected_family = {
             "base_title": payload["family_title"],
@@ -276,10 +309,10 @@ class SisGradeBridgeAdapter:
         )
         if drift_fields:
             raise _BridgeInvariantError(
-                "registered_bridge_shape_drift", fields=drift_fields,
+                "family_link_bridge_shape_drift", fields=drift_fields,
             )
-        if registered_bridge_drift:
-            raise _BridgeInvariantError("registered_bridge_drift")
+        if family_link_bridge_drift:
+            raise _BridgeInvariantError("family_link_bridge_drift")
         memberships_by_student: dict[str, list[int]] = {}
         all_members = set()
         for source_index, members in enumerate(source_memberships):
@@ -434,6 +467,9 @@ class SisGradeBridgeAdapter:
             "bridge_state": bridge_state,
             "counts": counts,
             "warnings": warnings,
+            "module_id": payload.get("module_id"),
+            "module_name": payload.get("module_name"),
+            "module_state": module_state,
         }
         baseline["validation_digest"] = models.sha256_dict({
             "source_assignment_ids": baseline["source_assignment_ids"],
@@ -457,18 +493,19 @@ class SisGradeBridgeAdapter:
             "due_at": baseline["due_at"],
             "bridge_due_at": bridge_due_at,
             "counts": counts,
+            "module_state": baseline.get("module_state"),
         })
         baseline["baseline_digest"] = models.sha256_dict(baseline)
         return baseline
 
     def check_drift(self, payload: dict, target: dict, baseline: dict) -> bool:
         if payload.get("mode") == "reconcile":
-            fresh = self._capture_reconciliation_baseline(payload, target)
-            return (
-                fresh.get("revision") != baseline.get("revision")
-                or fresh.get("bridge_exists") != baseline.get("bridge_exists")
-                or fresh.get("blocking_error") != baseline.get("blocking_error")
-            )
+            fresh = self.capture_baseline(payload, target)
+            if fresh.get("blocking_error") != baseline.get("blocking_error"):
+                return True
+            if fresh.get("blocking_error"):
+                return True
+            return fresh.get("validation_digest") != baseline.get("validation_digest")
         fresh = self.capture_baseline(payload, target)
         if fresh.get("blocking_error"):
             return True
@@ -482,6 +519,7 @@ class SisGradeBridgeAdapter:
                 "status": "missing" if not baseline.get("bridge_exists") else "drifted",
                 "bridge_assignment_id": baseline.get("bridge_assignment_id"),
                 "repair_fields": list(baseline.get("drift_fields") or []),
+                "action": baseline.get("action"),
                 "source_count": len(baseline.get("source_assignment_ids") or []),
             }
         if baseline.get("blocking_error"):
@@ -491,6 +529,7 @@ class SisGradeBridgeAdapter:
             "family_title": payload["family_title"],
             "source_count": len(baseline.get("source_assignment_ids") or []),
             "bridge_exists": bool(payload.get("registered")),
+            "family_link_verified": True,
             "points_possible": baseline.get("points_possible"),
             "common_assignment_group": True,
             "common_due_date": True,
@@ -504,7 +543,8 @@ class SisGradeBridgeAdapter:
 
     def initial_steps(self, payload: dict, baseline: dict) -> list[dict]:
         if payload.get("mode") == "reconcile":
-            return [models.new_step("create_bridge" if not baseline.get("bridge_exists") else "repair_bridge")]
+            action = baseline.get("action") or ("create" if not baseline.get("bridge_exists") else "register")
+            return [models.new_step({"create": "create_bridge", "repair": "repair_bridge", "register": "register_bridge"}.get(action, "reconcile_bridge"))]
         keys = (
             f"copy_grade:{index}"
             for index, _entry in enumerate(baseline.get("grade_entries") or [])
@@ -531,7 +571,7 @@ class SisGradeBridgeAdapter:
         bridge_id = str(payload.get("bridge_assignment_id") or "")
         if not bridge_id:
             return adapter_support.build_result(
-                "blocked", steps=steps, error_code="registered_bridge_id_missing"
+                "blocked", steps=steps, error_code="family_link_bridge_id_missing"
             )
 
         # A retry may enter with one or more ambiguous steps. Reconcile those
@@ -614,36 +654,131 @@ class SisGradeBridgeAdapter:
         for source_id in payload.get("source_assignment_ids") or []:
             source, error = adapter_support.get_assignment(course_id, source_id)
             if error or not source:
-                return {"blocking_error": "source_exact_id_unverified"}
+                raise _BridgeInvariantError("source_exact_id_unverified")
             source_rows.append(source)
         if len({str(row.get("id")) for row in source_rows}) != len(source_rows):
-            return {"blocking_error": "duplicate_source_assignment"}
+            raise _BridgeInvariantError("duplicate_source_assignment")
+        if len(source_rows) < 2:
+            raise _BridgeInvariantError("two_source_threshold_not_met")
+        _validate_source_identity(payload, source_rows)
+        module_state = _capture_module_state(course_id)
+        source_ids = [str(row.get("id")) for row in source_rows]
+        bridge_hint = str(payload.get("bridge_assignment_id") or "")
+        module_id, module_name = _resolve_reconciliation_module(
+            module_state, source_ids, bridge_hint,
+            requested_id=payload.get("module_id"),
+        )
+        due_dates = []
+        members_by_source = []
+        source_members = []
+        source_target_evidence = []
+        source_states = []
+        for source in source_rows:
+            _validate_source_shape(source)
+            overrides = _get_all(
+                f"/api/v1/courses/{course_id}/assignments/{source['id']}/overrides",
+                {"per_page": 100},
+            )
+            members, override_due, evidence = _source_override_members(course_id, source, overrides)
+            if not members:
+                raise _BridgeInvariantError("source_missing_student_overrides")
+            members_by_source.append(members)
+            source_members.append(sorted(members))
+            source_target_evidence.append(evidence)
+            source_states.append(_source_state(source, overrides))
+            due_dates.extend(override_due)
+        if not due_dates or due_dates[0] is None or len(set(due_dates)) != 1:
+            raise _BridgeInvariantError("mixed_effective_due_dates")
+        active_rows = _get_all(
+            f"/api/v1/courses/{course_id}/users",
+            {"enrollment_type[]": "student", "enrollment_state[]": "active", "per_page": 100},
+        )
+        active_ids = {str(row.get("id")) for row in active_rows if str(row.get("id") or "").strip()}
+        union = set().union(*members_by_source)
+        overlap = set().union(*(members_by_source[i] & members_by_source[j] for i in range(len(members_by_source)) for j in range(i + 1, len(members_by_source)))) & active_ids
+        if (union & active_ids) != active_ids:
+            raise _BridgeInvariantError("source_member_coverage_incomplete")
+        if overlap:
+            raise _BridgeInvariantError("source_member_coverage_overlaps")
+        _validate_common_source_shape(source_rows, due_dates)
         first = source_rows[0]
-        due_at = first.get("due_at")
-        if not due_at or any(row.get("due_at") != due_at for row in source_rows):
-            return {"blocking_error": "mixed_effective_due_dates"}
+        bridge_due = differentiated_bridge.require_family_delivery(due_dates[0], "reconciliation")[2]
         expected = {
             "name": differentiated_bridge.bridge_title(payload["family_title"]),
             "description": differentiated_bridge.bridge_description(),
-            "due_at": differentiated_bridge.require_family_delivery(due_at, "reconciliation")[2],
+            "points_possible": _normalized_number(first.get("points_possible")),
+            "assignment_group_id": str(first.get("assignment_group_id") or ""),
+            "due_at": bridge_due, "grading_type": "points", "submission_types": ["none"],
+            "published": True, "only_visible_to_overrides": False,
+            "omit_from_final_grade": False, "post_to_sis": True,
         }
         bridge_id = str(payload.get("bridge_assignment_id") or "") or None
         bridge = None
         if bridge_id:
             bridge, error = adapter_support.get_assignment(course_id, bridge_id)
             if error or not bridge:
-                bridge_id, bridge = None, None
-        drift_fields = [field for field, value in expected.items() if bridge and bridge.get(field) != value]
+                raise _BridgeInvariantError("bridge_exact_id_unverified")
+            overrides = _get_all(
+                f"/api/v1/courses/{course_id}/assignments/{bridge_id}/overrides",
+                {"per_page": 100},
+            )
+            if overrides:
+                raise _BridgeInvariantError("bridge_overrides_present")
+            actual = differentiated_bridge.assignment_shape(bridge, [])
+            safety_fields = [
+                key for key, value in expected.items()
+                if key not in {"name", "description", "due_at"}
+                and not differentiated_bridge._fields_match({key: actual.get(key)}, {key: value})
+            ]
+            if safety_fields:
+                raise _BridgeInvariantError("bridge_safety_drift", fields=safety_fields)
+            if str(bridge.get("name") or "").casefold() not in {
+                payload["family_title"].casefold(), expected["name"].casefold()
+            }:
+                raise _BridgeInvariantError("bridge_title_ambiguous")
+            # Exact ``Base`` is an accepted existing bridge name. Preserve it
+            # in the frozen payload and registration; only newly created
+            # bridges use the server name ``Base - Bridge``.
+            expected["name"] = str(bridge.get("name") or expected["name"])
+        drift_fields = [field for field in ("name", "description", "due_at") if bridge and bridge.get(field) != expected[field]]
+        bridge_state = differentiated_bridge.assignment_shape(bridge or {}, [])
+        validation_digest = models.sha256_dict({
+            "source_assignment_ids": [str(row.get("id")) for row in source_rows],
+            "source_titles": [str(row.get("name") or "") for row in source_rows],
+            "source_states": source_states,
+            "source_members": source_members,
+            "source_target_evidence": source_target_evidence,
+            "active_student_ids": sorted(active_ids),
+            "effective_due_dates": due_dates,
+            "expected_bridge": expected,
+            "bridge_state": bridge_state,
+            "bridge_assignment_id": bridge_id,
+            "bridge_overrides": [],
+            "action": "create" if bridge is None else ("repair" if drift_fields else "register"),
+            "module_state": module_state,
+            "module_id": module_id,
+            "module_name": module_name,
+        })
         return {
             "source_assignment_ids": [str(row.get("id")) for row in source_rows],
             "source_titles": [str(row.get("name") or "") for row in source_rows],
             "bridge_assignment_id": bridge_id,
             "bridge_exists": bridge is not None,
             "bridge": bridge or {}, "expected_bridge": expected,
+            "bridge_state": bridge_state,
+            "source_members": source_members,
+            "source_target_evidence": source_target_evidence,
+            "active_student_ids": sorted(active_ids),
+            "effective_due_dates": due_dates,
             "drift_fields": drift_fields,
+            "action": "create" if bridge is None else ("repair" if drift_fields else "register"),
+            "validation_digest": validation_digest,
             "revision": (bridge or {}).get("updated_at") or differentiated_bridge.structural_digest(
                 differentiated_bridge.assignment_shape(bridge or {}, [])
             ),
+            "module_id": module_id,
+            "module_name": module_name,
+            "module_state": module_state,
         }
 
     def _execute_reconciliation(self, payload: dict, target: dict, baseline: dict, context) -> dict:
@@ -651,42 +786,200 @@ class SisGradeBridgeAdapter:
             return adapter_support.build_result("blocked", steps=copy.deepcopy(target.get("steps") or []), error_code=baseline["blocking_error"])
         course_id = target["course_id"]
         steps = copy.deepcopy(target.get("steps") or [])
-        step = steps[0] if steps else models.new_step("create_bridge")
+        action = baseline.get("action") or payload.get("action") or "create"
+        step = steps[0] if steps else models.new_step({"create": "create_bridge", "repair": "repair_bridge", "register": "register_bridge"}.get(action, "reconcile_bridge"))
         expected = baseline["expected_bridge"]
-        bridge_id = baseline.get("bridge_assignment_id")
+        bridge_id = baseline.get("bridge_assignment_id") or step.get("returned_object_id")
         if not bridge_id:
             path = f"/api/v1/courses/{course_id}/assignments"
-            request = {"assignment": {**expected, "published": True, "omit_from_final_grade": False, "post_to_sis": True}}
-            context.before_send(step["step_key"], models.sha256_dict({"method": "POST", "path": path, "payload": request}))
+            request = {"assignment": copy.deepcopy(expected)}
+            marked = context.before_send(
+                step["step_key"],
+                models.sha256_dict({"method": "POST", "path": path, "payload": request}),
+            )
+            adapter_support.replace_step(steps, marked)
+            step = marked
             response, error = canvas_client._canvas_send("POST", path, request)
             if error or not isinstance(response, dict) or not response.get("id"):
                 step["state"] = "sent_unknown" if adapter_support.is_uncertain(error) else "blocked"
                 step["error_code"] = "bridge_create_uncertain" if step["state"] == "sent_unknown" else "bridge_create_rejected"
+                step = context.checkpoint_step(step)
+                adapter_support.replace_step(steps, step)
                 return adapter_support.build_result(step["state"], steps=steps, error_code=step["error_code"])
             bridge_id = str(response["id"])
+            step["state"] = "claimed"
+            step["returned_object_id"] = bridge_id
+            step = context.checkpoint_step(
+                step,
+                returned_object_id=bridge_id,
+                returned_object_url=(response or {}).get("html_url"),
+            )
+            adapter_support.replace_step(steps, step)
+        elif step.get("state") == "sent_unknown":
+            # The POST returned an exact ID but the immediate verification
+            # read was unavailable. Verify that ID before any possible retry;
+            # never issue a second create POST.
+            existing, read_error = adapter_support.get_assignment(course_id, str(bridge_id))
+            if read_error or not existing:
+                step["state"] = "sent_unknown"
+                step["error_code"] = "bridge_reconciliation_unverified"
+                step = context.checkpoint_step(step, returned_object_id=str(bridge_id))
+                adapter_support.replace_step(steps, step)
+                return adapter_support.build_result("sent_unknown", steps=steps, returned_object_id=str(bridge_id), error_code=step["error_code"])
         elif baseline.get("drift_fields"):
             request = {"assignment": {field: expected[field] for field in baseline["drift_fields"]}}
             path = f"/api/v1/courses/{course_id}/assignments/{bridge_id}"
-            context.before_send(step["step_key"], models.sha256_dict({"method": "PUT", "path": path, "payload": request}))
+            marked = context.before_send(
+                step["step_key"],
+                models.sha256_dict({"method": "PUT", "path": path, "payload": request}),
+            )
+            adapter_support.replace_step(steps, marked)
+            step = marked
             _response, error = canvas_client._canvas_send("PUT", path, request)
             if error:
                 step["state"] = "sent_unknown" if adapter_support.is_uncertain(error) else "blocked"
                 step["error_code"] = "bridge_repair_uncertain" if step["state"] == "sent_unknown" else "bridge_repair_rejected"
+                step = context.checkpoint_step(step)
+                adapter_support.replace_step(steps, step)
                 return adapter_support.build_result(step["state"], steps=steps, error_code=step["error_code"])
         bridge, error = adapter_support.get_assignment(course_id, bridge_id)
-        if error or any(bridge.get(field) != value for field, value in expected.items()):
-            return adapter_support.build_result("sent_unknown", steps=steps, returned_object_id=bridge_id, error_code="bridge_repair_unverified")
-        config.save_sis_grade_bridge(course_id, {
+        bridge_overrides = _get_all(
+            f"/api/v1/courses/{course_id}/assignments/{bridge_id}/overrides", {"per_page": 100}
+        ) if not error else []
+        actual_bridge = differentiated_bridge.assignment_shape(bridge or {}, bridge_overrides)
+        mismatches = [
+            field for field, value in expected.items()
+            if field == "name" and str(actual_bridge.get(field) or "").casefold() not in {
+                payload["family_title"].casefold(), str(value).casefold()
+            }
+            or field != "name" and not differentiated_bridge._fields_match({field: actual_bridge.get(field)}, {field: value})
+        ]
+        if error or not bridge or bridge_overrides or mismatches:
+            # The Canvas mutation already happened, so persist the ambiguous
+            # outcome locally before returning.  In particular, a create may
+            # have an exact returned ID even when the follow-up read is
+            # temporarily unavailable; recovery must be able to inspect that
+            # ID rather than treating the step as still claimed.
+            step["state"] = "sent_unknown"
+            step["error_code"] = "bridge_reconciliation_unverified"
+            step["returned_object_id"] = bridge_id
+            step = context.checkpoint_step(
+                step,
+                returned_object_id=bridge_id,
+                returned_object_url=(bridge or {}).get("html_url") if bridge else None,
+            )
+            adapter_support.replace_step(steps, step)
+            return adapter_support.build_result(
+                "sent_unknown", steps=steps, returned_object_id=bridge_id,
+                error_code="bridge_reconciliation_unverified",
+            )
+        layout_error = self._reconcile_module_layout(
+            payload, baseline, steps, context, bridge_id,
+        )
+        if layout_error:
+            return adapter_support.build_result(
+                # The bridge mutation already happened, so every layout
+                # failure is recoverable attention rather than a fresh block.
+                "sent_unknown",
+                steps=steps, returned_object_id=bridge_id, error_code=layout_error,
+            )
+        registration = {
             "family_title": payload["family_title"], "family_key": payload["family_key"],
             "source_assignment_ids": baseline["source_assignment_ids"],
             "source_titles": baseline["source_titles"], "bridge_assignment_id": bridge_id,
             "bridge_state_digest": differentiated_bridge.structural_digest(
                 differentiated_bridge.assignment_shape(bridge, [])
             ),
-        })
+            "module_id": baseline.get("module_id"),
+            "module_name": baseline.get("module_name"),
+        }
+        config.save_sis_grade_bridge(course_id, registration)
+        saved = config.get_sis_grade_bridge(course_id, payload["family_title"])
+        if saved != registration:
+            return adapter_support.build_result("blocked", steps=steps, returned_object_id=bridge_id, error_code="family_registration_unverified")
         step["state"] = "applied"
         step["returned_object_id"] = bridge_id
+        step = context.checkpoint_step(
+            step,
+            returned_object_id=bridge_id,
+            returned_object_url=(bridge or {}).get("html_url"),
+        )
+        adapter_support.replace_step(steps, step)
         return adapter_support.build_result("applied", steps=steps, returned_object_id=bridge_id, returned_object_url=bridge.get("html_url"))
+
+    def _reconcile_module_layout(self, payload: dict, baseline: dict, steps: list[dict], context, bridge_id: str) -> str | None:
+        module_id = str(baseline.get("module_id") or payload.get("module_id") or "")
+        if not module_id:
+            return "module_selection_required"
+        module_state = _capture_module_state(payload["course_id"])
+        module = next((row for row in module_state.get("modules", []) if str(row.get("id")) == module_id), None)
+        if not module:
+            return "module_exact_id_unverified"
+        source_ids = [str(value) for value in baseline.get("source_assignment_ids") or []]
+        for index, source_id in enumerate(source_ids):
+            key = f"attach_source_module:{index}"
+            step = adapter_support.ensure_step(steps, key)
+            current_state = _capture_module_state(payload["course_id"])
+            current_module = next((row for row in current_state.get("modules", []) if str(row.get("id")) == module_id), None)
+            items = (current_module or {}).get("items") or []
+            existing = next((item for item in items if str(item.get("content_id")) == source_id), None)
+            if existing:
+                step["state"] = "applied"
+                step["module_id"] = module_id
+                step = context.checkpoint_step(step, returned_object_id=str(existing["id"]))
+                adapter_support.replace_step(steps, step)
+                continue
+            result = attach_assignment_type_module_item(
+                course_id=payload["course_id"], content_id=source_id,
+                title=baseline["source_titles"][index], module_id=module_id,
+                module_name="", steps=steps, context=context,
+                attach_step_key=key, returned_object_id=bridge_id,
+                deterministic_failure_state="blocked",
+            )
+            if result.get("state") != "applied":
+                return (
+                    "source_module_layout_unverified"
+                    if result.get("state") == "sent_unknown"
+                    else result.get("error_code") or "source_module_layout_unverified"
+                )
+        # Remove every exact bridge item, including legacy copies in modules
+        # other than the selected repair target.  Each deletion has its own
+        # stable step so recovery can prove the exact item is gone.
+        fresh_state = _capture_module_state(payload["course_id"])
+        bridge_items = [
+            (str(module_row.get("id")), str(item.get("id")))
+            for module_row in fresh_state.get("modules", [])
+            for item in module_row.get("items") or []
+            if bridge_id and str(item.get("content_id")) == str(bridge_id)
+        ]
+        for item_module_id, item_id in bridge_items:
+            key = f"remove_bridge_module:{item_module_id}:{item_id}"
+            step = adapter_support.ensure_step(steps, key)
+            if step.get("state") in {"applied", "skipped"}:
+                continue
+            path = f"/api/v1/courses/{payload['course_id']}/modules/{item_module_id}/items/{item_id}"
+            marked = context.before_send(key, models.sha256_dict({"method": "DELETE", "path": path}))
+            marked["module_id"] = item_module_id
+            marked["returned_object_id"] = item_id
+            adapter_support.replace_step(steps, marked)
+            _response, error = canvas_client._canvas_send("DELETE", path, None)
+            if error:
+                marked["state"] = "sent_unknown" if adapter_support.is_uncertain(error) else "blocked"
+                marked["error_code"] = "bridge_item_remove_uncertain" if marked["state"] == "sent_unknown" else "bridge_item_remove_rejected"
+                marked = context.checkpoint_step(marked, returned_object_id=item_id)
+                adapter_support.replace_step(steps, marked)
+                return marked["error_code"]
+            marked["state"] = "applied"
+            marked = context.checkpoint_step(marked, returned_object_id=item_id)
+            adapter_support.replace_step(steps, marked)
+        try:
+            _validate_module_membership(
+                _capture_module_state(payload["course_id"]),
+                module_id, source_ids, bridge_id,
+            )
+        except _BridgeInvariantError as exc:
+            return exc.code
+        return None
 
     def _stop_after_error(
         self, context, steps: list[dict], step: dict, error: str,
@@ -718,6 +1011,68 @@ class SisGradeBridgeAdapter:
         course_id = target["course_id"]
         key = str(step.get("step_key") or "")
         bridge_id = _bridge_id(payload, target, steps)
+        if key.startswith("attach_source_module:"):
+            try:
+                index = int(key.rsplit(":", 1)[1])
+                source_id = str(baseline["source_assignment_ids"][index])
+                module_id = str(step.get("module_id") or baseline.get("module_id") or "")
+                if not module_id:
+                    return "sent_unknown"
+                items = _get_all(
+                    f"/api/v1/courses/{course_id}/modules/{module_id}/items",
+                    {"per_page": 100},
+                )
+            except (ValueError, IndexError, KeyError, _BridgeReadError):
+                return "sent_unknown"
+            matches = [item for item in items if str(item.get("content_id")) == source_id]
+            if len(matches) != 1:
+                return "sent_unknown"
+            step["returned_object_id"] = str(matches[0].get("id"))
+            step["module_id"] = module_id
+            return "applied"
+        if key.startswith("remove_bridge_module:"):
+            parts = key.split(":")
+            if len(parts) != 3:
+                return "sent_unknown"
+            module_id, item_id = parts[1], parts[2]
+            try:
+                items = _get_all(
+                    f"/api/v1/courses/{course_id}/modules/{module_id}/items",
+                    {"per_page": 100},
+                )
+            except _BridgeReadError:
+                return "sent_unknown"
+            # A successful DELETE may have returned an uncertain transport
+            # error.  Absence from a complete collection is the safe
+            # postcondition; never issue a second DELETE.  An exact item still
+            # present remains unresolved.
+            return "sent_unknown" if any(str(item.get("id")) == item_id for item in items) else "applied"
+        if key in {"create_bridge", "repair_bridge"}:
+            if not bridge_id:
+                return "sent_unknown"
+            bridge, error = adapter_support.get_assignment(course_id, bridge_id)
+            if error or not bridge:
+                return "sent_unknown"
+            try:
+                overrides = _get_all(
+                    f"/api/v1/courses/{course_id}/assignments/{bridge_id}/overrides",
+                    {"per_page": 100},
+                )
+            except _BridgeReadError:
+                return "sent_unknown"
+            if overrides:
+                return "sent_unknown"
+            expected = payload.get("expected_bridge") or {}
+            actual = differentiated_bridge.assignment_shape(bridge, [])
+            for field, value in expected.items():
+                if field == "name":
+                    if str(actual.get(field) or "").casefold() not in {
+                        str(payload.get("family_title") or "").casefold(), str(value).casefold()
+                    }:
+                        return "sent_unknown"
+                elif not differentiated_bridge._fields_match({field: actual.get(field)}, {field: value}):
+                    return "sent_unknown"
+            return "applied"
         if key.startswith("copy_grade:"):
             if not bridge_id:
                 return "sent_unknown"
@@ -741,12 +1096,61 @@ class SisGradeBridgeAdapter:
         for step in steps:
             if step.get("state") == "applied":
                 continue
+            if step.get("state") == "pending":
+                # Registration is a local finalization step; recovery may
+                # legitimately reach it with earlier Canvas steps unresolved.
+                continue
             if step.get("state") != "sent_unknown":
                 return {"state": "sent_unknown", "steps": steps}
             if self._reconcile_step(payload, target, baseline, step, steps) != "applied":
                 return {"state": "sent_unknown", "steps": steps}
-            step["state"] = "applied"
-            step["error_code"] = None
+        if payload.get("mode") == "reconcile":
+            bridge_id = _bridge_id(payload, target, steps)
+            if not bridge_id:
+                return {"state": "sent_unknown", "steps": steps}
+            bridge, error = adapter_support.get_assignment(
+                target["course_id"], bridge_id,
+            )
+            if error or not bridge:
+                return {"state": "sent_unknown", "steps": steps}
+            # Registration is durable authority.  Persist it only after a
+            # fresh global source/bridge layout read proves every source is
+            # present exactly once in the selected module and the bridge is
+            # absent from every module.
+            try:
+                _validate_module_membership(
+                    _capture_module_state(target["course_id"]),
+                    str(baseline.get("module_id") or payload.get("module_id") or ""),
+                    [str(value) for value in baseline.get("source_assignment_ids") or []],
+                    bridge_id,
+                )
+            except (_BridgeInvariantError, _BridgeReadError):
+                return {"state": "sent_unknown", "steps": steps}
+            registration = {
+                "family_title": payload["family_title"],
+                "family_key": payload["family_key"],
+                "source_assignment_ids": baseline["source_assignment_ids"],
+                "source_titles": baseline["source_titles"],
+                "bridge_assignment_id": bridge_id,
+                "bridge_state_digest": differentiated_bridge.structural_digest(
+                    differentiated_bridge.assignment_shape(bridge, [])
+                ),
+                "module_id": baseline.get("module_id"),
+                "module_name": baseline.get("module_name"),
+            }
+            try:
+                config.save_sis_grade_bridge(target["course_id"], registration)
+                saved = config.get_sis_grade_bridge(
+                    target["course_id"], payload["family_title"],
+                )
+            except Exception:
+                return {"state": "sent_unknown", "steps": steps}
+            if saved != registration:
+                return {"state": "sent_unknown", "steps": steps}
+        for step in steps:
+            if step.get("state") in {"sent_unknown", "pending"}:
+                step["state"] = "applied"
+                step["error_code"] = None
         return {
             "state": "applied",
             "steps": steps,
@@ -758,6 +1162,115 @@ class SisGradeBridgeAdapter:
             target for target in operation.get("targets", [])
             if models.is_unresolved_target_state(target.get("state", "pending"))
         ]
+
+
+def _capture_module_state(course_id: str) -> dict:
+    """Capture student-free exact module/item identity for drift validation."""
+    modules = _get_all(f"/api/v1/courses/{course_id}/modules", {"per_page": 100})
+    records = []
+    for module in modules:
+        module_id = str(module.get("id") or "")
+        if not module_id:
+            continue
+        items = _get_all(
+            f"/api/v1/courses/{course_id}/modules/{module_id}/items",
+            {"per_page": 100},
+        )
+        records.append({
+            "id": module_id,
+            "name": str(module.get("name") or ""),
+            "position": module.get("position"),
+            "items": sorted([
+                {
+                    "id": str(item.get("id") or ""),
+                    "type": str(item.get("type") or ""),
+                    "title": str(item.get("title") or ""),
+                    "position": item.get("position"),
+                    "content_id": str(item.get("content_id") or ""),
+                }
+                for item in items if item.get("id") is not None
+            ], key=lambda item: (item["position"] if item["position"] is not None else 10**9, item["id"])),
+        })
+    records.sort(key=lambda item: (item["position"] if item["position"] is not None else 10**9, item["id"]))
+    return {"modules": records, "digest": models.sha256_dict(records)}
+
+
+def _validate_module_membership(module_state: dict, module_id: str, source_ids: list[str], bridge_id: str) -> dict:
+    module_id = str(module_id)
+    module = next((row for row in module_state.get("modules", []) if row.get("id") == module_id), None)
+    if not module:
+        raise _BridgeInvariantError("module_exact_id_unverified")
+    source_set = {str(value) for value in source_ids}
+    occurrences = {source_id: [] for source_id in source_set}
+    bridge_occurrences = []
+    for other in module_state.get("modules", []):
+        for item in other.get("items") or []:
+            content_id = str(item.get("content_id") or "")
+            if content_id in occurrences:
+                occurrences[content_id].append((str(other.get("id")), str(item.get("id"))))
+            if bridge_id and content_id == str(bridge_id):
+                bridge_occurrences.append((str(other.get("id")), str(item.get("id"))))
+    if any(len(found) != 1 or found[0][0] != module_id for found in occurrences.values()):
+        raise _BridgeInvariantError("source_module_membership_invalid")
+    if bridge_occurrences:
+        raise _BridgeInvariantError("bridge_module_item_present")
+    return module_state
+
+
+def _resolve_reconciliation_module(module_state: dict, source_ids: list[str], bridge_id: str, *, requested_id: str | None = None) -> tuple[str, str]:
+    modules = module_state.get("modules") or []
+    source_set = {str(value) for value in source_ids}
+    requested_module = None
+    if requested_id:
+        requested_module = next((row for row in modules if str(row.get("id")) == str(requested_id)), None)
+        if not requested_module:
+            raise _BridgeInvariantError("module_exact_id_unverified")
+    source_candidates = []
+    bridge_candidates = []
+    for module in modules:
+        contents = [str(item.get("content_id") or "") for item in module.get("items") or []]
+        if any(value in source_set for value in contents):
+            source_candidates.append(module)
+        if bridge_id and bridge_id in contents:
+            bridge_candidates.append(module)
+    source_ids_by_module = {
+        str(module["id"]): {value for value in (str(item.get("content_id") or "") for item in module.get("items") or []) if value in source_set}
+        for module in source_candidates
+    }
+    # A complete source set in one module is the deterministic legacy repair
+    # target even when bridge item(s) remain in another module.  Any source
+    # occurrence outside that module is still a hard cross-module error.
+    complete = [module for module in source_candidates
+                if source_ids_by_module[str(module["id"])] == source_set]
+    if len(complete) == 1:
+        module = complete[0]
+        if any(
+            str(other.get("id")) != str(module.get("id"))
+            and any(str(item.get("content_id") or "") in source_set
+                     for item in other.get("items") or [])
+            for other in modules
+        ):
+            raise _BridgeInvariantError("cross_module_source_placement")
+        return str(module["id"]), str(module.get("name") or "")
+    if len(complete) > 1:
+        raise _BridgeInvariantError("ambiguous_module")
+    if source_candidates:
+        if requested_module is not None:
+            if any(
+                str(module.get("id")) != str(requested_module.get("id"))
+                for module in source_candidates
+            ):
+                raise _BridgeInvariantError("cross_module_source_placement")
+            return str(requested_module["id"]), str(requested_module.get("name") or "")
+        raise _BridgeInvariantError("cross_module_source_placement")
+    if requested_module is not None:
+        return str(requested_module["id"]), str(requested_module.get("name") or "")
+    if len(bridge_candidates) == 1:
+        module = bridge_candidates[0]
+        return str(module["id"]), str(module.get("name") or "")
+    if len(bridge_candidates) > 1:
+        raise _BridgeInvariantError("ambiguous_module")
+    raise _BridgeInvariantError("module_selection_required")
 
 
 def _required_text(value: Any, field: str) -> str:

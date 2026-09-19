@@ -5,6 +5,27 @@ private scoring engine. Canvas Expert has no hosted grader. The agent prepares o
 exact assignment-bounded SAFE pseudonymized packet at a time, then submits results
 to Canvas Expert for validation and the exact assignment Canvas write.
 
+Before preparation, `discover_scoring_work()` is the broad, read-only entry point:
+it strictly refreshes every configured Current course, projects only aggregate local
+mirror state, and returns a student-free digest. The teacher directs which exact
+course/assignment rows to continue. Discovery creates no session or packet and never
+widens the assignment-scoped authorization described below.
+
+Discovery refreshes are bounded per call. A Current-course refresh that remains
+`queued` or `running` after the wait bound is reported as the retryable,
+student-free attention code `mirror_refresh_in_progress`, with its opaque
+`operation_id`, `refresh_status`, and an instruction to retry discovery without
+teacher interruption. If every Current course is still refreshing, discovery is
+`ok: true` with `status: "refreshing"`, empty assignment rows, standard totals, and
+the complete attention table. Usable rows remain visible when only some courses are
+refreshing, but the top-level status stays `refreshing`. Terminal refresh failures
+retain the existing partial or `scoring_discovery_failed` semantics. The existing
+CanvasMirror coordinator owns the physical two-worker limit and coalesces repeated
+course/scope refreshes. The host may make at most four total discovery calls for the
+current teacher request (the initial call plus three continuations), then must report
+remaining attention and wait for teacher direction; a repeated advisory does not reset
+that cap.
+
 Privacy invariant: the agent sees pseudonyms and scrubbed work only. Real names,
 Canvas/SIS IDs, signed URLs, credentials, and private paths remain in the local
 application and are never part of this contract. Pseudonymized does not mean
@@ -122,7 +143,9 @@ its effective model and packet projection carries the compaction marker and coun
 those counts are the signal that effective text was omitted. Ordinary assignments use the
 public prepare -> packet -> submit flow and retain the
 frozen baseline, drift check, per-student idempotency, PUT-then-GET verification, and
-content-minimized receipt lane. A successful write is posted only when the refreshed score,
+content-minimized receipt lane. An explicit teacher direction to score/post a selected
+discovery set authorizes submit for those exact assignments together; a review-only or
+no-submit direction stops before submit. A successful write is posted only when the refreshed score,
 comment availability/count, and latest-comment metadata satisfy the postcondition. A GET
 failure or mismatch is durable `sent_unknown`/Attention with no idempotency and no automatic
 retry; explicit HTTP rejection remains the existing failed result. Existing New Quizzes with

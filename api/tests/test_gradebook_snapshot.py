@@ -47,3 +47,24 @@ def test_snapshot_counts_only_roster_work_and_sums_student_ungraded():
     assert (assignment["submitted"], assignment["graded"], assignment["avg_pct"]) == (2, 2, 70)
     assert (assignment["ungraded"], assignment["partially_scored"]) == (2, 1)
     assert (assignment["missing"], assignment["late"]) == (0, 0)
+
+
+def test_late_ungraded_is_exact_intersection_of_needs_grading_and_late():
+    students = [{"id": 1, "name": "Learner"}]
+    assignments = [{"id": 10, "points_possible": 10}]
+    submissions = [
+        {"assignment_id": 10, "user_id": 1, "workflow_state": "submitted",
+         "submitted_at": "2026-09-01", "late": True},
+        {"assignment_id": 10, "user_id": 1, "workflow_state": "graded",
+         "submitted_at": "2026-09-01", "score": 8, "late": True},
+        {"assignment_id": 10, "user_id": 1, "workflow_state": "submitted",
+         "submitted_at": "2026-09-01", "excused": True, "late": True},
+        {"assignment_id": 10, "user_id": 1, "workflow_state": "submitted",
+         "submitted_at": "", "late": True},
+    ]
+
+    result = build_snapshot(students, assignments, submissions)
+    assignment = result["assignments"][0]
+    assert assignment["late_ungraded"] == sum(
+        needs_grading(row) and bool(row.get("late")) for row in submissions
+    ) == 1

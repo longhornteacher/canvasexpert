@@ -17,8 +17,9 @@ text so later readers can accurately see what counts as student writing.
 
 How work enters
 
-A teacher selects one Canvas assignment in CanvasExpert's web UI or equivalent
-local CLI. That action scopes one teacher-triggered acquisition; it is not a
+A teacher selects one Canvas assignment in the retained control console or equivalent
+local CLI. A connected agent can read the resulting private history through its runtime
+contract. The selection scopes one teacher-triggered acquisition; it is not a
 persistent tracking or eligibility flag. Every acquired response is eligible:
 there is no assignment-type, length, genre, or opt-in classifier. Typed text
 comes from the local mirror. A DOCX upload may be read through the focused

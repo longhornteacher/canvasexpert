@@ -1,10 +1,14 @@
-"""Landing a staged draft in Canvas from the chat.
+"""Landing a staged draft in Canvas from the connected agent.
 
 The pair is deliberately thin: it resolves one staged label, hands the same
 prepare request the push tab hands the adapter, and applies through the same
 Operation Ledger executor. What these tests hold down is the boundary around
 that -- which drafts it can reach, which options each kind accepts, and what
 crosses back out to the client.
+
+The retained push tab is a control-console path; these tests protect equivalence
+at the runtime/write boundary, not a requirement that the browser remain the
+primary authoring surface.
 """
 
 from __future__ import annotations
@@ -382,7 +386,7 @@ def test_apply_reports_what_landed_without_ledger_internals(monkeypatch):
     assert "KeyError" not in server._compact(result)
 
 
-def test_assignment_tier_result_projection_is_content_only_and_actionable():
+def test_assignment_tier_result_projection_is_family_safe_and_actionable():
     operation = {
         "kind": "content.assignment",
         "normalized_payload": {
@@ -411,14 +415,15 @@ def test_assignment_tier_result_projection_is_content_only_and_actionable():
     projected = content_push._result_projection(operation, result)
     target = projected["targets"][0]
     assert target["created"] == [
-        {"label": "Support", "assignment_id": "101", "name": "Practice - Red",
-         "html_url": "https://canvas.invalid/a/101"},
-        {"label": "Core", "assignment_id": "102", "name": "Practice - Blue",
-         "html_url": "https://canvas.invalid/a/102"},
+        {"tier": "Support", "public_tag": "Red", "group_name": None,
+         "assignment_id": "101", "title": "Practice - Red",
+         "url": "https://canvas.invalid/a/101"},
+        {"tier": "Core", "public_tag": "Blue", "group_name": None,
+         "assignment_id": "102", "title": "Practice - Blue",
+         "url": "https://canvas.invalid/a/102"},
     ]
-    assert "draft" in target["teacher_action"]
-    assert "Teacher action" in target["teacher_action"]
-    assert all(word in target["teacher_action"] for word in ("students", "groups", "pods", "publish"))
+    assert target["family_link"] == {"state": "needs_repair"}
+    assert target["module"] == {"module_id": None, "module_name": None}
 
     def keys(value):
         if isinstance(value, dict):
@@ -427,8 +432,7 @@ def test_assignment_tier_result_projection_is_content_only_and_actionable():
             return set().union(*(keys(item) for item in value))
         return set()
 
-    assert not keys(target) & {"group", "group_name", "student_count", "student_ids",
-                               "member_ids", "bridge", "family"}
+    assert not keys(target) & {"student_ids", "member_ids"}
 
 
 def test_apply_surfaces_the_unfinished_step_when_a_push_needs_attention(monkeypatch):

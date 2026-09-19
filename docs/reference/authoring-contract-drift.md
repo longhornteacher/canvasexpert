@@ -2,8 +2,8 @@
 
 **Audit date:** 2026-09-17
 
-**Status:** The payload-field drift is resolved in `dev`; the tier-tag and family-registration
-findings remain open design gaps.
+**Status:** The payload-field drift is resolved in `dev`; reconciliation now closes the
+family-link gap for structurally safe existing Canvas families.
 
 ## 1. Payload fields are now part of the live contract
 
@@ -36,12 +36,16 @@ This remains an authoring-time feedback gap. Possible follow-up directions are t
 configuration earlier and return the unconfigured labels, or expose the configured tags through the
 authoring contract so an assistant authors only deliverable tiers.
 
-## 3. Manually-built families cannot register, and therefore cannot SIS-sync
+## 3. Manually-built families require reviewed reconciliation before SIS projection
 
 Differentiated families built as independent assignments rather than through the `tiers` field do
-not enter automatic family registration. An unregistered family cannot use
-`preview_sis_grade_bridge` or `apply_sis_grade_bridge` and has no backfill path; it must be rebuilt
-through the supported `tiers` mechanism to gain bridge registration.
+not enter automatic family linking. A family without a verified link cannot use
+`preview_sis_grade_bridge` or `apply_sis_grade_bridge` until the teacher runs
+`reconcile_sis_grade_bridges` and reviews the exact source IDs, coverage, and bridge shape.
+Reconciliation may link a safe existing bridge or create the server-named bridge; it may
+also repair a legacy module that contains only the bridge by attaching the exact source assignments and
+removing the bridge module item. Ambiguous or unsafe structures fail closed; no family is
+silently backfilled from a name-only guess.
 
 The manual path is reachable because separately titled assignments are valid ordinary assignments.
 The cost appears later at the SIS step, after the work has already been authored and delivered.
@@ -52,5 +56,5 @@ bridge for another variant.
 
 - `docs/reference/assignment-differentiation-design.md` — the accepted tier design these findings sit against.
 - `docs/contracts/feedback-scoring-contract.md` — the private correction and results boundary.
-- `docs/guides/sis-grade-bridges.md` — registration and projection behavior referenced in finding 3.
+- `docs/guides/sis-grade-bridges.md` — family-link and projection behavior referenced in finding 3.
 - `docs/reference/assignment-corrections-design.md` — the accepted correction design and current limits.

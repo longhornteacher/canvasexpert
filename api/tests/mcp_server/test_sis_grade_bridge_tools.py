@@ -100,8 +100,9 @@ def test_mcp_preview_output_never_projects_private_student_rows(
 def test_server_instructions_lock_one_command_preauthorization():
     instructions = server._SERVER_INSTRUCTIONS
 
-    assert "Asking for a write is the authorization" in instructions
-    assert "only its named target and course" in instructions
+    assert "explicit score/post direction authorizes the selected discovery rows together" in instructions
+    assert "without reconfirming each assignment" in instructions
+    assert "never extends beyond those rows or another session" in instructions
 
 
 def test_no_current_tool_can_confirm_or_trigger_sis_sync():

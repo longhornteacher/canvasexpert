@@ -21,6 +21,7 @@ _PRIORITY_VALUE = {name: index for index, name in enumerate(PRIORITIES)}
 PRODUCTION_SCOPES = (
     "course.refresh", "course_context", "roster", "groups",
     "course.scoring_refresh", "submissions.course_delta", "new_quizzes.metadata",
+    "course.structure_refresh",
 )
 
 _WORKER = contextvars.ContextVar("canvasmirror_worker", default=None)

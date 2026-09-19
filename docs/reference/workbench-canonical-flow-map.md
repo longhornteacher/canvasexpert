@@ -1,8 +1,16 @@
 # Workbench Canonical Flow Map
 
 > Generated 2026-07-12 from source inventory. No runtime changes.
-> This is the first-stop routing map for debugging sessions.
+> This is the first-stop routing map for debugging sessions. The product center is now
+> the local agent runtime and MCP cooperation boundary; browser rows below describe the
+> retained control-console and local-only surfaces around that runtime.
 > For detailed file ownership, see the per-feature module maps in `docs/reference/`.
+
+New agent-facing work starts from
+`docs/contracts/agent-runtime-product-contract.md` and the relevant MCP/runtime contract,
+not from the nearest browser page. The control console exists for setup, trust, review,
+recovery, receipts, diagnostics, and genuinely local-only operations. Host agents own
+their own conversation and preview presentation from Canvas Expert's host-neutral results.
 
 ## Teacher outcome → canonical flow
 
@@ -13,7 +21,7 @@
 | 3 | **Gradebook actions** | `/gradebook` | `gradebook.html` (`layouts/workspace.html`, `left-main`) | `gradebook.js` + `gradebook/*.js` | `routes/gradebook.py` (facade) + `routes/gradebook_*.py`, `gradebook_service.py` | `gradebook-module-map.md` | Single-course scope; late-policy/sweep/curve writes are reversible; extra-time reads from Roster config |
 | 4 | **Roster & student-group actions** | `/roster` | `roster.html` (`layouts/workspace.html`, `left-main`) | `roster.js` + `roster/*.js` | `routes/roster.py` + `routes/roster_*.py`, `routes/names.py` | `roster-module-map.md` | V3: Canvas groups are source of truth; V2 tier/planned_group writes rejected; vault is PRIVATE |
 | 5 | **Student reports** | `/students/reports` | `student_reports.html` (`layouts/document.html`, `wide`) | `course_expert/student_reports.js`, `course_expert/portfolio.js` | `routes/pages.py::student_reports_page`, `routes/reports.py` | `roster-module-map.md` | Private report roots, monitored-student data, CSV handling, and portfolio behavior remain owned by the existing report routes; no data migration or new Canvas write path. |
-| 6 | **Scoring Sessions** – agent-assisted scoring | MCP `prepare_scoring_session` → `get_scoring_packet` → `submit_scoring_results` | No Canvas Expert scoring page | MCP server and private scoring engine | `api/mcp_server/`, `api/powergrader/` | `powergrader-scoring-map.md`, `feedback-scoring-contract.md` | One assignment-scoped session prepares one exact assignment; SAFE packet and write stay assignment-bounded with per-student review, drift, idempotency, verification, and receipts. Canvas Live is review/edit surface. |
+| 6 | **Scoring Sessions** – agent-assisted scoring | MCP `discover_scoring_work` → teacher direction → `prepare_scoring_session` → `get_scoring_packet` → `submit_scoring_results` | No Canvas Expert scoring page | MCP server and private scoring engine | `api/mcp_server/`, `api/powergrader/` | `powergrader-scoring-map.md`, `feedback-scoring-contract.md` | Discovery is cross-course, student-free, refresh-only, and read-only. Each selected assignment then gets its own SAFE packet and write boundary with per-student review, drift, idempotency, verification, and receipts. Canvas Live is review/edit surface. |
 | 8 | **Settings & first-run** | `/settings` (first-run: `/welcome`) | `settings.html` (`layouts/workspace.html`, `left-main`) / `welcome.html` (`layouts/wizard.html`) | `settings.js` + `settings/*.js` / `welcome.js` | `routes/settings.py`, `routes/calendar.py`, `routes/onboarding.py`, `config/` | `settings-module-map.md` | Token in OS credential store only; no district defaults in source; local-only bind |
 | 9 | **Routines** | `/routines` | `routines.html` (`layouts/document.html`, `wide`) | inline / route-driven | `routes/routines.py` + `routes/routines_builtin.py` + `routes/routines_custom.py` | `operation-ledger-contract.md` (routines integration) | Local automations only; no cloud scheduler; writes gated by routine definitions |
 

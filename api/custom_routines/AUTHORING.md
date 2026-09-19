@@ -1,8 +1,9 @@
 # Custom Routines — LLM Authoring Guide
 
 You are helping a teacher write a **custom routine** for Canvas Expert. A routine is a
-Python function that checks or modifies Canvas data on a schedule. Drop the finished file
-into `api/custom_routines/` and restart the app — it appears in the Dashboard Routines table
+Python function that checks or modifies Canvas data on a schedule. The local runtime
+executes it; the retained control console configures and displays it. Drop the finished
+file into `api/custom_routines/` and restart the app — it appears in the Routines table
 alongside the built-ins.
 
 ## Runner contract
@@ -15,7 +16,7 @@ def my_routine(params: dict) -> dict:
     return {"ok": bool, "lines": list[str], "summary": str}
 ```
 
-- `params` — the user's saved settings (editable from the dashboard).
+- `params` — the user's saved settings (editable from the control console).
 - Return `{"ok": True, "lines": […], "summary": "…"}` on success, `{"ok": False, …}` on failure.
 - `lines` — one string per course (or per notable event). Prefix markers:
   `✓` (success/ok), `✗` (error), `⚑` (flag/warning), `·` (info/no-op).
@@ -74,7 +75,7 @@ live only when the mirror is missing, stale, or corrupt, always labeling `source
    marker so they know it modifies Canvas data.
 2. **Read-only routines are the safe default — prefer them.** Flag/check/report without
    writing. The user can always enable `apply` mode later.
-3. **Use the ✗ ✓ ⚑ · markers** in `lines` for consistent dashboard rendering.
+3. **Use the ✗ ✓ ⚑ · markers** in `lines` for consistent control-console rendering.
 4. **Wrap numbers** (`\u2265` for ≥) to avoid encoding issues.
 
 ## Worked example — missing-work nudge

@@ -1,0 +1,487 @@
+{
+  "schema_version": 52,
+  "tools": [
+    {
+      "name": "apply_assignment_update",
+      "properties": {
+        "batch_id": "string",
+        "operation_id": "string",
+        "review_digest": "string"
+      },
+      "required": [
+        "operation_id",
+        "batch_id",
+        "review_digest"
+      ]
+    },
+    {
+      "name": "apply_content_push",
+      "properties": {
+        "batch_id": "string",
+        "operation_id": "string",
+        "review_digest": "string"
+      },
+      "required": [
+        "operation_id",
+        "batch_id",
+        "review_digest"
+      ]
+    },
+    {
+      "name": "apply_learning_objective",
+      "properties": {
+        "course_id": "string",
+        "expected_revision": "integer",
+        "preview": "object",
+        "preview_digest": "string"
+      },
+      "required": [
+        "course_id",
+        "preview",
+        "preview_digest",
+        "expected_revision"
+      ]
+    },
+    {
+      "name": "apply_roster_student_change",
+      "properties": {
+        "course_id": "string",
+        "expected_settings_digest": "string",
+        "preview": "object",
+        "preview_digest": "string"
+      },
+      "required": [
+        "course_id",
+        "preview",
+        "preview_digest",
+        "expected_settings_digest"
+      ]
+    },
+    {
+      "name": "apply_sis_grade_bridge",
+      "properties": {
+        "batch_id": "string",
+        "operation_id": "string",
+        "review_digest": "string"
+      },
+      "required": [
+        "operation_id",
+        "batch_id",
+        "review_digest"
+      ]
+    },
+    {
+      "name": "apply_workspace_reset",
+      "properties": {
+        "preview_digest": "string"
+      },
+      "required": [
+        "preview_digest"
+      ]
+    },
+    {
+      "name": "clear_roster_student_field",
+      "properties": {
+        "course_id": "string",
+        "expected_settings_digest": "string",
+        "field": "string",
+        "pseudonym": "string"
+      },
+      "required": [
+        "course_id",
+        "pseudonym",
+        "field",
+        "expected_settings_digest"
+      ]
+    },
+    {
+      "name": "delete_learning_objective",
+      "properties": {
+        "course_id": "string",
+        "entry_id": "string",
+        "expected_revision": "integer"
+      },
+      "required": [
+        "course_id",
+        "entry_id",
+        "expected_revision"
+      ]
+    },
+    {
+      "name": "discover_scoring_work",
+      "properties": {},
+      "required": []
+    },
+    {
+      "name": "get_authoring_contract",
+      "properties": {
+        "kind": "string"
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    {
+      "name": "get_course_assignments",
+      "properties": {
+        "course_id": "string",
+        "full_descriptions": "boolean"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "get_course_pages",
+      "properties": {
+        "course_id": "string",
+        "full_text": "boolean"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "get_gradebook_snapshot",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "get_modules",
+      "properties": {
+        "course_id": "string",
+        "include_items": "boolean"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "get_product_guide",
+      "properties": {
+        "topic": "string"
+      },
+      "required": []
+    },
+    {
+      "name": "get_roster",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "get_roster_student_settings",
+      "properties": {
+        "course_id": "string",
+        "pseudonym": "string"
+      },
+      "required": [
+        "course_id",
+        "pseudonym"
+      ]
+    },
+    {
+      "name": "get_scoring_packet",
+      "properties": {
+        "include_context": "boolean",
+        "limit": "integer",
+        "offset": "integer",
+        "scoring_session_id": "string"
+      },
+      "required": [
+        "scoring_session_id"
+      ]
+    },
+    {
+      "name": "get_submissions",
+      "properties": {
+        "assignment_id": "string",
+        "course_id": "string",
+        "include_text": "boolean",
+        "max_text_chars": "integer",
+        "pseudonyms": "string"
+      },
+      "required": [
+        "course_id",
+        "assignment_id"
+      ]
+    },
+    {
+      "name": "get_writing_history",
+      "properties": {
+        "include_text": "boolean",
+        "max_text_chars": "integer",
+        "pseudonym": "string",
+        "since": "string",
+        "until": "string"
+      },
+      "required": [
+        "pseudonym"
+      ]
+    },
+    {
+      "name": "list_courses",
+      "properties": {},
+      "required": []
+    },
+    {
+      "name": "list_groups",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "list_learning_objectives",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "list_scoring_sessions",
+      "properties": {},
+      "required": []
+    },
+    {
+      "name": "list_sections",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "list_sis_grade_bridges",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "list_staged_content",
+      "properties": {
+        "kind": "string"
+      },
+      "required": []
+    },
+    {
+      "name": "prepare_scoring_session",
+      "properties": {
+        "assignment_id": "string",
+        "course_id": "string",
+        "scoring_guidance": "string"
+      },
+      "required": [
+        "course_id",
+        "assignment_id"
+      ]
+    },
+    {
+      "name": "preview_assignment_update",
+      "properties": {
+        "assignment_id": "string",
+        "course_id": "string",
+        "due_at": "string",
+        "lock_at": "string",
+        "published": "boolean",
+        "unlock_at": "string"
+      },
+      "required": [
+        "course_id",
+        "assignment_id"
+      ]
+    },
+    {
+      "name": "preview_content_push",
+      "properties": {
+        "assignment_group_name": "string",
+        "course_id": "string",
+        "create_module": "boolean",
+        "due_at": "string",
+        "kind": "string",
+        "label": "string",
+        "lock_at": "string",
+        "module_id": "string",
+        "module_name": "string",
+        "post_to_sis": "boolean",
+        "published": "boolean",
+        "unlock_at": "string"
+      },
+      "required": [
+        "course_id",
+        "kind",
+        "label"
+      ]
+    },
+    {
+      "name": "preview_differentiated_quiz_push",
+      "properties": {
+        "assignment_group_name": "string",
+        "course_id": "string",
+        "create_module": "boolean",
+        "due_at": "string",
+        "lock_at": "string",
+        "module_id": "string",
+        "module_name": "string",
+        "post_to_sis": "boolean",
+        "published": "boolean",
+        "unlock_at": "string",
+        "variants": "array"
+      },
+      "required": [
+        "course_id",
+        "variants"
+      ]
+    },
+    {
+      "name": "preview_learning_objective",
+      "properties": {
+        "course_id": "string",
+        "effective_end": "string",
+        "effective_start": "string",
+        "objective": "string",
+        "replaces": "string",
+        "source_refs": "array"
+      },
+      "required": [
+        "course_id",
+        "objective",
+        "effective_start",
+        "effective_end",
+        "source_refs"
+      ]
+    },
+    {
+      "name": "preview_roster_student_change",
+      "properties": {
+        "course_id": "string",
+        "patch": "object",
+        "pseudonym": "string"
+      },
+      "required": [
+        "course_id",
+        "pseudonym",
+        "patch"
+      ]
+    },
+    {
+      "name": "preview_sis_grade_bridge",
+      "properties": {
+        "course_id": "string",
+        "family_title": "string"
+      },
+      "required": [
+        "course_id",
+        "family_title"
+      ]
+    },
+    {
+      "name": "preview_sis_grade_bridge_reconciliation",
+      "properties": {
+        "course_id": "string",
+        "family_title": "string"
+      },
+      "required": [
+        "course_id",
+        "family_title"
+      ]
+    },
+    {
+      "name": "preview_workspace_reset",
+      "properties": {},
+      "required": []
+    },
+    {
+      "name": "push_content_live",
+      "properties": {
+        "assignment_group_name": "string",
+        "content": "string",
+        "course_id": "string",
+        "create_module": "boolean",
+        "kind": "string",
+        "label": "string",
+        "module_id": "string",
+        "module_name": "string",
+        "post_to_sis": "boolean",
+        "published": "boolean"
+      },
+      "required": [
+        "course_id",
+        "kind",
+        "label",
+        "content"
+      ]
+    },
+    {
+      "name": "reconcile_sis_grade_bridges",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "refresh_course_structure",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "refresh_mirror",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "stage_content",
+      "properties": {
+        "content": "string",
+        "kind": "string",
+        "label": "string"
+      },
+      "required": [
+        "kind",
+        "label",
+        "content"
+      ]
+    },
+    {
+      "name": "submit_scoring_results",
+      "properties": {
+        "answers": "",
+        "expected_packet_digest": "string",
+        "idempotency_key": "string",
+        "results": "array",
+        "review_digest": "string",
+        "scoring_session_id": "string"
+      },
+      "required": [
+        "scoring_session_id",
+        "results",
+        "expected_packet_digest"
+      ]
+    }
+  ]
+}

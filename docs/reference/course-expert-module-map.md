@@ -4,6 +4,11 @@ Routing scope: open this map only when the active handoff touches Create/Course 
 then use the relevant section. It is not global executor context and does not replace the
 handoff's exact file/symbol list.
 
+This is a retained browser/control-console map. The primary agent-facing path is the local
+runtime and host-neutral MCP contract. New agent-facing capability should start there;
+Create work belongs here only when it changes retained console behavior or a shared
+authoring/runtime seam.
+
 As of 2026-07-15, Create browser behavior is split into small shared
 push modules plus page-specific feature scripts. `course_expert.html` is now
 mostly markup, data injection, and script includes.
@@ -82,7 +87,8 @@ Expert loads that bundle first, then the shared push cards, then the page-specif
 - typed prepare, frozen review, digest-gated apply, and retry routes
 - the PII-minimized operation list and bounded polling status endpoint
 
-- Course Expert uses typed operation preparation and review as the sole browser live-write path for quizzes.
+- Course Expert uses typed operation preparation and review as the sole retained-browser
+  live-write path for quizzes.
   The legacy QuizForge streaming HTTP wrappers (`/api/push/stream`, `/api/push-multi-whole/stream`,
   `/api/push-variants/stream`, `/api/push-multi/stream`) were removed in July 2026.
   `qf_pusher.py` remains a whole-quiz/planning owner. The unsafe differentiated
@@ -101,8 +107,8 @@ Expert loads that bundle first, then the shared push cards, then the page-specif
 - QuizForge validate/preview: `push/quiz.js`, `routes/push_validation.py`
 - QuizForge prepare/review/apply/progress: `push/quiz.js`, `push/core.js`,
   `routes/operations.py`, `operation_ledger/adapters/quiz.py`
-- Differentiated public suffix, bridge, bridge-only module placement, and family
-  registration: `operation_ledger/adapters/differentiated_bridge.py`, reached through
+- Differentiated public suffix, bridge, source-only module placement, and family
+  family link: `operation_ledger/adapters/differentiated_bridge.py`, reached through
   the assignment or quiz adapter
 - Assignment/Page card behavior: matching `push/*.js`,
   `routes/push_validation.py`
@@ -123,6 +129,6 @@ legacy globals (`window.CE_PUSH`, `localToISO`, `pushContent`, `targetCourses`,
 updated in the same change.
 
 Differentiated QuizForge delivery requires Settings-backed public tags, a timezone-aware
-due timestamp, and a module; only its unsuffixed bridge is module-visible. AssignmentForge
-tier delivery is content-only and creates independent unpublished, unrestricted drafts;
-the teacher assigns and publishes them in Canvas Live.
+due timestamp, and a module; its configured-tag source assignments are module-visible while the unsuffixed bridge is gradebook-only. AssignmentForge
+tier delivery is a reviewed family operation with exact group targets, override-only
+sources, a shared bridge, source-only module placement, and a verified family link.

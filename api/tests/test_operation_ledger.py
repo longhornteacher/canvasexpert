@@ -27,7 +27,7 @@ def _root(tmp_path, monkeypatch):
     return root
 
 
-def test_assignment_tier_operation_result_and_receipt_are_content_only(monkeypatch):
+def test_assignment_tier_operation_receipt_describes_complete_family_sources(monkeypatch):
     operation = {
         "operation_id": "op-tiered",
         "kind": "content.assignment",
@@ -53,8 +53,7 @@ def test_assignment_tier_operation_result_and_receipt_are_content_only(monkeypat
     result = executor._finish_operation("op-tiered", [])
     receipt = captured["receipt"]
     assert result["status"] == "applied"
-    assert receipt["teacher_action"].startswith("Teacher action: in Canvas")
-    assert all(word in receipt["teacher_action"] for word in ("students", "groups", "pods", "publish"))
+    assert "teacher_action" not in receipt
     assert receipt["variants"] == [
         {"label": "Support", "assignment_id": "101", "name": "Practice - Red",
          "html_url": "https://canvas.invalid/a/101"},
@@ -690,7 +689,7 @@ def test_recovery_apply_invalidates_catalog_scopes(tmp_path, monkeypatch):
         ("content.assignment", {}, {"assignments", "modules"}),
         ("content.quiz", {}, {"assignments", "modules"}),
         ("content.quick_assignment", {}, {"assignments"}),
-        ("gradebook.sis_bridge", {}, {"assignments"}),
+            ("gradebook.sis_bridge", {}, {"assignments", "modules"}),
         # A page always lands a Canvas page, so `pages` is unconditional; the
         # module scope stays payload-sensitive (a bare page touches no module).
         ("content.page", {}, {"pages"}),

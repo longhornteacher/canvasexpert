@@ -10,6 +10,7 @@ import requests
 
 from .. import models
 from . import assignment_tiered, assignment_whole, differentiated_bridge
+from .assignment_groups import GroupResolutionError, resolve_assignment_groups
 from .adapter_support import (
     as_list as _as_list,
     build_result as _build_result,
@@ -55,6 +56,9 @@ class AssignmentAdapter:
             raise ValueError("Printable attachments are not supported for tiered assignments")
 
         if tiers:
+            target_rows = differentiated_bridge.normalize_tier_targets(
+                [row["label"] for row in tiers], prepare_request.get("tier_targets")
+            )
             tags = differentiated_bridge.resolve_public_tags(
                 [row["label"] for row in tiers]
             )
@@ -62,9 +66,10 @@ class AssignmentAdapter:
                 {
                     **row,
                     **resolved,
+                    "group_name": target["group_name"],
                 }
-                for row, resolved in zip(
-                    af.add_supports(tiers, data.get("supports"), tags), tags
+                for row, resolved, target in zip(
+                    af.add_supports(tiers, data.get("supports"), tags), tags, target_rows
                 )
             ]
             base_title = differentiated_bridge.normalize_base_title(name)
@@ -100,6 +105,18 @@ class AssignmentAdapter:
         if tiers:
             payload["tiers"] = tiers
             payload["base_title"] = base_title
+            payload["tier_targets"] = target_rows
+            # Family safety is server-owned; an omitted value is the normal
+            # path while an explicit unrestricted draft is a contradiction.
+            if prepare_request.get("published") is False:
+                raise ValueError(
+                    "tiered AssignmentForge delivery cannot publish an unrestricted draft; "
+                    "sources are published only after exact group restriction"
+                )
+            if prepare_request.get("post_to_sis") is True:
+                raise ValueError(
+                    "tiered AssignmentForge sources are SIS-disabled; omit post_to_sis"
+                )
         if data.get("supports"):
             payload["supports"] = data["supports"]
         if data.get("corrections"):
@@ -128,8 +145,13 @@ class AssignmentAdapter:
 
         # Module placement
         mod_name = prepare_request.get("module_name")
-        if mod_name and not tiers:
+        if mod_name:
             payload["module_name"] = str(mod_name).strip()
+        mod_id = prepare_request.get("module_id")
+        if mod_id:
+            payload["module_id"] = str(mod_id).strip()
+        if prepare_request.get("create_module"):
+            payload["create_module"] = True
 
         return payload
 
@@ -147,6 +169,8 @@ class AssignmentAdapter:
             "assignment_group_name": payload.get("assignment_group_name"),
             "printable_path": payload.get("printable_path"),
             "module_name": payload.get("module_name"),
+            "module_id": payload.get("module_id"),
+            "create_module": payload.get("create_module"),
             "tiers": payload.get("tiers"),
             "base_title": payload.get("base_title"),
             "supports": payload.get("supports"),
@@ -205,7 +229,39 @@ class AssignmentAdapter:
                     "html_url": row.get("html_url"),
                 } for row in (assignments or []) if row.get("id") is not None
                     and _normalize(row.get("name")) == _normalize(title))
-            return {"existing_assignments": matches}
+            try:
+                resolved = resolve_assignment_groups(
+                    course_id,
+                    [{"label": row["label"], "group": row["group_name"]}
+                     for row in payload["tiers"]],
+                )
+            except GroupResolutionError as exc:
+                return {"blocking_error": "group_resolution_failed", "error": str(exc)}
+            if not payload.get("assignment_group_name"):
+                return {"blocking_error": "assignment_group_required"}
+            assignment_group_id = _find_assignment_group(
+                course_id, payload["assignment_group_name"]
+            )
+            if assignment_group_id is None:
+                return {"blocking_error": "assignment_group_not_found"}
+            payload["assignment_group_id"] = assignment_group_id
+            due_at, module_name, bridge_due_at = differentiated_bridge.require_family_delivery(
+                payload.get("due_at"), payload.get("module_name"), payload.get("module_id"),
+                require_exact_module=True,
+                create_module=bool(payload.get("create_module")),
+            )
+            payload["due_at"] = due_at
+            payload["module_name"] = module_name
+            payload["bridge_due_at"] = bridge_due_at
+            payload["bridge_description"] = differentiated_bridge.bridge_description()
+            payload["group_snapshot"] = resolved["safe"]
+            if payload.get("module_id"):
+                module, module_error = canvas_client.canvas_get(
+                    f"/api/v1/courses/{course_id}/modules/{payload['module_id']}"
+                )
+                if module_error or not module or str(module.get("id")) != str(payload["module_id"]):
+                    return {"blocking_error": "module_exact_id_unverified"}
+            return {"existing_assignments": matches, "group_snapshot": resolved["safe"]}
 
         baseline = {"existing_assignment": None}
         assignments, error = canvas_client.canvas_get(
@@ -232,7 +288,7 @@ class AssignmentAdapter:
             if baseline is None or "canvas_error" in baseline:
                 return True
             fresh = self.capture_baseline(payload, target)
-            if "canvas_error" in fresh:
+            if "canvas_error" in fresh or fresh.get("blocking_error"):
                 return True
             known = {
                 str(step.get("returned_object_id"))
@@ -274,10 +330,12 @@ class AssignmentAdapter:
                 "type": "printable",
                 "path": str(payload["printable_path"]),
             })
-        if payload.get("module_name"):
+        if payload.get("module_name") or payload.get("module_id") or payload.get("create_module"):
             dependencies.append({
                 "type": "module",
-                "name": payload["module_name"],
+                "name": payload.get("module_name"),
+                **({"id": payload["module_id"]} if payload.get("module_id") else {}),
+                **({"create": True} if payload.get("create_module") else {}),
             })
         review = {
             "course_name": course_name,
@@ -303,15 +361,29 @@ class AssignmentAdapter:
                     "source_title": row.get("title"),
                 } for row in payload["tiers"]],
                 "tier_warning": (
-                    "Canvas will create one unpublished, unrestricted assignment draft "
-                    "per tier. The teacher assigns students, groups, or pods and publishes each draft in Canvas."
+                    "Canvas will create one published, exact-group-restricted source assignment per tier "
+                    "and one whole-course grade bridge. Only the sources appear in the selected module."
                 ),
                 "teacher_action": (
-                    "Teacher action: in Canvas, assign each draft to the intended students, groups, or pods, "
-                    "then publish the drafts."
+                    "Review the exact family in Canvas Live; Canvas Expert will not perform Canvas Grade Sync."
                 ),
             })
-            review["published"] = False
+            review["published"] = True
+            review["module"] = {
+                "module_id": payload.get("module_id"),
+                "module_name": payload.get("module_name"),
+            }
+            review["bridge"] = {
+                "title": differentiated_bridge.bridge_title(payload.get("base_title")),
+                "due_at": payload.get("bridge_due_at"),
+                "post_to_sis": True,
+            }
+            review["groups"] = [
+                {"tier": row.get("label"), "public_tag": row.get("tag"),
+                 "group_name": safe.get("group_name"),
+                 "student_count": safe.get("student_count")}
+                for row, safe in zip(payload["tiers"], (baseline.get("group_snapshot") or {}).get("tiers", []))
+            ]
             review["baseline_has_existing"] = bool(baseline.get("existing_assignments"))
             review["baseline_existing_id"] = None
             review["baseline_existing_url"] = None
@@ -411,14 +483,16 @@ _file_link_html = assignment_whole.file_link_html
 
 def _attach_to_module(
     course_id: str, assignment_id: str, name: str,
-    module_name: str, steps: list[dict], context,
+    module_name: str = "", steps: list[dict] = None, context=None,
+    module_id: str | None = None, create_module: bool = False,
     *, attach_step_key: str = "attach_module",
 ) -> dict:
     return attach_assignment_type_module_item(
         course_id=course_id,
         content_id=assignment_id,
         title=name,
-        module_name=module_name,
+        module_name=module_name, module_id=module_id,
+        create_module=create_module,
         steps=steps,
         context=context,
         attach_step_key=attach_step_key,
@@ -440,6 +514,9 @@ def _ordered_steps(target: dict) -> list[dict]:
             prefix, _, suffix = key.partition(":")
             rank = {
                 "create_tier_assignment": 0,
+                "restrict_assignment": 1,
+                "create_override": 2,
+                "publish_assignment": 3,
             }.get(prefix, 9)
             return (int(suffix) if suffix.isdigit() else 999999, rank)
         return sorted(existing.values(), key=tier_order)

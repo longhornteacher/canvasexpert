@@ -2,7 +2,8 @@
 
 Routing scope: read this card only for the internal assignment scoring
 engine. `api/powergrader/` is a legacy package path, not a teacher-facing surface.
-The public flow is MCP `prepare_scoring_session` -> `get_scoring_packet` ->
+The public flow is MCP `discover_scoring_work` -> teacher direction ->
+`prepare_scoring_session` -> `get_scoring_packet` ->
 `submit_scoring_results`. One assignment-scoped session owns one SAFE packet and
 write authorization. Canvas Live is the only review/edit surface.
 
@@ -18,6 +19,11 @@ write authorization. Canvas Live is the only review/edit surface.
   session_id)` at the call boundary. Existing records without a generation use
   `(created, session_id)` as the fallback regardless of status, with no migration
   or deletion.
+- `scoring_discovery.py` owns the read-only cross-course digest. It refreshes
+  configured Current courses with bounded concurrency, reads only refreshed local
+  mirror snapshots, projects aggregate assignment counts, and joins at most one
+  current actionable session by exact course/assignment scope. It persists no queue
+  or parent lifecycle record and never opens the identity vault.
 - `scoring_preparation.py` delegates canonical SAFE construction to
   `scoring_artifacts.py`; `session_builder.py` assembles the one private
   assignment-scoped session. Together with the mirror acquisition modules they
@@ -46,6 +52,9 @@ write authorization. Canvas Live is the only review/edit surface.
 - The agent receives only pseudonym/item results, SAFE response text, scoring norms,
   safe questions, and scanned outcomes. No real name, Canvas/SIS ID, signed URL,
   credential, private path, operation token, or live Canvas response crosses MCP.
+- Discovery is student-free and read-only. It never prepares a SAFE packet, creates
+  or supersedes a session, or authorizes a later write; teacher direction selects
+  exact rows before preparation.
 - A teacher's request authorizes valid results only for the exact course/assignment
   saved in that assignment-scoped session. It never extends to later-discovered work,
   another Scoring Session, arbitrary grade edit, or SIS action. A superseded or
@@ -77,5 +86,6 @@ Start with `api/tests/powergrader/test_session_store.py`,
 `api/tests/mcp_server/test_prepare_scoring_session.py`,
 `test_scoring_apply_tools.py`,
 `test_new_quiz_scoring_tools.py`, `api/tests/powergrader/test_scoring_packet.py`,
-and `test_scoring_apply.py`. Verify affected browser
-routes separately; source-text checks do not establish rendered behavior.
+and `test_scoring_apply.py`. Verify affected retained control-console routes separately
+when executable console code changes; source-text checks do not establish rendered
+behavior.

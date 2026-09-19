@@ -216,6 +216,8 @@ class FakeCanvas:
         if "/modules/" in path and "/items/" in path:
             module_id, item_id = path.split("/modules/")[1].split("/items/")
             return copy.deepcopy(self.module_items.get((module_id, item_id))), None
+        if path.endswith("/modules/501"):
+            return {"id": "501", "name": "Week 1"}, None
         if "/assignments/" in path and "/overrides/" in path:
             assignment_id, override_id = path.split("/assignments/")[1].split("/overrides/")
             row = next((row for row in self.overrides.get(assignment_id, []) if str(row["id"]) == override_id), None)
@@ -227,6 +229,8 @@ class FakeCanvas:
     def get_all(self, path, params=None, timeout=30):
         if path.endswith("/modules"):
             return [{"id": "501", "name": "Week 1"}], None
+        if "/modules/501/items" in path:
+            return [copy.deepcopy(row) for (module_id, _item_id), row in self.module_items.items() if module_id == "501"], None
         if path.endswith("/overrides"):
             assignment_id = path.split("/assignments/")[1].split("/")[0]
             return copy.deepcopy(self.overrides.get(assignment_id, [])), None
@@ -236,7 +240,7 @@ class FakeCanvas:
         return [], None
 
 
-def test_differentiated_quiz_family_example_creates_only_bridge_module_item(monkeypatch):
+def test_differentiated_quiz_family_example_places_only_sources_in_module(monkeypatch):
     _plans(monkeypatch)
     payload = QuizAdapter().build_payload(_request())
     resolved = {"safe": {"tiers": [
@@ -262,7 +266,8 @@ def test_differentiated_quiz_family_example_creates_only_bridge_module_item(monk
     assert [row["name"] for row in sources] == ["Reading Check - Red", "Reading Check - Gold"]
     assert all(row["published"] and row["only_visible_to_overrides"] and row["omit_from_final_grade"] and not row["post_to_sis"] for row in sources)
     bridge = next(row for row in fake.assignments.values() if row["name"] == bridge_name)
-    assert [str(row["content_id"]) for row in fake.module_items.values()] == [bridge["id"]]
+    assert {str(row["content_id"]) for row in fake.module_items.values()} == {row["id"] for row in sources}
+    assert bridge["id"] not in {str(row["content_id"]) for row in fake.module_items.values()}
     assert registrations[("42", "Reading Check")]["source_assignment_ids"] == [row["id"] for row in sources]
     assert all(value not in json.dumps(context.steps) for value in ("9001", "9002"))
     assert not any(path.endswith("/post_grades") for _method, path, _body in fake.sends)

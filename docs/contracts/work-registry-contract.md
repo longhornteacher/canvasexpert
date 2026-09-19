@@ -3,18 +3,25 @@
 Status: implemented durable contract, accepted 2026-07-11. Operation-ledger integration
 is governed by `docs/contracts/operation-ledger-contract.md`.
 
+This contract governs resumable runtime work and its retained local control-console
+projections. It does not make the browser the primary teacher-agent surface. Connected
+agents own conversation, host-rendered previews, and Scoring Session interaction; the
+control console owns setup, readiness, review, recovery, receipts, diagnostics, and
+genuinely local-only operations.
+
 ## Purpose
 
 The Work Registry gives CanvasExpert one durable, cross-course index of work without
 making that index the source of truth for Canvas objects, student records, or authored
 Forge files. Scoring Sessions are not Home/Work jobs.
 
-The UI has three operating states:
+The retained control console has three operating states for local runtime work:
 
 - **Desk** answers: Start, Continue, Attention, Prepared, and Receipts.
 - **Workbench** opens one resumable job with a persistent Work rail and explicit scope.
-- **Instrument** expands the same job for high-density grading, comparison, preview, or
-  delivery work. Instrument never clones or creates a second job/form.
+- **Instrument** expands the same job for compact local detail, comparison, or recovery.
+  It is not a scoring queue, authoring workspace, or duplicate of a host agent's
+  conversation and preview surface. Instrument never clones or creates a second job/form.
 
 ## Persistence boundary
 
@@ -88,9 +95,10 @@ of `course_ids`.
 ## Transient Desk presentation sidecar
 
 The exact job shape above remains generic and is the only job shape written to registry,
-discovery, suppression, session, or queue storage. For the loopback-only Desk UI,
+discovery, suppression, session, or general work storage. It is not a Scoring Session
+queue. For the loopback-only Desk control console,
 `GET /api/work` may return a separate top-level `presentations` mapping keyed by opaque
-`job_id`. Dashboard initial data receives the same mapping. Each value has exactly four
+`job_id`. Control-console initial data receives the same mapping. Each value has exactly four
 string fields:
 
 ```json
@@ -193,7 +201,7 @@ CourseExpert's existing picker may explicitly add a newly focused course to its 
 target set before publishing both changes; that is picker behavior, not a global context
 invariant. Read-only/single-course pages may change focus without authorizing a write.
 
-The browser contract is `window.CE_CONTEXT` with `snapshot`, `setFocus`, `setTargets`,
+The control-console browser contract is `window.CE_CONTEXT` with `snapshot`, `setFocus`, `setTargets`,
 `reconcile(availableCourses, {source, authoritative})`, and `subscribe`, plus the
 `ce:contextchange` event. Reconciliation prunes stale focus/targets only after a successful
 authoritative all-course response. Bookmark-only hydration and failed Canvas fetches are

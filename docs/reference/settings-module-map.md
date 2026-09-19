@@ -4,6 +4,10 @@ Routing scope: open this map only when the active handoff touches Settings, then
 relevant section. It is not global executor context and does not replace the handoff's
 exact file/symbol list.
 
+This is a retained control-console implementation map. Setup, readiness, credential
+handling, and connection diagnostics remain console responsibilities; new agent-facing
+capability starts at the local runtime/MCP boundary.
+
 As of 2026-07-08, Settings browser logic is split into plain feature files loaded
 from a small shared bootstrap. Keep this map current if the load order or ownership
 changes again.
@@ -71,8 +75,8 @@ Current split:
 - Do not add district URLs, real calendars, teacher names, or other district-specific
   defaults to source.
 - Keep Settings local-only and do not introduce a public callback or OAuth route.
-  the canonical `School Calendar.json` is written only by the Calendar page and MCP calendar
-  tools (see `docs/contracts/canonical-school-calendar-contract.md`).
+  the canonical `School Calendar.json` is written only by the Calendar page and local
+  control-console services (see `docs/contracts/canonical-school-calendar-contract.md`).
 - Preserve the `config.*` facade and storage keys unless a migration is explicitly
   planned and tested.
 - `config.active_courses()` is the compatibility-named Current-course boundary for

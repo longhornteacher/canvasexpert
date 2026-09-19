@@ -4,6 +4,10 @@ Routing scope: open this card only when the active handoff touches Roster, then 
 relevant row. It is not global executor context and does not authorize broad Roster
 discovery.
 
+This is a retained control-console implementation map. Agent-facing roster reads and
+bounded local changes start at the runtime/MCP contract; the browser entries below describe
+the console path and its safety seams, not a competing agent workflow.
+
 Student Reports is a separate surface at `/students/reports`; it does not share Roster
 state or mutation paths. Roster lenses are visual views over one loaded roster, not
 separate datasets.

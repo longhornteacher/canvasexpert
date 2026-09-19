@@ -46,12 +46,14 @@ slice-specific.
 - **One source of truth per artifact.** Never ship a static copy *and* a
   generated copy of the same thing (e.g. an authoring contract or a scoring
   skill). Pick the one canonical source; generate or read from it everywhere.
-- **Lean, and don't reinvent harnesses.** The authoring contracts and teacher
-  docs must be lean and un-wordy. Do not invent bespoke personas, "paste this
-  whole file" framing, or step-by-step orchestration on top of assistants that
-  already provide it (Claude Cowork, MagicSchool, ChatGPT Work). Rely on the host
-  assistant's own conversational ability; ship the contract, not a harness around
-  it.
+- **Lean, and don't reinvent host interfaces.** The authoring contracts and teacher
+  docs must be lean and un-wordy. Do not invent bespoke personas, make whole-file
+  instructions the default for a connected agent, or add step-by-step orchestration
+  on top of assistants that already provide conversation and rendering (Claude
+  Cowork, MagicSchool, ChatGPT Work). Rely on the host assistant's own conversational
+  ability; ship the runtime contract and narrow reference material, not a second
+  harness around it. A standalone CanvasAgent reference may still include appendices
+  for chat-only or setup use when no runtime connection is available.
 - **The app reports; it never accuses.** Where a feature could be read as an
   integrity judgement about a student — the Writing Timeline being the current
   example — it reports observable facts and states its own limits, and any rule

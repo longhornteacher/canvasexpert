@@ -8,6 +8,7 @@ import pytest
 from api.operation_ledger import models
 from api.operation_ledger.adapters.assignment import AssignmentAdapter
 from api.operation_ledger.adapters.assignment_groups import GroupResolutionError, resolve_assignment_groups
+from api.operation_ledger.adapters.module_placement import attach_assignment_type_module_item
 from api.platform_services import canvas_client, config
 
 
@@ -39,6 +40,45 @@ def test_group_resolver_safe_snapshot_and_source_order():
     assert [row["student_count"] for row in result["safe"]["tiers"]] == [2, 1]
     assert result["student_ids_by_group"] == {"10": ["9001", "9002"], "20": ["9003"]}
     assert all(value not in json.dumps(result["safe"]) for value in ("9001", "9002", "9003"))
+
+
+def test_exact_module_id_is_write_authority_even_when_display_name_differs(monkeypatch):
+    fake = FakeCanvas()
+    monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    context = Context()
+    steps = []
+    result = attach_assignment_type_module_item(
+        course_id="42", content_id="9001", title="Practice",
+        module_id="501", module_name="Renamed display", steps=steps,
+        context=context, attach_step_key="attach", returned_object_id="assignment-1",
+        deterministic_failure_state="blocked",
+    )
+    assert result["state"] == "applied", result
+    assert not any(path.endswith("/modules") for _method, path, _body in fake.sends)
+    assert any(path.endswith("/modules/501/items") for _method, path, _body in fake.sends)
+
+
+def test_public_module_selection_options_refuse_mixed_or_implicit_create(monkeypatch):
+    from api import content_push
+    assert "module_id and create_module" in content_push._collect_options(
+        "assignment", {"module_id": "501", "create_module": True}
+    )[1]
+    assert "non-empty module_name" in content_push._collect_options(
+        "assignment", {"create_module": True, "module_name": ""}
+    )[1]
+
+    fake = FakeCanvas()
+    monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    result = attach_assignment_type_module_item(
+        course_id="42", content_id="9002", title="New Practice",
+        module_name="Explicit New", create_module=True, steps=[], context=Context(),
+        attach_step_key="attach", returned_object_id="assignment-2",
+        deterministic_failure_state="blocked",
+    )
+    assert result["state"] == "applied"
+    assert any(path.endswith("/modules") for _method, path, _body in fake.sends)
 
 
 @pytest.mark.parametrize("case", ["missing", "ambiguous", "empty", "overlap", "coverage", "read"])
@@ -104,6 +144,10 @@ class FakeCanvas:
     def send(self, method, path, body, timeout=30):
         self.sends.append((method, path, copy.deepcopy(body)))
         self.next_id += 1
+        if method == "POST" and path.endswith("/modules"):
+            module_id = str(self.next_id)
+            self.modules[module_id] = {"id": module_id, **copy.deepcopy(body["module"])}
+            return copy.deepcopy(self.modules[module_id]), None
         if method == "POST" and path.endswith("/assignments"):
             assignment_id = str(self.next_id)
             row = {"id": assignment_id, "course_id": "42", "assignment_group_id": "77",
@@ -133,6 +177,8 @@ class FakeCanvas:
         if "/modules/" in path and "/items/" in path:
             module_id, item_id = path.split("/modules/")[1].split("/items/")
             return copy.deepcopy(self.module_items.get((module_id, item_id))), None
+        if path.endswith("/modules/501"):
+            return copy.deepcopy(self.modules.get("501")), None
         if "/assignments/" in path and "/overrides/" in path:
             assignment_id, override_id = path.split("/assignments/")[1].split("/overrides/")
             row = next((row for row in self.overrides.get(assignment_id, []) if str(row["id"]) == override_id), None)
@@ -147,6 +193,10 @@ class FakeCanvas:
             return [{"id": 77, "name": "Coursework"}], None
         if path.endswith("/modules"):
             return list(copy.deepcopy(self.modules).values()), None
+        if "/modules/" in path and path.endswith("/items"):
+            module_id = path.split("/modules/")[1].split("/")[0]
+            return [copy.deepcopy(item) for (current_module_id, _item_id), item in self.module_items.items()
+                    if current_module_id == module_id], None
         if path.endswith("/overrides"):
             assignment_id = path.split("/assignments/")[1].split("/")[0]
             return copy.deepcopy(self.overrides.get(assignment_id, [])), None
@@ -168,16 +218,18 @@ def _build(monkeypatch, **request_overrides):
     })
     monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
     request = {"path": "synthetic.txt", "due_at": "2026-09-14T15:30:00-05:00",
-               "module_name": "Week 1", "assignment_group_name": "Coursework"}
+               "module_name": "Week 1", "assignment_group_name": "Coursework",
+               "tier_targets": [
+                   {"tier": "Support", "group_name": "Blue"},
+                   {"tier": "Extend", "group_name": "Gold"},
+               ]}
     request.update(request_overrides)
     return AssignmentAdapter().build_payload(request)
 
 
-def test_prepare_accepts_content_only_tiers_without_module_or_due(monkeypatch):
-    payload = _build(monkeypatch, due_at="", module_name="")
-    assert [row["label"] for row in payload["tiers"]] == ["Support", "Extend"]
-    assert all("group" not in row for row in payload["tiers"])
-    assert "module_name" not in payload
+def test_prepare_requires_exact_tier_targets(monkeypatch):
+    with pytest.raises(ValueError, match="tier_targets is required"):
+        _build(monkeypatch, tier_targets=None)
 
 
 def test_prepare_preserves_ordinary_dates_for_each_tier(monkeypatch):
@@ -199,37 +251,65 @@ def test_prepare_requires_unique_public_tags(monkeypatch):
         "Support": "Red", "Core": "Blue", "Accelerate": "Silver", "Extend": " red ",
     })
     with pytest.raises(ValueError, match="unique"):
-        AssignmentAdapter().build_payload({"path": "synthetic.txt", "due_at": "2026-09-14T15:30:00-05:00", "module_name": "Week 1"})
+        AssignmentAdapter().build_payload({
+            "path": "synthetic.txt", "due_at": "2026-09-14T15:30:00-05:00",
+            "module_name": "Week 1", "tier_targets": [
+                {"tier": "Support", "group_name": "Blue"},
+                {"tier": "Extend", "group_name": "Gold"},
+            ],
+        })
 
 
-def test_differentiated_assignment_drafts_are_independent_and_student_free(monkeypatch):
+def test_differentiated_assignment_family_is_group_restricted_and_student_free(monkeypatch):
     payload = _build(
         monkeypatch,
         unlock_at="2026-09-01T08:00:00-05:00",
         lock_at="2026-09-30T23:59:00-05:00",
+        module_id="501",
     )
     fake = FakeCanvas()
     monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
     monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
     monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
+    monkeypatch.setattr(
+        "api.operation_ledger.adapters.assignment.resolve_assignment_groups",
+        lambda _course, _tiers: {
+            "safe": {"tiers": [
+                {"label": "Support", "group_name": "Blue", "group_id": "10", "student_count": 2,
+                 "membership_digest": "a" * 64},
+                {"label": "Extend", "group_name": "Gold", "group_id": "20", "student_count": 1,
+                 "membership_digest": "b" * 64},
+            ]},
+            "student_ids_by_group": {"10": ["9001", "9002"], "20": ["9003"]},
+        },
+    )
+    monkeypatch.setattr(
+        "api.operation_ledger.adapters.assignment_tiered.resolve_assignment_groups",
+        lambda _course, _tiers: {
+            "safe": {"tiers": [
+                {"label": "Support", "group_name": "Blue", "group_id": "10", "student_count": 2,
+                 "membership_digest": "a" * 64},
+                {"label": "Extend", "group_name": "Gold", "group_id": "20", "student_count": 1,
+                 "membership_digest": "b" * 64},
+            ]},
+            "student_ids_by_group": {"10": ["9001", "9002"], "20": ["9003"]},
+        },
+    )
 
     baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
-    assert baseline == {"existing_assignments": []}
+    assert baseline["existing_assignments"] == []
     context = Context()
     result = AssignmentAdapter().execute(payload, {"course_id": "42", "steps": []}, baseline, {}, context)
-
-    assert result["state"] == "applied"
-    sources = [row for row in fake.assignments.values() if row["name"] != "Practice"]
+    assert result["state"] == "applied", result
+    sources = [row for row in fake.assignments.values() if row["name"] not in {"Practice", "Practice - Bridge"}]
     assert [row["name"] for row in sources] == ["Practice - Red", "Practice - Gold"]
     assert all(row["due_at"] == "2026-09-14T15:30:00-05:00" for row in sources)
     assert all(row["unlock_at"] == "2026-09-01T08:00:00-05:00" for row in sources)
     assert all(row["lock_at"] == "2026-09-30T23:59:00-05:00" for row in sources)
-    assert all(not row["published"] and not row["only_visible_to_overrides"] for row in sources)
-    assert all(not rows for rows in fake.overrides.values())
-    assert not fake.module_items
-    assert not any(any(term in path for term in ("group_categories", "/groups/", "/enrollments"))
-                   for path in fake.reads)
-    assert not any("/overrides" in path or "/modules" in path for _method, path, _body in fake.sends)
+    assert all(row["published"] and row["only_visible_to_overrides"] for row in sources)
+    assert all(row["omit_from_final_grade"] and not row["post_to_sis"] for row in sources)
+    assert all(len(fake.overrides[row["id"]]) == 1 for row in sources)
+    assert {str(row["content_id"]) for row in fake.module_items.values()} == {row["id"] for row in sources}
     assert all(value not in json.dumps(context.steps) for value in ("9001", "9002", "9003"))
 
     sends_before = len(fake.sends)

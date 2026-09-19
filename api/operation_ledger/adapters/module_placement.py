@@ -18,7 +18,9 @@ from api.platform_services import canvas_client
 def _resolve_or_create_module(
     *,
     course_id: str,
-    module_name: str,
+    module_name: str = "",
+    module_id: str | None = None,
+    create_module: bool = False,
     steps: list[dict],
     context,
     attach_step_key: str,
@@ -35,30 +37,60 @@ def _resolve_or_create_module(
     """
     create_module_step = find_step(steps, "create_module")
     attach_step = find_step(steps, attach_step_key)
-    module_id = module_id_from_steps(create_module_step, attach_step)
+    selected_module_id = str(module_id or module_id_from_steps(create_module_step, attach_step) or "")
 
-    if module_id:
-        return (module_id, None)
-
-    if read_modules is None:
-        modules, error = canvas_client.canvas_get_all(
-            f"/api/v1/courses/{course_id}/modules",
-            {"per_page": 100},
+    if selected_module_id and not create_module:
+        module, error = canvas_client.canvas_get(
+            f"/api/v1/courses/{course_id}/modules/{selected_module_id}"
         )
-    else:
-        modules, error = read_modules(course_id)
-    if error:
+        if error or not isinstance(module, dict) or str(module.get("id") or "") != selected_module_id:
+            return (None, build_result(
+                "blocked" if not error else "sent_unknown",
+                steps=steps,
+                error_code="module_exact_id_unverified",
+                returned_object_id=returned_object_id,
+            ))
+        attach_step = ensure_step(steps, attach_step_key)
+        attach_step["module_id"] = selected_module_id
+        return (selected_module_id, None)
+
+    if create_module and not str(module_name or "").strip():
         return (None, build_result(
-            "sent_unknown",
-            steps=steps,
-            error_code="module_lookup_failed",
-            private_diagnostic=error,
+            "blocked", steps=steps, error_code="module_name_required",
             returned_object_id=returned_object_id,
         ))
-    matches = [
-        module for module in modules
-        if normalize(module.get("name")) == normalize(module_name)
-    ]
+
+    if create_module:
+        # Explicit create intent never falls back to name lookup.
+        matches = []
+    elif not str(module_name or "").strip():
+        return (None, build_result(
+            "blocked", steps=steps, error_code="module_selection_required",
+            returned_object_id=returned_object_id,
+        ))
+    else:
+        matches = None
+
+    if matches is None:
+        if read_modules is None:
+            modules, error = canvas_client.canvas_get_all(
+                f"/api/v1/courses/{course_id}/modules",
+                {"per_page": 100},
+            )
+        else:
+            modules, error = read_modules(course_id)
+        if error:
+            return (None, build_result(
+                "sent_unknown",
+                steps=steps,
+                error_code="module_lookup_failed",
+                private_diagnostic=error,
+                returned_object_id=returned_object_id,
+            ))
+        matches = [
+            module for module in modules
+            if normalize(module.get("name")) == normalize(module_name)
+        ]
     if len(matches) > 1:
         return (None, build_result(
             "blocked",
@@ -67,10 +99,10 @@ def _resolve_or_create_module(
             returned_object_id=returned_object_id,
         ))
     if matches:
-        module_id = str(matches[0].get("id"))
+        selected_module_id = str(matches[0].get("id"))
         attach_step = ensure_step(steps, attach_step_key)
-        attach_step["module_id"] = module_id
-        return (module_id, None)
+        attach_step["module_id"] = selected_module_id
+        return (selected_module_id, None)
 
     create_module_step = ensure_step(steps, "create_module")
     if (
@@ -173,13 +205,19 @@ def _attach_module_item(
                 returned_object_id=returned_object_id,
             )
         return build_result("applied", steps=steps, returned_object_id=returned_object_id)
+    if attach_step.get("outbound_started_at") and not item_id:
+        return build_result(
+            "sent_unknown", steps=steps,
+            error_code="module_item_creation_unresolved",
+            returned_object_id=returned_object_id,
+        )
 
     item_path = f"/api/v1/courses/{course_id}/modules/{module_id}/items"
     item_request = {
         "module_item": {
             "title": title,
             "type": "Assignment",
-            "content_id": int(content_id),
+            "content_id": int(content_id) if str(content_id).isdigit() else str(content_id),
         }
     }
     attach_step = context.checkpoint_step(attach_step)
@@ -238,7 +276,9 @@ def attach_assignment_type_module_item(
     course_id: str,
     content_id: str,
     title: str,
-    module_name: str,
+    module_name: str = "",
+    module_id: str | None = None,
+    create_module: bool = False,
     steps: list[dict],
     context,
     attach_step_key: str,
@@ -254,6 +294,8 @@ def attach_assignment_type_module_item(
     module_id, early = _resolve_or_create_module(
         course_id=course_id,
         module_name=module_name,
+        module_id=module_id,
+        create_module=create_module,
         steps=steps,
         context=context,
         attach_step_key=attach_step_key,

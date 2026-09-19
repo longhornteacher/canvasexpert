@@ -10,7 +10,7 @@ monkeypatch them without touching the real Canvas API or identity vault
 (same pattern as ``api/tests/test_gradebook_routes.py``).
 
 Every ``course_id`` tool gates on ``config.active_courses()`` — the same
-Current-course scope the web UI uses. ``list_courses``,
+Current-course scope the web UI uses. ``list_courses``, ``discover_scoring_work``,
 ``get_authoring_contract``, ``get_product_guide`` and ``list_staged_content``
 are the only tools with no ``course_id`` and no student data, so they skip both
 the course gate and the outbound safety gate. ``get_writing_history`` breaks that
@@ -39,6 +39,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
 from api import content_push, course_scope, feedback_scrub, gradebook_queries, gradebook_snapshot, learning_objectives, operational_log, roster_context, roster_service, sis_grade_bridge
+from api.powergrader import scoring_discovery
 from api.mirror import queries as mirror_queries
 from api.mirror import read_service
 from api.mirror import store as mirror_store
@@ -103,7 +104,7 @@ _ASSIGNMENT_COLUMNS = ("id", "title", "due_at", "points_possible",
                        "published", "description_text")
 _GRADEBOOK_ASSIGNMENT_COLUMNS = ("id", "title", "due_at", "points", "has_submission",
                                  "has_grade", "ungraded", "partially_scored",
-                                 "missing", "late", "avg_pct")
+                                 "late_ungraded", "missing", "late", "avg_pct")
 _GRADEBOOK_STUDENT_COLUMNS = ("pseudonym", "missing", "late", "ungraded", "pct")
 _MODULE_COLUMNS = ("id", "name", "position", "item_count")
 _MODULE_ITEM_COLUMNS = ("id", "type", "title", "position", "content_id")
@@ -118,6 +119,11 @@ _PACKET_STUDENT_COLUMNS = (
     "pseudonym", "item_id", "text", "segment_index", "segment_count"
 )
 _NEXT_STEPS = {
+    "discover_scoring_work": (
+        "Report the complete assignment and attention set, then wait for teacher direction. "
+        "Call prepare_scoring_session only for the selected exact course_id and assignment_id "
+        "rows; discovery does not prepare packets or write to Canvas."
+    ),
     "get_scoring_packet": (
         "Read total as response rows and students_total as people. Keep the scoring "
         "contract and rubric on page zero; use next_offset for later pages. After "
@@ -164,9 +170,18 @@ _NEXT_STEPS = {
     ),
 }
 
+_DISCOVERY_REFRESHING_NEXT = (
+    "Discovery is still refreshing one or more Current courses. Automatically retry "
+    "discover_scoring_work only within at most four total calls for this teacher request "
+    "(the initial call plus three continuations), without asking the teacher; "
+    "then report the remaining attention and wait for teacher direction."
+)
+
 def _with_next(tool_name: str, result: dict) -> dict:
-    """Attach one static post-result procedure to an authorized success payload."""
+    """Attach the bounded post-result procedure to an authorized success payload."""
     if result.get("ok"):
+        if tool_name == "discover_scoring_work" and result.get("status") == "refreshing":
+            return {**result, "next": _DISCOVERY_REFRESHING_NEXT}
         return {**result, "next": _NEXT_STEPS[tool_name]}
     return result
 
@@ -209,7 +224,7 @@ def final_response_gate(payload: dict) -> dict:
 
 
 def list_sis_grade_bridges(course_id: str) -> dict:
-    """List student-free SIS grade-bridge registrations for one Current course."""
+    """List student-free SIS grade-bridge family links for one Current course."""
     return sis_grade_bridge.list_sis_grade_bridges(course_id)
 
 
@@ -842,7 +857,7 @@ def list_groups(course_id: str) -> dict:
 
 def get_course_assignments(course_id: str, full_descriptions: bool = False) -> dict:
     """Assignment metadata from the local course catalog (disk-only, no live
-    Canvas fallback — refresh the catalog from the web UI first) for any
+    Canvas fallback — call refresh_course_structure before using stale scope) for any
     saved course (Current or Previous). No student data — no safety gate.
     Descriptions are trimmed to a preview unless ``full_descriptions`` is set;
     assignments go out as a {columns, rows} table."""
@@ -857,7 +872,7 @@ def get_course_assignments(course_id: str, full_descriptions: bool = False) -> d
         return {
             "ok": False,
             "error": ("No local course catalog found for this course. Refresh "
-                      "the catalog from the CanvasExpert web UI, then try again."),
+                      "the catalog with refresh_course_structure, then try again."),
         }
 
     description_chars = 0 if full_descriptions else _DESCRIPTION_PREVIEW_CHARS
@@ -955,8 +970,9 @@ def get_modules(course_id: str, include_items: bool = False) -> dict:
     }
     if scope["state"] == "stale":
         result["stale_note"] = (
-            "Refresh this course's Course Catalog from the CanvasExpert web UI. "
-            "refresh_mirror only refreshes CanvasMirror roster, assignments, and submissions."
+            "Course Catalog module scope is stale and is not write-authoritative. Call "
+            "refresh_course_structure (refresh_mirror does not update modules), then "
+            "re-read get_modules before selecting a module."
         )
     return result
 
@@ -1122,6 +1138,7 @@ _TOOL_GROUPS = {
         "list_sections",
         "list_groups",
         "refresh_mirror",
+        "refresh_course_structure",
     ),
     "Create and Forge": (
         # The product guide selects the workflow; the contract and staged list
@@ -1143,6 +1160,7 @@ _TOOL_GROUPS = {
         "apply_workspace_reset",
     ),
     "Scoring Sessions": (
+        "discover_scoring_work",
         "prepare_scoring_session",
         "list_scoring_sessions",
         "get_scoring_packet",
@@ -1296,8 +1314,9 @@ def _staging_appendix(kind: str) -> str:
         "envelope, and their course_id. It stages the draft and creates the "
         "Canvas object in one call. Their request is the authorization: do "
         "not stage it instead and ask, and do not ask them to confirm a "
-        "preview they did not ask for. Drafts land unpublished unless they "
-        "asked for published=true, so what you create is visible to them and "
+        "preview they did not ask for. Whole-class drafts may remain unpublished; "
+        "tiered deliveries are reviewed differentiated families and are not "
+        "left as unrestricted teacher-assignment work. What you create is visible to them and "
         "not yet to students -- they can edit or delete it by hand in Canvas "
         "and tell you what to change.\n\n"
         "**If they asked you to prepare it for their review**, call "
@@ -1323,9 +1342,9 @@ def get_authoring_contract(kind: str) -> dict:
     ``_DIRECT_WRITE_CONTRACT_KINDS`` have no review queue and are returned
     verbatim. No course_id, student data, vault, or safety gate applies.
 
-    For AssignmentForge: also read AssignmentForge/ASSIGNMENTFORGE.md in your
-    workspace root for authoring workflows, differentiation, supports, corrections,
-    and auto-scoring eligibility rules.
+    For AssignmentForge: also read api/default_docs/AI Authoring/Author an Assignment
+    (AssignmentForge).txt for authoring workflows, differentiation, supports,
+    corrections, and auto-scoring eligibility rules.
     """
     filename = _CONTRACT_FILES.get(kind)
     if filename is None:
@@ -1416,13 +1435,16 @@ def preview_content_push(
     course_id: str,
     kind: str,
     label: str,
-    published: bool = False,
+    published: bool | None = None,
     module_name: str = "",
     assignment_group_name: str = "",
     due_at: str = "",
     unlock_at: str = "",
     lock_at: str = "",
-    post_to_sis: bool = False,
+    post_to_sis: bool | None = None,
+    module_id: str = "",
+    create_module: bool = False,
+    tier_targets: list | None = None,
 ) -> dict:
     """Freeze one staged draft (quiz/assignment/page, by the label
     list_staged_content returns) into a persisted, digest-protected review for
@@ -1432,7 +1454,8 @@ def preview_content_push(
     Delivery options are per kind -- a page takes published and module_name, a
     quiz takes differentiated grouping options, and an
     assignment takes ordinary grading-category options plus post_to_sis and ISO 8601
-    due_at/unlock_at/lock_at.
+     due_at/unlock_at/lock_at. Tiered AssignmentForge additionally takes
+     tier_targets, one exact Canvas group name for every authored tier.
     Naming one a kind cannot carry is refused, not dropped. Drafts stay
     unpublished unless published=true.
 
@@ -1447,7 +1470,8 @@ def preview_content_push(
         published=published, module_name=module_name,
         assignment_group_name=assignment_group_name,
         due_at=due_at, unlock_at=unlock_at, lock_at=lock_at,
-        post_to_sis=post_to_sis,
+        post_to_sis=post_to_sis, module_id=module_id,
+        create_module=create_module, tier_targets=tier_targets,
     ))
 
 
@@ -1460,13 +1484,14 @@ def preview_differentiated_quiz_push(
     due_at: str = "",
     unlock_at: str = "",
     lock_at: str = "",
-    post_to_sis: bool = False,
+    post_to_sis: bool = False, module_id: str = "", create_module: bool = False,
 ) -> dict:
     """Freeze several staged QuizForge labels for distinct selected groups."""
     return _with_next("preview_differentiated_quiz_push", content_push.preview_differentiated_quiz_push(
         course_id, variants, published=published, module_name=module_name,
         assignment_group_name=assignment_group_name, due_at=due_at,
         unlock_at=unlock_at, lock_at=lock_at, post_to_sis=post_to_sis,
+        module_id=module_id, create_module=create_module,
     ))
 
 
@@ -1543,10 +1568,10 @@ def push_content_live(
     kind: str,
     label: str,
     content: str,
-    published: bool = False,
+    published: bool | None = None,
     module_name: str = "",
     assignment_group_name: str = "",
-    post_to_sis: bool = False,
+    post_to_sis: bool | None = None, module_id: str = "", create_module: bool = False,
 ) -> dict:
     """Stage one authored draft and create it in Canvas in a single call.
 
@@ -1563,7 +1588,8 @@ def push_content_live(
         course_id, kind, label, content,
         published=published, module_name=module_name,
         assignment_group_name=assignment_group_name,
-        post_to_sis=post_to_sis,
+        post_to_sis=post_to_sis, module_id=module_id,
+        create_module=create_module,
     )
 
 
@@ -1823,6 +1849,49 @@ def get_gradebook_snapshot(course_id: str) -> dict:
     return result
 
 
+def discover_scoring_work() -> dict:
+    """Refresh every Current course and return a student-free grading digest."""
+    from api.powergrader import session_store
+
+    try:
+        active_courses = config.active_courses()
+        if not active_courses:
+            return scoring_discovery.discover_scoring_work(
+                active_courses,
+                refresh_course=_refresh_course_for_scoring,
+                load_snapshot=_load_snapshot,
+                actionable_sessions=(),
+                tier_tags=config.get_tier_tags(),
+                registrations_by_course={},
+            )
+        sessions = session_store.current_actionable_sessions(
+            course_ids={str(course.get("id") or "") for course in active_courses}
+        )
+        result = scoring_discovery.discover_scoring_work(
+            active_courses,
+            refresh_course=_refresh_course_for_scoring,
+            load_snapshot=_load_snapshot,
+            actionable_sessions=sessions,
+            tier_tags=config.get_tier_tags(),
+            registrations_by_course={
+                str(course.get("id") or ""): config.list_sis_grade_bridges(str(course.get("id") or ""))
+                for course in active_courses
+            },
+        )
+    except Exception:
+        result = {
+            "ok": False,
+            "code": "scoring_discovery_failed",
+            "stage": "discover",
+            "retryable": True,
+            "user_action": "Retry scoring discovery; no Current-course mirror could be read.",
+            "error": "Scoring discovery could not be completed.",
+        }
+    if result.get("ok"):
+        return _with_next("discover_scoring_work", result)
+    return result
+
+
 _REFRESH_TIMEOUT_SECONDS = 25.0
 
 # refresh_mirror drives a submissions delta (course.refresh) AND a roster
@@ -1845,7 +1914,7 @@ def _refresh_course_for_scoring(course_id: str) -> dict:
     Scoring is intentionally stricter than ordinary mirror-backed reads: a
     mirror that is merely inside its serve-age window may still predate a
     teacher's recent Canvas Live edit.  Keep the refresh private to Canvas
-    Expert and return only a success bit to the scoring orchestration.
+    Expert and return only lifecycle facts to the scoring orchestration.
     """
     try:
         plan_id = _enqueue_sync(course_id, _SCORING_REFRESH_SCOPES)
@@ -1855,6 +1924,7 @@ def _refresh_course_for_scoring(course_id: str) -> dict:
     identity = _refresh_identity(plan)
     result = {
         "ok": plan.get("state") == "succeeded",
+        "state": plan.get("state"),
         "status": plan.get("status") or (
             "synced" if plan.get("state") == "succeeded" else "failed"
         ),
@@ -1925,6 +1995,30 @@ def refresh_mirror(course_id: str) -> dict:
               "error": "Sync failed. Try again, or use Sync now in the CanvasExpert web UI."}
     result.update(identity)
     return result
+
+
+def refresh_course_structure(course_id: str) -> dict:
+    """Refresh the student-free Course Catalog module structure via coordinator."""
+    try:
+        result = mirror_service.refresh_course_structure(
+            course_id, timeout_seconds=_REFRESH_TIMEOUT_SECONDS,
+        )
+    except (ValueError, RuntimeError) as error:
+        return {"ok": False, "error": str(error)}
+    if result.get("ok"):
+        return {
+            "ok": True,
+            "status": result.get("status", "synced"),
+            "operation_id": result.get("operation_id"),
+            "revision": result.get("revision", ""),
+        }
+    return {
+        "ok": False,
+        "status": result.get("status", "failed"),
+        "operation_id": result.get("operation_id"),
+        "revision": result.get("revision", ""),
+        "error": "Course structure refresh failed; retry or inspect the local diagnostics.",
+    }
 
 
 # --- Scoring Packet MCP Tools (v22) ----------------------------------------

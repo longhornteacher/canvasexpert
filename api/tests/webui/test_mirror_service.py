@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api import course_catalog
@@ -477,6 +478,42 @@ def test_sync_now_scopes_to_saved_courses(monkeypatch, tmp_path, _configure):
         canvas_get_all_complete=canvas.complete, now=NOW)
     assert results[0]["ok"] is True
     assert results[0]["course_id"] == "111"
+
+
+def test_structure_refresh_is_current_only_and_returns_lifecycle_identity(monkeypatch, _configure):
+    _configure(courses=(
+        {"id": "111", "name": "Current", "active": True},
+        {"id": "222", "name": "Previous", "active": False},
+    ))
+    refreshed = []
+    monkeypatch.setattr(
+        mirror_service.course_catalog, "refresh_catalog",
+        lambda course_id, course_name, **kwargs: refreshed.append((course_id, course_name))
+        or {"source": "canvas", "catalog": {"modules": {"records": [{"id": "private"}]}}},
+    )
+    assert mirror_service._run_structure_refresh("222")["error_class"] == "course_unavailable"
+    assert mirror_service._run_structure_refresh("111")["ok"] is True
+    assert refreshed == [("111", "Current")]
+
+    monkeypatch.setattr(
+        mirror_service, "coordinator_instance",
+        lambda: type("Coordinator", (), {"submit": lambda self, *args, **kwargs: "plan-1"})(),
+    )
+    monkeypatch.setattr(
+        mirror_service, "wait_for_plan",
+        lambda plan_id, timeout_seconds: {"state": "succeeded", "jobs": []},
+    )
+    monkeypatch.setattr(
+        mirror_service.course_catalog, "read_catalog",
+        lambda course_id: {"catalog": {"modules": {"state": "current", "last_success_at": "rev-1", "records": [{"id": "private"}]}}},
+    )
+    result = mirror_service.refresh_course_structure("111")
+    assert result == {
+        "ok": True, "status": "succeeded", "operation_id": "plan-1",
+        "revision": "rev-1", "state": "current", "error_code": "",
+    }
+    with pytest.raises(ValueError, match="Current"):
+        mirror_service.refresh_course_structure("222")
 
 
 def test_sync_now_records_a_failed_course_context_refresh(monkeypatch, tmp_path, _configure):

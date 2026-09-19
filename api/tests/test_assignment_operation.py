@@ -113,7 +113,13 @@ def test_assignment_canvas_text_contains_no_em_dashes(tmp_path, monkeypatch):
     monkeypatch.setattr("api.platform_services.config.get_canvas_base",
                         lambda: "https://canvas.invalid")
 
-    payload = AssignmentAdapter().build_payload({"path": str(af_file)})
+    payload = AssignmentAdapter().build_payload({
+        "path": str(af_file),
+        "tier_targets": [
+            {"tier": "Support", "group_name": "Blue"},
+            {"tier": "Core", "group_name": "Red"},
+        ],
+    })
 
     assert payload["name"] == "Argument - draft"
     assert "\u2014" not in payload["description"]
@@ -168,14 +174,18 @@ def test_payload_build_accepts_tiers(tmp_path, monkeypatch):
         "path": str(af_file),
         "due_at": "2026-09-14T10:00:00-05:00",
         "module_name": "Week 1",
+        "tier_targets": [
+            {"tier": "Support", "group_name": "Blue"},
+            {"tier": "Core", "group_name": "Gold"},
+        ],
     })
     assert payload["tiers"] == [{
         "label": "Support", "tier": "Support",
-        "tag": "Red", "title": "Tiered - Red",
+        "tag": "Red", "group_name": "Blue", "title": "Tiered - Red",
         "description": "<p>Hi</p>",
     }, {
         "label": "Core", "tier": "Core",
-        "tag": "Blue", "title": "Tiered - Blue",
+        "tag": "Blue", "group_name": "Gold", "title": "Tiered - Blue",
         "description": "<p>Hi</p>",
     }]
 
@@ -199,7 +209,14 @@ def test_payload_keeps_supports_and_corrections_private_to_the_operation(tmp_pat
     monkeypatch.setattr("api.platform_services.config.get_canvas_base",
                         lambda: "https://canvas.invalid")
 
-    payload = AssignmentAdapter().build_payload({"path": str(af_file)})
+    payload = AssignmentAdapter().build_payload({
+        "path": str(af_file),
+        "tier_targets": [
+            {"tier": "Support", "group_name": "Silver"},
+            {"tier": "Core", "group_name": "Red"},
+            {"tier": "Accelerate", "group_name": "Blue"},
+        ],
+    })
 
     assert payload["supports"]["silver"]["stem_frame"]
     assert payload["corrections"]["item-1"]["shared"]["answer"] == "Use walk."

@@ -1,4 +1,4 @@
-"""Route-contract snapshot — the app's public HTTP surface, frozen.
+"""Route-contract snapshot — the local control console's HTTP surface, frozen.
 
 This is the safety net for the `server.py` breakup (dev/REFACTOR_PLAN.md): any
 extraction that drops, renames, or reshapes a route makes this test fail loudly,
@@ -8,6 +8,8 @@ this test is cheap.
 
 If you INTENTIONALLY add or remove a route, update EXPECTED in the same commit —
 that's the whole point: a surface change must be a deliberate, reviewed edit.
+The snapshot protects retained browser/control-console behavior; it is not a mandate
+to add browser routes for capabilities that belong in the agent runtime.
 
 The gradebook student-list endpoint is at `/api/students/list` (returns id+name for
 the extra-time panel). The reports endpoint is at `/api/students` (returns id+name+monitored).

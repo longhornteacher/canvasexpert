@@ -18,7 +18,7 @@ from api.mcp_server import server, tools
 # Observed truncation in a real client landed near 2,300 characters. We cannot
 # hold every client to that, but we can stop the block growing: any addition
 # now has to earn its place by displacing something.
-INSTRUCTION_BUDGET = 3000
+INSTRUCTION_BUDGET = 2200
 # Slice B moved post-call procedure into bounded result advisories. Raised once
 # from 17,717 for the staged-content push pair: preview_content_push carries the
 # delivery options as named parameters rather than one opaque object, so the
@@ -37,7 +37,9 @@ INSTRUCTION_BUDGET = 3000
 # structure, not wordy prose.
 # The current unified scoring surface has one preparation, one packet, one submit,
 # and one optional identity-free list tool; no scoring preview/apply pair.
-LISTING_BUDGET = 17956
+# v51 adds one zero-argument discovery tool; the measured v50 ceiling was
+# 15,943, so this allows only the observed 7-character increase.
+LISTING_BUDGET = 15950
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
@@ -81,12 +83,21 @@ def test_chat_side_canvas_landing_is_still_offered():
     assert "bounded scoring guidance" in instructions
 
 
+def test_refreshing_discovery_continuation_is_bounded_and_teacher_free():
+    instructions = server._SERVER_INSTRUCTIONS
+
+    assert "mirror_refresh_in_progress" in instructions
+    assert "at most four total calls" in instructions
+    assert "initial plus three continuations" in instructions
+    assert "without teacher interruption" in instructions
+
+
 def test_write_rules_precede_the_discovery_hints():
     """If a client truncates the tail, lose the product-guide nudge, not the
     rule that bounds how far one teacher request reaches."""
     instructions = server._SERVER_INSTRUCTIONS
 
-    assert (instructions.index("only its named target and course")
+    assert (instructions.index("selected discovery rows together")
             < instructions.index("get_product_guide"))
 
 
@@ -135,10 +146,11 @@ def test_next_procedures_are_static_bounded_and_gate_safe():
     """Every registered tool is checked against B's exact result-advisory allowlist."""
     registered = set(server.mcp._tool_manager._tools)
 
-    assert set(tools._NEXT_STEPS) == RESULT_NEXT_TOOLS
+    expected_next = RESULT_NEXT_TOOLS | {"discover_scoring_work"}
+    assert set(tools._NEXT_STEPS) == expected_next
     assert RESULT_NEXT_TOOLS < registered
     for name in registered:
-        assert (name in tools._NEXT_STEPS) == (name in RESULT_NEXT_TOOLS)
+        assert (name in tools._NEXT_STEPS) == (name in expected_next)
     for name, procedure in tools._NEXT_STEPS.items():
         assert isinstance(procedure, str) and procedure.strip()
         success = tools._with_next(name, {"ok": True})
@@ -190,7 +202,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 40
+    assert len(listed) == 42
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -299,9 +311,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 40
-    assert len(_synthetic_mcp["calls"]) == 40
-    assert len(_synthetic_mcp["gated"]) == 40
+    assert len(results) == 42
+    assert len(_synthetic_mcp["calls"]) == 42
+    assert len(_synthetic_mcp["gated"]) == 42
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

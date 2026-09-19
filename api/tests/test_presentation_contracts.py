@@ -1,4 +1,9 @@
-"""Architecture and rendered contracts for the staged WebUI presentation system."""
+"""Architecture and rendered contracts for the retained control-console UI.
+
+These assertions protect the browser surfaces that still belong to the local
+control console. They do not define the product center or require browser parity
+for the agent-facing runtime.
+"""
 
 import re
 from pathlib import Path
@@ -12,7 +17,7 @@ from api.webui.routes import connections as connection_routes, pages
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = ROOT / "api" / "webui" / "templates"
 
-# Route -> (page template, layout, variant, real rail count).
+# Retained console route -> (page template, layout, variant, real rail count).
 #
 # There used to be a fifth "migrated" flag here, plus a MIGRATED_ROUTES subset
 # derived from it. Every route carried True once the template-family rollout

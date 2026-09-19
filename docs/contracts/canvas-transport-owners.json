@@ -53,7 +53,7 @@
         "catalog.assignments"
       ],
       "reconciliation": "invalidate",
-      "reason": "Creates the unpublished, omitted, SIS-disabled bridge after every exact differentiated source is verified. The central operation-ledger post-apply hook invalidates catalog.assignments after the complete content operation succeeds."
+      "reason": "Creates the unpublished, omitted, SIS-disabled bridge after every exact differentiated source is verified. The central operation-ledger post-apply hook invalidates catalog.assignments after the complete family operation succeeds."
     },
     {
       "path": "api/operation_ledger/adapters/differentiated_bridge.py",
@@ -66,7 +66,7 @@
         "catalog.assignments"
       ],
       "reconciliation": "invalidate",
-      "reason": "Activates the exact bridge only after its module item and every source postcondition are verified. The central operation-ledger post-apply hook invalidates catalog.assignments after the complete content operation succeeds."
+      "reason": "Activates the exact bridge only after every source module-item postcondition is verified and the bridge is confirmed absent from module items. The central operation-ledger post-apply hook invalidates catalog.assignments after the complete content operation succeeds."
     },
     {
       "path": "api/operation_ledger/adapters/sis_grade_bridge.py",
@@ -105,7 +105,7 @@
         "catalog.assignments"
       ],
       "reconciliation": "invalidate",
-      "reason": "Repairs only the frozen drift fields of the exact discovered bridge after review and re-verifies the result before registration."
+      "reason": "Repairs only the frozen drift fields of the exact discovered bridge after review and re-verifies the result before saving the family link."
     },
     {
       "path": "api/operation_ledger/adapters/assignment_tiered.py",

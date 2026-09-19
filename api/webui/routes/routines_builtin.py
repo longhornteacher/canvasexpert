@@ -80,7 +80,7 @@ def _run_routine_sis_bridge_sync(_params):
         try:
             registrations = config.list_sis_grade_bridges(course_id)
         except Exception:
-            lines.append("✗ registered bridge families could not be read")
+            lines.append("✗ linked bridge families could not be read")
             totals["attention_families"] += 1
             ok = False
             continue
@@ -125,7 +125,7 @@ def _run_routine_sis_bridge_sync(_params):
                 f"{int(counts.get('conflicting_final_values') or 0)} conflicting"
             )
     if not totals["families"] and not lines:
-        lines.append("· no registered differentiated families in Current courses")
+        lines.append("· no linked differentiated families in Current courses")
     summary = (
         f"{totals['families']} families: {totals['copied_scores']} copied, "
         f"{totals['missing_zeroes']} missing zeroes, "

@@ -93,7 +93,7 @@ class QuizAdapter:
         settings = copy.deepcopy(prepare_request.get("settings") or {})
         due_at, module_name, bridge_due_at = (
             differentiated_bridge.require_family_delivery(
-                settings.get("due_at"), settings.get("module_name")
+                settings.get("due_at"), settings.get("module_name"), settings.get("module_id")
             )
         )
         variants = []
@@ -171,7 +171,9 @@ class QuizAdapter:
         if len(set(group_names)) != 1:
             raise ValueError("Differentiated QuizForge variants must use one assignment group")
         base_title = base_titles[0]
-        settings.update({"due_at": due_at, "module_name": module_name})
+        settings.update({"due_at": due_at, "module_name": module_name,
+                         "module_id": str(settings.get("module_id") or "").strip(),
+                         "create_module": bool(settings.get("create_module"))})
         for variant, resolved in zip(variants, tags):
             title = differentiated_bridge.source_title(base_title, resolved["tag"])
             variant.update(resolved)
@@ -193,6 +195,8 @@ class QuizAdapter:
             "base_title": base_title,
             "due_at": due_at,
             "module_name": module_name,
+            "module_id": settings.get("module_id") or "",
+            "create_module": bool(settings.get("create_module")),
             "bridge_due_at": bridge_due_at,
             "bridge_description": differentiated_bridge.bridge_description(),
         }
@@ -224,6 +228,8 @@ class QuizAdapter:
                 "base_title": payload.get("base_title"),
                 "due_at": payload.get("due_at"),
                 "module_name": payload.get("module_name"),
+                "module_id": payload.get("module_id"),
+                "create_module": payload.get("create_module"),
                 "bridge_due_at": payload.get("bridge_due_at"),
                 "bridge_description": payload.get("bridge_description"),
             })
@@ -286,7 +292,10 @@ class QuizAdapter:
     def capture_baseline(self, payload: dict, target: dict) -> dict:
         course_id = target["course_id"]
         if payload.get("mode") == "differentiated":
-            return self._capture_baseline_differentiated(course_id, payload)
+            baseline = self._capture_baseline_differentiated(course_id, payload)
+            if isinstance(baseline.get("group_snapshot"), dict):
+                payload["group_snapshot"] = copy.deepcopy(baseline["group_snapshot"])
+            return baseline
         plan = payload.get("plan", {})
         title = plan.get("title", "")
         baseline: dict = {"existing_quiz": None}
@@ -511,8 +520,8 @@ class QuizAdapter:
             },
             "only_visible_to_overrides": True,
             "tier_warning": (
-                "Canvas will create one color-suffixed New Quiz per tier and one "
-                "server-named '<family> - Bridge' in the module. Review them in Canvas Live; "
+                "Canvas will create one configured-tag-suffixed New Quiz per tier and one "
+                "gradebook-only '<family> - Bridge'; only the source assignments are module items. Review them in Canvas Live; "
                 "the teacher initiates SIS sync there."
             ),
         }
@@ -617,10 +626,12 @@ def _ordered_steps(target: dict) -> list[dict]:
         family_rank = {
             "create_bridge": 100,
             "create_module": 101,
-            "attach_bridge_module": 102,
             "activate_bridge": 103,
             "register_family": 104,
         }.get(key)
+        if key.startswith("attach_source_module:"):
+            source_index = key.rsplit(":", 1)[-1]
+            return (999999, 102, int(source_index) if source_index.isdigit() else 0)
         if family_rank is not None:
             return (999999, family_rank, 0)
         return (variant, rank, item_idx)

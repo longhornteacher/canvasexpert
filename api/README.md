@@ -1,15 +1,22 @@
-# Canvas Expert (the live/token app)
+# Canvas Expert (the local agent runtime and control console)
 
-The **live half of the Canvas Expert platform.** Holds a Canvas API token and
-pushes content to live courses via the REST and New Quizzes APIs:
+Canvas Expert is the **local runtime behind teacher-agent cooperation**. It holds the
+Canvas API token, keeps private local state, exposes the primary stdio MCP interface to
+desktop agents, and performs bounded Canvas reads and writes. Its browser app is a small
+control console for setup, readiness, mirror status, review, recovery, receipts, and
+diagnostics. Agent hosts may render previews in their own conversation surfaces; this
+runtime returns the semantic data and safety boundaries behind them.
+
+The runtime supports:
 
 - **Push Quizzes** (QuizForge JSON → live New Quizzes)
 - **Push Assignments** (AssignmentForge JSON → live whole-class assignments)
 - **Push Pages** (PageForge JSON → live pages)
 - **Printable outputs** (QuizForge JSON → local DOCX + PDF files)
 - **Gradebook tools** — late policy sweep, student extensions, curves
-- **Scoring Sessions** — MCP-connected agent prepares one exact Current-course assignment
-  using an assignment-bounded SAFE packet and submits valid results to Canvas Live
+- **Scoring Sessions** — MCP-connected agent discovers work across every Current course,
+  waits for teacher direction, then prepares one exact assignment at a time using an
+  assignment-bounded SAFE packet and submits valid results to Canvas Live
 - **School Calendar:** school dates, day kinds, grading periods, bell schedules, and Teacher Schedule
 - **MCP server:** local pseudonymized reads, guarded writes, and Scoring Sessions
 - **Daily Writing:** longitudinal Writing Record and tracked-assignment Writing Timeline
@@ -41,23 +48,24 @@ execution remains local stdio; no hosted or tunnel setup is offered.
 Each contract is canonical in `default_docs/AI Authoring/` — this backend consumes, never forks.
 Token security: the repo is **private**; a `pre-commit` hook blocks the token pattern;
 Netlify publishes only `web/`, so nothing here is served. Keep the token only in
-`api/.env` (CLI) or OS credential store (Web UI, via `keyring`).
+`api/.env` (CLI) or OS credential store (control console, via `keyring`).
 
 ## Workflow
 
-**Recommended: use the Web UI** (see "Web UI" below). CLI scripts are available for
-automation/headless use.
+**Recommended: connect a desktop agent through the local MCP server** (see `docs/mcp-server.md`).
+Use the Web UI as the control console for first-run setup, connection/readiness checks,
+CanvasMirror status, operation review/recovery, receipts, and private workspace management.
+CLI scripts remain available for bounded automation and legacy/headless workflows.
 
-### Web UI (CanvasAgent and Canvas Expert work pages)
+### Control console (CanvasAgent and local safety surfaces)
 
 1. Launch: `py qf_ui.py` (opens http://127.0.0.1:8765)
-2. Author a Forge file (QuizForge/AssignmentForge/PageForge JSON) — each
-   push box has an inline "Forge one with your LLM" helper, or use the embedded
-   QuizForge web editor.
-3. **Validate** the file in the Web UI (summarizes what will push, spots errors)
-4. **Select target courses** (multi-select dropdown in the Work tools header)
-5. **Configure delivery** (due dates, grading category, module, publish state)
-6. **Push** — one button, multi-course in one shot. Log shows per-course notes.
+2. Configure the Canvas account, workspace, and desktop-agent connection.
+3. Check Canvas readiness, CanvasMirror freshness, privacy readiness, and local MCP status.
+4. Review or recover prepared operations and inspect private receipts when the agent asks
+   for teacher confirmation or an action needs attention.
+5. Use any remaining local-only control or repair surface named by the relevant feature
+   contract.
 
 Printable QuizForge outputs are generated locally from the same Forge contract.
 PDFs use the installed Microsoft Edge through Playwright; editable DOCX files use
@@ -69,19 +77,20 @@ bundled Pandoc through `pypandoc-binary`.
 - **Validate**: `py validate_qf.py <file.txt>`
 
 Differentiated live delivery has no direct CLI. Use the reviewed AssignmentForge or
-QuizForge Operation Ledger path so public tags, bridge creation, exact-ID recovery,
-module placement, and registration are one operation.
+QuizForge Operation Ledger path so exact tier targets, group restrictions, bridge
+creation, exact-ID recovery, module placement, and the verified family link are one
+operation.
 
-## Web UI (recommended for day-to-day use)
+## Control console (not the primary working surface)
 
-`qf_ui.py` wraps the CLI scripts behind a local browser UI (branded **Canvas Expert**;
+`qf_ui.py` starts the local browser control console (branded **Canvas Expert**;
 repo-root launcher `Open Canvas Expert.bat`):
 
 ```
 py qf_ui.py            # opens http://127.0.0.1:8765
 ```
 
-**Token storage:** the Web UI stores the token in the **OS credential store** via
+**Token storage:** the control console stores the token in the **OS credential store** via
 `keyring` (Windows Credential Manager) — never on disk. `api/.env` is for CLI use
 only. Non-secret config (base URL, bookmarks, download root)
 lives in `api/webui/config.json` (gitignored).
@@ -110,8 +119,10 @@ local model is unavailable, the affected media evidence remains held. Weights st
 `%LOCALAPPDATA%\CanvasExpert\speech-models` or the machine-local
 `CANVAS_EXPERT_WHISPER_MODEL_CACHE` override, never in the workspace or an AI packet.
 
-**Full feature reference** (Settings, Dashboard, Push Quiz/Assignment/Page/Module,
-  Gradebook tools, Download Assignments, Course Info, Scoring Sessions): **`api/webui/README.md`**.
+**Control-console and retained-surface reference** (Settings, readiness, mirror status,
+  operations, receipts, retained Create/Gradebook/Roster/Course Info surfaces):
+  **`api/webui/README.md`**. Agent-facing workflows are defined by the MCP contract and
+  the relevant runtime/feature contracts, not by browser page parity.
 
 Differentiated bridge grade sync is available as a default-off built-in Routine and through
 the assistant tools documented in the [SIS Grade Bridges guide](../docs/guides/sis-grade-bridges.md).
@@ -140,23 +151,24 @@ changed bridge grades in Canvas Live. The teacher reviews there and owns Canvas 
 - **Differentiated family**: two or more files with the same unsuffixed base title and
   canonical `metadata.variant` tier create exact `Base - <configured tag>` quizzes. Each
 source is published, group-only, omitted from the final grade, and SIS-disabled. One
-server-named `<Base> - Bridge` no-submission bridge is attached to the required module and registered only
-  after exact postconditions pass.
+server-named `<Base> - Bridge` no-submission bridge remains gradebook-only; the exact source assignments are attached to the selected module and
+linked only after exact postconditions pass. Existing families may be reviewed through
+reconciliation; scoring requires the verified family link.
 
 ### Assignments (AssignmentForge)
 - Extracts JSON from the `<ASSIGNMENTFORGE_JSON>` envelope.
 - Resolves course-resource placeholders (`{{file:NAME}}`, `{{page:Title}}` per course).
 - Creates assignment(s) with configurable submission types, points, dates, grading category.
-- **Differentiated content**: one file with two or more canonical tiers creates one
-  independent `Base - <configured tag>` assignment draft per tier, each carrying its own
-  scaffolding. Drafts are unpublished and unrestricted; the teacher assigns students/groups
-   and publishes them in Canvas. No bridge, override, module item, or roster lookup is used;
-   the teacher owns the student/group/pod placement action.
+- **Differentiated family**: one file with two or more canonical tiers requires exact
+  `tier_targets`, a selected module, and a reviewed delivery operation. Each source is
+  restricted to its named group, override-only, omitted from the final grade, and SIS-disabled;
+  the shared family owner attaches sources, creates/verifies the gradebook-only bridge, and
+  saves the family link only after all postconditions pass.
 
 Differentiated quiz delivery retains its timezone-aware due timestamp, module, unique public
-tags, equal points, and assignment-group requirements. AssignmentForge tier drafts preserve
+tags, equal points, and assignment-group requirements. AssignmentForge family sources preserve
 the ordinary assignment dates, grading category, submission settings, points, and SIS/final-
-grade options; CanvasExpert does not assign or publish them for the teacher.
+runtime owns group restriction and final-grade/SIS safety.
 
 ### Pages (PageForge)
 - Extracts JSON from the `<PAGEFORGE_JSON>` envelope.
@@ -175,7 +187,7 @@ grade options; CanvasExpert does not assign or publish them for the teacher.
 | `qf_pusher.py` | Driver: envelope → live quiz (points, settings, stimulus, TEKS) |
 | `downloader.py` | Submission downloader → canonical `Student Work/Submissions/<course>/Assignments/<assignment>/<student>/Attempt <n>/` tree; no duplicate raw by-student mirror |
 | `validate_qf.py` | QuizForge compliance checker |
-| `qf_ui.py` | Launches the local web UI (see "Web UI" above) |
+| `qf_ui.py` | Launches the local control console (see "Control console" above) |
 | `../engine/rendering/physical/` | Local printable DOCX/PDF render stack (Edge via Playwright for PDF, Pandoc for DOCX) |
 | `powergrader/` | Legacy-named private scoring engine: mirror-backed assignment preparation, SAFE bundle/session assembly, feedback contract, ordinary assignment write safeguards, and read-only New Quiz evidence |
 | `mcp_server/` | Local MCP tool registry, contracts, pseudonymized reads, and teacher-owned write tools |
@@ -188,7 +200,7 @@ grade options; CanvasExpert does not assign or publish them for the teacher.
 | `custom_routines/` | Teacher-authored local automation jobs and the routine authoring contract |
 | `learning_objectives.py` | Reviewed, revision-protected per-course Learning Objectives storage and validation |
 | `course_catalog.py` | Student-free local course, module, assignment, and page catalog reads |
-| `webui/` | Web UI: FastAPI app (`server.py`), single-account + bookmark config (`config.py` → `config.json`), templates/static, split feature scripts, subprocess/SSE runner |
+| `webui/` | Local control console: FastAPI app (`server.py`), single-account + bookmark config, templates/static, retained feature scripts, subprocess/SSE runner |
 | `qf_materials/qf quiz examples/` | QuizForge fixtures (contract lives at `default_docs/AI Authoring/Author a Quiz (QuizForge).txt`) |
 
 ## Setup
@@ -216,7 +228,7 @@ ANTHROPIC_KEY=
   assignee and the whole class can see the tier.
 - The New Quiz assignment shell accepts and reports `omit_from_final_grade` and
   `post_to_sis`. Differentiated delivery verifies both flags on every exact source and
-  bridge assignment before registration.
+  bridge assignment before the family link is saved.
 - **`result_view_settings` must explicitly enable feedback — an empty/unset one
   shows the student NOTHING** (confirmed live: rationales stay hidden even after
   manually toggling result viewing on). Canvas only surfaces per-item feedback +

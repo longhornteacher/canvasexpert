@@ -4,6 +4,10 @@ Routing scope: open this map only when the active handoff touches Gradebook, the
 relevant section. It is not global executor context and does not replace the handoff's
 exact file/symbol list.
 
+This is a retained control-console implementation map. The primary agent-facing path for
+gradebook reads, bounded operations, and SIS bridge work is the local runtime and MCP
+contract; browser entries below describe only the console behavior that remains.
+
 As of 2026-07-08, Gradebook is split on both sides:
 
 - backend routes are behind a thin facade in `api/webui/routes/gradebook.py`
@@ -51,7 +55,7 @@ Feature ownership:
 - `gradebook_common.py` - shared Canvas fetch helpers used by the route modules
 - `gradebook_service.py` - shared curve math and curve event storage
 
-Assistant-operated SIS grade bridges do not belong to this Web UI facade. Start with the
+Assistant-operated SIS grade bridges do not belong to this control-console facade. Start with the
 [SIS Grade Bridges guide](../guides/sis-grade-bridges.md), then follow its exact contract and
 Operation Ledger routing for preview, apply, recurring updates, or Attention recovery.
 
