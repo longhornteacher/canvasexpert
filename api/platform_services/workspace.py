@@ -1,5 +1,5 @@
 """Canonical workspace ownership: the single source of truth for the v3
-synced-workspace tree (``Library/``, ``To Review/``, ``Printables/``,
+synced-workspace tree (``Assignments/``, ``Library/``, ``To Review/``, ``Printables/``,
 ``Canvas Uploads/``, ``Student Work/``, ``For AI/``, ``_System/``).
 
 The synced workspace is teacher-visible data.  Keep path construction here so
@@ -40,9 +40,15 @@ LIBRARY_NAME = "Library"
 AI_AUTHORING_SUBFOLDER = "AI Authoring"
 LEARNING_OBJECTIVES_SUBFOLDER = "Learning Objectives"
 LIBRARY_SUBFOLDERS = [
-    AI_AUTHORING_SUBFOLDER, "Quizzes", "Assignments", "Pages",
+    AI_AUTHORING_SUBFOLDER, "Quizzes", "Pages",
     "Calendars", "Source Materials", LEARNING_OBJECTIVES_SUBFOLDER,
 ]
+
+# Authored/staged assignment content has one source tree.  ``_Shared`` is
+# reusable assignment content; course-owned content is keyed by stable Canvas
+# course ID and remains readable through the teacher's nickname.
+ASSIGNMENTS_NAME = "Assignments"
+SHARED_ASSIGNMENTS_NAME = "_Shared"
 
 # Assistant-staged drafts waiting for the teacher to push to Canvas.
 TO_REVIEW_NAME = "To Review"
@@ -163,7 +169,9 @@ def teacher_visible_path(
     if len(candidate) <= budget:
         return candidate
 
-    # Compact fallback: shorten display portions, keep stable IDs.
+    # Compact fallback: shorten display portions, keep stable IDs.  Category
+    # roots are part of the privacy/layout contract and must remain visible;
+    # hashing them would turn ``For AI`` into an ambiguous top-level folder.
     compact_segments: list[str] = list(segments)
     for c in components:
         if isinstance(c, tuple):
@@ -173,6 +181,8 @@ def teacher_visible_path(
             # still produce distinct paths.
             short_hash = _deterministic_hash(f"{display}—{stable_id}")
             compact_segments.append(f"{short_hash} — {safe_id(stable_id)}")
+        elif str(c) in {FOR_AI_NAME, STUDENT_WORK_NAME, SYSTEM_NAME}:
+            compact_segments.append(str(c))
         else:
             # Non-identity component: shorten aggressively.
             short = _deterministic_hash(str(c))
@@ -188,6 +198,8 @@ def teacher_visible_path(
         if isinstance(c, tuple):
             _display, stable_id = c
             minimal_segments.append(stable_id)
+        elif str(c) in {FOR_AI_NAME, STUDENT_WORK_NAME, SYSTEM_NAME}:
+            minimal_segments.append(str(c))
         else:
             minimal_segments.append(_deterministic_hash(str(c)))
 
@@ -347,6 +359,45 @@ def library_root(root=None):
 def library_folder(name, root=None):
     base = library_root(root)
     return os.path.join(base, name) if base else None
+
+
+def assignments_root(root=None):
+    """Return the sole authored-assignment source root."""
+    return _join_root(ASSIGNMENTS_NAME, root)
+
+
+def shared_assignments_root(root=None):
+    base = assignments_root(root)
+    return os.path.join(base, SHARED_ASSIGNMENTS_NAME) if base else None
+
+
+def course_assignments_root(course_id, course_nickname="", root=None):
+    """Return ``Assignments/<course-id> - <nickname>``.
+
+    The ID is always present; a missing nickname does not create a second
+    naming scheme or silently fall back to the old Library tree.
+    """
+    base = assignments_root(root)
+    if not base:
+        return None
+    course_id_text = safe_id(course_id, "unknown-course")
+    available = max(1, MAX_COMPONENT_LENGTH - len(course_id_text) - 3)
+    nickname = safe_component(course_nickname or "Course", available)
+    return os.path.join(base, f"{course_id_text} - {nickname}")
+
+
+def assignment_source_folder(course_id, course_nickname="", assignment_id="",
+                             assignment_name="", root=None):
+    """Resolve one authored assignment below the canonical course/shared tree."""
+    parent = (shared_assignments_root(root) if not course_id else
+              course_assignments_root(course_id, course_nickname, root))
+    if not parent:
+        return None
+    if not assignment_id and not assignment_name:
+        return parent
+    label = safe_component(assignment_name or "Assignment", MAX_COMPONENT_LENGTH)
+    stable = safe_id(assignment_id, _deterministic_hash(assignment_name or label))
+    return os.path.join(parent, f"{label} — {stable}")
 
 
 def to_review_root(root=None):
@@ -707,8 +758,10 @@ def _seed_workspace_readme(root):
             "For AI/ is the pseudonymized counterpart -- safe to hand to an external AI.\n"
             "Review every file before sharing; pseudonyms do not guarantee anonymity and\n"
             "visible content may still identify a student.\n\n"
-            "Library/ holds the reusable material you author or keep (quizzes,\n"
-            "assignments, pages, calendars, source materials, AI Authoring instructions).\n\n"
+            "Assignments/ is the sole authored-assignment source. It contains\n"
+            "_Shared/ plus one <course-id> - <nickname>/ folder per course.\n"
+            "Library/ holds reusable non-assignment material (quizzes, pages,\n"
+            "calendars, source materials, AI Authoring instructions).\n\n"
             "To Review/ holds pending assistant drafts. Forge drafts wait for Canvas review and push.\n\n"
             "Printables/ is for PDF/DOCX output to print or photocopy.\n"
             "Canvas Uploads/ holds QTI/.imscc import packages.\n\n"
@@ -729,6 +782,8 @@ def ensure_workspace():
         target_dir = os.path.join(root, LIBRARY_NAME, subfolder)
         os.makedirs(target_dir, exist_ok=True)
         _seed_folder_if_missing(os.path.join(DEFAULT_DOCS_DIR, subfolder), target_dir)
+    os.makedirs(shared_assignments_root(root), exist_ok=True)
+    os.makedirs(assignments_root(root), exist_ok=True)
     os.makedirs(os.path.join(root, TO_REVIEW_NAME), exist_ok=True)
     for subfolder in TO_REVIEW_SUBFOLDERS:
         os.makedirs(os.path.join(root, TO_REVIEW_NAME, subfolder), exist_ok=True)
@@ -797,3 +852,121 @@ def path_within_workspace(path: str, root=None) -> bool:
         return os.path.commonpath([os.path.realpath(path), os.path.realpath(base)]) == os.path.realpath(base)
     except ValueError:
         return False
+
+
+# --- Explicit clean-slate workspace reset ---------------------------------
+
+_RESET_HASH_ROOT = re.compile(r"^[0-9a-f]{8}$", re.IGNORECASE)
+_RESET_SCORING_NAMES = ("packet", "session", "export", "scoring")
+_RESET_DATED_EXPORT = re.compile(r"^(sage scores|scores?\s*[-_])", re.IGNORECASE)
+_RESET_HASH_MARKERS = ("safe", "private", "evidence", "student", "grading", "packet")
+
+
+def _tree_counts(path: str) -> tuple[int, int]:
+    files = directories = 0
+    if os.path.isdir(extended_path(path)):
+        for _dir, dirnames, filenames in os.walk(extended_path(path)):
+            directories += len(dirnames)
+            files += len(filenames)
+    elif os.path.exists(extended_path(path)):
+        files = 1
+    return files, directories
+
+
+def _reset_report_item(path: str, category: str) -> dict:
+    files, directories = _tree_counts(path)
+    return {"category": category, "path": os.path.abspath(path),
+            "files": files, "directories": directories}
+
+
+def _reset_candidates(root: str) -> tuple[list[dict], list[dict]]:
+    """Return deletable items and explicit refusals without mutating state."""
+    candidates: list[dict] = []
+    refused: list[dict] = []
+
+    def add_children(parent: str, category: str) -> None:
+        if not os.path.isdir(extended_path(parent)):
+            return
+        for name in os.listdir(extended_path(parent)):
+            candidates.append(_reset_report_item(os.path.join(parent, name), category))
+
+    add_children(os.path.join(root, LIBRARY_NAME, ASSIGNMENTS_NAME), "legacy_assignments")
+    add_children(os.path.join(root, ASSIGNMENTS_NAME), "assignments")
+    add_children(os.path.join(root, FOR_AI_NAME), "for_ai")
+
+    student_root = os.path.join(root, STUDENT_WORK_NAME)
+    for name in (SUBMISSIONS_NAME, GRADING_KEYS_NAME, STUDENT_WORK_REPORTS_NAME):
+        add_children(os.path.join(student_root, name), f"student_work/{name}")
+    if os.path.isdir(extended_path(student_root)):
+        allowed = {SUBMISSIONS_NAME, GRADING_KEYS_NAME, STUDENT_WORK_REPORTS_NAME}
+        for name in os.listdir(extended_path(student_root)):
+            if name not in allowed:
+                refused.append({"category": "student_work", "path": os.path.abspath(os.path.join(student_root, name)),
+                                "reason": "unknown category"})
+
+    scoring_root = os.path.join(root, "ScoringSession")
+    if os.path.isdir(extended_path(scoring_root)):
+        for name in os.listdir(extended_path(scoring_root)):
+            path = os.path.join(scoring_root, name)
+            if any(token in name.lower() for token in _RESET_SCORING_NAMES):
+                candidates.append(_reset_report_item(path, "scoring_session"))
+            else:
+                refused.append({"category": "scoring_session", "path": os.path.abspath(path),
+                                "reason": "unknown category"})
+
+    for name in os.listdir(extended_path(root)) if os.path.isdir(extended_path(root)) else []:
+        path = os.path.join(root, name)
+        if _RESET_DATED_EXPORT.match(name):
+            candidates.append(_reset_report_item(path, "dated_export"))
+        elif _RESET_HASH_ROOT.match(name) and os.path.isdir(extended_path(path)):
+            names = []
+            for dirpath, _, filenames in os.walk(extended_path(path)):
+                names.extend([dirpath.lower(), *[f.lower() for f in filenames]])
+            if any(marker in " ".join(names) for marker in _RESET_HASH_MARKERS):
+                candidates.append(_reset_report_item(path, "compact_hash_output"))
+            else:
+                refused.append({"category": "compact_hash_root", "path": os.path.abspath(path),
+                                "reason": "contents do not identify SAFE/private/evidence output"})
+    return candidates, refused
+
+
+def reset_workspace(root=None, *, apply: bool = False) -> dict:
+    """Plan or apply the authorized, local clean-slate output reset.
+
+    Ordinary workspace initialization and mirror refresh never call this.  An
+    apply is refused in its entirety when an item under a resettable category
+    cannot be classified; settings, locks, credentials, and Canvas Mirror are
+    outside the candidate set by construction.
+    """
+    base = _root_or_workspace(root)
+    if not base:
+        return {"mode": "apply" if apply else "dry_run", "status": "unavailable",
+                "counts": {"items": 0, "files": 0, "directories": 0},
+                "paths": [], "refused": []}
+    base = os.path.abspath(base)
+    candidates, refused = _reset_candidates(base)
+    counts = {
+        "items": len(candidates),
+        "files": sum(item["files"] for item in candidates),
+        "directories": sum(item["directories"] for item in candidates),
+    }
+    report = {"mode": "apply" if apply else "dry_run",
+              "status": "refused" if refused else "planned",
+              "counts": counts, "paths": [item["path"] for item in candidates],
+              "items": candidates, "refused": refused}
+    if not apply or refused:
+        return report
+
+    for item in candidates:
+        path = item["path"]
+        if os.path.isdir(extended_path(path)) and not os.path.islink(path):
+            shutil.rmtree(extended_path(path))
+        elif os.path.exists(extended_path(path)):
+            os.unlink(extended_path(path))
+    report["status"] = "applied"
+    return report
+
+
+def reconcile_workspace(root=None) -> dict:
+    """Return the explicit reset reconciliation without changing files."""
+    return reset_workspace(root, apply=False)

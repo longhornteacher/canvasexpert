@@ -233,20 +233,31 @@ def _ready_payload(session: dict) -> dict:
     bundle_path = _safe_bundle_path(session)
     if not bundle_path:
         return _typed_failure(
-            "safe_packet_unavailable", "prepare", retryable=True,
+            "packet_missing", "prepare", retryable=True,
             user_action="The SAFE scoring packet could not be verified. Retry preparation.",
         )
     try:
         with open(bundle_path, encoding="utf-8") as handle:
             safe_bundle = json.load(handle)
         from api.powergrader import scoring_packet
+        verdict = scoring_packet.validate_safe_bundle(safe_bundle)
+        if not verdict.get("ok"):
+            return _typed_failure(
+                "packet_invalid", "prepare", retryable=True,
+                user_action="The SAFE scoring packet is invalid. Retry preparation.",
+            )
         page = scoring_packet.build_packet(
             session=session, safe_bundle=safe_bundle, offset=0, limit=1,
             include_context=False,
         )
+    except FileNotFoundError:
+        return _typed_failure(
+            "packet_missing", "prepare", retryable=True,
+            user_action="The SAFE scoring packet could not be verified. Retry preparation.",
+        )
     except Exception:
         return _typed_failure(
-            "safe_packet_unavailable", "prepare", retryable=True,
+            "packet_invalid", "prepare", retryable=True,
             user_action="The SAFE scoring packet could not be verified. Retry preparation.",
         )
     result.update({
@@ -254,6 +265,12 @@ def _ready_payload(session: dict) -> dict:
         "response_count": int(page.get("total") or 0),
         "held": int(page.get("held") or 0),
         "next": "Call get_scoring_packet with scoring_session_id and read every page.",
+    })
+    result.update({
+        "mirror_revision": session.get("mirror_revision"),
+        "snapshot_id": session.get("mirror_snapshot_id") or "",
+        "submission_snapshot": session.get("submission_snapshot") or "",
+        "packet_health": scoring_packet.validate_safe_bundle(safe_bundle),
     })
     return result
 
@@ -290,8 +307,23 @@ def prepare_scoring_session(
             error="The private workspace is unavailable.",
         )
 
+    # Guidance is teacher-authored private state. Keep it available when the
+    # mirror refresh fails after the teacher has already answered the norms
+    # question; a retry need not ask the same question again.
+    if str(scoring_guidance or "").strip():
+        session_store.save_preparation_state(
+            course_id, assignment_id, scoring_guidance=str(scoring_guidance).strip())
+    else:
+        scoring_guidance = (session_store.load_preparation_state(
+            course_id, assignment_id).get("scoring_guidance") or "")
+
     try:
-        refreshed = bool(refresh_course(course_id))
+        refresh_result = refresh_course(course_id)
+        if isinstance(refresh_result, dict):
+            refreshed = bool(refresh_result.get("ok") and
+                             refresh_result.get("usable", True))
+        else:
+            refreshed = bool(refresh_result)
     except Exception:
         refreshed = False
     if not refreshed:
@@ -447,6 +479,12 @@ def prepare_scoring_session(
     session["writing_timeline_tracked"] = writing_timeline_tracked
     session["feedback_pattern_id"] = "basic"
     session["scoring_basis"] = scoring_basis
+    session["mirror_revision"] = (mirror_result.get("mirror_revision")
+                                   or mirror_result.get("revision")
+                                   or mirror_result.get("snapshot_id"))
+    session["mirror_snapshot_id"] = str(mirror_result.get("snapshot_id") or "")
+    session["submission_snapshot"] = session_store.submission_snapshot_digest(submitted)
+    session["submission_snapshot_count"] = len(submitted)
     session["scoring_rubric_text"] = complete_guidance if complete_guidance is not None else rubric_text_override
     assignmentforge_metadata = assignmentforge.for_assignment(course_id, assignment_id)
     if assignmentforge_metadata.get("corrections"):
@@ -465,6 +503,7 @@ def prepare_scoring_session(
             error="The private Scoring Session could not be saved.",
             assignment_name=assignment_name,
         )
+    session_store.clear_preparation_state(course_id, assignment_id)
     return _ready_payload(session)
 
 

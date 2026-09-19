@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from api import course_catalog
-from api.mirror import store, sync
+from api.mirror import read_service, store, sync
 
 COURSE = "111"
 NOW = "2026-07-16T12:00:00Z"
@@ -103,6 +103,57 @@ def test_full_pass_writes_everything_and_sets_watermarks(tmp_path):
     assert state["passes"]["roster"]["state"] == "current"
     assert state["watermarks"] == {"submitted_since": NOW_MINUS_OVERLAP,
                                    "graded_since": NOW_MINUS_OVERLAP}
+
+
+def test_refresh_persists_operation_revision_and_usable_snapshot(tmp_path):
+    canvas = FakeCanvas(submissions=[_sub(700010)])
+    result = sync.refresh(COURSE, canvas_get_all=canvas,
+                          canvas_get_all_complete=canvas.complete,
+                          root=str(tmp_path), now=NOW)
+    assert result["status"] == "synced"
+    assert result["usable"] is True
+    assert result["mirror_revision"] == 1
+    assert result["snapshot_id"] == f"{COURSE}:1"
+    status = sync.refresh_status(COURSE, root=str(tmp_path))
+    assert status["operation_id"] == result["operation_id"]
+    assert status["snapshot_id"] == result["snapshot_id"]
+    assignments = read_service.private_assignments(COURSE, root=str(tmp_path))
+    submissions = read_service.private_submissions(COURSE, root=str(tmp_path))
+    assert assignments["mirror_revision"] == submissions["mirror_revision"] == 1
+    assert assignments["snapshot_id"] == submissions["snapshot_id"] == result["snapshot_id"]
+    assert assignments["refresh_state"] == submissions["refresh_state"] == "synced"
+
+
+def test_refresh_lifecycle_persists_syncing_before_terminal_state(tmp_path):
+    store.begin_refresh(COURSE, operation_id="op-1", requested_at=NOW,
+                        root=str(tmp_path))
+    syncing = sync.refresh_status(COURSE, root=str(tmp_path))
+    assert syncing["status"] == "syncing"
+    assert syncing["usable"] is False
+    assert syncing["operation_id"] == "op-1"
+
+
+def test_refresh_failure_is_terminal_and_retry_converges(tmp_path):
+    failing = FakeCanvas(errors={"submissions": "HTTP 503: upstream"})
+    failed = sync.refresh(COURSE, canvas_get_all=failing,
+                          canvas_get_all_complete=failing.complete,
+                          root=str(tmp_path), now=NOW)
+    assert failed["status"] == "failed"
+    assert failed["usable"] is False
+    assert store.read_refresh(COURSE, root=str(tmp_path))["revision"] == 0
+
+    succeeding = FakeCanvas(submissions=[_sub(700010)])
+    retried = sync.refresh(COURSE, canvas_get_all=succeeding,
+                           canvas_get_all_complete=succeeding.complete,
+                           root=str(tmp_path), now="2026-07-16T13:00:00Z")
+    repeated = sync.refresh(COURSE, canvas_get_all=FakeCanvas(errors={"assignments": "must not run"}),
+                            canvas_get_all_complete=lambda *args, **kwargs: (_ for _ in ()).throw(
+                                AssertionError("successful refresh should be reusable")),
+                            root=str(tmp_path), now="2026-07-16T14:00:00Z")
+    assert retried["status"] == repeated["status"] == "synced"
+    assert retried["operation_id"] == repeated["operation_id"]
+    assert retried["snapshot_id"] == repeated["snapshot_id"]
+    assert retried["mirror_revision"] == repeated["mirror_revision"] == 1
 
 
 def test_full_pass_requests_submission_comments_delta_does_not(tmp_path):

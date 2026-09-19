@@ -56,6 +56,9 @@ def _envelope(
     generation_version: str = "v1",
     max_age_hours=None,
     now=None,
+    mirror_revision=0,
+    snapshot_id="",
+    refresh_state="",
 ) -> dict:
     state = _state_with_age(
         str(state or "unavailable"), str(last_success_at or ""),
@@ -74,6 +77,9 @@ def _envelope(
         "canvas_observed_at": "",
         "retry_after": "",
         "generation": f"{scope}:{generation_version}:{last_success_at}",
+        "mirror_revision": int(mirror_revision or 0),
+        "snapshot_id": str(snapshot_id or ""),
+        "refresh_state": str(refresh_state or ""),
         "error_code": str(error_code or ""),
         "records": copy.deepcopy(records or []),
     }
@@ -84,16 +90,24 @@ def _private_document(course_id, scope: str, reader: Callable, records: Callable
     document = reader(course_id, root=root)
     if document is None:
         return _envelope(course_id, scope, max_age_hours=max_age_hours, now=now)
+    refresh = store.read_refresh(course_id, root=root)
+    refresh_active = refresh.get("revision", 0) > 0 or refresh.get("state") == "syncing"
+    state = document.get("state", "unavailable")
+    if refresh_active and refresh.get("state") != "synced":
+        state = refresh.get("state") or "failed"
     return _envelope(
         course_id,
         scope,
-        state=document.get("state", "unavailable"),
+        state=state,
         source="mirror",
         last_success_at=document.get("last_success_at", ""),
         last_attempt_at=document.get("last_attempt_at", ""),
         error_code=document.get("error_code", ""),
         records=records(document),
         generation_version=f"v{document.get('schema_version', 1)}",
+        mirror_revision=refresh.get("revision", 0) if refresh_active else 0,
+        snapshot_id=refresh.get("snapshot_id", "") if refresh_active else "",
+        refresh_state=refresh.get("state", "") if refresh_active else "",
         max_age_hours=max_age_hours,
         now=now,
     )
@@ -135,11 +149,22 @@ def _sync_freshness(course_id, *, root=None) -> dict:
     last_attempt_at = max((str(value.get("last_attempt_at") or "") for value in pass_values), default="")
     newest = max(pass_values, key=lambda value: str(value.get("last_attempt_at") or ""), default={})
     state = "current" if last_success_at else str(newest.get("state") or "unavailable")
+    refresh = store.read_refresh(course_id, root=root)
+    # Direct legacy pass callers predate the lifecycle sidecar.  Preserve
+    # their pass-level behavior while exposing lifecycle identity whenever a
+    # refresh has actually been recorded.
+    lifecycle_active = refresh.get("revision", 0) > 0 or refresh.get("state") == "syncing"
+    effective_state = state
+    if lifecycle_active and refresh.get("state") != "synced":
+        effective_state = refresh.get("state") or "failed"
     return {
-        "state": state,
+        "state": effective_state,
         "last_success_at": last_success_at,
         "last_attempt_at": last_attempt_at,
-        "error_code": str(newest.get("error_code") or ""),
+        "error_code": str((refresh.get("error_code") if lifecycle_active else newest.get("error_code")) or ""),
+        "mirror_revision": refresh.get("revision", 0) if lifecycle_active else 0,
+        "snapshot_id": refresh.get("snapshot_id", "") if lifecycle_active else "",
+        "refresh_state": refresh.get("state", "") if lifecycle_active else "",
     }
 
 
@@ -156,6 +181,8 @@ def private_assignments(course_id, *, root=None, max_age_hours=None, now=None) -
         course_id, PRIVATE_ASSIGNMENTS, state=freshness["state"], source="mirror",
         last_success_at=freshness["last_success_at"], last_attempt_at=freshness["last_attempt_at"],
         error_code=freshness["error_code"],
+        mirror_revision=freshness["mirror_revision"], snapshot_id=freshness["snapshot_id"],
+        refresh_state=freshness["refresh_state"],
         records=list(document["assignments"].values()),
         generation_version=f"v{document.get('schema_version', 1)}",
         max_age_hours=max_age_hours, now=now,
@@ -181,6 +208,8 @@ def private_submissions(course_id, *, root=None, max_age_hours=None, now=None) -
         course_id, PRIVATE_SUBMISSIONS, state=freshness["state"], source="mirror",
         last_success_at=freshness["last_success_at"], last_attempt_at=freshness["last_attempt_at"],
         error_code=freshness["error_code"], records=records,
+        mirror_revision=freshness["mirror_revision"], snapshot_id=freshness["snapshot_id"],
+        refresh_state=freshness["refresh_state"],
         generation_version="v1", max_age_hours=max_age_hours, now=now,
     )
 

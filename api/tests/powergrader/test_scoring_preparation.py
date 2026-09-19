@@ -6,6 +6,7 @@ import json
 import pytest
 
 from api.powergrader import scoring_preparation
+from api.powergrader import session_store
 
 
 def _assignment(**overrides):
@@ -273,3 +274,53 @@ def test_mirror_failure_is_typed_and_identity_safe(monkeypatch, tmp_path):
     )
     assert result["code"] == "mirror_submission_row_invalid"
     assert {"code", "stage", "retryable", "user_action"} <= result.keys()
+
+
+def test_preparation_binds_mirror_revision_and_submission_snapshot(monkeypatch, tmp_path):
+    saved, prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(
+        rubric=[{"description": "Reasoning", "points": 10, "ratings": []}],
+    ))
+    monkeypatch.setattr(scoring_preparation.assignment_refresh,
+                        "prepare_assignment_from_mirror",
+                        lambda _c, _a: ([_submission()], _assignment(rubric=[
+                            {"description": "Reasoning", "points": 10, "ratings": []},
+                        ]), {"status": "mirror", "mirror_revision": "r7"}))
+    result = prepare()
+    session = saved[result["scoring_session_id"]]
+    assert session["mirror_revision"] == "r7"
+    assert session["submission_snapshot"]
+
+
+def test_refresh_retry_reuses_private_norms_guidance(monkeypatch, tmp_path):
+    saved, prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(rubric=[]))
+    calls = iter([False, True])
+    first = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", "Use evidence.", refresh_course=lambda _course: next(calls),
+        save_session=lambda session: saved.setdefault(session["session_id"], session),
+    )
+    assert first["code"] == "mirror_refresh_failed"
+    second = prepare()
+    assert second["status"] == "ready"
+
+
+def test_ready_payload_reports_missing_packet(monkeypatch, tmp_path):
+    saved, prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(
+        rubric=[{"description": "Reasoning", "points": 10, "ratings": []}],
+    ))
+    result = prepare()
+    session = saved[result["scoring_session_id"]]
+    session["privacy_artifacts"]["safe_bundle"] = str(tmp_path / "gone.json")
+    assert scoring_preparation._ready_payload(session)["code"] == "packet_missing"
+
+
+def test_newer_submission_invalidates_the_frozen_snapshot():
+    original = [{"user_id": "u1", "id": "s1", "attempt": 1,
+                 "submitted_at": "2026-09-18T10:00:00Z", "workflow_state": "submitted"}]
+    session = {"mirror_revision": "r1",
+               "submission_snapshot": session_store.submission_snapshot_digest(original)}
+    newer = [dict(original[0], id="s2", attempt=2,
+                  submitted_at="2026-09-18T11:00:00Z")]
+    result = session_store.session_staleness(
+        session, mirror_revision="r1", submission_snapshot=newer)
+    assert result == {"stale": True, "code": "submission_identity_mismatch",
+                      "reason": "submission_snapshot_changed"}

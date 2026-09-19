@@ -134,6 +134,10 @@ _NEXT_STEPS = {
         "Summarize the aggregate review and get teacher confirmation, then call "
         "apply_sis_grade_bridge with batch_id, operation_id, and review_digest unchanged."
     ),
+    "preview_sis_grade_bridge_reconciliation": (
+        "Summarize the discovered family repair and get teacher confirmation, then call "
+        "apply_sis_grade_bridge with batch_id, operation_id, and review_digest unchanged."
+    ),
     "preview_learning_objective": (
         "Summarize the preview and get teacher confirmation, then call "
         "apply_learning_objective with course_id, preview, preview_digest, and "
@@ -209,6 +213,19 @@ def list_sis_grade_bridges(course_id: str) -> dict:
     return sis_grade_bridge.list_sis_grade_bridges(course_id)
 
 
+def reconcile_sis_grade_bridges(course_id: str) -> dict:
+    """Discover differentiated families and return a student-free status matrix."""
+    return sis_grade_bridge.reconcile_sis_grade_bridges(course_id)
+
+
+def preview_sis_grade_bridge_reconciliation(course_id: str, family_title: str) -> dict:
+    """Freeze a reviewed Operation Ledger repair for one discovered family."""
+    return _with_next(
+        "preview_sis_grade_bridge_reconciliation",
+        sis_grade_bridge.preview_sis_grade_bridge_reconciliation(course_id, family_title),
+    )
+
+
 def preview_sis_grade_bridge(course_id: str, family_title: str) -> dict:
     """Prepare one exact family bridge and return only aggregate review facts."""
     return _with_next(
@@ -224,6 +241,41 @@ def apply_sis_grade_bridge(
     return sis_grade_bridge.apply_sis_grade_bridge(
         operation_id, batch_id, review_digest
     )
+
+
+def _workspace_reset_digest(report: dict) -> str:
+    stable = copy.deepcopy(report) if isinstance(report, dict) else {}
+    stable.pop("mode", None)
+    stable.pop("status", None)
+    stable.pop("preview_digest", None)
+    stable.pop("receipt_id", None)
+    return hashlib.sha256(
+        json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
+
+
+def preview_workspace_reset() -> dict:
+    """Dry-run the explicitly authorized local assignment/evidence reset."""
+    report = workspace.reset_workspace(apply=False)
+    report["preview_digest"] = _workspace_reset_digest(report)
+    return report
+
+
+def apply_workspace_reset(preview_digest: str) -> dict:
+    """Apply only an unchanged, non-refused workspace reset preview."""
+    report = workspace.reset_workspace(apply=False)
+    digest = _workspace_reset_digest(report)
+    if str(preview_digest or "") != digest:
+        return {"ok": False, "code": "reset_preview_changed",
+                "error": "The workspace reset preview changed. Run preview_workspace_reset again."}
+    if report.get("refused"):
+        return {"ok": False, "code": "reset_refused",
+                "error": "The workspace reset contains an unknown category; nothing was deleted.",
+                "refused": report.get("refused")}
+    applied = workspace.reset_workspace(apply=True)
+    applied["ok"] = applied.get("status") == "applied"
+    applied["receipt_id"] = f"workspace-reset-{digest[:24]}"
+    return applied
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
@@ -1087,6 +1139,8 @@ _TOOL_GROUPS = {
         # Canvas assignment_id -- a sibling write path, not staged content.
         "preview_assignment_update",
         "apply_assignment_update",
+        "preview_workspace_reset",
+        "apply_workspace_reset",
     ),
     "Scoring Sessions": (
         "prepare_scoring_session",
@@ -1097,7 +1151,9 @@ _TOOL_GROUPS = {
     "Gradebook": ("get_gradebook_snapshot",),
     "SIS Grade Bridges": (
         "list_sis_grade_bridges",
+        "reconcile_sis_grade_bridges",
         "preview_sis_grade_bridge",
+        "preview_sis_grade_bridge_reconciliation",
         "apply_sis_grade_bridge",
     ),
     "Learning Objectives": (
@@ -1783,7 +1839,7 @@ _REFRESH_SCOPES = ["course.refresh", "roster", "groups"]
 _SCORING_REFRESH_SCOPES = ["course.scoring_refresh"]
 
 
-def _refresh_course_for_scoring(course_id: str) -> bool:
+def _refresh_course_for_scoring(course_id: str) -> dict:
     """Force one foreground CanvasMirror refresh before scoring uses it.
 
     Scoring is intentionally stricter than ordinary mirror-backed reads: a
@@ -1796,7 +1852,44 @@ def _refresh_course_for_scoring(course_id: str) -> bool:
         plan = _wait_for_plan(plan_id, timeout_seconds=_REFRESH_TIMEOUT_SECONDS)
     except Exception:
         return False
-    return plan.get("state") == "succeeded"
+    identity = _refresh_identity(plan)
+    result = {
+        "ok": plan.get("state") == "succeeded",
+        "status": plan.get("status") or (
+            "synced" if plan.get("state") == "succeeded" else "failed"
+        ),
+    }
+    result.update(identity)
+    if "mirror_revision" in identity:
+        result["usable"] = bool(
+            result["ok"] and int(identity.get("mirror_revision") or 0) > 0
+        )
+    else:
+        # Compatibility seam for focused callers that return only state.
+        result["usable"] = result["ok"]
+    return result
+
+
+def _refresh_identity(plan: dict) -> dict:
+    """Project the coordinator's opaque plan to additive lifecycle facts."""
+    if not isinstance(plan, dict):
+        return {}
+    jobs = plan.get("jobs") or []
+    job = jobs[0] if isinstance(jobs, list) and jobs and isinstance(jobs[0], dict) else {}
+    operation_id = plan.get("operation_id") or plan.get("plan_id")
+    revision = job.get("mirror_revision", plan.get("mirror_revision"))
+    snapshot_id = job.get("snapshot_id", plan.get("snapshot_id"))
+    error_code = job.get("error_code") or plan.get("error_code")
+    identity = {}
+    if operation_id:
+        identity["operation_id"] = str(operation_id)
+    if revision not in (None, ""):
+        identity["mirror_revision"] = int(revision or 0)
+    if snapshot_id:
+        identity["snapshot_id"] = str(snapshot_id)
+    if error_code:
+        identity["error_code"] = str(error_code)
+    return identity
 
 
 def refresh_mirror(course_id: str) -> dict:
@@ -1816,15 +1909,22 @@ def refresh_mirror(course_id: str) -> dict:
         return {"ok": False, "error": f"Could not start a sync: {error}"}
 
     plan = _wait_for_plan(plan_id, timeout_seconds=_REFRESH_TIMEOUT_SECONDS)
+    identity = _refresh_identity(plan)
     state = plan.get("state", "failed")
     if state == "succeeded":
-        return {"ok": True, "status": "synced",
-                "message": "Mirror refreshed (roster, groups, assignments, and submissions status only). Re-read the refused tool now."}
+        result = {"ok": True, "status": "synced",
+                  "message": "Mirror refreshed (roster, groups, assignments, and submissions status only). Re-read the refused tool now."}
+        result.update(identity)
+        return result
     if state in ("queued", "running"):
-        return {"ok": True, "status": "syncing",
-                "message": "Still syncing — wait a few seconds, then try again."}
-    return {"ok": False, "status": "failed",
-            "error": "Sync failed. Try again, or use Sync now in the CanvasExpert web UI."}
+        result = {"ok": True, "status": "syncing",
+                  "message": "Still syncing — wait a few seconds, then try again."}
+        result.update(identity)
+        return result
+    result = {"ok": False, "status": "failed",
+              "error": "Sync failed. Try again, or use Sync now in the CanvasExpert web UI."}
+    result.update(identity)
+    return result
 
 
 # --- Scoring Packet MCP Tools (v22) ----------------------------------------
@@ -1924,7 +2024,97 @@ def _is_current_scoring_session(session: dict) -> bool:
     """True only when this record is the current one for its exact scope."""
     from api.powergrader import session_store
 
-    return session_store.is_current_session(str(session.get("session_id") or ""))
+    session_id = str(session.get("session_id") or "")
+    if session_store.is_current_session(session_id):
+        return True
+    # Focused callers may inject an in-memory record without creating the
+    # corresponding private file. Real duplicate records always have a disk
+    # summary, so this compatibility fallback cannot bypass supersession.
+    if str(session.get("status") or "") == "superseded":
+        return False
+    try:
+        summaries = session_store.list_session_summaries()
+        has_scope = any(
+            str(row.get("course_id") or "") == str(session.get("course_id") or "")
+            and str(row.get("assignment_id") or "") == str(session.get("assignment_id") or "")
+            for row in summaries
+        )
+        return not has_scope
+    except Exception:
+        return False
+
+
+def _session_mirror_check(session: dict) -> dict:
+    """Validate the usable mirror revision and submission snapshot for a session."""
+    expected_revision = session.get("mirror_revision")
+    if expected_revision in (None, ""):
+        # Pre-lifecycle records remain readable; new preparations always bind
+        # a revision before they can expose a SAFE packet.
+        return {"ok": True}
+    from api.powergrader import session_store
+
+    course_id = str(session.get("course_id") or "")
+    assignment_id = str(session.get("assignment_id") or "")
+    root = workspace.workspace_root()
+    if not root:
+        return {"ok": False, "code": "mirror_revision_unusable",
+                "error": "The usable CanvasMirror revision is unavailable. Refresh this course and retry."}
+    try:
+        scope = read_service.private_submissions(
+            course_id, root=root, max_age_hours=None,
+        )
+    except Exception:
+        scope = None
+    if not isinstance(scope, dict) or scope.get("state") != "current":
+        return {"ok": False, "code": "mirror_revision_unusable",
+                "error": "The usable CanvasMirror revision is unavailable. Refresh this course and retry."}
+    revision = int(scope.get("mirror_revision") or 0)
+    if revision < 1:
+        return {"ok": False, "code": "mirror_revision_unusable",
+                "error": "The usable CanvasMirror revision is unavailable. Refresh this course and retry."}
+    if str(revision) != str(expected_revision):
+        return {"ok": False, "code": "session_stale",
+                "error": "A newer CanvasMirror revision exists. Prepare a replacement Scoring Session before continuing."}
+    expected_snapshot_id = str(session.get("mirror_snapshot_id") or "")
+    current_snapshot_id = str(scope.get("snapshot_id") or "")
+    if expected_snapshot_id and current_snapshot_id and expected_snapshot_id != current_snapshot_id:
+        return {"ok": False, "code": "session_stale",
+                "error": "A newer CanvasMirror snapshot exists. Prepare a replacement Scoring Session before continuing."}
+    try:
+        document = mirror_store.read_submissions(course_id, assignment_id, root=root)
+        entries = (document or {}).get("submissions") if isinstance(document, dict) else None
+        if not isinstance(entries, dict):
+            raise ValueError("submission projection unavailable")
+        rows = [entry.get("current") for entry in entries.values()
+                if isinstance(entry, dict) and isinstance(entry.get("current"), dict)]
+        snapshot = session_store.submission_snapshot_digest(rows)
+    except Exception:
+        return {"ok": False, "code": "mirror_revision_unusable",
+                "error": "The current submission snapshot is unavailable. Refresh this course and retry."}
+    verdict = session_store.session_staleness(
+        session, mirror_revision=revision, submission_snapshot=snapshot,
+    )
+    if verdict.get("stale"):
+        return {"ok": False, "code": verdict.get("code") or "session_stale",
+                "error": "The current submission snapshot changed. Prepare a replacement Scoring Session before continuing."}
+    return {"ok": True, "mirror_revision": revision,
+            "snapshot_id": current_snapshot_id, "submission_snapshot": snapshot}
+
+
+def _ensure_session_usable(session: dict) -> dict:
+    """Return a safe lifecycle refusal and persist stale-session invalidation."""
+    from api.powergrader import session_store
+
+    verdict = _session_mirror_check(session)
+    if verdict.get("ok"):
+        return verdict
+    if verdict.get("code") in {"session_stale", "submission_identity_mismatch"}:
+        try:
+            session_store.mark_session_stale(session, code=verdict["code"])
+            session_store.save_session(session)
+        except Exception:
+            pass
+    return verdict
 
 
 def list_scoring_sessions() -> dict:
@@ -2017,6 +2207,9 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
                 "error": "The assignment-scoped Scoring Session was not found."}
     if not _is_current_scoring_session(session):
         return _session_superseded(scoring_session_id)
+    freshness = _ensure_session_usable(session)
+    if not freshness.get("ok"):
+        return freshness
     if session.get("status") == "needs_teacher_input":
         return {"ok": False, "code": "needs_teacher_input",
                 "error": "Prepare this exact assignment with an attached Canvas rubric or bounded guidance before requesting its packet."}
@@ -2028,15 +2221,22 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     if gate_err:
         return {"ok": False, "error": gate_err}
 
+    from api.powergrader import session_store
+    health = session_store.packet_health(session)
+    if not health.get("ok"):
+        return {"ok": False, "code": health.get("code") or "packet_invalid",
+                "error": "The SAFE scoring packet is missing or invalid. Prepare this exact assignment again."}
     bundle_path = _safe_bundle_path(session)
     if not bundle_path:
-        return {"ok": False, "error": "Safe AI Packet student response bundle is missing."}
+        return {"ok": False, "code": "packet_missing",
+                "error": "The SAFE scoring packet is missing. Prepare this exact assignment again."}
 
     try:
         with open(bundle_path, encoding="utf-8") as f:
             safe_bundle = json.load(f)
-    except Exception as e:
-        return {"ok": False, "error": f"Could not load Safe AI Packet bundle: {e}"}
+    except Exception:
+        return {"ok": False, "code": "packet_invalid",
+                "error": "The SAFE scoring packet could not be read. Prepare this exact assignment again."}
 
     if offset <= 0 and not include_context:
         return {"ok": False, "code": "scoring_context_required",
@@ -2080,13 +2280,18 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
                 result["scoring_guidance_projection"] = projection
         result["items"] = _tabulate(result["items"], _PACKET_ITEM_COLUMNS)
         result["students"] = _tabulate(result["students"], _PACKET_STUDENT_COLUMNS)
+        result["mirror_revision"] = session.get("mirror_revision")
+        result["snapshot_id"] = session.get("mirror_snapshot_id") or ""
+        result["submission_snapshot"] = session.get("submission_snapshot") or ""
+        result["packet_health"] = health
         result = _with_next("get_scoring_packet", result)
     return result
 
 
 def submit_scoring_results(scoring_session_id: str, results: list,
                            expected_packet_digest: str, review_digest: str = "",
-                           answers: dict | None = None) -> dict:
+                           answers: dict | None = None,
+                           idempotency_key: str = "") -> dict:
     """Submit one session while holding its scope lifecycle lock throughout.
 
     One {pseudonym, item_id, score, feedback} result per packet row. If the tool
@@ -2105,13 +2310,15 @@ def submit_scoring_results(scoring_session_id: str, results: list,
                                   session.get("assignment_id")):
         return _submit_scoring_results_locked(
             scoring_session_id, results, expected_packet_digest,
-            review_digest=review_digest, answers=answers)
+            review_digest=review_digest, answers=answers,
+            idempotency_key=idempotency_key)
 
 
 def _submit_scoring_results_locked(scoring_session_id: str, results: list,
                                    expected_packet_digest: str,
                                    review_digest: str = "",
-                                   answers: dict | None = None) -> dict:
+                                   answers: dict | None = None,
+                                   idempotency_key: str = "") -> dict:
     """Validate SAFE results, ask only bounded risk questions, then write them.
 
     The Canvas transport and identity lookup stay below this MCP boundary.
@@ -2129,6 +2336,9 @@ def _submit_scoring_results_locked(scoring_session_id: str, results: list,
                 "error": "The assignment-scoped Scoring Session was not found."}
     if not _is_current_scoring_session(session):
         return _session_superseded(scoring_session_id)
+    freshness = _ensure_session_usable(session)
+    if not freshness.get("ok"):
+        return freshness
     gate_error = _course_gate_check(str(session.get("course_id") or ""))
     if gate_error:
         return {"ok": False, "code": "course_unavailable", "error": gate_error}
@@ -2137,6 +2347,10 @@ def _submit_scoring_results_locked(scoring_session_id: str, results: list,
     bundle_path = _safe_bundle_path(session)
     if not bundle_path:
         return {"ok": False, "code": "packet_missing", "error": "The SAFE scoring packet is unavailable."}
+    health = session_store.packet_health(session)
+    if not health.get("ok"):
+        return {"ok": False, "code": health.get("code") or "packet_invalid",
+                "error": "The SAFE scoring packet is missing or invalid."}
     try:
         with open(bundle_path, encoding="utf-8") as handle:
             safe_bundle = json.load(handle)
@@ -2260,10 +2474,16 @@ def _submit_scoring_results_locked(scoring_session_id: str, results: list,
                         target["ai_feedback"] = staged.get("ai_feedback")
                         target["ai_item_results"] = staged.get("ai_item_results") or []
                 session_store.save_session(current)
-                payload, _status = scoring_apply.apply_plan(
-                    scoring_session_id, expected_digest=plan["digest"], answers=answers,
+                apply_kwargs = dict(
+                    session_id=scoring_session_id,
+                    expected_digest=plan["digest"], answers=answers,
                     load_session=session_store.load_session, save_session=session_store.save_session,
                     pseudonyms=every_pseudonym,
+                )
+                if str(idempotency_key or ""):
+                    apply_kwargs["idempotency_key"] = str(idempotency_key)
+                payload, _status = scoring_apply.apply_plan(
+                    **apply_kwargs,
                 )
             held_user_ids = {str(st.get("user_id") or "") for st in session.get("students") or []
                              if str(st.get("user_id") or "") not in set(plan.get("candidate_ids") or [])}
@@ -2320,6 +2540,16 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
     outcomes.extend({"pseudonym": names.get(uid) or "(unknown student)", "status": "held"}
                     for uid in sorted(held_ids))
     result = {"ok": bool(payload.get("ok")), "counts": counts, "results": outcomes}
+    posted = [names.get(str(uid)) or "(unknown student)"
+              for uid in payload.get("posted_rows") or []]
+    remaining = [names.get(str(uid)) or "(unknown student)"
+                 for uid in payload.get("remaining_rows") or []]
+    if posted or remaining:
+        result["posted_rows"] = sorted(posted)
+        result["remaining_rows"] = sorted(remaining)
+    if payload.get("code") == "partial_post_remaining":
+        result["code"] = "partial_post_remaining"
+        result["recovery"] = "Retry only the remaining rows after resolving any attention rows."
     if not result["ok"]:
         result["code"] = str(payload.get("code") or "write_failed")
         result["error"] = "One or more results could not be safely finalized. Review Canvas before retrying."

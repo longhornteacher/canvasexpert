@@ -15,6 +15,7 @@ _REGISTRATION_KEYS = (
     "bridge_assignment_id",
     "bridge_state_digest",
 )
+_OPTIONAL_REGISTRATION_KEYS = ("family_key", "grading_excluded")
 
 
 def _clean_text(value, field: str) -> str:
@@ -52,6 +53,10 @@ def _normalize_registration(registration: dict) -> dict:
         raise ValueError("source assignment IDs must be unique")
     if len(clean["bridge_state_digest"]) != 64:
         raise ValueError("bridge_state_digest must be a SHA-256 digest")
+    if registration.get("family_key") not in (None, ""):
+        clean["family_key"] = _clean_text(registration.get("family_key"), "family_key")
+    if registration.get("grading_excluded") is not None:
+        clean["grading_excluded"] = bool(registration.get("grading_excluded"))
     return clean
 
 

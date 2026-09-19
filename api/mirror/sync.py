@@ -25,7 +25,9 @@ degrade the pass envelope (stale/unavailable) and never touch collections.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import threading
 import time
+import uuid
 
 from api.assignment_collection import acquire_assignment_collection
 
@@ -48,6 +50,14 @@ WATERMARK_OVERLAP_MINUTES = 10
 # The next pass compares against the now-smaller committed index, so a genuine
 # shrink prunes cleanly one pass later.
 LARGE_SHRINK_RATIO = 0.5
+
+_REFRESH_LOCKS_GUARD = threading.Lock()
+_REFRESH_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _refresh_lock(course_id) -> threading.Lock:
+    with _REFRESH_LOCKS_GUARD:
+        return _REFRESH_LOCKS.setdefault(str(course_id), threading.Lock())
 
 
 def _overlapped(iso_z: str) -> str:
@@ -236,6 +246,87 @@ def _guard(course_id, root):
     if store.course_dir(course_id, root) is None:
         return {"ok": False, "error": "workspace not configured"}
     return None
+
+
+def refresh_status(course_id, *, root=None) -> dict:
+    """Return the durable refresh identity without acquiring Canvas data."""
+    document = store.read_refresh(course_id, root=root)
+    return {
+        "ok": document["state"] == "synced",
+        "course_id": str(course_id),
+        "operation_id": document["operation_id"],
+        "status": document["state"],
+        "state": document["state"],
+        "usable": document["state"] == "synced" and document["revision"] > 0,
+        "mirror_revision": document["revision"],
+        "snapshot_id": document["snapshot_id"],
+        "error_code": document["error_code"],
+    }
+
+
+def refresh(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
+            now=None, operation_id=None, force=False, full=False,
+            with_comments=True, course_name=None) -> dict:
+    """Run one durable, coalesced read-only refresh.
+
+    The per-course lock covers acquisition and projection commit.  A caller
+    arriving after a successful refresh receives the same usable snapshot
+    rather than starting a competing refresh; ``force=True`` is reserved for
+    an explicit teacher retry after a known successful snapshot.
+    """
+    blocked = _guard(course_id, root)
+    if blocked:
+        return {**blocked, "status": "failed", "usable": False,
+                "operation_id": "unconfigured", "mirror_revision": 0,
+                "snapshot_id": "", "error_code": "workspace_unconfigured"}
+    lock = _refresh_lock(course_id)
+    with lock:
+        prior = store.read_refresh(course_id, root=root)
+        if prior["state"] == "synced" and prior["revision"] > 0 and not force:
+            return refresh_status(course_id, root=root)
+        operation_id = str(operation_id or uuid.uuid4().hex)
+        started = now or store.now_iso()
+        store.begin_refresh(course_id, operation_id=operation_id,
+                            requested_at=started, root=root)
+        try:
+            if full:
+                result = full_pass(
+                    course_id, canvas_get_all=canvas_get_all,
+                    canvas_get_all_complete=canvas_get_all_complete, root=root,
+                    now=now, bypass_new_quiz_cooldown=True,
+                    course_name=course_name, with_comments=with_comments,
+                )
+            else:
+                result = delta_pass(
+                    course_id, canvas_get_all=canvas_get_all,
+                    canvas_get_all_complete=canvas_get_all_complete, root=root,
+                    now=now, bypass_new_quiz_cooldown=True,
+                    course_name=course_name,
+                )
+            lifecycle = store.finish_refresh(
+                course_id, operation_id=operation_id, ok=bool(result.get("ok")),
+                finished_at=now or store.now_iso(),
+                error_code=str(result.get("error_code") or result.get("error") or ""),
+                root=root,
+            )
+        except Exception as exc:
+            lifecycle = store.finish_refresh(
+                course_id, operation_id=operation_id, ok=False,
+                finished_at=now or store.now_iso(), error_code=type(exc).__name__,
+                root=root,
+            )
+            result = {"ok": False, "error_code": type(exc).__name__}
+        return {
+            **result,
+            "course_id": str(course_id),
+            "operation_id": lifecycle["operation_id"],
+            "status": lifecycle["state"],
+            "state": lifecycle["state"],
+            "usable": lifecycle["state"] == "synced" and lifecycle["revision"] > 0,
+            "mirror_revision": lifecycle["revision"],
+            "snapshot_id": lifecycle["snapshot_id"],
+            "error_code": lifecycle["error_code"],
+        }
 
 
 def _is_large_shrink(previous_count: int, new_count: int) -> bool:

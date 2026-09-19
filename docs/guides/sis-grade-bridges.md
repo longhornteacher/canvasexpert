@@ -62,12 +62,15 @@ not duplicate sources, overrides, bridge, module, or module item.
 | Tool | Purpose |
 |---|---|
 | `list_sis_grade_bridges(course_id)` | List student-free registrations for one Current course. |
+| `reconcile_sis_grade_bridges(course_id)` | Discover CE-owned differentiated families and return a student-free missing/drifted/incomplete matrix. |
+| `preview_sis_grade_bridge_reconciliation(course_id, family_title)` | Turn one discovered missing or drifted family into the reviewed repair path. |
 | `preview_sis_grade_bridge(course_id, family_title)` | Re-read one exact registered family, enforce its laws, and freeze an aggregate review. |
 | `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | Copy the unchanged eligible final scores to the exact registered bridge through the Operation Ledger. |
 
 Grade projection is available only after the differentiated content operation has registered the
-family. An unregistered title fails closed. The tools do not create, adopt, rename, or repair a
-family.
+family. An unregistered title fails closed. Reconciliation may discover a missing or drifted
+CE-owned family and prepare a reviewed repair, but it never adopts arbitrary same-title Canvas
+objects, renames a family, or bypasses the Operation Ledger.
 
 The Routines page also provides **Differentiated bridge grade sync**. It is a built-in Canvas
 write routine, disabled by default, with manual Run and the existing local interval schedule.

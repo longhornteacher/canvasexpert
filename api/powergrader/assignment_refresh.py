@@ -406,5 +406,24 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
             "_mirror_unreadable": unreadable,
         })
         rows.append(row)
-    return rows, assignment, {"status": "mirror", "manifest_path": None,
-                              "historical_only": bool(entry_count) and historical_orphans == entry_count}
+    revisions = {
+        int(scope.get("mirror_revision") or 0)
+        for scope in (roster, assignments, submissions_scope)
+        if isinstance(scope, dict)
+    }
+    snapshots = {
+        str(scope.get("snapshot_id") or "")
+        for scope in (roster, assignments, submissions_scope)
+        if isinstance(scope, dict) and str(scope.get("snapshot_id") or "")
+    }
+    if len(revisions) > 1 or len(snapshots) > 1:
+        return None, None, _mirror_preparation_failure("mirror_revision_unusable")
+    revision = next(iter(revisions), 0)
+    snapshot_id = next(iter(snapshots), "")
+    return rows, assignment, {
+        "status": "mirror", "manifest_path": None,
+        "historical_only": bool(entry_count) and historical_orphans == entry_count,
+        "mirror_revision": revision,
+        "snapshot_id": snapshot_id,
+        "refresh_state": str(submissions_scope.get("refresh_state") or ""),
+    }

@@ -11,7 +11,9 @@ import copy
 
 from api.operation_ledger import batches, executor, models, operations, receipts, registry
 from api.operation_ledger.adapters.sis_grade_bridge import KIND
+from api.operation_ledger.adapters import differentiated_bridge
 from api.platform_services import config
+from api.platform_services import canvas_client
 
 
 def _current_course(course_id: str) -> bool:
@@ -60,8 +62,131 @@ def list_sis_grade_bridges(course_id: str) -> dict:
     }
 
 
+def _course_assignments(course_id: str) -> list[dict]:
+    rows, error, complete = canvas_client.canvas_get_all_complete(
+        f"/api/v1/courses/{course_id}/assignments", {"per_page": 100}
+    )
+    if error or not complete or not isinstance(rows, list):
+        raise ValueError("assignment discovery is incomplete")
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _student_free_coverage(course_id: str, source_ids: list[str]) -> dict:
+    member_sets = []
+    for assignment_id in source_ids:
+        overrides, error, complete = canvas_client.canvas_get_all_complete(
+            f"/api/v1/courses/{course_id}/assignments/{assignment_id}/overrides",
+            {"per_page": 100},
+        )
+        if error or not complete or not isinstance(overrides, list):
+            return {"complete": False, "source_count": len(source_ids), "member_count": 0, "overlap_count": None}
+        members = set()
+        for override in overrides:
+            for value in (override.get("student_ids") or []):
+                if str(value).strip():
+                    members.add(str(value).strip())
+        member_sets.append(members)
+    union = set().union(*member_sets) if member_sets else set()
+    overlaps = sum(1 for member in union if sum(member in values for values in member_sets) > 1)
+    return {
+        "complete": bool(member_sets) and all(member_sets),
+        "source_count": len(source_ids),
+        "member_count": len(union),
+        "overlap_count": overlaps,
+        "exact_source_member_coverage": overlaps == 0 and bool(member_sets),
+    }
+
+
+def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | None = None) -> dict:
+    """Student-free CE-owned family reconciliation matrix.
+
+    This is deliberately read-only. Missing registrations and bridge repairs
+    are represented as actionable rows for the reviewed operation path.
+    """
+    course_key = str(course_id or "").strip()
+    if not course_key:
+        return {"ok": False, "error": "course_id is required"}
+    try:
+        rows = assignments if assignments is not None else _course_assignments(course_key)
+        families = differentiated_bridge.discover_families(
+            rows, config.list_sis_grade_bridges(course_key)
+        )
+        registrations = config.list_sis_grade_bridges(course_key)
+    except Exception as exc:
+        return {"ok": False, "error": "bridge discovery could not be completed", "blocking": True}
+
+    matrix = []
+    for family in families:
+        title = family["family_title"]
+        registration = next(
+            (record for record in registrations
+             if record.get("family_key") == family["family_key"]
+             or str(record.get("family_title") or "").casefold() == title.casefold()),
+            None,
+        )
+        source_ids = family["source_assignment_ids"]
+        coverage = _student_free_coverage(course_key, source_ids) if assignments is None else {
+            "complete": None, "source_count": len(source_ids),
+            "member_count": None, "overlap_count": None,
+            "exact_source_member_coverage": None,
+        }
+        reasons = []
+        status = "synced"
+        bridge = None
+        if family["source_count"] < 2 or len(family["source_tiers"]) != family["source_count"]:
+            status = "incomplete"
+            reasons.append("exact_source_member_coverage_unavailable")
+        if family["bridge_count"] > 1:
+            status = "blocked"
+            reasons.append("multiple_bridge_targets")
+        if registration is None:
+            status = "missing" if status == "synced" else status
+            reasons.append("registration_missing")
+        elif str(registration.get("bridge_assignment_id") or "") not in family["bridge_assignment_ids"]:
+            status = "blocked"
+            reasons.append("registered_bridge_not_in_family")
+        elif family["bridge_count"] == 1:
+            bridge = next((row for row in rows if str(row.get("id")) == family["bridge_assignment_ids"][0]), None)
+            if bridge:
+                source_rows = [row for row in rows if str(row.get("id")) in source_ids]
+                raw_due = next((row.get("due_at") for row in source_rows if row.get("due_at")), None)
+                expected_due = (
+                    differentiated_bridge.require_family_delivery(raw_due, "matrix")[2]
+                    if raw_due else None
+                )
+                expected = {
+                    "name": differentiated_bridge.bridge_title(title),
+                    "description": differentiated_bridge.bridge_description(),
+                    "due_at": expected_due,
+                }
+                drift = sorted(field for field, value in expected.items() if bridge.get(field) != value)
+                if drift:
+                    status = "drifted"
+                    reasons.append("bridge_shape_drift")
+                    family["drift_fields"] = drift
+        matrix.append({
+            "family_key": family["family_key"],
+            "family_title": title,
+            "status": status,
+            "source_assignment_ids": source_ids,
+            "source_titles": family.get("source_titles", []),
+            "source_tiers": family["source_tiers"],
+            "bridge_assignment_id": (family["bridge_assignment_ids"][0] if len(family["bridge_assignment_ids"]) == 1 else None),
+            "source_count": family["source_count"],
+            "bridge_count": family["bridge_count"],
+            "grading_excluded": family["grading_excluded"],
+            "bridge_eligible": status not in {"blocked", "incomplete"},
+            "coverage": coverage,
+            "drift_fields": family.get("drift_fields", []),
+            "reasons": reasons,
+            "identity_source": family["identity_source"],
+        })
+    return {"ok": True, "course_id": course_key, "matrix": matrix}
+
+
 def preview_sis_grade_bridge(
     course_id: str, family_title: str, *, write_origin: str = "assistant",
+    discovered_family: dict | None = None,
 ) -> dict:
     course_key = str(course_id or "").strip()
     title = str(family_title or "").strip()
@@ -78,6 +203,7 @@ def preview_sis_grade_bridge(
             "family_title": title,
             "registration": registration,
             "write_origin": write_origin,
+            "discovered_family": discovered_family,
         })
         provisional = adapter.verify_targets(
             payload, [{"course_id": course_key}]
@@ -151,6 +277,22 @@ def preview_sis_grade_bridge(
         "review_digest": batch["review_digest"],
         "preview": frozen,
     }
+
+
+def preview_sis_grade_bridge_reconciliation(
+    course_id: str, family_title: str, *, assignments: list[dict] | None = None,
+) -> dict:
+    """Create a reviewed operation for a CE-discovered missing/drifted family."""
+    matrix = reconcile_sis_grade_bridges(course_id, assignments=assignments)
+    if not matrix.get("ok"):
+        return matrix
+    row = next((item for item in matrix["matrix"] if item["family_title"] == family_title), None)
+    if row is None:
+        return {"ok": False, "error": "differentiated family was not discovered", "blocking": True}
+    if row["status"] not in {"missing", "drifted"}:
+        return {"ok": False, "error": f"family is {row['status']}", "blocking": row["status"] in {"blocked", "incomplete"}}
+    family = dict(row)
+    return preview_sis_grade_bridge(course_id, family_title, discovered_family=family)
 
 
 def apply_sis_grade_bridge(
@@ -229,6 +371,8 @@ def _result_projection(operation_key: str, result: dict, fallback: dict) -> dict
 
 __all__ = [
     "list_sis_grade_bridges",
+    "reconcile_sis_grade_bridges",
+    "preview_sis_grade_bridge_reconciliation",
     "preview_sis_grade_bridge",
     "apply_sis_grade_bridge",
 ]

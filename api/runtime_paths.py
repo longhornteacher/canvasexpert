@@ -88,6 +88,22 @@ def library_folder(name: str) -> Path | None:
     return Path(value) if value else None
 
 
+def assignments_root() -> Path | None:
+    """The sole authored/staged assignment source tree."""
+    value = _workspace_module().assignments_root()
+    return Path(value) if value else None
+
+
+def shared_assignments_root() -> Path | None:
+    value = _workspace_module().shared_assignments_root()
+    return Path(value) if value else None
+
+
+def course_assignments_root(course_id: str, course_nickname: str = "") -> Path | None:
+    value = _workspace_module().course_assignments_root(course_id, course_nickname)
+    return Path(value) if value else None
+
+
 def printables_dir() -> Path:
     return workspace_folder("Printables") or (app_root() / "Finished_Exports" / "Printables")
 
@@ -112,13 +128,18 @@ def content_folders(kind: str) -> list[Path]:
     if workspace_name is None:
         raise ValueError(f"unknown content folder kind: {kind}")
 
-    # The synced Library is the only teacher-facing source for all picker
-    # kinds. Bundled qf_materials files are examples, not current workspace
-    # content, and must never appear in a picker or become a silent fallback.
+    # AssignmentForge content has one canonical source tree. Bundled
+    # qf_materials files are examples, not current workspace content, and must
+    # never appear in a picker or become a silent fallback.
     folders: list[Path] = []
-    current = library_folder(workspace_name)
-    if current:
-        folders.append(current)
+    if kind == "assignment":
+        current = assignments_root()
+        if current:
+            folders.append(current)
+    else:
+        current = library_folder(workspace_name)
+        if current:
+            folders.append(current)
     # An unconfigured workspace yields an empty list rather than silently
     # serving bundled repo copies; the picker's existing setup guidance is the
     # pointer to configure one.
@@ -129,8 +150,8 @@ def inbox_folder(kind: str) -> Path | None:
     """Per-kind To Review drop folder where an MCP-capable assistant stages a
     draft for the teacher to review and push.
 
-    Distinct from the teacher's own library folders returned by
-    ``content_folders`` (Library/Quizzes, Assignments, Pages): this is
+    Distinct from the teacher's own content folders returned by
+    ``content_folders`` (Library/Quizzes, Assignments, Library/Pages): this is
     a separate, marker-gated pickup surface -- see
     ``webui.deps.list_inbox_files``. Not included in ``content_folders``'s
     plain glob, since that glob has no marker gate and would surface a

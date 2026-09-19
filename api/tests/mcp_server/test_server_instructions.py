@@ -44,6 +44,7 @@ RESULT_NEXT_TOOLS = {
     "get_scoring_packet",
     "prepare_scoring_session",
     "preview_sis_grade_bridge",
+    "preview_sis_grade_bridge_reconciliation",
     "preview_learning_objective",
     "preview_roster_student_change",
     "preview_content_push",
@@ -189,7 +190,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 36
+    assert len(listed) == 40
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -298,9 +299,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 36
-    assert len(_synthetic_mcp["calls"]) == 36
-    assert len(_synthetic_mcp["gated"]) == 36
+    assert len(results) == 40
+    assert len(_synthetic_mcp["calls"]) == 40
+    assert len(_synthetic_mcp["gated"]) == 40
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

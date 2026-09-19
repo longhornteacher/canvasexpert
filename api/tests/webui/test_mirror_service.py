@@ -449,7 +449,10 @@ def test_scoring_refresh_runs_a_full_pass_without_comments(monkeypatch, _configu
 
     result = mirror_service._run_scoring_course_refresh("111")
 
-    assert result == {"ok": True, "assignments": 2}
+    assert result["ok"] is True
+    assert result["assignments"] == 2
+    assert result["status"] == "synced"
+    assert result["mirror_revision"] == 1
     assert captured["course_id"] == "111"
     assert captured["course_name"] == "Course One"
     assert captured["with_comments"] is False

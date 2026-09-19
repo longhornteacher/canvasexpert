@@ -82,6 +82,32 @@
       "reason": "Each copied final row is write-ahead checkpointed and exactly verified; after confirmed grade writes the adapter invokes mirror_service.notify_course_changed once for the course, reusing the targeted submissions delta refresh."
     },
     {
+      "path": "api/operation_ledger/adapters/sis_grade_bridge.py",
+      "symbol": "SisGradeBridgeAdapter._execute_reconciliation",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(\"POST\", <course_assignments_path>, request) [create discovered bridge repair]",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "catalog.assignments"
+      ],
+      "reconciliation": "invalidate",
+      "reason": "Creates the exact CE-discovered bridge only through a reviewed Operation Ledger reconciliation. The assignment catalog is invalidated after the confirmed repair."
+    },
+    {
+      "path": "api/operation_ledger/adapters/sis_grade_bridge.py",
+      "symbol": "SisGradeBridgeAdapter._execute_reconciliation",
+      "detector": "attr:_canvas_send",
+      "call_index": 2,
+      "call_form": "canvas_client._canvas_send(\"PUT\", <bridge_assignment_path>, request) [repair discovered bridge shape]",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "catalog.assignments"
+      ],
+      "reconciliation": "invalidate",
+      "reason": "Repairs only the frozen drift fields of the exact discovered bridge after review and re-verifies the result before registration."
+    },
+    {
       "path": "api/operation_ledger/adapters/assignment_tiered.py",
       "symbol": "execute",
       "detector": "attr:_canvas_send",

@@ -67,7 +67,8 @@ def test_all_content_pickers_use_only_the_synced_library(tmp_path, monkeypatch):
         assert picker() == [], kind
 
         root = tmp_path / kind
-        folder = root / "Library" / runtime_paths._KIND_WORKSPACE_NAMES[kind]
+        folder = (root / "Assignments" if kind == "assignment"
+                  else root / "Library" / runtime_paths._KIND_WORKSPACE_NAMES[kind])
         folder.mkdir(parents=True)
         (folder / f"{kind}-source.txt").write_text("library\n", encoding="utf-8")
         monkeypatch.setattr(workspace, "workspace_root", lambda root=root: str(root))

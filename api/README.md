@@ -89,8 +89,8 @@ lives in `api/webui/config.json` (gitignored).
 ## Workspace & multi-PC
 
 When OneDrive is available, teacher-authored content lives in
-`OneDrive\CanvasExpert\` with `Library\AI Authoring\`, `Library\Quizzes\`,
-`Library\Assignments\`, `Library\Pages\`, `Printables\`,
+`OneDrive\CanvasExpert\` with `Assignments\`, `Library\AI Authoring\`,
+`Library\Quizzes\`, `Library\Pages\`, `Printables\`,
 `Canvas Uploads\`, and synced `settings.json`. Human-facing student work is
 canonical under `Student Work\Submissions\<Course>\Assignments\<Assignment>\`;
 pseudonymized artifacts live under `For AI\`, derived output under

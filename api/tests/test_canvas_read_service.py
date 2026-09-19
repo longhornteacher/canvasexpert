@@ -58,7 +58,7 @@ def test_private_scopes_have_exact_copied_local_envelopes(tmp_path):
     expected_keys = {
         "course_id", "scope", "state", "capability", "source", "last_success_at",
         "last_attempt_at", "canvas_observed_at", "retry_after", "generation",
-        "error_code", "records",
+        "mirror_revision", "snapshot_id", "refresh_state", "error_code", "records",
     }
 
     results = [reader(COURSE, root=str(tmp_path)) for reader in readers]

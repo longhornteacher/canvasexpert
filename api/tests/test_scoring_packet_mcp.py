@@ -539,7 +539,8 @@ def test_get_scoring_packet_missing_bundle(monkeypatch, tmp_path):
     result = tools.get_scoring_packet("s1")
 
     assert result["ok"] is False
-    assert "Safe AI Packet student response bundle is missing" in result["error"]
+    assert result["code"] == "packet_missing"
+    assert "SAFE scoring packet is missing or invalid" in result["error"]
 
 
 def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):

@@ -23,6 +23,99 @@ BRIDGE_SHAPE_FIELDS = (
     "grading_type", "submission_types", "published", "only_visible_to_overrides",
     "omit_from_final_grade", "post_to_sis", "overrides",
 )
+RECONCILIATION_FIELDS = ("name", "description", "due_at")
+
+_FAMILY_KEYS = ("family_id", "differentiation_family_id", "canonical_family_id")
+_TIER_KEYS = ("tier", "canonical_tier", "variant", "variant_label")
+
+
+def _metadata_value(assignment: dict, keys: tuple[str, ...]):
+    metadata = assignment.get("metadata")
+    candidates = [assignment, metadata if isinstance(metadata, dict) else {}]
+    for candidate in candidates:
+        for key in keys:
+            value = candidate.get(key)
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def canonical_family_key(assignment: dict) -> str | None:
+    value = _metadata_value(assignment, _FAMILY_KEYS)
+    return str(value).strip() if value not in (None, "") else None
+
+
+def canonical_assignment_tier(assignment: dict) -> str | None:
+    value = _metadata_value(assignment, _TIER_KEYS)
+    if value in (None, ""):
+        return None
+    try:
+        return canonical_tier(value)
+    except ValueError:
+        return None
+
+
+def normalized_family_title(value: object) -> str:
+    """Normalize only for the legacy title fallback, never as primary identity."""
+    title = normalize_student_text(value or "").strip()
+    title = re.sub(r"\s*[-–—:]\s*(?:Support|Core|Accelerate|Extend|Bridge)\s*$", "", title, flags=re.I)
+    return title.strip()
+
+
+def discover_families(assignments: list[dict], registrations: list[dict] | None = None) -> list[dict]:
+    """Return student-free CE-owned family candidates from assignment metadata.
+
+    Stable family/tier metadata wins. Title normalization is used only when an
+    assignment has no stable family metadata at all.
+    """
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for assignment in assignments or []:
+        if not isinstance(assignment, dict) or not assignment.get("id"):
+            continue
+        family_key = canonical_family_key(assignment)
+        tier = canonical_assignment_tier(assignment)
+        identity = "metadata"
+        is_bridge = (
+            _metadata_value(assignment, ("bridge", "is_bridge", "bridge_assignment")) is True
+            or str(assignment.get("name") or "").strip().casefold().endswith(" - bridge")
+        )
+        if assignment.get("post_to_sis") is True and canonical_assignment_tier(assignment) is None and not is_bridge:
+            continue
+        if not family_key or not tier:
+            if family_key and is_bridge:
+                groups.setdefault((family_key, identity), []).append(assignment)
+                continue
+            family_key = normalized_family_title(assignment.get("name"))
+            tier = canonical_assignment_tier({"tier": assignment.get("tier")}) or "unknown"
+            identity = "title_fallback"
+        if not family_key or tier == "unknown":
+            continue
+        groups.setdefault((family_key, identity), []).append(assignment)
+    result = []
+    for (family_key, identity), rows in sorted(groups.items(), key=lambda item: item[0]):
+        tiers = {}
+        bridges = []
+        for row in rows:
+            tier = canonical_assignment_tier(row)
+            if tier:
+                tiers.setdefault(tier, []).append(row)
+            marker = _metadata_value(row, ("bridge", "is_bridge", "bridge_assignment"))
+            if marker is True or str(row.get("name") or "").strip().casefold().endswith(" - bridge"):
+                bridges.append(row)
+        source_rows = [row for values in tiers.values() for row in values]
+        result.append({
+            "family_key": family_key,
+            "family_title": normalized_family_title(rows[0].get("name")),
+            "identity_source": identity,
+            "source_assignment_ids": sorted(str(row.get("id")) for row in source_rows),
+            "source_titles": [str(row.get("name") or "") for row in sorted(source_rows, key=lambda row: str(row.get("id")))],
+            "source_tiers": sorted(tiers),
+            "bridge_assignment_ids": sorted(str(row.get("id")) for row in bridges),
+            "source_count": len(source_rows),
+            "bridge_count": len(bridges),
+            "grading_excluded": all(row.get("omit_from_final_grade") is True for row in source_rows),
+        })
+    return result
 
 
 def canonical_tier(value: object) -> str:
@@ -571,11 +664,15 @@ __all__ = [
     "assignment_shape",
     "bridge_description",
     "bridge_matches",
+    "canonical_assignment_tier",
+    "canonical_family_key",
     "canonical_tier",
     "dashboard_url",
+    "discover_families",
     "execute_family_tail",
     "expected_bridge",
     "normalize_base_title",
+    "normalized_family_title",
     "require_family_delivery",
     "reconcile_family_tail",
     "resolve_public_tags",

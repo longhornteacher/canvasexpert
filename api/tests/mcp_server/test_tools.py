@@ -646,7 +646,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 36
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 40
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -1679,8 +1679,10 @@ def test_server_registers_the_expected_tool_set():
         "stage_content", "push_content_live",
         "preview_assignment_update", "apply_assignment_update",
         # Shipped with the SIS grade bridge; this set was never updated with them.
-        "list_sis_grade_bridges", "preview_sis_grade_bridge",
+        "list_sis_grade_bridges", "reconcile_sis_grade_bridges",
+        "preview_sis_grade_bridge", "preview_sis_grade_bridge_reconciliation",
         "apply_sis_grade_bridge",
+        "preview_workspace_reset", "apply_workspace_reset",
         "get_course_pages", "list_learning_objectives", "preview_learning_objective",
             "apply_learning_objective", "delete_learning_objective",
             "get_roster_student_settings", "preview_roster_student_change",

@@ -48,6 +48,20 @@ class SisGradeBridgeAdapter:
             prepare_request.get("family_title"), "family_title"
         )
         registration = prepare_request.get("registration")
+        discovered = prepare_request.get("discovered_family")
+        if not registration and isinstance(discovered, dict):
+            source_ids = [_required_text(v, "source_assignment_id") for v in discovered.get("source_assignment_ids") or []]
+            if len(source_ids) < 2:
+                raise ValueError("discovered family has fewer than two source assignments")
+            return {
+                "mode": "reconcile", "course_id": course_id,
+                "family_title": family_title,
+                "family_key": _required_text(discovered.get("family_key"), "family_key"),
+                "source_assignment_ids": source_ids,
+                "source_titles": [str(v or "").strip() for v in discovered.get("source_titles") or []],
+                "bridge_assignment_id": str(discovered.get("bridge_assignment_id") or "").strip() or None,
+                "write_origin": "assistant",
+            }
         if not registration:
             raise ValueError(
                 "Differentiated family is not registered; create it through "
@@ -100,6 +114,15 @@ class SisGradeBridgeAdapter:
         if baseline.get("blocking_error"):
             raise ValueError(str(baseline["blocking_error"]))
         frozen = copy.deepcopy(payload)
+        if payload.get("mode") == "reconcile":
+            frozen.update({
+                "source_assignment_ids": list(baseline["source_assignment_ids"]),
+                "source_titles": list(baseline["source_titles"]),
+                "bridge_assignment_id": baseline.get("bridge_assignment_id"),
+                "expected_bridge": copy.deepcopy(baseline["expected_bridge"]),
+                "repair_fields": list(baseline.get("drift_fields") or []),
+            })
+            return frozen
         frozen.update({
             "source_assignment_ids": list(baseline["source_assignment_ids"]),
             "source_titles": list(baseline["source_titles"]),
@@ -159,6 +182,8 @@ class SisGradeBridgeAdapter:
         )
 
     def capture_baseline(self, payload: dict, target: dict) -> dict:
+        if payload.get("mode") == "reconcile":
+            return self._capture_reconciliation_baseline(payload, target)
         try:
             return self._capture_baseline(payload, target)
         except _BridgeInvariantError as exc:
@@ -437,12 +462,28 @@ class SisGradeBridgeAdapter:
         return baseline
 
     def check_drift(self, payload: dict, target: dict, baseline: dict) -> bool:
+        if payload.get("mode") == "reconcile":
+            fresh = self._capture_reconciliation_baseline(payload, target)
+            return (
+                fresh.get("revision") != baseline.get("revision")
+                or fresh.get("bridge_exists") != baseline.get("bridge_exists")
+                or fresh.get("blocking_error") != baseline.get("blocking_error")
+            )
         fresh = self.capture_baseline(payload, target)
         if fresh.get("blocking_error"):
             return True
         return fresh.get("validation_digest") != baseline.get("validation_digest")
 
     def freeze_review(self, payload: dict, target: dict, baseline: dict) -> dict:
+        if payload.get("mode") == "reconcile":
+            return {
+                "course_id": target["course_id"],
+                "family_title": payload["family_title"],
+                "status": "missing" if not baseline.get("bridge_exists") else "drifted",
+                "bridge_assignment_id": baseline.get("bridge_assignment_id"),
+                "repair_fields": list(baseline.get("drift_fields") or []),
+                "source_count": len(baseline.get("source_assignment_ids") or []),
+            }
         if baseline.get("blocking_error"):
             raise ValueError(str(baseline["blocking_error"]))
         return {
@@ -462,6 +503,8 @@ class SisGradeBridgeAdapter:
         }
 
     def initial_steps(self, payload: dict, baseline: dict) -> list[dict]:
+        if payload.get("mode") == "reconcile":
+            return [models.new_step("create_bridge" if not baseline.get("bridge_exists") else "repair_bridge")]
         keys = (
             f"copy_grade:{index}"
             for index, _entry in enumerate(baseline.get("grade_entries") or [])
@@ -472,6 +515,8 @@ class SisGradeBridgeAdapter:
         self, payload: dict, target: dict, baseline: dict,
         claim: dict, context,
     ) -> dict:
+        if payload.get("mode") == "reconcile":
+            return self._execute_reconciliation(payload, target, baseline, context)
         if baseline.get("blocking_error"):
             return adapter_support.build_result(
                 "blocked",
@@ -562,6 +607,86 @@ class SisGradeBridgeAdapter:
             returned_object_id=bridge_id,
             returned_object_url=(final_assignment or {}).get("html_url"),
         )
+
+    def _capture_reconciliation_baseline(self, payload: dict, target: dict) -> dict:
+        course_id = target["course_id"]
+        source_rows = []
+        for source_id in payload.get("source_assignment_ids") or []:
+            source, error = adapter_support.get_assignment(course_id, source_id)
+            if error or not source:
+                return {"blocking_error": "source_exact_id_unverified"}
+            source_rows.append(source)
+        if len({str(row.get("id")) for row in source_rows}) != len(source_rows):
+            return {"blocking_error": "duplicate_source_assignment"}
+        first = source_rows[0]
+        due_at = first.get("due_at")
+        if not due_at or any(row.get("due_at") != due_at for row in source_rows):
+            return {"blocking_error": "mixed_effective_due_dates"}
+        expected = {
+            "name": differentiated_bridge.bridge_title(payload["family_title"]),
+            "description": differentiated_bridge.bridge_description(),
+            "due_at": differentiated_bridge.require_family_delivery(due_at, "reconciliation")[2],
+        }
+        bridge_id = str(payload.get("bridge_assignment_id") or "") or None
+        bridge = None
+        if bridge_id:
+            bridge, error = adapter_support.get_assignment(course_id, bridge_id)
+            if error or not bridge:
+                bridge_id, bridge = None, None
+        drift_fields = [field for field, value in expected.items() if bridge and bridge.get(field) != value]
+        return {
+            "source_assignment_ids": [str(row.get("id")) for row in source_rows],
+            "source_titles": [str(row.get("name") or "") for row in source_rows],
+            "bridge_assignment_id": bridge_id,
+            "bridge_exists": bridge is not None,
+            "bridge": bridge or {}, "expected_bridge": expected,
+            "drift_fields": drift_fields,
+            "revision": (bridge or {}).get("updated_at") or differentiated_bridge.structural_digest(
+                differentiated_bridge.assignment_shape(bridge or {}, [])
+            ),
+        }
+
+    def _execute_reconciliation(self, payload: dict, target: dict, baseline: dict, context) -> dict:
+        if baseline.get("blocking_error"):
+            return adapter_support.build_result("blocked", steps=copy.deepcopy(target.get("steps") or []), error_code=baseline["blocking_error"])
+        course_id = target["course_id"]
+        steps = copy.deepcopy(target.get("steps") or [])
+        step = steps[0] if steps else models.new_step("create_bridge")
+        expected = baseline["expected_bridge"]
+        bridge_id = baseline.get("bridge_assignment_id")
+        if not bridge_id:
+            path = f"/api/v1/courses/{course_id}/assignments"
+            request = {"assignment": {**expected, "published": True, "omit_from_final_grade": False, "post_to_sis": True}}
+            context.before_send(step["step_key"], models.sha256_dict({"method": "POST", "path": path, "payload": request}))
+            response, error = canvas_client._canvas_send("POST", path, request)
+            if error or not isinstance(response, dict) or not response.get("id"):
+                step["state"] = "sent_unknown" if adapter_support.is_uncertain(error) else "blocked"
+                step["error_code"] = "bridge_create_uncertain" if step["state"] == "sent_unknown" else "bridge_create_rejected"
+                return adapter_support.build_result(step["state"], steps=steps, error_code=step["error_code"])
+            bridge_id = str(response["id"])
+        elif baseline.get("drift_fields"):
+            request = {"assignment": {field: expected[field] for field in baseline["drift_fields"]}}
+            path = f"/api/v1/courses/{course_id}/assignments/{bridge_id}"
+            context.before_send(step["step_key"], models.sha256_dict({"method": "PUT", "path": path, "payload": request}))
+            _response, error = canvas_client._canvas_send("PUT", path, request)
+            if error:
+                step["state"] = "sent_unknown" if adapter_support.is_uncertain(error) else "blocked"
+                step["error_code"] = "bridge_repair_uncertain" if step["state"] == "sent_unknown" else "bridge_repair_rejected"
+                return adapter_support.build_result(step["state"], steps=steps, error_code=step["error_code"])
+        bridge, error = adapter_support.get_assignment(course_id, bridge_id)
+        if error or any(bridge.get(field) != value for field, value in expected.items()):
+            return adapter_support.build_result("sent_unknown", steps=steps, returned_object_id=bridge_id, error_code="bridge_repair_unverified")
+        config.save_sis_grade_bridge(course_id, {
+            "family_title": payload["family_title"], "family_key": payload["family_key"],
+            "source_assignment_ids": baseline["source_assignment_ids"],
+            "source_titles": baseline["source_titles"], "bridge_assignment_id": bridge_id,
+            "bridge_state_digest": differentiated_bridge.structural_digest(
+                differentiated_bridge.assignment_shape(bridge, [])
+            ),
+        })
+        step["state"] = "applied"
+        step["returned_object_id"] = bridge_id
+        return adapter_support.build_result("applied", steps=steps, returned_object_id=bridge_id, returned_object_url=bridge.get("html_url"))
 
     def _stop_after_error(
         self, context, steps: list[dict], step: dict, error: str,

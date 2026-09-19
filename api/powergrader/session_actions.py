@@ -317,6 +317,7 @@ def push_grades(
     save_session,
     canvas_send,
     canvas_get,
+    idempotency_key: str = "",
 ) -> tuple[dict, int]:
     """Apply only a still-valid, drift-checked frozen review."""
     session = load_session(session_id)
@@ -338,6 +339,7 @@ def push_grades(
 
     students = {str(student.get("user_id")): student for student in session.get("students", [])}
     idempotency = session.setdefault("push_idempotency", {})
+    request_key = str(idempotency_key or "")
     preflight = []
     for user_id in requested:
         student = students.get(user_id)
@@ -348,10 +350,11 @@ def push_grades(
         if payload_digest != pending.get("payload_digests", {}).get(user_id):
             return _review_error("payload_changed")
         target_digest = pending.get("target_digests", {}).get(user_id)
-        if idempotency.get(user_id) == target_digest:
+        idem_slot = f"{request_key}:{user_id}" if request_key else user_id
+        if idempotency.get(idem_slot) == target_digest:
             preflight.append((
                 user_id, student, payload, target_digest, "already_applied", None,
-                payload_digest,
+                payload_digest, idem_slot,
             ))
             continue
         if student.get("status") != "approved" or student.get("posted"):
@@ -367,12 +370,12 @@ def push_grades(
             return _review_error("drift_detected")
         preflight.append((
             user_id, student, payload, target_digest, "pending", baseline,
-            payload_digest,
+            payload_digest, idem_slot,
         ))
 
     results = []
     pushed = 0
-    for user_id, student, payload, target_digest, state, baseline, payload_digest in preflight:
+    for user_id, student, payload, target_digest, state, baseline, payload_digest, idem_slot in preflight:
         if state == "already_applied":
             student["posted"] = True
             student["status"] = "posted"
@@ -419,7 +422,7 @@ def push_grades(
         student.pop("push_state", None)
         student["posted"] = True
         student["status"] = "posted"
-        idempotency[user_id] = target_digest
+        idempotency[idem_slot] = target_digest
         pushed += 1
         results.append({
             "user_id": user_id, "status": "pushed", "code": "pushed",
@@ -440,6 +443,10 @@ def push_grades(
         "ok": failed == 0 and attention == 0,
         "pushed": pushed,
         "results": results,
+        "posted_rows": [result["user_id"] for result in results
+                         if result["status"] in {"pushed", "already_applied"}],
+        "remaining_rows": [str(student.get("user_id")) for student in session.get("students", [])
+                           if not student.get("posted") and student.get("user_id") is not None],
         "errors": [result["code"] for result in results
                    if result["status"] in {"failed", "attention"}],
     }, 200

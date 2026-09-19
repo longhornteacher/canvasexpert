@@ -240,7 +240,7 @@ def settings_page(request: Request):
         "workspace_files": [
             {"name": "Library / AI Authoring", "path": workspace.library_folder("AI Authoring")},
             {"name": "Library / Quizzes", "path": workspace.library_folder("Quizzes")},
-            {"name": "Library / Assignments", "path": workspace.library_folder("Assignments")},
+            {"name": "Assignments", "path": workspace.assignments_root()},
             {"name": "Library / Pages", "path": workspace.library_folder("Pages")},
             {"name": "Library / Source Materials", "path": workspace.library_folder("Source Materials")},
             {"name": "To Review", "path": workspace.to_review_root()},

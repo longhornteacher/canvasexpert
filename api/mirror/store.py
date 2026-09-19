@@ -39,6 +39,9 @@ from api import feedback_scrub
 
 MIRROR_VERSION = 1
 SYNC_FILENAME = "_sync.v1.json"
+REFRESH_VERSION = 1
+REFRESH_FILENAME = "_refresh.v1.json"
+REFRESH_STATES = {"syncing", "synced", "failed"}
 ROSTER_FILENAME = "roster.v1.json"
 GROUPS_FILENAME = "groups.v1.json"
 ASSIGNMENTS_FILENAME = "assignments.v1.json"
@@ -66,6 +69,11 @@ PASS_STATES = {"current", "stale", "unavailable"}
 
 _ENVELOPE_KEYS = {"state", "last_success_at", "last_attempt_at", "error_code"}
 _SYNC_KEYS = {"schema_version", "course_id", "passes", "watermarks"}
+_REFRESH_KEYS = {
+    "schema_version", "course_id", "operation_id", "state",
+    "requested_at", "started_at", "finished_at", "error_code",
+    "revision", "snapshot_id",
+}
 _WATERMARK_KEYS = {"submitted_since", "graded_since"}
 _ROSTER_KEYS = {"schema_version", "course_id", "students", "sections"} | _ENVELOPE_KEYS
 _GROUPS_KEYS = {"schema_version", "course_id", "categories"} | _ENVELOPE_KEYS
@@ -174,6 +182,11 @@ def course_dir(course_id, root=None):
 def sync_path(course_id, root=None):
     directory = course_dir(course_id, root)
     return os.path.join(directory, SYNC_FILENAME) if directory else None
+
+
+def refresh_path(course_id, root=None):
+    directory = course_dir(course_id, root)
+    return os.path.join(directory, REFRESH_FILENAME) if directory else None
 
 
 def roster_path(course_id, root=None):
@@ -596,6 +609,30 @@ def validate_sync(document: dict, course_id) -> dict:
     for key in _WATERMARK_KEYS:
         if not isinstance(document["watermarks"][key], str):
             raise ValueError(f"sync watermark {key} is invalid")
+    return document
+
+
+def validate_refresh(document: dict, course_id) -> dict:
+    _require_exact_keys(document, _REFRESH_KEYS, "refresh")
+    if document["schema_version"] != REFRESH_VERSION:
+        raise ValueError("refresh schema_version is unsupported")
+    if str(document["course_id"]) != str(course_id):
+        raise ValueError("refresh course_id mismatch")
+    if document["state"] not in REFRESH_STATES:
+        raise ValueError("refresh state is invalid")
+    for key in ("requested_at", "started_at", "finished_at"):
+        if document[key] and not _valid_iso_z(document[key]):
+            raise ValueError(f"refresh {key} is invalid")
+    if not isinstance(document["operation_id"], str) or not document["operation_id"]:
+        raise ValueError("refresh operation_id is invalid")
+    if not isinstance(document["error_code"], str):
+        raise ValueError("refresh error_code is invalid")
+    if not isinstance(document["revision"], int) or isinstance(document["revision"], bool) or document["revision"] < 0:
+        raise ValueError("refresh revision is invalid")
+    if not isinstance(document["snapshot_id"], str):
+        raise ValueError("refresh snapshot_id is invalid")
+    if document["state"] == "synced" and (document["revision"] < 1 or not document["snapshot_id"]):
+        raise ValueError("synced refresh must identify a snapshot")
     return document
 
 
@@ -1174,6 +1211,81 @@ def read_sync(course_id, *, root=None) -> dict:
     document = _read_document(sync_path(course_id, root),
                               lambda d: validate_sync(d, course_id))
     return document if document is not None else default_sync(course_id)
+
+
+def default_refresh(course_id) -> dict:
+    return {
+        "schema_version": REFRESH_VERSION,
+        "course_id": str(course_id),
+        "operation_id": "uninitialized",
+        "state": "failed",
+        "requested_at": "",
+        "started_at": "",
+        "finished_at": "",
+        "error_code": "not_refreshed",
+        "revision": 0,
+        "snapshot_id": "",
+    }
+
+
+def read_refresh(course_id, *, root=None) -> dict:
+    document = _read_document(refresh_path(course_id, root),
+                              lambda d: validate_refresh(d, course_id))
+    return document if document is not None else default_refresh(course_id)
+
+
+def begin_refresh(course_id, *, operation_id: str, requested_at: str | None = None,
+                  root=None) -> dict:
+    """Durably mark one refresh attempt as in progress.
+
+    A prior usable revision is retained while the new attempt runs.  The
+    operation id is caller-owned so a coordinator can return the same identity
+    to every coalesced waiter.
+    """
+    _require_dir(course_id, root)
+    attempted_at = requested_at or now_iso()
+    with course_lock(course_id):
+        previous = read_refresh(course_id, root=root)
+        document = {
+            "schema_version": REFRESH_VERSION,
+            "course_id": str(course_id),
+            "operation_id": str(operation_id),
+            "state": "syncing",
+            "requested_at": attempted_at,
+            "started_at": attempted_at,
+            "finished_at": "",
+            "error_code": "",
+            "revision": previous.get("revision", 0),
+            "snapshot_id": previous.get("snapshot_id", ""),
+        }
+        return _write_document(refresh_path(course_id, root),
+                               validate_refresh(document, course_id))
+
+
+def finish_refresh(course_id, *, operation_id: str, ok: bool,
+                   finished_at: str | None = None, error_code: str = "",
+                   root=None) -> dict:
+    """Commit the terminal lifecycle state after projection writes settle."""
+    _require_dir(course_id, root)
+    finished_at = finished_at or now_iso()
+    with course_lock(course_id):
+        document = read_refresh(course_id, root=root)
+        if document.get("operation_id") != str(operation_id):
+            raise ValueError("refresh_operation_mismatch")
+        if ok:
+            revision = int(document.get("revision", 0)) + 1
+            document.update({
+                "state": "synced", "finished_at": finished_at,
+                "error_code": "", "revision": revision,
+                "snapshot_id": f"{str(course_id)}:{revision}",
+            })
+        else:
+            document.update({
+                "state": "failed", "finished_at": finished_at,
+                "error_code": str(error_code or "sync_failed"),
+            })
+        return _write_document(refresh_path(course_id, root),
+                               validate_refresh(document, course_id))
 
 
 def default_course_context(course_id) -> dict:

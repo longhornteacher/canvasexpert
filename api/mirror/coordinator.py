@@ -42,6 +42,8 @@ class _Job:
     error_code: str = ""
     yields: int = 0
     queue_wait_ms: int = 0
+    mirror_revision: int = 0
+    snapshot_id: str = ""
 
 
 @dataclass
@@ -175,15 +177,22 @@ class MirrorCoordinator:
 
     def _plan_view(self, plan: _Plan) -> dict:
         self._refresh_plan_locked(plan)
-        return {"plan_id": plan.plan_id, "state": plan.state,
+        return {"plan_id": plan.plan_id, "operation_id": plan.plan_id,
+                "state": plan.state,
+                "status": "syncing" if plan.state in {"queued", "running"}
+                          else ("synced" if plan.state == "succeeded" else "failed"),
                 "jobs": [self._job_view(self._jobs[job_id]) for job_id in plan.jobs if job_id in self._jobs]}
 
     @staticmethod
     def _job_view(job: _Job) -> dict:
-        return {"job_id": job.job_id, "course_id": job.course_id, "scope": job.scope,
+        view = {"job_id": job.job_id, "course_id": job.course_id, "scope": job.scope,
                 "priority": job.priority, "state": job.state, "error_class": job.error_class,
                 "error_code": job.error_code,
                 "queue_wait_ms": job.queue_wait_ms, "yield_count": job.yields}
+        if job.mirror_revision or job.snapshot_id:
+            view.update({"mirror_revision": job.mirror_revision,
+                         "snapshot_id": job.snapshot_id})
+        return view
 
     def _refresh_plan_locked(self, plan: _Plan) -> None:
         states = [self._jobs[job_id].state for job_id in plan.jobs if job_id in self._jobs]
@@ -219,6 +228,9 @@ class MirrorCoordinator:
                         job.error_code = str(outcome.get("error_code") or "")
                     else:
                         job.state = "succeeded"
+                    if isinstance(outcome, dict):
+                        job.mirror_revision = int(outcome.get("mirror_revision") or 0)
+                        job.snapshot_id = str(outcome.get("snapshot_id") or "")
             except Exception as error:
                 with self._lock:
                     job.state = "failed"

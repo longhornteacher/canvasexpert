@@ -394,3 +394,34 @@ def test_apply_plan_skips_what_the_answer_skipped():
 
     assert result["ok"] is True
     assert len(sent) == 1 and "9002" in sent[0]
+
+
+def test_apply_plan_reports_exact_partial_post_recovery_rows():
+    session = _session()
+    load, save, _saved = _store(session)
+    live_rows = {}
+    sent = []
+
+    def canvas_send(method, path, payload, timeout=30):
+        user_id = path.rstrip("/").split("/")[-1]
+        sent.append(user_id)
+        if user_id == "9002":
+            return None, "HTTP 400 rejected"
+        live_rows[user_id] = {
+            "score": float(payload["submission"]["posted_grade"]),
+            "grade": payload["submission"]["posted_grade"],
+            "workflow_state": "graded",
+            "submission_comments": [{"id": 1, "created_at": "2026-09-18T12:00:00Z"}],
+        }
+        return {"id": 1}, None
+
+    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    result, _status = scoring_apply.apply_plan(
+        "session-1", expected_digest=plan["digest"], answers={},
+        load_session=load, save_session=save,
+        canvas_get=_canvas_get(live_rows=live_rows), canvas_send=canvas_send)
+
+    assert sent == ["9001", "9002"]
+    assert result["code"] == "partial_post_remaining"
+    assert result["posted_rows"] == ["9001"]
+    assert result["remaining_rows"] == ["9002"]

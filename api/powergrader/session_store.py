@@ -39,6 +39,118 @@ ACTIONABLE_STATUSES = frozenset({"ready", "needs_teacher_input"})
 SUPERSEDED_STATUS = "superseded"
 
 
+def _stable_digest(value) -> str:
+    raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def submission_snapshot_digest(submissions) -> str:
+    """Digest only the private submission identity/version fields used by a session."""
+    rows = []
+    for row in submissions or []:
+        if not isinstance(row, dict):
+            continue
+        rows.append({key: row.get(key) for key in (
+            "user_id", "id", "attempt", "submitted_at", "workflow_state", "score",
+        )})
+    rows.sort(key=lambda row: (str(row.get("user_id") or ""), str(row.get("id") or "")))
+    return _stable_digest(rows)
+
+
+def packet_health(session: dict) -> dict:
+    """Return a non-sensitive packet health record for lifecycle gates."""
+    raw = (session.get("privacy_artifacts") or {}).get("safe_bundle") or ""
+    path = workspace.extended_path(raw) if raw else ""
+    if not path or not os.path.isfile(path):
+        return {"ok": False, "code": "packet_missing"}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            bundle = json.load(handle)
+        from api.powergrader.scoring_packet import validate_safe_bundle
+        verdict = validate_safe_bundle(bundle)
+        return verdict if verdict.get("ok") else {"ok": False, "code": "packet_invalid",
+                                                    "reason": verdict.get("reason")}
+    except Exception:
+        return {"ok": False, "code": "packet_invalid", "reason": "bundle_unreadable"}
+
+
+def session_staleness(session: dict, *, mirror_revision=None,
+                      submission_snapshot=None) -> dict:
+    """Compare a session's frozen inputs with a newly usable local snapshot."""
+    expected_revision = session.get("mirror_revision")
+    if mirror_revision is not None and expected_revision not in (None, ""):
+        if str(mirror_revision) != str(expected_revision):
+            return {"stale": True, "code": "session_stale", "reason": "mirror_revision_changed"}
+    expected_snapshot = session.get("submission_snapshot")
+    if submission_snapshot is not None and expected_snapshot not in (None, ""):
+        actual = (submission_snapshot if isinstance(submission_snapshot, str)
+                  else submission_snapshot_digest(submission_snapshot))
+        if str(actual) != str(expected_snapshot):
+            return {"stale": True, "code": "submission_identity_mismatch",
+                    "reason": "submission_snapshot_changed"}
+    return {"stale": False}
+
+
+def mark_session_stale(session: dict, *, code="session_stale", replacement_session_id="") -> dict:
+    """Record stale state without deleting the private packet/history."""
+    session["status"] = SUPERSEDED_STATUS
+    session["stale_code"] = str(code)
+    session["stale_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if replacement_session_id:
+        session["superseded_by_session_id"] = str(replacement_session_id)
+    return session
+
+
+def result_idempotency_key(session: dict, pseudonym: str, item_id: str,
+                           caller_key: str = "") -> str:
+    return _stable_digest({"session": session.get("session_id"),
+                           "pseudonym": str(pseudonym), "item_id": str(item_id),
+                           "caller_key": str(caller_key or "")})
+
+
+def remember_result(session: dict, pseudonym: str, item_id: str, result: dict,
+                    *, caller_key: str = "") -> str:
+    key = result_idempotency_key(session, pseudonym, item_id, caller_key)
+    session.setdefault("result_idempotency", {})[key] = dict(result)
+    return key
+
+
+def remembered_result(session: dict, pseudonym: str, item_id: str,
+                      *, caller_key: str = "") -> dict | None:
+    value = session.get("result_idempotency", {}).get(
+        result_idempotency_key(session, pseudonym, item_id, caller_key))
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _preparation_state_path(course_id, assignment_id) -> str | None:
+    d = pg_dir()
+    if not d:
+        return None
+    return os.path.join(d, f"prep-{scope_digest(course_id, assignment_id)}.json")
+
+
+def save_preparation_state(course_id, assignment_id, *, scoring_guidance: str) -> None:
+    """Keep teacher guidance private while a refresh is retrying."""
+    path = _preparation_state_path(course_id, assignment_id)
+    if path and str(scoring_guidance or "").strip():
+        atomic_write_json(Path(path), {"scoring_guidance": str(scoring_guidance).strip()})
+
+
+def load_preparation_state(course_id, assignment_id) -> dict:
+    path = _preparation_state_path(course_id, assignment_id)
+    value = _read_json(path) if path else None
+    return value if isinstance(value, dict) else {}
+
+
+def clear_preparation_state(course_id, assignment_id) -> None:
+    path = _preparation_state_path(course_id, assignment_id)
+    if path:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
 def safe_session_id(session_id: str) -> str:
     return "".join(c for c in session_id if c.isalnum() or c == "-")
 

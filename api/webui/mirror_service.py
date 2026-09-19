@@ -129,15 +129,24 @@ def _run_new_quiz_metadata(course_id: str):
 
 
 def _run_course_refresh(course_id: str):
-    """One compatibility job: manual calls legacy sync once; heartbeat is filtered."""
+    """Run one durable, revision-producing course refresh."""
     context = coordinator.current_worker_context()
     with _telemetry("course.refresh"):
         if context.get("priority") in {"background", "concluded"}:
             course = next((item for item in config.active_courses()
                            if str(item.get("id")) == str(course_id)), None)
             return _run_heartbeat_course(course) if course else {"ok": False, "error_class": "course_unavailable"}
-        results = sync_now(course_id)
-        return {"ok": bool(results) and all(result.get("ok") for result in results)}
+        course = next((item for item in config.saved_courses()
+                       if str(item.get("id")) == str(course_id)), None)
+        if not course:
+            return {"ok": False, "error_class": "course_unavailable"}
+        return sync.refresh(
+            course_id,
+            canvas_get_all=canvas_get_all,
+            canvas_get_all_complete=canvas_get_all_complete,
+            course_name=course.get("name"),
+            force=True,
+        )
 
 
 def _run_scoring_course_refresh(course_id: str):
@@ -154,13 +163,12 @@ def _run_scoring_course_refresh(course_id: str):
                        if str(item.get("id")) == str(course_id)), None)
         if not course:
             return {"ok": False, "error_class": "course_unavailable"}
-        return sync.full_pass(
+        return sync.refresh(
             course_id,
             canvas_get_all=canvas_get_all,
             canvas_get_all_complete=canvas_get_all_complete,
             course_name=course.get("name"),
-            bypass_new_quiz_cooldown=True,
-            with_comments=False,
+            force=True, full=True, with_comments=False,
         )
 
 

@@ -27,6 +27,44 @@ class PacketTooLarge(Exception):
     """A required packet envelope or one response segment cannot fit."""
 
 
+def validate_safe_bundle(bundle: object) -> dict:
+    """Validate the minimum SAFE bundle contract before it can authorize work.
+
+    This intentionally validates shape and privacy boundary only.  It does not
+    inspect student prose, which is untrusted content, and it never returns
+    bundle data in the diagnostic result.
+    """
+    if not isinstance(bundle, dict):
+        return {"ok": False, "code": "packet_invalid", "reason": "bundle_not_object"}
+    students = bundle.get("students")
+    if not isinstance(students, list):
+        return {"ok": False, "code": "packet_invalid", "reason": "students_not_list"}
+    seen = set()
+    for student in students:
+        if not isinstance(student, dict):
+            return {"ok": False, "code": "packet_invalid", "reason": "student_not_object"}
+        pseudonym = str(student.get("pseudonym") or "").strip()
+        if not pseudonym or pseudonym in seen:
+            return {"ok": False, "code": "packet_invalid", "reason": "pseudonym_invalid"}
+        seen.add(pseudonym)
+        if any(key in student for key in ("user_id", "canvas_id", "real_name")):
+            return {"ok": False, "code": "packet_invalid", "reason": "identity_field_present"}
+        responses = student.get("responses")
+        if not isinstance(responses, list):
+            return {"ok": False, "code": "packet_invalid", "reason": "responses_not_list"}
+        item_ids = set()
+        for response in responses:
+            if not isinstance(response, dict):
+                return {"ok": False, "code": "packet_invalid", "reason": "response_not_object"}
+            item_id = str(response.get("item_id") or "").strip()
+            if not item_id or item_id in item_ids:
+                return {"ok": False, "code": "packet_invalid", "reason": "item_identity_invalid"}
+            item_ids.add(item_id)
+            if "response" not in response and "oral_reading" not in response:
+                return {"ok": False, "code": "packet_invalid", "reason": "response_text_missing"}
+    return {"ok": True, "student_count": len(students)}
+
+
 def _canonical_digest(value: dict) -> str:
     """SHA-256 over a key-sorted, separator-normalised JSON rendering."""
     raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)

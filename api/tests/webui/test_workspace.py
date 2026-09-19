@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from api.platform_services import config, workspace
+from api import runtime_paths
 from api.platform_services.config import _io as config_io
 
 
@@ -51,8 +52,10 @@ def test_ensure_workspace_creates_and_seeds_authoring_library(tmp_path, monkeypa
     resolved = workspace.ensure_workspace()
     assert resolved == str(root)
 
-    for folder in ["AI Authoring", "Quizzes", "Assignments", "Pages", "Calendars", "Source Materials"]:
+    for folder in ["AI Authoring", "Quizzes", "Pages", "Calendars", "Source Materials"]:
         assert (root / "Library" / folder).is_dir()
+    assert (root / "Assignments" / "_Shared").is_dir()
+    assert not (root / "Library" / "Assignments").exists()
     assert not (root / "Library" / "Rubrics").exists()
     for folder in ["Printables", "Canvas Uploads", "To Review", "Student Work", "For AI", "_System"]:
         assert (root / folder).is_dir()
@@ -522,3 +525,75 @@ def test_teacher_visible_path_tuple_takes_raw_display_and_id(tmp_path):
         str(tmp_path), ("Fictional Course", "900001"), filename="f.txt")
     assert "Fictional Course — 900001" in result
     assert "900001 — 900001" not in result
+
+
+def test_assignment_source_resolves_shared_and_course_trees(tmp_path):
+    root = tmp_path / "CanvasExpert"
+    course = workspace.course_assignments_root("42", "ELA 7", root)
+    shared = workspace.assignment_source_folder("", "", "shared-1", "Common rubric", root)
+    owned = workspace.assignment_source_folder("42", "ELA 7", "a-7", "Writing", root)
+
+    assert course == str(root / "Assignments" / "42 - ELA 7")
+    assert shared == str(root / "Assignments" / "_Shared" / "Common rubric — shared-1")
+    assert owned == str(root / "Assignments" / "42 - ELA 7" / "Writing — a-7")
+
+
+def test_assignment_picker_uses_only_canonical_source(tmp_path, monkeypatch):
+    root = tmp_path / "CanvasExpert"
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    assert runtime_paths.content_folders("assignment") == [root / "Assignments"]
+
+
+def test_compact_paths_preserve_category_roots(tmp_path):
+    base = os.path.join(str(tmp_path), "x" * 80)
+    result = workspace.teacher_visible_path(
+        base, "For AI", ("A" * 120, "course-1"), ("B" * 120, "assignment-1"),
+        "run-1", filename="batch.md",
+    )
+    assert os.sep + "For AI" + os.sep in result
+    assert "For AI" in result
+    assert len(result) <= workspace.TEACHER_VISIBLE_BUDGET
+
+
+def test_reset_workspace_dry_run_apply_is_idempotent_and_preserves_allowlist(tmp_path):
+    root = tmp_path / "CanvasExpert"
+    (root / "Library" / "Assignments" / "old.txt").parent.mkdir(parents=True)
+    (root / "Library" / "Assignments" / "old.txt").write_text("old")
+    (root / "Assignments" / "_Shared" / "old.txt").parent.mkdir(parents=True)
+    (root / "Assignments" / "_Shared" / "old.txt").write_text("old")
+    (root / "For AI" / "packet.json").parent.mkdir(parents=True)
+    (root / "For AI" / "packet.json").write_text("safe")
+    (root / "Student Work" / "Submissions" / "report.txt").parent.mkdir(parents=True)
+    (root / "Student Work" / "Submissions" / "report.txt").write_text("private")
+    (root / "_System" / "Canvas Mirror" / "42" / "mirror.json").parent.mkdir(parents=True)
+    (root / "_System" / "Canvas Mirror" / "42" / "mirror.json").write_text("mirror")
+    (root / "settings.json").write_text("settings")
+
+    dry = workspace.reset_workspace(root)
+    assert dry["status"] == "planned"
+    assert dry["counts"]["items"] == 4
+    assert (root / "For AI" / "packet.json").exists()
+
+    applied = workspace.reset_workspace(root, apply=True)
+    assert applied["status"] == "applied"
+    assert not (root / "Library" / "Assignments" / "old.txt").exists()
+    assert not (root / "Assignments" / "_Shared" / "old.txt").exists()
+    assert not (root / "For AI" / "packet.json").exists()
+    assert (root / "settings.json").read_text() == "settings"
+    assert (root / "_System" / "Canvas Mirror" / "42" / "mirror.json").exists()
+
+    again = workspace.reset_workspace(root, apply=True)
+    assert again["status"] == "applied"
+    assert again["counts"] == {"items": 0, "files": 0, "directories": 0}
+
+
+def test_reset_workspace_refuses_unknown_categories(tmp_path):
+    root = tmp_path / "CanvasExpert"
+    unknown = root / "Student Work" / "Unclassified"
+    unknown.mkdir(parents=True)
+    (unknown / "keep.txt").write_text("keep")
+
+    report = workspace.reset_workspace(root, apply=True)
+    assert report["status"] == "refused"
+    assert report["refused"][0]["reason"] == "unknown category"
+    assert (unknown / "keep.txt").exists()

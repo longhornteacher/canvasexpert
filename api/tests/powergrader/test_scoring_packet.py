@@ -1,7 +1,20 @@
 """Response and membership arithmetic laws for SAFE packet projections."""
 import pytest
 
-from api.powergrader.scoring_packet import build_packet
+from api.powergrader.scoring_packet import build_packet, validate_safe_bundle
+
+
+def test_safe_bundle_validation_rejects_missing_or_identity_bearing_packets():
+    assert validate_safe_bundle({})["code"] == "packet_invalid"
+    result = validate_safe_bundle({"students": [{"pseudonym": "A", "user_id": "u1", "responses": []}]})
+    assert result == {"ok": False, "code": "packet_invalid", "reason": "identity_field_present"}
+
+
+def test_safe_bundle_validation_accepts_complete_identity_free_bundle():
+    result = validate_safe_bundle({"students": [{"pseudonym": "A", "responses": [
+        {"item_id": "q1", "response": "answer"},
+    ]}]})
+    assert result["ok"] is True
 
 
 @pytest.mark.parametrize("response_texts, empty_students, expected_rows, expected_held", [

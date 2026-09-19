@@ -294,7 +294,7 @@ def approve_rows(session: dict, user_ids) -> None:
 
 def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
                load_session, save_session, canvas_get=None, canvas_send=None,
-               pseudonyms=()) -> tuple[dict, int]:
+               pseudonyms=(), idempotency_key: str = "") -> tuple[dict, int]:
     """Approve, freeze and push exactly what a matching preview described.
 
     ``approve_rows`` runs before the freeze, so ``review_push`` sees ordinary
@@ -336,8 +336,27 @@ def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
         session_id, user_ids=json.dumps(user_ids), review_token=frozen["review_token"],
         load_session=load_session, save_session=save_session,
         canvas_send=canvas_send, canvas_get=canvas_get,
+        idempotency_key=idempotency_key,
     )
     if pushed.get("ok"):
         pushed = dict(pushed)
         pushed["skipped"] = resolved["skipped"]
+    # Make retry state explicit even when Canvas accepted only part of the
+    # batch.  The private session remains the source of truth for exact rows.
+    current = load_session(session_id) or session
+    rows = []
+    for student in current.get("students") or []:
+        if student.get("user_id") is None:
+            continue
+        row = {"user_id": str(student.get("user_id")),
+               "posted": bool(student.get("posted")),
+               "status": str(student.get("status") or "")}
+        rows.append(row)
+    posted_rows = [row["user_id"] for row in rows if row["posted"]]
+    remaining_rows = [row["user_id"] for row in rows if not row["posted"]]
+    pushed["posted_rows"] = posted_rows
+    pushed["remaining_rows"] = remaining_rows
+    if remaining_rows and posted_rows:
+        pushed["code"] = "partial_post_remaining"
+        pushed["recovery"] = "Retry only the remaining rows after resolving any attention rows."
     return pushed, status

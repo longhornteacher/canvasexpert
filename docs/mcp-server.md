@@ -45,13 +45,15 @@ These files live in the teacher's workspace root (not in the repo) so they're di
 
 ## Tools
 
-Tool schema version 49 (36 tools).
+Tool schema version 50 (40 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
 | `list_courses` | First call for every saved course (Current + Previous) and the `course_id` used by course-scoped tools | No |
 | `list_sis_grade_bridges(course_id)` | Configured whole-course SIS bridges for a Current `course_id` returned by `list_courses` | No |
+| `reconcile_sis_grade_bridges(course_id)` | Discovers differentiated families from stable assignment metadata and returns a student-free synced/missing/drifted/incomplete/blocked matrix | No |
 | `preview_sis_grade_bridge(course_id, family_title)` | Persists a local aggregate, digest-protected grade-projection review for one exact registered differentiated family | No |
+| `preview_sis_grade_bridge_reconciliation(course_id, family_title)` | Persists a reviewed Operation Ledger repair for one discovered missing or drifted family | No |
 | `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | Copies eligible final Canvas scores to the exact registered bridge through the Operation Ledger | No |
 | `list_sections(course_id)` | Saved section values from the local mirror | No |
 | `get_course_assignments(course_id, full_descriptions=false)` | Disk-only catalog assignments; descriptions are previews unless `full_descriptions=true` | No |
@@ -81,10 +83,12 @@ Tool schema version 49 (36 tools).
 | `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |
 | `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state | Yes, pseudonymized |
 | `refresh_mirror(course_id)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |
+| `preview_workspace_reset()` | Dry-runs the explicitly authorized local cleanup and reports classified paths, counts, and refusals | No |
+| `apply_workspace_reset(preview_digest)` | Applies only an unchanged, non-refused workspace cleanup preview and returns a local receipt | No |
 | `prepare_scoring_session(course_id, assignment_id, scoring_guidance="")` | Refresh one Current course once, then prepare one exact assignment from current mirror projections; missing norms return bounded teacher input | No |
 | `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
-| `submit_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None)` | Post valid SAFE-packet results to Canvas, or return pseudonym-only questions for an explicit conversational answer and retry | Yes, pseudonymized |
+| `submit_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, idempotency_key="")` | Post valid SAFE-packet results to Canvas, or return pseudonym-only questions for an explicit conversational answer and retry; the optional key makes caller retries deterministic | Yes, pseudonymized |
 
 `get_course_assignments` and `get_modules` only read the local course catalog written by
 the CanvasExpert web UI — neither ever falls back to a live Canvas call. If the catalog
@@ -181,7 +185,7 @@ the app actually does. Every successful response returns an ordered object that 
 all ten topics with one-line summaries. `overview` serves Appendix B; the other named
 CanvasAgent sections serve their exact Appendix A-F slices; `full` serves the entire file;
 and the two writing topics serve their own canonical files. `tools` is generated from the
-frozen schema-v48 contract and groups all 37 tools exactly once by teacher-facing job.
+frozen schema-v50 contract and groups all 40 tools exactly once by teacher-facing job.
 Topic matching trims surrounding whitespace and ignores case. The download route's
 CanvasAgent bytes equal `topic="full"`; section topics are extracted from those same bytes.
 Results are text-only MCP content: the server returns one minified JSON text block and
