@@ -333,6 +333,34 @@ def test_scoring_refresh_failure_never_forwards_arbitrary_exception_text(monkeyp
     assert "RuntimeError" not in str(result)
 
 
+@pytest.mark.parametrize("refresh_state", ["queued", "running", "syncing"])
+def test_scoring_refresh_in_progress_is_typed_and_identity_safe(
+    monkeypatch, tmp_path, refresh_state,
+):
+    """CONTRACT: queued, running, and syncing refreshes remain retryable."""
+    monkeypatch.setattr(scoring_preparation.workspace, "workspace_root", lambda: str(tmp_path))
+
+    result = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", refresh_course=lambda _course: {
+            "ok": False, "usable": False, "state": refresh_state,
+            "error_code": "refresh_pending",
+            "operation_id": "opaque-operation",
+            "mirror_revision": 7,
+            "snapshot_id": "snap-1",
+        },
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "mirror_refresh_in_progress"
+    assert result["stage"] == "refresh"
+    assert result["retryable"] is True
+    assert result["operation_id"] == "opaque-operation"
+    assert result["mirror_revision"] == 7
+    assert result["snapshot_id"] == "snap-1"
+    assert result["refresh_state"] == refresh_state
+    assert result["error_code"] == "refresh_pending"
+
+
 def test_ordinary_refresh_success_is_not_evidence_of_a_scoring_refresh(monkeypatch, tmp_path):
     """CONTRACT: the two refreshes are distinct scopes.
 
@@ -369,6 +397,32 @@ def test_preparation_binds_mirror_revision_and_submission_snapshot(monkeypatch, 
     assert session["submission_snapshot"]
 
 
+def test_preparation_binds_the_canonical_eligible_submission_digest(monkeypatch, tmp_path):
+    eligible = dict(_submission(), id="submitted-1", attempt=1,
+                    submitted_at="2026-09-18T10:00:00Z", score=None)
+    graded = dict(eligible, user_id="u2", id="graded-1", workflow_state="graded",
+                  submitted_at="", score=9)
+    missing = dict(eligible, user_id="u3", id="missing-1", workflow_state="",
+                   submitted_at="", missing=True)
+    rows = [eligible, graded, missing]
+    saved, prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(
+        rubric=[{"description": "Reasoning", "points": 10, "ratings": []}],
+    ), submissions=rows)
+    monkeypatch.setattr(
+        scoring_preparation.gradebook_snapshot,
+        "needs_grading",
+        lambda row: bool(row.get("submitted_at"))
+        and str(row.get("workflow_state") or "").casefold() in {"submitted", "pending_review"},
+    )
+
+    result = prepare()
+    session = saved[result["scoring_session_id"]]
+
+    assert session["submission_snapshot"] == session_store.eligible_submission_snapshot_digest(rows)
+    assert session["submission_snapshot"] == session_store.eligible_submission_snapshot_digest([eligible])
+    assert session["submission_snapshot_count"] == 1
+
+
 def test_refresh_retry_reuses_private_norms_guidance(monkeypatch, tmp_path):
     saved, prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(rubric=[]))
     calls = iter([False, True])
@@ -395,7 +449,7 @@ def test_newer_submission_invalidates_the_frozen_snapshot():
     original = [{"user_id": "u1", "id": "s1", "attempt": 1,
                  "submitted_at": "2026-09-18T10:00:00Z", "workflow_state": "submitted"}]
     session = {"mirror_revision": "r1",
-               "submission_snapshot": session_store.submission_snapshot_digest(original)}
+               "submission_snapshot": session_store.eligible_submission_snapshot_digest(original)}
     newer = [dict(original[0], id="s2", attempt=2,
                   submitted_at="2026-09-18T11:00:00Z")]
     result = session_store.session_staleness(

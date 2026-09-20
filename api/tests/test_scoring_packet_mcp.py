@@ -26,7 +26,7 @@ for _path in (_API_DIR, _REPO_ROOT):
 
 from api import feedback_vault
 from api.mcp_server import tools
-from api.powergrader import scoring_packet, session_builder
+from api.powergrader import scoring_packet, session_builder, session_store
 
 _ORDINALS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven"]
 
@@ -571,6 +571,57 @@ def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):
     assert isinstance(without_context["next"], str)
     assert "contract" not in without_context
     assert "rubric" not in without_context
+
+
+def test_packet_freshness_digest_ignores_ineligible_rows(monkeypatch, tmp_path):
+    """LAW: packet validation hashes the same eligible set as preparation."""
+    people = _seed_vault(monkeypatch, tmp_path, count=1)
+    _set_active_courses(monkeypatch, ["111"])
+    eligible = {
+        "user_id": people[0]["canvas_id"], "id": "submitted-1", "attempt": 1,
+        "submitted_at": "2026-09-18T10:00:00Z", "workflow_state": "submitted",
+        "score": None,
+    }
+    graded = {
+        "user_id": "900002", "id": "graded-1", "attempt": 1,
+        "submitted_at": "", "workflow_state": "graded", "score": 9,
+    }
+    missing = {
+        "user_id": "900003", "id": "missing-1", "attempt": 1,
+        "submitted_at": "", "workflow_state": "", "score": None,
+    }
+    rows = [eligible, graded, missing]
+    session = _fake_session("s1", "111", people)
+    session.update({
+        "mirror_revision": 3,
+        "mirror_snapshot_id": "111:3",
+        "submission_snapshot": session_store.eligible_submission_snapshot_digest(rows),
+    })
+    _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
+    _bind_session_store(monkeypatch, {"s1": session})
+    monkeypatch.setattr(tools.workspace, "workspace_root", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        tools.read_service, "private_submissions",
+        lambda *_args, **_kwargs: {
+            "state": "current", "mirror_revision": 3, "snapshot_id": "111:3",
+        },
+    )
+    monkeypatch.setattr(
+        tools.mirror_store, "read_submissions",
+        lambda *_args, **_kwargs: {
+            "state": "current",
+            "submissions": {
+                "u1": {"current": eligible},
+                "u2": {"current": graded},
+                "u3": {"current": missing},
+            },
+        },
+    )
+
+    result = tools.get_scoring_packet("s1")
+
+    assert result["ok"] is True
+    assert result["submission_snapshot"] == session["submission_snapshot"]
 
 
 def test_get_scoring_packet_uses_effective_guidance_and_exposes_projection(monkeypatch, tmp_path):

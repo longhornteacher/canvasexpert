@@ -20,6 +20,7 @@ from pathlib import Path
 
 from api.storage_support import atomic_write_json, interprocess_lock
 
+from api import gradebook_snapshot
 from api.platform_services import workspace
 
 # Per-session lock registry for interactive auto-post serialization
@@ -57,6 +58,19 @@ def submission_snapshot_digest(submissions) -> str:
     return _stable_digest(rows)
 
 
+def eligible_submission_rows(submissions) -> list[dict]:
+    """Return the exact submission rows currently eligible for scoring."""
+    return [
+        row for row in (submissions or [])
+        if isinstance(row, dict) and gradebook_snapshot.needs_grading(row)
+    ]
+
+
+def eligible_submission_snapshot_digest(submissions) -> str:
+    """Digest the canonical assignment-scoped eligible submission set."""
+    return submission_snapshot_digest(eligible_submission_rows(submissions))
+
+
 def packet_health(session: dict) -> dict:
     """Return a non-sensitive packet health record for lifecycle gates."""
     raw = (session.get("privacy_artifacts") or {}).get("safe_bundle") or ""
@@ -84,7 +98,7 @@ def session_staleness(session: dict, *, mirror_revision=None,
     expected_snapshot = session.get("submission_snapshot")
     if submission_snapshot is not None and expected_snapshot not in (None, ""):
         actual = (submission_snapshot if isinstance(submission_snapshot, str)
-                  else submission_snapshot_digest(submission_snapshot))
+                  else eligible_submission_snapshot_digest(submission_snapshot))
         if str(actual) != str(expected_snapshot):
             return {"stale": True, "code": "submission_identity_mismatch",
                     "reason": "submission_snapshot_changed"}

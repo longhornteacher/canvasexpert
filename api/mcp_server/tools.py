@@ -2181,7 +2181,7 @@ def _session_mirror_check(session: dict) -> dict:
             raise ValueError("submission projection unavailable")
         rows = [entry.get("current") for entry in entries.values()
                 if isinstance(entry, dict) and isinstance(entry.get("current"), dict)]
-        snapshot = session_store.submission_snapshot_digest(rows)
+        snapshot = session_store.eligible_submission_snapshot_digest(rows)
     except Exception:
         return {"ok": False, "code": "mirror_revision_unusable",
                 "error": "The current submission snapshot is unavailable. Refresh this course and retry."}

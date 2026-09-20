@@ -77,7 +77,7 @@ def _refresh_failure_facts(refresh_result) -> dict:
             facts["mirror_revision"] = int(revision)
         except (TypeError, ValueError):
             pass
-    state = str(refresh_result.get("state") or "").strip()
+    state = str(refresh_result.get("state") or refresh_result.get("status") or "").strip()
     if state:
         facts["refresh_state"] = state
     return facts
@@ -362,6 +362,17 @@ def prepare_scoring_session(
         # is the scoring-specific full rebuild, so an ordinary refresh_mirror
         # success is never evidence that this succeeded.
         facts = _refresh_failure_facts(refresh_result)
+        refresh_state = str(facts.get("refresh_state") or "").casefold()
+        if refresh_state in {"queued", "running", "syncing"}:
+            stable_error_code = facts.pop("code", None)
+            if stable_error_code:
+                facts["error_code"] = stable_error_code
+            return _typed_failure(
+                "mirror_refresh_in_progress", "refresh", retryable=True,
+                user_action="Retry preparation after the Current course mirror refresh completes.",
+                error="CanvasMirror is still refreshing this assignment.",
+                **facts,
+            )
         return _typed_failure(
             facts.pop("code", "mirror_refresh_failed"), "refresh", retryable=True,
             user_action="Retry preparation after the Current course mirror refresh completes.",
@@ -423,7 +434,7 @@ def prepare_scoring_session(
             assignment_name=assignment_name,
         )
 
-    submitted = [row for row in submissions if gradebook_snapshot.needs_grading(row)]
+    submitted = session_store.eligible_submission_rows(submissions)
     if not submitted:
         return _typed_failure(
             "nothing_to_grade", "select", retryable=False,
@@ -519,7 +530,7 @@ def prepare_scoring_session(
                                    or mirror_result.get("revision")
                                    or mirror_result.get("snapshot_id"))
     session["mirror_snapshot_id"] = str(mirror_result.get("snapshot_id") or "")
-    session["submission_snapshot"] = session_store.submission_snapshot_digest(submitted)
+    session["submission_snapshot"] = session_store.eligible_submission_snapshot_digest(submissions)
     session["submission_snapshot_count"] = len(submitted)
     session["scoring_rubric_text"] = complete_guidance if complete_guidance is not None else rubric_text_override
     assignmentforge_metadata = assignmentforge.for_assignment(course_id, assignment_id)
