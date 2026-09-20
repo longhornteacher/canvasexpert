@@ -276,6 +276,84 @@ def test_mirror_failure_is_typed_and_identity_safe(monkeypatch, tmp_path):
     assert {"code", "stage", "retryable", "user_action"} <= result.keys()
 
 
+# ── Scoring-refresh failure facts ───────────────────────────────────────────
+
+def test_scoring_refresh_failure_preserves_safe_lifecycle_facts(monkeypatch, tmp_path):
+    """CONTRACT: a failed scoring refresh keeps its own safe typed facts.
+
+    The runner's stable code and opaque lifecycle identifiers survive instead
+    of flattening to one generic message. Nothing private crosses the boundary.
+    """
+    monkeypatch.setattr(scoring_preparation.workspace, "workspace_root", lambda: str(tmp_path))
+
+    result = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", refresh_course=lambda _course: {
+            "ok": False, "usable": False, "state": "failed",
+            "error_code": "mirror_scope_unavailable",
+            "operation_id": "opaque-operation",
+            "mirror_revision": 7,
+            "snapshot_id": "snap-1",
+        },
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "mirror_scope_unavailable"
+    assert result["stage"] == "refresh"
+    assert result["retryable"] is True
+    assert result["operation_id"] == "opaque-operation"
+    assert result["mirror_revision"] == 7
+    assert result["snapshot_id"] == "snap-1"
+    assert result["refresh_state"] == "failed"
+
+
+def test_scoring_refresh_failure_without_a_code_stays_generic(monkeypatch, tmp_path):
+    monkeypatch.setattr(scoring_preparation.workspace, "workspace_root", lambda: str(tmp_path))
+
+    result = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", refresh_course=lambda _course: False,
+    )
+
+    assert result["code"] == "mirror_refresh_failed"
+    assert result["stage"] == "refresh"
+    assert "operation_id" not in result
+
+
+def test_scoring_refresh_failure_never_forwards_arbitrary_exception_text(monkeypatch, tmp_path):
+    """CONTRACT: detailed cause is private operational diagnostics only."""
+    monkeypatch.setattr(scoring_preparation.workspace, "workspace_root", lambda: str(tmp_path))
+    private = "C:\\Users\\teacher\\OneDrive\\CanvasExpert\\private\\roster.json"
+
+    def explode(_course):
+        raise RuntimeError(private)
+
+    result = scoring_preparation.prepare_scoring_session("c1", "a1", refresh_course=explode)
+
+    assert result["code"] == "mirror_refresh_failed"
+    assert private not in str(result)
+    assert "RuntimeError" not in str(result)
+
+
+def test_ordinary_refresh_success_is_not_evidence_of_a_scoring_refresh(monkeypatch, tmp_path):
+    """CONTRACT: the two refreshes are distinct scopes.
+
+    ``refresh_mirror`` uses ordinary course/roster/group scopes; scoring uses
+    the ``course.scoring_refresh`` full rebuild. A runner that reports success
+    without a usable scoring revision must not be treated as refreshed.
+    """
+    monkeypatch.setattr(scoring_preparation.workspace, "workspace_root", lambda: str(tmp_path))
+
+    result = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", refresh_course=lambda _course: {
+            "ok": True, "usable": False, "state": "succeeded",
+            "error_code": "scoring_revision_unusable",
+        },
+    )
+
+    assert result["ok"] is False
+    assert result["stage"] == "refresh"
+    assert result["code"] == "scoring_revision_unusable"
+
+
 def test_preparation_binds_mirror_revision_and_submission_snapshot(monkeypatch, tmp_path):
     saved, prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(
         rubric=[{"description": "Reasoning", "points": 10, "ratings": []}],

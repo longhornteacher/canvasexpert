@@ -451,14 +451,14 @@
       "symbol": "push_grades",
       "detector": "name:canvas_send",
       "call_index": 1,
-      "call_form": "canvas_send(\"PUT\", _path(session, user_id), payload) [grade + optional comment]",
+      "call_form": "canvas_send(\"PUT\", _path(session, user_id), payload) [raw score + optional comment]",
       "classification": "canvas_mutation",
       "scopes": [
         "private.submissions",
         "private.submission_comments"
       ],
       "reconciliation": "targeted",
-      "reason": "The unified MCP Scoring Session submit path calls scoring_apply.apply_plan, which reaches this frozen, drift-checked, receipt-backed grade writer and triggers a narrow mirror refresh after a verified push."
+      "reason": "The unified MCP Scoring Session submit path calls scoring_apply.apply_plan, which reaches this narrow grade writer. It sends the reviewed raw posted_grade and one plain-text comment once, then records the transport outcome; it performs no read-back and interprets no gradebook or late-policy adjustment. Canvas applies those adjustments itself."
     },
     {
       "path": "api/powergrader/new_quiz_fetch.py",

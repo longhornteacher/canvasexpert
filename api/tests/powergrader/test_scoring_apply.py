@@ -1,12 +1,16 @@
-"""Chat-side scoring apply: the plan, its questions, and the push.
+"""Chat-side scoring apply: the plan, its questions, and the narrow write.
 
-Canvas is faked at the ``canvas_get`` / ``canvas_send`` injection points these
-functions already take. No live scoring run, no real student data.
+Canvas is faked at the ``canvas_send`` injection point these functions already
+take. No live scoring run, no real student data.
+
+The write is deliberately narrow: one send, no read-back. These tests pin that
+as a law, not an implementation detail.
 """
+import json
+
 import pytest
 
 from api.powergrader import scoring_apply, session_actions
-
 
 def _session(**overrides):
     session = {
@@ -21,25 +25,6 @@ def _session(**overrides):
     return session
 
 
-def _canvas_get(scored=(), *, workflow_state="graded", live_rows=None):
-    """Fake submission reads. ``scored`` names user_ids Canvas already scored."""
-    def get(path, params=None, timeout=20):
-        user_id = path.rstrip("/").split("/")[-1]
-        if live_rows and user_id in live_rows:
-            return (live_rows[user_id], None)
-        scored_row = user_id in scored
-        return ({
-            "score": 3 if scored_row else None,
-            "workflow_state": workflow_state if scored_row else "submitted",
-            "submission_comments": [], "comments_available": True,
-        }, None)
-    return get
-
-
-def _answer_all(plan, choice_index=0):
-    return {q["id"]: q["options"][choice_index] for q in plan["questions"]}
-
-
 def test_scoring_session_canvas_feedback_contains_no_em_dashes():
     payload = session_actions._payload({
         "teacher_score": 8,
@@ -49,27 +34,56 @@ def test_scoring_session_canvas_feedback_contains_no_em_dashes():
     assert payload["comment"]["text_comment"] == "Strong claim - add evidence."
 
 
+def test_feedback_payload_preserves_literal_punctuation_and_unicode():
+    """CONTRACT: ordinary feedback reaches the outbound JSON payload faithfully.
+
+    Literal ``&``, ``<``, ``>``, straight and curly quotes, en dash, newlines,
+    and other supplied Unicode must survive CE's own payload construction. The
+    only expected change is the em dash, which normalizes to an ASCII hyphen by
+    the locked ``normalize_student_text`` rule.
+
+    This is a synthetic string, not a real submission: no diagnostic feedback
+    text is persisted and no student data is involved.
+    """
+    supplied = (
+        "Tom & Jerry <b>bold</b> \"straight\" \u201ccurly\u201d "
+        "en\u2013dash \u2014 em\u2013dash\nsecond line \u00e9\u00fc\u4e2d\u6587"
+    )
+
+    payload = session_actions._payload({
+        "teacher_score": 7,
+        "teacher_feedback": supplied,
+    })
+
+    text = payload["comment"]["text_comment"]
+    assert "&" in text and "<b>" in text and ">" in text
+    assert '"straight"' in text and "\u201ccurly\u201d" in text
+    assert "en\u2013dash" in text
+    assert "\n" in text
+    assert "\u00e9\u00fc\u4e2d\u6587" in text
+    # The em dash is the one locked normalization: it becomes an ASCII hyphen.
+    assert "\u2014" not in text
+    assert "en\u2013dash - em\u2013dash" in text
+    # The payload is JSON-serializable exactly as supplied.
+    assert json.loads(json.dumps(payload))["comment"]["text_comment"] == text
+
+
 # ── The plan ────────────────────────────────────────────────────────────────
 
 
-def test_build_plan_writes_nothing(tmp_path):
+def test_build_plan_writes_nothing():
     """LAW: preview is read-only, locally and remotely.
 
-    push_grades refuses unless the requested ids equal the frozen review's ids
-    exactly, so skip answers have to shrink the set before the freeze. Resolving
-    first means preview never has to mutate anything -- and a preview the
-    teacher never applies leaves nothing behind.
+    Planning performs no Canvas read at all, so a preview the teacher never
+    applies leaves nothing behind and costs no Canvas call.
     """
     session = _session()
     before = repr(session)
-    sent = []
 
-    plan = scoring_apply.build_plan(
-        session, canvas_get=_canvas_get(), pseudonyms=[])
+    plan = scoring_apply.build_plan(session, pseudonyms=[])
 
     assert plan["ok"] and plan["candidate_ids"] == ["9001", "9002"]
     assert repr(session) == before, "build_plan mutated the session"
-    assert sent == []
 
 
 def test_plan_digest_changes_when_a_staged_score_changes():
@@ -79,10 +93,10 @@ def test_plan_digest_changes_when_a_staged_score_changes():
     than landing something the teacher never read.
     """
     session = _session()
-    first = scoring_apply.build_plan(session, canvas_get=_canvas_get())["digest"]
+    first = scoring_apply.build_plan(session)["digest"]
 
     session["students"][0]["ai_score"] = 9
-    second = scoring_apply.build_plan(session, canvas_get=_canvas_get())["digest"]
+    second = scoring_apply.build_plan(session)["digest"]
 
     assert first != second
 
@@ -91,7 +105,7 @@ def test_posted_rows_are_not_candidates():
     session = _session()
     session["students"][0]["posted"] = True
 
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
 
     assert plan["candidate_ids"] == ["9002"]
 
@@ -111,36 +125,35 @@ def test_every_question_kind_is_answerable(kind):
     assert len(set(options)) == len(options)
 
 
+def test_no_grade_state_question_remains():
+    """LAW: the MCP scoring lane asks nothing about Canvas grade state.
+
+    No existing-score lookup, no overwrite question, no frozen baseline. The
+    teacher reviews the result in Canvas, which is the review surface.
+    """
+    assert "overwrites_existing_score" not in scoring_apply.QUESTION_OPTIONS
+    assert not hasattr(session_actions, "_fetch_snapshot")
+    assert not hasattr(session_actions, "_same_postcondition")
+    assert not hasattr(session_actions, "_same_score_baseline")
+    assert not hasattr(session_actions, "_same_comments")
+    assert not hasattr(session_actions, "review_push")
+
+
 def test_score_above_possible_is_raised():
     session = _session()
     session["students"][0]["ai_score"] = 12
 
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
 
     question = next(q for q in plan["questions"] if q["kind"] == "score_above_possible")
     assert question["user_ids"] == ["9001"]
-
-
-def test_existing_canvas_score_is_raised():
-    plan = scoring_apply.build_plan(
-        _session(), canvas_get=_canvas_get(scored={"9002"}))
-
-    question = next(q for q in plan["questions"] if q["kind"] == "overwrites_existing_score")
-    assert question["user_ids"] == ["9002"]
-
-
-def test_leftover_score_on_ungraded_work_is_not_an_overwrite():
-    plan = scoring_apply.build_plan(
-        _session(), canvas_get=_canvas_get(scored={"9002"}, workflow_state="pending_review"))
-
-    assert all(q["kind"] != "overwrites_existing_score" for q in plan["questions"])
 
 
 def test_feedback_with_no_score_is_raised():
     session = _session()
     session["students"][0]["ai_score"] = None
 
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
 
     question = next(q for q in plan["questions"] if q["kind"] == "missing_score")
     assert question["user_ids"] == ["9001"]
@@ -156,8 +169,7 @@ def test_pseudonym_in_feedback_is_raised():
     session = _session()
     session["students"][1]["ai_feedback"] = "You wrote that Pikachu rang loudly."
 
-    plan = scoring_apply.build_plan(
-        session, canvas_get=_canvas_get(), pseudonyms=["Pikachu", "Snorlax"])
+    plan = scoring_apply.build_plan(session, pseudonyms=["Pikachu", "Snorlax"])
 
     question = next(q for q in plan["questions"] if q["kind"] == "pseudonym_in_feedback")
     assert question["user_ids"] == ["9002"]
@@ -167,7 +179,7 @@ def test_students_who_would_receive_nothing_are_raised():
     session = _session()
     session["students"].append({"user_id": "9003"})
 
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
 
     question = next(q for q in plan["questions"] if q["kind"] == "held_not_scored")
     assert question["user_ids"] == ["9003"]
@@ -177,7 +189,7 @@ def test_students_who_would_receive_nothing_are_raised():
 def test_a_clean_session_asks_nothing():
     """Do not inflate the question list: a teacher asked something every time
     stops reading the questions."""
-    plan = scoring_apply.build_plan(_session(), canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(_session())
 
     assert plan["questions"] == []
 
@@ -189,7 +201,7 @@ def test_unanswered_questions_block_the_apply():
     """LAW: a question the agent can ignore is not a question."""
     session = _session()
     session["students"][0]["ai_score"] = 12
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
 
     resolved = scoring_apply.resolve_answers(plan, {})
 
@@ -202,7 +214,7 @@ def test_skip_those_removes_those_students_from_the_write():
     """LAW: the answer changes what lands."""
     session = _session()
     session["students"][0]["ai_score"] = 12
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
 
     resolved = scoring_apply.resolve_answers(
         plan, {"score_above_possible": "skip_those"})
@@ -215,7 +227,7 @@ def test_skip_those_removes_those_students_from_the_write():
 def test_post_anyway_keeps_them():
     session = _session()
     session["students"][0]["ai_score"] = 12
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
 
     resolved = scoring_apply.resolve_answers(
         plan, {"score_above_possible": "post_anyway"})
@@ -226,7 +238,7 @@ def test_post_anyway_keeps_them():
 def test_an_answer_outside_the_offered_options_is_refused():
     session = _session()
     session["students"][0]["ai_score"] = 12
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
 
     resolved = scoring_apply.resolve_answers(
         plan, {"score_above_possible": "obviously_just_do_it"})
@@ -237,7 +249,7 @@ def test_an_answer_outside_the_offered_options_is_refused():
 def test_stop_abandons_the_whole_apply():
     session = _session()
     session["students"].append({"user_id": "9003"})
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
 
     resolved = scoring_apply.resolve_answers(plan, {"held_not_scored": "stop"})
 
@@ -248,7 +260,7 @@ def test_skipping_everything_refuses_rather_than_pushing_nothing():
     session = _session()
     session["students"][0]["ai_score"] = 12
     session["students"][1]["ai_score"] = 12
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
 
     resolved = scoring_apply.resolve_answers(
         plan, {"score_above_possible": "skip_those"})
@@ -309,24 +321,15 @@ def test_apply_plan_pushes_the_previewed_rows():
     session = _session()
     load, save, saved = _store(session)
     sent = []
-    live_rows = {}
 
     def canvas_send(method, path, payload, timeout=30):
         sent.append((method, path, payload))
-        user_id = path.rstrip("/").split("/")[-1]
-        live_rows[user_id] = {
-            "score": float(payload["submission"]["posted_grade"]),
-            "grade": payload["submission"]["posted_grade"],
-            "workflow_state": "graded",
-            "submission_comments": [{"id": 1, "created_at": "2026-09-16T12:00:00Z"}],
-        }
         return ({"id": 1}, None)
 
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers={},
-        load_session=load, save_session=save,
-        canvas_get=_canvas_get(live_rows=live_rows), canvas_send=canvas_send)
+        load_session=load, save_session=save, canvas_send=canvas_send)
 
     assert result["ok"] is True
     assert len(sent) == 2
@@ -339,12 +342,12 @@ def test_apply_plan_refuses_a_stale_digest():
     load, save, _saved = _store(session)
     sent = []
 
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
     session["students"][0]["ai_score"] = 9
 
     result, status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers={},
-        load_session=load, save_session=save, canvas_get=_canvas_get(),
+        load_session=load, save_session=save,
         canvas_send=lambda *a, **k: sent.append(a) or ({}, None))
 
     assert result["ok"] is False and result["code"] == "plan_changed"
@@ -357,10 +360,10 @@ def test_apply_plan_makes_no_canvas_write_while_a_question_is_open():
     load, save, _saved = _store(session)
     sent = []
 
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers=None,
-        load_session=load, save_session=save, canvas_get=_canvas_get(),
+        load_session=load, save_session=save,
         canvas_send=lambda *a, **k: sent.append(a) or ({}, None))
 
     assert result["code"] == "unanswered_questions"
@@ -372,25 +375,16 @@ def test_apply_plan_skips_what_the_answer_skipped():
     session["students"][0]["ai_score"] = 12
     load, save, _saved = _store(session)
     sent = []
-    live_rows = {}
 
     def canvas_send(method, path, payload, timeout=30):
         sent.append(path)
-        user_id = path.rstrip("/").split("/")[-1]
-        live_rows[user_id] = {
-            "score": float(payload["submission"]["posted_grade"]),
-            "grade": payload["submission"]["posted_grade"],
-            "workflow_state": "graded",
-            "submission_comments": [{"id": 1, "created_at": "2026-09-16T12:00:00Z"}],
-        }
         return ({"id": 1}, None)
 
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"],
         answers={"score_above_possible": "skip_those"},
-        load_session=load, save_session=save,
-        canvas_get=_canvas_get(live_rows=live_rows), canvas_send=canvas_send)
+        load_session=load, save_session=save, canvas_send=canvas_send)
 
     assert result["ok"] is True
     assert len(sent) == 1 and "9002" in sent[0]
@@ -399,7 +393,6 @@ def test_apply_plan_skips_what_the_answer_skipped():
 def test_apply_plan_reports_exact_partial_post_recovery_rows():
     session = _session()
     load, save, _saved = _store(session)
-    live_rows = {}
     sent = []
 
     def canvas_send(method, path, payload, timeout=30):
@@ -407,21 +400,92 @@ def test_apply_plan_reports_exact_partial_post_recovery_rows():
         sent.append(user_id)
         if user_id == "9002":
             return None, "HTTP 400 rejected"
-        live_rows[user_id] = {
-            "score": float(payload["submission"]["posted_grade"]),
-            "grade": payload["submission"]["posted_grade"],
-            "workflow_state": "graded",
-            "submission_comments": [{"id": 1, "created_at": "2026-09-18T12:00:00Z"}],
-        }
         return {"id": 1}, None
 
-    plan = scoring_apply.build_plan(session, canvas_get=_canvas_get())
+    plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers={},
-        load_session=load, save_session=save,
-        canvas_get=_canvas_get(live_rows=live_rows), canvas_send=canvas_send)
+        load_session=load, save_session=save, canvas_send=canvas_send)
 
     assert sent == ["9001", "9002"]
     assert result["code"] == "partial_post_remaining"
     assert result["posted_rows"] == ["9001"]
     assert result["remaining_rows"] == ["9002"]
+
+
+# ── The narrow write: no read-back ──────────────────────────────────────────
+
+def test_successful_send_performs_no_canvas_read():
+    """LAW: after a successful ordinary scoring PUT, CE performs no Canvas GET,
+    mirror refresh, final-grade comparison, or policy inspection."""
+    session = _session()
+    load, save, _saved = _store(session)
+
+    def canvas_send(method, path, payload, timeout=30):
+        return ({"id": 1}, None)
+
+    plan = scoring_apply.build_plan(session)
+    result, _status = scoring_apply.apply_plan(
+        "session-1", expected_digest=plan["digest"], answers={},
+        load_session=load, save_session=save, canvas_send=canvas_send)
+
+    assert result["ok"] is True
+    # The accepted-write receipt carries transport facts only.
+    receipt = session["push_log"][-1]["results"][0]
+    assert set(receipt) == {"user_id", "status", "code",
+                            "request_digest", "target_digest"}
+    assert "postcondition_digest" not in receipt
+
+
+def test_transport_unknown_never_repeats_or_reverifies():
+    """LAW: a transport-unknown send never triggers a second PUT, automatic
+    re-verification, or an exposed Canvas grade result."""
+    session = _session()
+    load, save, _saved = _store(session)
+    sent = []
+
+    def canvas_send(method, path, payload, timeout=30):
+        sent.append(path)
+        return None, "connection lost"
+
+    plan = scoring_apply.build_plan(session)
+    result, _status = scoring_apply.apply_plan(
+        "session-1", expected_digest=plan["digest"], answers={},
+        load_session=load, save_session=save, canvas_send=canvas_send)
+
+    assert result["ok"] is False
+    assert result["code"] == "write_transport_unknown"
+    # One PUT per row, and no row is ever sent twice.
+    assert len(sent) == len(set(sent)) == 2
+    assert session["students"][0]["push_state"] == "sent_unknown"
+    assert not session.get("push_idempotency")
+
+
+def test_accepted_exact_payload_is_not_sent_twice():
+    """LAW: an accepted exact idempotent payload is not sent twice."""
+    session = _session()
+    load, save, _saved = _store(session)
+    sent = []
+
+    def canvas_send(method, path, payload, timeout=30):
+        sent.append(path)
+        return ({"id": 1}, None)
+
+    plan = scoring_apply.build_plan(session)
+    scoring_apply.apply_plan(
+        "session-1", expected_digest=plan["digest"], answers={},
+        load_session=load, save_session=save, canvas_send=canvas_send,
+        idempotency_key="batch-1")
+    first_count = len(sent)
+
+    # Re-approve the same rows and resubmit the identical payload.
+    for student in session["students"]:
+        student["posted"] = False
+        student["status"] = "approved"
+    again, _status = scoring_apply.apply_plan(
+        "session-1", expected_digest=plan["digest"], answers={},
+        load_session=load, save_session=save, canvas_send=canvas_send,
+        idempotency_key="batch-1")
+
+    assert len(sent) == first_count, "an accepted payload was sent twice"
+    assert again["ok"] is True

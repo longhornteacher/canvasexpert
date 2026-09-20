@@ -35,10 +35,15 @@ write authorization. Canvas Live is the only review/edit surface.
 - `api/mcp_server/tools.py` validates pseudonym/item results against the bundle,
   re-identifies privately exactly once, scans all outputs, and selects a write owner
   without exposing transport type or private identifiers.
-- `scoring_apply.py` owns ordinary-assignment questions, frozen review, drift,
-  idempotency, PUT-then-GET verification, and receipt flow through `session_actions.py`.
-  A PUT is persisted as durable Attention/`sent_unknown` before verification; only a
-  matching refreshed score and comment postcondition becomes posted and idempotent.
+- `scoring_apply.py` owns ordinary-assignment questions, the plan digest, and the
+  narrow write through `session_actions.py`. The write is one send: the reviewed raw
+  score (`submission.posted_grade`) and one plain-text comment (`comment.text_comment`)
+  to the existing Canvas Submissions endpoint. There is no post-write GET, no mirror
+  refresh, no score/comment comparison, and no grade-state preflight. A Canvas HTTP
+  success finalizes the exact local idempotency slot; a non-HTTP transport error is
+  `write_transport_unknown` with no read-back and no automatic retry; an explicit HTTP
+  rejection is a failed write. Canvas applies every gradebook and late-policy
+  adjustment, and CE neither reads nor interprets the adjusted result.
 - `scoring_preparation.py` stops existing New Quizzes that need writing scores with
   `new_quiz_writing_requires_assignment` before scoring norms or SAFE packet work.
 - `feedback_vault.py`, `feedback_safety.py`, and `pseudonym.py` own local identity
@@ -63,10 +68,12 @@ write authorization. Canvas Live is the only review/edit surface.
   re-identification, Canvas planning, or any Canvas call. Supersession deletes nothing:
   earlier session JSON, SAFE bundles, and receipts stay as teacher history, and no
   supersession metadata, private path, or Canvas id crosses MCP.
-- Ordinary assignments retain a fresh baseline, question digest, drift check,
-  per-student idempotency, PUT-then-GET verification, and minimized receipt. GET failure,
-  mismatch, or possibly-accepted transport remains durable Attention/`sent_unknown` without
-  retry; explicit Canvas HTTP rejection remains failed. Canvas Expert does not
+- Ordinary assignments retain the plan digest, per-student idempotency, and a minimized
+  transport receipt. There is no grade-state preflight, no post-write read-back, and no
+  grade-result comparison: a Canvas HTTP success is the whole postcondition. A non-HTTP
+  transport error is `write_transport_unknown` with no read-back and no automatic retry,
+  and it is never reported as `canvas_write_attention`; explicit Canvas HTTP rejection
+  remains failed. Canvas Expert does not
   write New Quiz item scores, per-item feedback, assignment totals, or fallback comments.
 - A question writes nothing until every allowed answer is explicit and bound to the
   unchanged results, packet digest, and exact review digest. Failures and ambiguous

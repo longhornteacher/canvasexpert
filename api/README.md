@@ -16,7 +16,10 @@ The runtime supports:
 - **Gradebook tools** — late policy sweep, student extensions, curves
 - **Scoring Sessions** — MCP-connected agent discovers work across every Current course,
   waits for teacher direction, then prepares one exact assignment at a time using an
-  assignment-bounded SAFE packet and submits valid results to Canvas Live
+  assignment-bounded SAFE packet and writes the reviewed raw score and one plain-text
+  comment to Canvas once. Canvas Expert does not read the resulting grade back; Canvas
+  applies every gradebook and late-policy adjustment, and the teacher reviews the result
+  in Canvas Live
 - **School Calendar:** school dates, day kinds, grading periods, bell schedules, and Teacher Schedule
 - **MCP server:** local pseudonymized reads, guarded writes, and Scoring Sessions
 - **Daily Writing:** longitudinal Writing Record and tracked-assignment Writing Timeline
@@ -189,7 +192,7 @@ runtime owns group restriction and final-grade/SIS safety.
 | `validate_qf.py` | QuizForge compliance checker |
 | `qf_ui.py` | Launches the local control console (see "Control console" above) |
 | `../engine/rendering/physical/` | Local printable DOCX/PDF render stack (Edge via Playwright for PDF, Pandoc for DOCX) |
-| `powergrader/` | Legacy-named private scoring engine: mirror-backed assignment preparation, SAFE bundle/session assembly, feedback contract, ordinary assignment write safeguards, and read-only New Quiz evidence |
+| `powergrader/` | Legacy-named private scoring engine: mirror-backed assignment preparation, SAFE bundle/session assembly, feedback contract, the narrow ordinary-assignment raw-score write, and read-only New Quiz evidence |
 | `mcp_server/` | Local MCP tool registry, contracts, pseudonymized reads, and teacher-owned write tools |
 | `mirror/` | CanvasMirror storage, freshness envelopes, sync coordinator, and disk-only query services |
 | `operation_ledger/` | High-risk operation checkpoints, claims, receipts, and recovery coordination |

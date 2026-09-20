@@ -2499,9 +2499,8 @@ def _submit_scoring_results_locked(scoring_session_id: str, results: list,
             student["ai_feedback"] = row.get("feedback") or ""
             student["ai_item_results"] = item_by_uid.get(str(user_id), [])
 
-    # Ordinary assignment risk planning reuses the exact freeze/drift lane used
-    # by Canvas Expert's guarded scorer. Its internal user ids are translated
-    # before any question can cross MCP.
+    # Ordinary assignment risk planning. Its internal user ids are translated
+    # before any question can cross MCP. Planning performs no Canvas read.
     if session.get("session_kind") == "scoring_assignment":
         from api.powergrader import scoring_apply
         plan = scoring_apply.build_plan(candidate, pseudonyms=every_pseudonym)
@@ -2510,7 +2509,7 @@ def _submit_scoring_results_locked(scoring_session_id: str, results: list,
                 return {
                     "ok": False,
                     "code": "canvas_write_attention",
-                    "error": "A previous Canvas write could not be verified. Review Canvas before retrying.",
+                    "error": "A previous Canvas write could not be confirmed. Review Canvas before retrying.",
                 }
             return {"ok": False, "code": str(plan.get("code") or "canvas_preflight_failed"),
                     "error": "Canvas could not safely prepare this scoring submission."}
@@ -2615,9 +2614,13 @@ def _record_scoring_session_result(scoring_session_id: str, result: dict) -> dic
 
 
 def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()) -> dict:
-    """Project ordinary assignment writes to aggregate, pseudonym-only outcomes."""
+    """Project ordinary assignment writes to aggregate, pseudonym-only outcomes.
+
+    Only transport facts cross this boundary: no Canvas-returned score, grade,
+    gradebook total, deduction, policy status, comment text, or Canvas response.
+    """
     counts = {"finalized": 0, "already_applied": 0, "held": 0, "failed": 0,
-              "attention": 0}
+              "transport_unknown": 0}
     outcomes = []
     for item in payload.get("results") or []:
         status = str(item.get("status") or "failed")
@@ -2628,7 +2631,7 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
         outcomes.append({"pseudonym": names.get(str(item.get("user_id"))) or "(unknown student)",
                          "status": public_status,
                          **({"code": str(item.get("code") or "failed")}
-                            if public_status in {"failed", "attention"} else {})})
+                            if public_status in {"failed", "transport_unknown"} else {})})
     held_ids = {str(uid) for uid in held_user_ids}
     counts["held"] = len(held_ids)
     outcomes.extend({"pseudonym": names.get(uid) or "(unknown student)", "status": "held"}
@@ -2645,8 +2648,15 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
         result["code"] = "partial_post_remaining"
         result["recovery"] = "Retry only the remaining rows after resolving any attention rows."
     if not result["ok"]:
-        result["code"] = str(payload.get("code") or "write_failed")
-        result["error"] = "One or more results could not be safely finalized. Review Canvas before retrying."
+        if counts["transport_unknown"]:
+            # The write may have landed. Name only the safe outcome and the
+            # next teacher action; never re-verify or repeat the send.
+            result["code"] = "write_transport_unknown"
+            result["error"] = ("Canvas did not confirm the write. Review the assignment in "
+                               "Canvas before retrying; Canvas Expert will not repeat it.")
+        else:
+            result["code"] = str(payload.get("code") or "write_failed")
+            result["error"] = "One or more results could not be finalized. Review Canvas before retrying."
     return pseudonym.gate(result, vault)
 
 

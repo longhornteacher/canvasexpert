@@ -1,9 +1,14 @@
-"""Safety contract tests for PowerGrader's frozen review/apply flow."""
+"""Safety contract tests for PowerGrader's narrow Canvas write.
+
+The write is one send: the reviewed raw score and one plain-text comment go to
+the Canvas Submissions endpoint, and Canvas applies every gradebook and
+late-policy adjustment from there. These tests pin the absence of read-back as
+a law, not an implementation detail.
+"""
 
 import copy
 import json
 import sys
-from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -26,159 +31,168 @@ def _session():
     }
 
 
-def canvas_get(path, params=None, timeout=0):
-    return ({
-        "submission": {"score": 2, "grade": "2", "graded_at": None, "updated_at": "2026-01-01T00:00:00Z"},
-        "submission_comments": [],
-    }, None)
-
-
-def _canvas_get_with_rows(rows):
-    def get(path, params=None, timeout=0):
-        user_id = path.rstrip("/").split("/")[-1]
-        if user_id in rows:
-            return deepcopy(rows[user_id]), None
-        return canvas_get(path, params=params, timeout=timeout)
-    return get
-
-
-def test_review_selects_only_approved_rows_and_persists_frozen_state():
+def test_send_writes_the_raw_score_and_plain_text_comment_once():
+    """CONTRACT: a valid result maps to the exact raw posted_grade and comment."""
     session = _session()
-    saved = []
-    result, status = session_actions.review_push(
-        "session-1", user_ids="", load_session=lambda _: session,
-        save_session=lambda value: saved.append(value), canvas_get=canvas_get,
-    )
-    assert status == 200 and result["ok"] is True
-    assert result["user_ids"] == ["user-1", "user-2"]
-    assert "real_name" not in json.dumps(result)
-    pending = session["pending_push_review"]
-    assert pending["user_ids"] == result["user_ids"]
-    assert pending["token"] == result["review_token"]
-    assert len(pending["overall_digest"]) == 64
-    assert saved
+    calls = []
 
+    def send(method, path, payload):
+        calls.append((method, path, payload))
+        return {}, None
 
-def test_direct_apply_and_mismatched_review_are_rejected_without_put():
-    session = _session()
-    sent = []
-    send = lambda *args: sent.append(args) or ({}, None)
-    direct, code = session_actions.push_grades(
-        "session-1", user_ids='["user-1"]', review_token="", load_session=lambda _: session,
-        save_session=lambda _: None, canvas_send=send, canvas_get=canvas_get,
-    )
-    assert code == 409 and direct["code"] == "review_required" and sent == []
-    review, _ = session_actions.review_push(
-        "session-1", user_ids='["user-1"]', load_session=lambda _: session,
-        save_session=lambda _: None, canvas_get=canvas_get,
-    )
-    mismatch, code = session_actions.push_grades(
-        "session-1", user_ids='["user-2"]', review_token=review["review_token"],
-        load_session=lambda _: session, save_session=lambda _: None,
-        canvas_send=send, canvas_get=canvas_get,
-    )
-    assert code == 409 and mismatch["code"] == "review_mismatch" and sent == []
-
-
-def test_score_drift_blocks_before_any_put():
-    session = _session()
-    review, _ = session_actions.review_push(
-        "session-1", user_ids='["user-1"]', load_session=lambda _: session,
-        save_session=lambda _: None, canvas_get=canvas_get,
-    )
-    def drifted(*args, **kwargs):
-        data, _ = canvas_get(*args, **kwargs)
-        data["submission"]["updated_at"] = "2026-01-02T00:00:00Z"
-        return data, None
-    sent = []
     result, code = session_actions.push_grades(
-        "session-1", user_ids='["user-1"]', review_token=review["review_token"],
+        "session-1", user_ids='["user-1"]',
         load_session=lambda _: session, save_session=lambda _: None,
-        canvas_send=lambda *args: sent.append(args) or ({}, None), canvas_get=drifted,
+        canvas_send=send,
     )
-    assert code == 409 and result["code"] == "drift_detected" and sent == []
+
+    assert code == 200 and result["ok"] is True
+    assert calls == [("PUT", "/api/v1/courses/course-1/assignments/assignment-1/submissions/user-1", {
+        "submission": {"posted_grade": "4"},
+        "comment": {"text_comment": "Good."},
+    })]
+    assert session["students"][0]["posted"] is True
+
+
+def test_no_late_policy_or_gradebook_adjustment_field_is_sent():
+    """LAW: CE sends no policy/gradebook adjustment field and requests no policy."""
+    session = _session()
+    sent = []
+
+    def send(method, path, payload):
+        sent.append(payload)
+        return {}, None
+
+    session_actions.push_grades(
+        "session-1", user_ids='["user-1"]',
+        load_session=lambda _: session, save_session=lambda _: None,
+        canvas_send=send,
+    )
+
+    blob = json.dumps(sent)
+    for forbidden in ("late_policy_status", "seconds_late_override", "excuse",
+                      "points_deducted", "late_policy"):
+        assert forbidden not in blob
+
+
+def test_successful_send_performs_no_canvas_read():
+    """LAW: after a successful ordinary scoring PUT, CE performs no Canvas GET,
+    mirror refresh, final-grade comparison, or policy inspection."""
+    session = _session()
+    calls = []
+
+    def send(method, path, payload):
+        calls.append(path)
+        return {}, None
+
+    result, _code = session_actions.push_grades(
+        "session-1", user_ids='["user-1", "user-2"]',
+        load_session=lambda _: session, save_session=lambda _: None,
+        canvas_send=send,
+    )
+
+    assert result["ok"] is True
+    assert len(calls) == 2
+    # The accepted-write receipt carries transport facts only.
+    receipt = session["push_log"][-1]["results"][0]
+    assert set(receipt) == {"user_id", "status", "code",
+                            "request_digest", "target_digest"}
+
+
+def test_transport_error_is_unknown_without_idempotency_or_repeat():
+    """LAW: a transport-unknown send never triggers a second PUT, automatic
+    re-verification, or an exposed Canvas grade result."""
+    session = _session()
+    calls = []
+
+    def send(method, path, payload):
+        calls.append(path)
+        return None, "connection lost"
+
+    result, code = session_actions.push_grades(
+        "session-1", user_ids='["user-1"]',
+        load_session=lambda _: session, save_session=lambda _: None,
+        canvas_send=send,
+    )
+
+    assert code == 200 and result["ok"] is False
+    assert result["code"] == "write_transport_unknown"
+    assert result["results"][0]["status"] == "transport_unknown"
+    assert session["students"][0]["push_state"] == "sent_unknown"
+    assert not session.get("push_idempotency")
+
+    before_retry = len(calls)
+    retry, _code = session_actions.push_grades(
+        "session-1", user_ids='["user-1"]',
+        load_session=lambda _: session, save_session=lambda _: None,
+        canvas_send=send,
+    )
+    assert retry["code"] == "payload_changed"
+    assert len(calls) == before_retry, "transport-unknown must not repeat the PUT"
+
+
+def test_explicit_http_rejection_is_distinct_from_transport_uncertainty():
+    session = _session()
+
+    result, _code = session_actions.push_grades(
+        "session-1", user_ids='["user-1"]',
+        load_session=lambda _: session, save_session=lambda _: None,
+        canvas_send=lambda *_a: (None, "HTTP 400: rejected"),
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "canvas_rejected"
+    assert result["results"][0]["status"] == "failed"
+    assert session["students"][0].get("push_state") is None
 
 
 def test_partial_success_updates_only_confirmed_rows_and_repeat_is_idempotent():
     session = _session()
-    rows = {}
-    read = _canvas_get_with_rows(rows)
-    review, _ = session_actions.review_push(
-        "session-1", user_ids='["user-1", "user-2"]', load_session=lambda _: session,
-        save_session=lambda _: None, canvas_get=read,
-    )
     calls = []
+
     def send(method, path, payload):
         calls.append((method, path, payload))
-        if path.endswith("user-1"):
-            rows["user-1"] = {
-                "submission": {"score": 4, "grade": "4", "graded_at": None,
-                               "updated_at": "2026-01-01T00:00:00Z"},
-                "submission_comments": [{"id": 1, "created_at": "2026-01-02T00:00:00Z"}],
-            }
         return ({}, None) if path.endswith("user-1") else ({}, "HTTP 400: rejected")
+
     result, code = session_actions.push_grades(
-        "session-1", user_ids=json.dumps(review["user_ids"]), review_token=review["review_token"],
+        "session-1", user_ids='["user-1", "user-2"]',
         load_session=lambda _: session, save_session=lambda _: None,
-        canvas_send=send, canvas_get=read,
+        canvas_send=send,
     )
     assert code == 200 and result["ok"] is False
     assert session["students"][0]["posted"] is True
     assert session["students"][1]["posted"] is False
     assert len(calls) == 2
+
+    # Re-approve the accepted row and resubmit the identical payload.
+    session["students"][0]["posted"] = False
+    session["students"][0]["status"] = "approved"
     again, code = session_actions.push_grades(
-        "session-1", user_ids=json.dumps(review["user_ids"]), review_token=review["review_token"],
+        "session-1", user_ids='["user-1"]',
         load_session=lambda _: session, save_session=lambda _: None,
-        canvas_send=send, canvas_get=read,
+        canvas_send=send,
     )
     assert code == 200 and again["results"][0]["status"] == "already_applied"
-    assert len(calls) == 3
+    assert len(calls) == 2, "an accepted payload was sent twice"
 
 
-def test_transport_send_error_is_durable_attention_without_idempotency():
+def test_stored_ai_banner_is_removed_from_the_sent_payload():
     session = _session()
-    review, _ = session_actions.review_push(
-        "session-1", user_ids='["user-1"]', load_session=lambda _: session,
-        save_session=lambda _: None, canvas_get=canvas_get,
-    )
-    result, code = session_actions.push_grades(
-        "session-1", user_ids='["user-1"]', review_token=review["review_token"],
-        load_session=lambda _: session, save_session=lambda _: None,
-        canvas_send=lambda *_args: (None, "connection lost"), canvas_get=canvas_get,
-    )
-    assert code == 200 and result["ok"] is False
-    assert result["results"][0]["status"] == "attention"
-    assert session["students"][0]["push_state"] == "sent_unknown"
-    assert not session.get("push_idempotency")
-
-
-def test_stored_ai_banner_is_removed_from_review_apply_payload():
-    session = _session()
-    rows = {}
-    read = _canvas_get_with_rows(rows)
     session["students"][0]["teacher_feedback"] = (
         "---------- AI draft ----------\n"
         "AI score: 4 / 10\n"
         "Good."
     )
-    review, _ = session_actions.review_push(
-        "session-1", user_ids='["user-1"]', load_session=lambda _: session,
-        save_session=lambda _: None, canvas_get=read,
-    )
     calls = []
+
     def send(method, path, payload):
         calls.append((method, path, payload))
-        rows["user-1"] = {
-            "submission": {"score": 4, "grade": "4", "graded_at": None,
-                           "updated_at": "2026-01-01T00:00:00Z"},
-            "submission_comments": [{"id": 1, "created_at": "2026-01-02T00:00:00Z"}],
-        }
         return {}, None
+
     result, code = session_actions.push_grades(
-        "session-1", user_ids='["user-1"]', review_token=review["review_token"],
+        "session-1", user_ids='["user-1"]',
         load_session=lambda _: session, save_session=lambda _: None,
         canvas_send=send,
-        canvas_get=read,
     )
     assert code == 200 and result["ok"] is True
     assert calls[0][2] == {
@@ -187,67 +201,14 @@ def test_stored_ai_banner_is_removed_from_review_apply_payload():
     }
 
 
-def test_grade_mutation_invalidates_review():
+def test_grade_mutation_saves_the_teacher_edit():
     session = _session()
-    session["pending_push_review"] = {"token": "opaque"}
     saved = []
     result, _ = session_actions.save_grade(
         "session-1", user_id="user-1", teacher_score="5", teacher_feedback="Updated",
         status="approved", load_session=lambda _: session,
         save_session=lambda value: saved.append(copy.deepcopy(value)),
     )
-    assert result["ok"] is True and "pending_push_review" not in saved[0]
-
-
-@pytest.mark.parametrize("failure", ["get_failed", "score_mismatch"])
-def test_successful_put_without_matching_readback_is_durable_attention(failure):
-    session = _session()
-    calls = []
-    reads = [0]
-
-    def read(path, params=None, timeout=0):
-        reads[0] += 1
-        if reads[0] == 1:
-            return canvas_get(path, params=params, timeout=timeout)
-        if failure == "get_failed":
-            return None, "connection lost"
-        return ({
-            "submission": {"score": 99, "grade": "99", "graded_at": None,
-                           "updated_at": "2026-01-01T00:00:00Z"},
-            "submission_comments": [{"id": 1, "created_at": "2026-01-02T00:00:00Z"}],
-        }, None)
-
-    review, _ = session_actions.review_push(
-        "session-1", user_ids='["user-1"]', load_session=lambda _: session,
-        save_session=lambda _: None, canvas_get=read,
-    )
-    reads[0] = 0
-
-    def send(method, path, payload):
-        calls.append((method, path, payload))
-        return {}, None
-
-    result, status = session_actions.push_grades(
-        "session-1", user_ids='["user-1"]', review_token=review["review_token"],
-        load_session=lambda _: session, save_session=lambda _: None,
-        canvas_send=send, canvas_get=read,
-    )
-
-    assert status == 200 and result["ok"] is False
-    assert result["results"][0]["status"] == "attention"
-    assert result["results"][0]["code"] == "sent_unknown"
-    assert session["students"][0]["status"] == "attention"
-    assert session["students"][0]["push_state"] == "sent_unknown"
-    assert "user-1" not in session.get("push_idempotency", {})
-    receipt = session["push_log"][-1]["results"][0]
-    assert receipt["request_digest"] and receipt["target_digest"]
-    assert "postcondition_digest" in receipt
-
-    before_retry = len(calls)
-    retry, retry_status = session_actions.push_grades(
-        "session-1", user_ids='["user-1"]', review_token=review["review_token"],
-        load_session=lambda _: session, save_session=lambda _: None,
-        canvas_send=send, canvas_get=read,
-    )
-    assert retry_status == 409 and retry["code"] == "payload_changed"
-    assert len(calls) == before_retry
+    assert result["ok"] is True
+    assert saved[0]["students"][0]["teacher_score"] == 5.0
+    assert saved[0]["students"][0]["teacher_feedback"] == "Updated"

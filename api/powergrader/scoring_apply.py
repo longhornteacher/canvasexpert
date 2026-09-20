@@ -1,36 +1,25 @@
-"""Chat-side scoring apply: plan, questions, and the push.
+"""Chat-side scoring apply: plan, questions, and the narrow write.
 
-The web UI queue and this module reach Canvas through the same transport --
-``session_actions.review_push`` freezes, ``session_actions.push_grades``
-writes. What differs is where the teacher's review happens: the queue shows it
-on a page, this shows it in the conversation.
+The ordinary Assignment write is one send: the reviewed raw score and
+plain-text comment go to the Canvas Submissions endpoint, and Canvas applies
+every gradebook and late-policy adjustment from there. This module therefore
+performs no Canvas read at all -- no existing-score lookup, no frozen baseline,
+no drift check, and no post-write verification. Canvas Live is the review
+surface; the teacher may edit the result there.
 
-Read-only preview. ``build_plan`` captures a Canvas baseline but writes
-nothing, locally or remotely. Every state change -- copying staged AI values
-into the teacher fields, approving rows, freezing, pushing -- happens in
-``apply_plan``, inside one session lock held by the caller.
+What still guards the write: the packet digest, the exact assignment scope, the
+session's currentness, result-shape and range validation, the outbound privacy
+scan, held-work handling, and explicit teacher answers to the remaining
+non-grade questions.
 
-That ordering is forced, not stylistic: ``push_grades`` refuses unless the
-requested ids equal the frozen review's ids exactly (``review_mismatch``), so a
-``skip_those`` answer has to shrink the set *before* the freeze. Resolving
-answers first and freezing once is the only shape that works, and it has the
-happy side effect that a preview the teacher never applies leaves nothing
-behind.
+Read-only preview. ``build_plan`` writes nothing, locally or remotely. Every
+state change -- copying staged AI values into the teacher fields, approving
+rows, sending -- happens in ``apply_plan``, inside one session lock held by the
+caller.
 
 Identity: this module speaks Canvas ``user_id``, like the rest of the
 powergrader package. Pseudonym resolution belongs to the MCP tool layer above
 it, which never lets a ``user_id`` cross the boundary.
-
-Cost, so it is a known quantity rather than a surprise: an apply reads each
-student's submission three times -- once here to recompute the plan digest,
-once in ``review_push`` to freeze the baseline, once in ``push_grades`` to
-drift-check against it. The three serve different purposes and none is
-redundant. The first is load-bearing specifically for
-``overwrites_existing_score``: ``review_push`` captures its baseline fresh at
-apply time, so a score that appeared in Canvas after the preview would be
-folded silently into that baseline and never raise the question the teacher
-should have been asked. A 25-student session therefore costs ~75 GETs on
-apply; watch ``X-Rate-Limit-Remaining`` if sessions get much larger.
 """
 from __future__ import annotations
 
@@ -62,7 +51,6 @@ def _effective_points_possible(job: dict, assignment: dict, ai_result: dict | No
 # exactly, so there is no default and no "most likely" choice.
 QUESTION_OPTIONS: dict[str, tuple[str, ...]] = {
     "score_above_possible": ("post_anyway", "skip_those"),
-    "overwrites_existing_score": ("overwrite", "skip_those"),
     "missing_score": ("comment_only", "skip_those"),
     "pseudonym_in_feedback": ("skip_those", "post_anyway"),
     "held_not_scored": ("proceed", "stop"),
@@ -92,7 +80,7 @@ def _projected_payload(student: dict) -> dict:
     """What ``_payload`` will build once the staged values are approved.
 
     Mirrors the approval copy in ``approve_rows`` so the plan digest covers the
-    bytes that will actually be pushed, not the row's pre-approval state.
+    bytes that will actually be sent, not the row's pre-approval state.
     """
     projected = dict(student)
     if student.get("teacher_score") is None:
@@ -110,9 +98,9 @@ def default_transports():
     layer is not allowed to hold a live Canvas call. Callers there ask this
     package to do the talking instead. Tests still inject their own fakes.
     """
-    from api.platform_services.canvas_client import canvas_get, _canvas_send
+    from api.platform_services.canvas_client import _canvas_send
 
-    return canvas_get, _canvas_send
+    return _canvas_send
 
 
 def _question(kind: str, detail: str, user_ids: list[str]) -> dict:
@@ -125,26 +113,24 @@ def _question(kind: str, detail: str, user_ids: list[str]) -> dict:
     }
 
 
-def build_plan(session: dict, *, canvas_get=None, pseudonyms=()) -> dict:
+def build_plan(session: dict, *, pseudonyms=()) -> dict:
     """Read-only. What would be posted, and what needs answering first.
 
     ``pseudonyms`` is every stand-in name in the local vault. Feedback that
     contains one would reach a real student as a stranger's fake name, or as
     their own -- which they have never seen either.
     """
-    if canvas_get is None:
-        canvas_get, _ = default_transports()
     students = [s for s in session.get("students", []) if s.get("user_id") is not None]
     if any(s.get("push_state") == "sent_unknown" for s in students):
         return {
             "ok": False,
             "code": "canvas_write_attention",
-            "error": "A previous Canvas write could not be verified. Review Canvas before retrying.",
+            "error": "A previous Canvas write could not be confirmed. Review Canvas before retrying.",
         }
     candidates = [s for s in students if _staged(s)]
     candidate_ids = [str(s["user_id"]) for s in candidates]
 
-    above, overwrites, missing, tainted = [], [], [], []
+    above, missing, tainted = [], [], []
     assignment = session.get("assignment") or {}
 
     for student in candidates:
@@ -168,20 +154,6 @@ def build_plan(session: dict, *, canvas_get=None, pseudonyms=()) -> dict:
         if any(name and name in text for name in pseudonyms):
             tainted.append(user_id)
 
-        if "submission" in payload:
-            baseline, error = session_actions._fetch_snapshot(session, user_id, canvas_get)
-            if error:
-                return {"ok": False, "code": error,
-                        "error": "Could not read the current Canvas state for this session."}
-            # A leftover or auto-derived score on work Canvas still marks
-            # submitted/pending_review is the reason this row is in the
-            # session. Asking to overwrite it treats unfinished SpeedGrader
-            # work as a finished grade.
-            state = str(baseline.get("workflow_state") or "").strip().casefold()
-            if baseline.get("score") is not None and state not in {
-                    "submitted", "pending_review"}:
-                overwrites.append(user_id)
-
     receives_nothing = [str(s["user_id"]) for s in students
                         if not _staged(s) and not s.get("posted")]
 
@@ -190,10 +162,6 @@ def build_plan(session: dict, *, canvas_get=None, pseudonyms=()) -> dict:
         questions.append(_question(
             "score_above_possible",
             "Staged score is higher than the item is worth.", above))
-    if overwrites:
-        questions.append(_question(
-            "overwrites_existing_score",
-            "Canvas already has a score for these submissions.", overwrites))
     if missing:
         questions.append(_question(
             "missing_score",
@@ -293,29 +261,29 @@ def approve_rows(session: dict, user_ids) -> None:
 
 
 def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
-               load_session, save_session, canvas_get=None, canvas_send=None,
+               load_session, save_session, canvas_send=None,
                pseudonyms=(), idempotency_key: str = "") -> tuple[dict, int]:
-    """Approve, freeze and push exactly what a matching preview described.
+    """Approve and send exactly what a matching preview described.
 
-    ``approve_rows`` runs before the freeze, so ``review_push`` sees ordinary
-    approved rows and needs no special eligibility handling.
+    ``approve_rows`` runs before the send, so ``push_grades`` sees ordinary
+    approved rows. There is no freeze, no drift check, and no read-back: the
+    plan digest is the only thing standing between the preview the teacher read
+    and the bytes that go out.
     """
-    if canvas_get is None or canvas_send is None:
-        default_get, default_send = default_transports()
-        canvas_get = canvas_get or default_get
-        canvas_send = canvas_send or default_send
+    if canvas_send is None:
+        canvas_send = default_transports()
 
     session = load_session(session_id)
     if not session:
         return {"ok": False, "code": "session_not_found", "error": "Session not found."}, 404
 
-    plan = build_plan(session, canvas_get=canvas_get, pseudonyms=pseudonyms)
+    plan = build_plan(session, pseudonyms=pseudonyms)
     if not plan.get("ok"):
         return plan, 200
     if plan["digest"] != str(expected_digest or ""):
         return {"ok": False, "code": "plan_changed",
-                "error": ("The staged scores or the Canvas state changed since the "
-                          "preview. Preview again before applying.")}, 409
+                "error": ("The staged scores changed since the preview. "
+                          "Preview again before applying.")}, 409
 
     resolved = resolve_answers(plan, answers)
     if not resolved.get("ok"):
@@ -325,18 +293,10 @@ def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
     approve_rows(session, user_ids)
     save_session(session)
 
-    frozen, status = session_actions.review_push(
-        session_id, user_ids=json.dumps(user_ids),
-        load_session=load_session, save_session=save_session, canvas_get=canvas_get,
-    )
-    if not frozen.get("ok"):
-        return frozen, status
-
     pushed, status = session_actions.push_grades(
-        session_id, user_ids=json.dumps(user_ids), review_token=frozen["review_token"],
+        session_id, user_ids=json.dumps(user_ids),
         load_session=load_session, save_session=save_session,
-        canvas_send=canvas_send, canvas_get=canvas_get,
-        idempotency_key=idempotency_key,
+        canvas_send=canvas_send, idempotency_key=idempotency_key,
     )
     if pushed.get("ok"):
         pushed = dict(pushed)

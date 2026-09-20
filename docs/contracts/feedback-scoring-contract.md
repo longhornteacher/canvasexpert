@@ -141,14 +141,38 @@ never enters the SAFE packet or MCP response.
 Teacher guidance remains available privately in full for the session record. When oversized,
 its effective model and packet projection carries the compaction marker and counts above;
 those counts are the signal that effective text was omitted. Ordinary assignments use the
-public prepare -> packet -> submit flow and retain the
-frozen baseline, drift check, per-student idempotency, PUT-then-GET verification, and
-content-minimized receipt lane. An explicit teacher direction to score/post a selected
+public prepare -> packet -> submit flow and write through one narrow lane: the reviewed raw
+score (`submission.posted_grade`) and one plain-text submission comment
+(`comment.text_comment`) go to the existing Canvas Submissions endpoint once. That endpoint is
+the API counterpart of entering the raw score in SpeedGrader; it is not the LTI Score API and
+adds no rubric-assessment or New Quiz item-score write. `item_id` remains the SAFE
+packet/result identity and correction-selection key, not a separate writable Canvas score
+field for ordinary Assignments. An explicit teacher direction to score/post a selected
 discovery set authorizes submit for those exact assignments together; a review-only or
-no-submit direction stops before submit. A successful write is posted only when the refreshed score,
-comment availability/count, and latest-comment metadata satisfy the postcondition. A GET
-failure or mismatch is durable `sent_unknown`/Attention with no idempotency and no automatic
-retry; explicit HTTP rejection remains the existing failed result. Existing New Quizzes with
+no-submit direction stops before submit.
+
+Canvas Expert does not read the resulting grade back. There is no post-write GET, no mirror
+refresh, no score equality comparison, no comment-count or latest-comment comparison, no
+`points_deducted` use, and no grade/score/late-policy fact in MCP results or receipts. Canvas
+may apply a late/missing policy or any other gradebook adjustment; CE neither changes that
+policy nor asks about, reads, calculates, displays, or treats the adjusted result as a write
+failure. The teacher reviews the result in Canvas and may edit it there; that review is not an
+automated CE responsibility. CE sends no `late_policy_status`, `seconds_late_override`,
+`excuse`, or other policy/gradebook adjustment field, and requests no course late policy.
+
+A Canvas HTTP success means the write was accepted; CE records that compact receipt and moves
+on. A non-HTTP transport error is `write_transport_unknown`: it performs no later verification
+and no automatic retry, and it is never reported as `canvas_write_attention`. An explicit
+Canvas HTTP rejection is a failed write. Neither outcome may trigger a second submission
+comment write. A successful transport response finalizes the exact local idempotency slot, so
+an already accepted exact payload is never sent twice; an unconfirmed transport error is never
+treated as accepted.
+
+Grade-state preflight is not part of this lane: no existing-score lookup, no
+`overwrites_existing_score` question, no frozen Canvas score/comment baseline, and no pre-write
+Canvas drift check. Packet digest, assignment scope, session currentness, result-shape/range
+validation, the outbound privacy scan, held-work handling, and explicit teacher answers to the
+remaining non-grade questions stay in force. Existing New Quizzes with
 writing return the identity-safe unsupported code before scoring norms, SAFE packet generation, or Canvas mutation. New Quiz
 assignment totals and assignment-level comments are not scoring fallbacks.
 

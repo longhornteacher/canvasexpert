@@ -70,7 +70,7 @@ def test_chat_scoring_uses_one_assignment_type_neutral_submit_flow():
     assert "prepare_scoring_session" in instructions
     assert "get_scoring_packet" in instructions
     assert "submit_scoring_results" in instructions
-    assert "valid rows post to Canvas" in instructions
+    assert "never read back" in instructions
     assert "PowerGrader" not in instructions
     assert "OpenRouter" not in instructions
 

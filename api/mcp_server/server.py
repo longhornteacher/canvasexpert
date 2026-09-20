@@ -30,11 +30,11 @@ _SERVER_INSTRUCTIONS = (
     "gradebook reads refuse; use refresh_mirror once, then retry. Results are compact "
     "JSON tables or arrays; refusals are {ok:false}. Prefer narrow calls and "
     "include_text=false. "
-    "For broad grading requests, call discover_scoring_work first. It strictly "
-    "refreshes every Current course, reads only each refreshed local mirror, and "
+    "For broad grading, call discover_scoring_work first. It refreshes every Current "
+    "course, reads only each refreshed local mirror, and "
     "returns the complete assignment and attention set without preparation or writes. "
     "Report all rows, wait for teacher direction, then loop only the selected exact "
-    "course_id and assignment_id rows; do not ask the teacher to pick before discovery. "
+    "course_id and assignment_id rows; do not ask the teacher to pick first. "
     "A partial result keeps usable courses visible. "
     "A refreshing result is successful but incomplete: for mirror_refresh_in_progress, "
     "retry discovery only within at most four total calls for this teacher request "
@@ -42,11 +42,13 @@ _SERVER_INSTRUCTIONS = (
     "then report remaining attention and wait. "
     "Call prepare_scoring_session for one exact assignment. It performs one private "
     "full scoring refresh. For needs_scoring_norms, ask its bounded question and retry "
-    "the same preparation with bounded scoring guidance; never ask the teacher to "
+    "with bounded scoring guidance; never ask the teacher to "
     "choose a scoring transport or assignment type. Read every SAFE page with get_scoring_packet, including "
     "its contract and rubric; held work and evidence gaps are not empty. Submit only "
     "that packet's pseudonym/item results with expected_packet_digest through "
-    "submit_scoring_results. valid rows post to Canvas. For needs_teacher_input, ask "
+    "submit_scoring_results. Valid rows write the raw score and one plain-text comment "
+    "once; Canvas applies any gradebook or late-policy adjustment, and the grade is "
+    "never read back. For needs_teacher_input, ask "
     "only its questions and resubmit the same results with the review digest and answers. "
     "Canvas Live is the review surface; list_scoring_sessions is an identity-free resume "
     "aid. A teacher's explicit score/post direction authorizes the selected discovery "
@@ -448,8 +450,9 @@ def submit_scoring_results(
     answers: dict[str, str] | None = None,
     idempotency_key: str = "",
 ) -> str:
-    """Post one score and feedback per SAFE packet row to Canvas.
+    """Write one raw score and one plain-text comment per SAFE packet row to Canvas.
     Each results item needs pseudonym, item_id, score, and feedback from get_scoring_packet.
+    Canvas applies any gradebook or late-policy adjustment; the grade is never read back.
     If teacher judgment is needed, resubmit the same results with review_digest and answers."""
     return _compact(tools.submit_scoring_results(
         scoring_session_id, results, expected_packet_digest, review_digest, answers,

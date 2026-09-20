@@ -54,8 +54,36 @@ def _typed_failure(code: str, stage: str, *, retryable: bool, user_action: str,
     return result
 
 
-def _guidance_units(text: str) -> list[str]:
-    return [unit.strip() for unit in re.split(r"(?:\r?\n){1,2}", text) if unit.strip()]
+def _refresh_failure_facts(refresh_result) -> dict:
+    """Project a failed scoring refresh to identity-safe lifecycle facts.
+
+    Only the runner's own stable code and opaque lifecycle identifiers cross
+    this boundary. Canvas response bodies, URLs, student data, credentials,
+    filesystem paths, and arbitrary exception text never do.
+    """
+    if not isinstance(refresh_result, dict):
+        return {}
+    facts = {}
+    code = str(refresh_result.get("error_code") or "").strip()
+    if code:
+        facts["code"] = code
+    for key in ("operation_id", "snapshot_id"):
+        value = str(refresh_result.get(key) or "").strip()
+        if value:
+            facts[key] = value
+    revision = refresh_result.get("mirror_revision")
+    if revision not in (None, ""):
+        try:
+            facts["mirror_revision"] = int(revision)
+        except (TypeError, ValueError):
+            pass
+    state = str(refresh_result.get("state") or "").strip()
+    if state:
+        facts["refresh_state"] = state
+    return facts
+
+
+def _guidance_units(text: str) -> list[str]:    return [unit.strip() for unit in re.split(r"(?:\r?\n){1,2}", text) if unit.strip()]
 
 
 def _guidance_snippet(
@@ -325,12 +353,20 @@ def prepare_scoring_session(
         else:
             refreshed = bool(refresh_result)
     except Exception:
+        refresh_result = None
         refreshed = False
     if not refreshed:
+        # Carry the scoring-refresh runner's own identity-safe lifecycle facts
+        # (opaque operation id, mirror revision/snapshot, stable error code)
+        # instead of flattening every cause to one generic message. The runner
+        # is the scoring-specific full rebuild, so an ordinary refresh_mirror
+        # success is never evidence that this succeeded.
+        facts = _refresh_failure_facts(refresh_result)
         return _typed_failure(
-            "mirror_refresh_failed", "refresh", retryable=True,
+            facts.pop("code", "mirror_refresh_failed"), "refresh", retryable=True,
             user_action="Retry preparation after the Current course mirror refresh completes.",
             error="CanvasMirror could not be refreshed for this assignment.",
+            **facts,
         )
 
     try:

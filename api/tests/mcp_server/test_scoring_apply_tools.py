@@ -118,7 +118,8 @@ def test_ordinary_results_submit_once_without_exposing_private_identity(
 
     assert writes == ["verified write"]
     assert result["counts"] == {
-        "finalized": 1, "already_applied": 0, "held": 0, "failed": 0, "attention": 0,
+        "finalized": 1, "already_applied": 0, "held": 0, "failed": 0,
+        "transport_unknown": 0,
     }
     assert result["results"] == [{"pseudonym": PSEUDONYM, "status": "finalized"}]
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
@@ -324,3 +325,71 @@ def test_superseded_session_refuses_before_the_canvas_apply(
     assert result["ok"] is False
     assert result["code"] == "session_superseded"
     assert writes == []
+
+
+# ── Transport-only result semantics ─────────────────────────────────────────
+
+def test_transport_unknown_is_reported_without_a_canvas_grade_result(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """LAW: a transport-unknown send never exposes a Canvas grade result and
+    never becomes canvas_write_attention."""
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    from api.powergrader import scoring_apply
+
+    monkeypatch.setattr(scoring_apply, "build_plan", lambda *_a, **_kw: {
+        "ok": True, "candidate_ids": [REAL_ID], "questions": [],
+        "digest": "frozen-review", "notes": [],
+    })
+    monkeypatch.setattr(scoring_apply, "apply_plan", lambda *_a, **_kw: (
+        {"ok": False, "code": "write_transport_unknown", "pushed": 0,
+         "results": [{"user_id": REAL_ID, "status": "transport_unknown",
+                      "code": "write_transport_unknown"}],
+         "posted_rows": [], "remaining_rows": [REAL_ID]}, 200))
+
+    result = tools.submit_scoring_results("session-1", _result(), _digest(bundle))
+
+    assert result["ok"] is False
+    assert result["code"] == "write_transport_unknown"
+    assert result["code"] != "canvas_write_attention"
+    assert result["counts"]["transport_unknown"] == 1
+    assert result["results"] == [
+        {"pseudonym": PSEUDONYM, "status": "transport_unknown",
+         "code": "write_transport_unknown"},
+    ]
+    # No Canvas-returned grade fact crosses the boundary.
+    blob = _blob(result)
+    assert REAL_ID not in blob and REAL_NAME not in blob
+    for leaked in ("score", "grade", "points_deducted", "late_policy", "posted_grade"):
+        assert leaked not in blob
+
+
+def test_accepted_write_reports_a_pseudonym_only_finalized_outcome(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """EXAMPLE: one ordinary Assignment result completes after a single
+    accepted PUT and reports a pseudonym-only finalized outcome."""
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    from api.powergrader import scoring_apply
+    sends = []
+
+    monkeypatch.setattr(scoring_apply, "build_plan", lambda *_a, **_kw: {
+        "ok": True, "candidate_ids": [REAL_ID], "questions": [],
+        "digest": "frozen-review", "notes": [],
+    })
+
+    def apply_plan(*_a, **_kw):
+        sends.append("PUT")
+        return ({"ok": True, "pushed": 1,
+                 "results": [{"user_id": REAL_ID, "status": "pushed", "code": "pushed"}],
+                 "posted_rows": [REAL_ID], "remaining_rows": []}, 200)
+
+    monkeypatch.setattr(scoring_apply, "apply_plan", apply_plan)
+
+    result = tools.submit_scoring_results("session-1", _result(), _digest(bundle))
+
+    assert sends == ["PUT"]
+    assert result["ok"] is True
+    assert result["counts"]["finalized"] == 1
+    assert result["results"] == [{"pseudonym": PSEUDONYM, "status": "finalized"}]
+    assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
