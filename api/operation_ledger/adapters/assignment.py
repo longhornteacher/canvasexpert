@@ -510,7 +510,7 @@ def _ordered_steps(target: dict) -> list[dict]:
         def tier_order(step):
             key = str(step.get("step_key") or "")
             if key == "create_module":
-                return (-1, 0)
+                return (-1, 0, 0)
             prefix, _, suffix = key.partition(":")
             rank = {
                 "create_tier_assignment": 0,
@@ -518,7 +518,18 @@ def _ordered_steps(target: dict) -> list[dict]:
                 "create_override": 2,
                 "publish_assignment": 3,
             }.get(prefix, 9)
-            return (int(suffix) if suffix.isdigit() else 999999, rank)
+            family_rank = {
+                "create_bridge": 100,
+                "create_module": 101,
+                "activate_bridge": 103,
+                "register_family": 104,
+            }.get(key)
+            if key.startswith("attach_source_module:"):
+                source_index = key.rsplit(":", 1)[-1]
+                return (999999, 102, int(source_index) if source_index.isdigit() else 0)
+            if family_rank is not None:
+                return (999999, family_rank, 0)
+            return (int(suffix) if suffix.isdigit() else 999999, rank, 0)
         return sorted(existing.values(), key=tier_order)
     order = ("create_assignment", "create_module", "attach_module")
     return [existing[key] for key in order if key in existing]
