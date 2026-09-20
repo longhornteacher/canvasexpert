@@ -497,6 +497,20 @@ def is_current_session(session_id: str) -> bool:
     return current_session_id(session_id) == str(session_id or "")
 
 
+def current_actionable_session(course_id, assignment_id) -> dict | None:
+    """Return the current resumable record for one exact assignment scope.
+
+    This is the read-only preparation guard.  It deliberately returns the
+    private record so the caller can check packet health and mirror freshness
+    before deciding whether a replacement preparation is warranted.
+    """
+    current = _current_summary(_scope_summaries(course_id, assignment_id))
+    if not current or str(current.get("status") or "") not in ACTIONABLE_STATUSES:
+        return None
+    session_id = str(current.get("session_id") or "")
+    return load_session(session_id) if session_id else None
+
+
 def current_actionable_sessions(*, course_ids=None) -> list[dict]:
     """One current, actionable summary row per exact course/assignment scope.
 

@@ -45,16 +45,22 @@ course/scope job.
    authorizes submission for the set; do not request a new blanket confirmation per
    assignment. A review-only or no-submit direction stops before
    `submit_scoring_results`.
-   It performs one private full scoring refresh and reads only current local
-   mirror projections. A Canvas rubric wins; otherwise a missing basis returns
-   `needs_teacher_input` with `needs_scoring_norms`. Ask the concise question,
-   then retry the same exact preparation with bounded guidance.
+   Check `list_scoring_sessions()` first when resuming mid-task. A new preparation
+   performs one private full scoring refresh and reads only current local mirror
+   projections. If it returns `mirror_refresh_in_progress`, wait 5-10 minutes,
+   retry preparation once, then accept/report the outcome; never poll. A Canvas rubric
+   wins; otherwise a missing basis returns `needs_teacher_input` with
+   `needs_scoring_norms`. Ask the concise question, then retry the same exact
+   preparation with bounded guidance.
 2. A successful preparation returns one `scoring_session_id` with
-   `session_kind: scoring_assignment`. If it returns a typed blocker, follow its
-   `user_action`; every blocker names its actual preparation cause. A new
-   preparation makes its session the current one for that exact assignment and
-   supersedes earlier unfinished sessions for the same assignment. Older records
-   remain private history but are not resumable.
+   `session_kind: scoring_assignment`. Once a usable session exists, work locally
+   from its immutable packet and do not call `prepare_scoring_session` or
+   `refresh_mirror` again for that assignment. A repeated prepare returns
+   `scoring_session_already_open` and the existing session id without refreshing.
+   If a packet is stale, missing, or invalid, preparation may create a replacement;
+   that replacement becomes current and supersedes the earlier private record. If it
+   returns any other typed blocker, follow its `user_action`; every blocker names its
+   actual preparation cause.
 3. Read page zero with `get_scoring_packet`, including its scoring contract and
    basis, then follow `next_offset` through every page. Report held or otherwise
    unscorable work before scoring. Item/catalog or evidence gaps are not an empty
@@ -108,7 +114,8 @@ beyond what the packet surfaces.
 | Signal | Meaning | What to do |
 |---|---|---|
 | `needs_scoring_norms` | No rubric or guidance available | Ask the teacher for bounded guidance; retry the same preparation call with `scoring_guidance` set |
-| `mirror_refresh_in_progress` | The bounded discovery wait ended while a Current-course refresh was still queued or running | Call `discover_scoring_work()` only within the at-most-four-total-call cap for the current teacher request (initial plus three continuations), without teacher interruption; then report remaining attention and wait |
+| `mirror_refresh_in_progress` | A bounded discovery or assignment preparation refresh is still queued or running | For discovery, call `discover_scoring_work()` only within the at-most-four-total-call cap. For preparation, wait 5-10 minutes and retry once; then report the blocker and move on. Never poll |
+| `scoring_session_already_open` | A usable assignment-scoped session already exists | Use its `scoring_session_id`, read every packet page, work locally, and submit once. Do not prepare or refresh that assignment again |
 | `mirror_refresh_failed` | A Current-course refresh reached a terminal failure | Preserve the typed partial or `scoring_discovery_failed` result; report the attention and wait for teacher direction |
 | `start_failed` | The active assignment could not be prepared safely. **Not self-resolving.** Observed reproducing on specific assignments across multiple days, surviving fresh sessions and mirror refreshes | Do not retry blind. It is assignment-isolated, not course- or tool-wide. The open session stays resumable. Escalate; the teacher grades those assignments in Canvas meanwhile |
 | `signed_launch_shape` on New Quiz score preview | Canvas could not freeze a student's New Quiz result during finalization. Observed platform-wide across unrelated quizzes | Staged scores remain safe locally. Treat as a standing platform condition, not a per-assignment retry |

@@ -12,13 +12,15 @@ write authorization. Canvas Live is the only review/edit surface.
 - `session_store.py` is the single lifecycle owner for assignment-scoped
   Scoring Sessions. It holds the deterministic scope lock (order: scope, then
   session) and resolves the one current session per exact
-  `(course_id, assignment_id)`. A successful preparation persists its new record
-  with the next private positive scope generation and supersedes every other
-  actionable record for that scope; terminal and already-superseded records are
-  untouched. Generated records resolve by `(scope_generation, created,
-  session_id)` at the call boundary. Existing records without a generation use
-  `(created, session_id)` as the fallback regardless of status, with no migration
-  or deletion.
+  `(course_id, assignment_id)`. The MCP preparation guard reuses a usable
+  actionable record and returns `scoring_session_already_open` without a refresh;
+  stale, missing, or invalid packets are the replacement cases. An allowed
+  successful preparation persists its new record with the next private positive
+  scope generation and supersedes every other actionable record for that scope;
+  terminal and already-superseded records are untouched. Generated records resolve
+  by `(scope_generation, created, session_id)` at the call boundary. Existing
+  records without a generation use `(created, session_id)` as the fallback
+  regardless of status, with no migration or deletion.
 - `scoring_discovery.py` owns the read-only cross-course digest. It refreshes
   configured Current courses with bounded concurrency, reads only refreshed local
   mirror snapshots, projects aggregate assignment counts, and joins at most one

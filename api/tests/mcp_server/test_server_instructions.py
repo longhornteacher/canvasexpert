@@ -92,6 +92,17 @@ def test_refreshing_discovery_continuation_is_bounded_and_teacher_free():
     assert "without teacher interruption" in instructions
 
 
+def test_scoring_preparation_wait_and_open_session_rules_are_explicit():
+    instructions = server._SERVER_INSTRUCTIONS
+
+    assert "wait 5-10 minutes" in instructions
+    assert "retry preparation once" in instructions
+    assert "do not poll" in instructions
+    assert "scoring_session_already_open" in instructions
+    assert "do not prepare or refresh the assignment again" in instructions
+    assert "work locally" in instructions
+
+
 def test_write_rules_precede_the_discovery_hints():
     """If a client truncates the tail, lose the product-guide nudge, not the
     rule that bounds how far one teacher request reaches."""

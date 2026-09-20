@@ -2061,13 +2061,49 @@ def _normalize_scoring_preparation_result(result) -> dict:
     return result
 
 
+def _open_scoring_session_refusal(course_id: str, assignment_id: str) -> dict | None:
+    """Refuse duplicate preparation when a usable assignment packet is open.
+
+    A missing, invalid, or stale packet is recoverable through the existing
+    replacement path.  Basis-stage ``needs_scoring_norms`` never saves a
+    session, so the teacher-guidance retry is unaffected.
+    """
+    from api.powergrader import session_store
+
+    session = session_store.current_actionable_session(course_id, assignment_id)
+    if not isinstance(session, dict):
+        return None
+
+    freshness = _ensure_session_usable(session)
+    if not freshness.get("ok"):
+        return None
+    health = session_store.packet_health(session)
+    if not health.get("ok"):
+        return None
+
+    session_id = str(session.get("session_id") or "")
+    return {
+        "ok": False,
+        "code": "scoring_session_already_open",
+        "stage": "prepare",
+        "retryable": False,
+        "scoring_session_id": session_id,
+        "user_action": (
+            "Use get_scoring_packet with the existing scoring_session_id, "
+            "work locally on that snapshot, then submit once. Do not prepare "
+            "or refresh this assignment again."
+        ),
+        "error": "A usable Scoring Session is already open for this assignment.",
+    }
+
+
 def prepare_scoring_session(course_id: str, assignment_id: str,
                             scoring_guidance: str = "") -> dict:
     """Prepare one exact assignment after one private full mirror refresh.
 
     See ScoringSession/SCORING_SESSIONS.md (§2) in your workspace root for the
     Scoring Session workflow, failure modes, and known patterns."""
-    from api.powergrader import scoring_preparation
+    from api.powergrader import scoring_preparation, session_store
 
     course_key = str(course_id or "").strip()
     assignment_key = str(assignment_id or "").strip()
@@ -2080,6 +2116,13 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
                 "user_action": "Provide a Current course_id and exact assignment_id.",
                 "error": gate_error,
             }
+    try:
+        with session_store.scope_lock(course_key, assignment_key):
+            existing = _open_scoring_session_refusal(course_key, assignment_key)
+    except Exception:
+        return _safe_scoring_preparation_failure()
+    if existing:
+        return existing
     try:
         result = scoring_preparation.prepare_scoring_session(
             course_key, assignment_key, scoring_guidance,

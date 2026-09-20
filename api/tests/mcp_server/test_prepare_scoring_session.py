@@ -33,6 +33,62 @@ def test_prepare_calls_one_full_refresh_and_returns_ready(monkeypatch):
     assert calls == [("c1", "a1", "Writing"), ("refresh", "c1")]
 
 
+def test_prepare_refuses_to_resync_when_a_usable_session_is_open(monkeypatch):
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "c1"}])
+    session = {
+        "session_id": "s1", "course_id": "c1", "assignment_id": "a1",
+        "session_kind": "scoring_assignment", "status": "ready",
+    }
+    monkeypatch.setattr(session_store, "current_actionable_session",
+                        lambda _course, _assignment: session)
+    monkeypatch.setattr(session_store, "packet_health",
+                        lambda _session: {"ok": True})
+    monkeypatch.setattr(tools, "_ensure_session_usable",
+                        lambda _session: {"ok": True})
+    monkeypatch.setattr(
+        "api.powergrader.scoring_preparation.prepare_scoring_session",
+        lambda *_args, **_kwargs: pytest.fail("duplicate preparation refreshed the mirror"),
+    )
+
+    result = tools.prepare_scoring_session("c1", "a1")
+
+    assert result == {
+        "ok": False,
+        "code": "scoring_session_already_open",
+        "stage": "prepare",
+        "retryable": False,
+        "scoring_session_id": "s1",
+        "user_action": (
+            "Use get_scoring_packet with the existing scoring_session_id, "
+            "work locally on that snapshot, then submit once. Do not prepare "
+            "or refresh this assignment again."
+        ),
+        "error": "A usable Scoring Session is already open for this assignment.",
+    }
+
+
+def test_prepare_allows_replacement_when_the_open_session_is_stale(monkeypatch):
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "c1"}])
+    session = {
+        "session_id": "s1", "course_id": "c1", "assignment_id": "a1",
+        "session_kind": "scoring_assignment", "status": "ready",
+    }
+    monkeypatch.setattr(session_store, "current_actionable_session",
+                        lambda _course, _assignment: session)
+    monkeypatch.setattr(tools, "_ensure_session_usable",
+                        lambda _session: {"ok": False, "code": "session_stale"})
+    monkeypatch.setattr(session_store, "packet_health",
+                        lambda _session: pytest.fail("stale session needs no packet check"))
+    monkeypatch.setattr(
+        "api.powergrader.scoring_preparation.prepare_scoring_session",
+        lambda *_args, **_kwargs: {"ok": True, "status": "ready", "scoring_session_id": "s2"},
+    )
+
+    result = tools.prepare_scoring_session("c1", "a1")
+
+    assert result["status"] == "ready"
+
+
 def test_prepare_owner_exception_returns_safe_typed_failure(monkeypatch):
     private_text = "private student identity should never escape"
     monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "c1"}])

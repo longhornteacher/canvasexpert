@@ -227,7 +227,12 @@ forces one foreground full scoring refresh for that course, reads only current l
 mirror projections, performs no direct Canvas read, and saves one assignment-scoped
 session on success. Canvas workflow state is authoritative: a numeric score or teacher
 comment does not clear `submitted` or `pending_review` work. The assistant never asks
-for an assignment type or scoring transport.
+for an assignment type or scoring transport. Preparation is one call per exact
+assignment while the session is usable: if the refresh is still queued or running,
+wait 5-10 minutes and retry once, then report the blocker; do not poll. Once a usable
+session id exists, continue locally from its packet and do not prepare or refresh that
+assignment again. A repeated call returns `scoring_session_already_open`; stale,
+missing, or invalid packets are the explicit replacement cases.
 
 AssignmentForge auto-scoring gates: An assignment qualifies for AI auto-scoring in a
 Scoring Session only when all four conditions are met: (1) the assignment text explicitly

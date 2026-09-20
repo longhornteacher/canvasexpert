@@ -315,3 +315,13 @@ def test_preparing_the_same_assignment_twice_leaves_the_second_resumable(store):
     # Both records remain on disk: supersede, never delete.
     assert store.load_session("first") is not None
     assert store.load_session("second") is not None
+
+
+def test_current_actionable_session_returns_only_the_current_record(store):
+    store.activate_scoring_session(_session("first", created="2026-01-01T08:00:00"))
+    store.activate_scoring_session(_session("second", created="2026-01-02T08:00:00"))
+
+    current = store.current_actionable_session("c1", "a1")
+
+    assert current["session_id"] == "second"
+    assert current["status"] == "ready"

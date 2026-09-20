@@ -105,14 +105,23 @@ then resubmits the unchanged results and packet digest with every explicit answe
 the exact review digest. A changed review plan or invalid answer fails closed.
 ## Session consumption and write safety
 
-One exact course-and-assignment scope has at most one actionable Scoring Session. A successful
-preparation activates its newly saved session and marks every earlier actionable session for that
-exact `(course_id, assignment_id)` as `superseded` with private `superseded_by_session_id` and
-`superseded_at` fields. Actionable means `ready` or the submit-stage `needs_teacher_input`;
-terminal `completed`/`completed_with_holds` sessions remain unchanged. A failed preparation, a
-typed blocker, and the basis-stage `needs_scoring_norms` state neither save a session nor
-supersede one. `list_scoring_sessions()` is an identity-free resume aid and returns at most one
-row per exact scope.
+One exact course-and-assignment scope has at most one actionable Scoring Session. Before starting
+another full scoring refresh, preparation checks that exact scope. When a usable actionable
+record exists (`ready` or submit-stage `needs_teacher_input` with a valid SAFE packet), it
+returns the identity-safe `scoring_session_already_open` refusal with the existing
+`scoring_session_id`; it does not refresh, save, or supersede anything. The agent must continue
+from that immutable packet and must not call preparation or `refresh_mirror` again for the
+assignment. A failed preparation, a typed blocker, and the basis-stage `needs_scoring_norms`
+state neither save a session nor supersede one. `mirror_refresh_in_progress` is a wait signal:
+the agent may retry preparation once after waiting 5-10 minutes, then must accept/report the
+outcome rather than poll.
+
+If the current packet is stale, missing, or invalid, preparation may create a replacement. A
+successful replacement activates its newly saved session and marks every earlier actionable
+session for that exact `(course_id, assignment_id)` as `superseded` with private
+`superseded_by_session_id` and `superseded_at` fields. Terminal `completed`/`completed_with_holds`
+sessions remain unchanged. `list_scoring_sessions()` is an identity-free resume aid and returns
+at most one row per exact scope.
 
 Supersession never deletes: earlier session JSON, SAFE bundles, receipts, and Canvas objects
 remain as teacher history, and supersession metadata stays private. Activated sessions carry a
