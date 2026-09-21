@@ -18,6 +18,7 @@ import unicodedata
 # token appears inside it. "[#]" has no word chars, so no \b-bounded rule can
 # match within it.
 ID_PLACEHOLDER = "[#]"
+NEUTRAL_NAME_PLACEHOLDER = "⟨student-name-scrubbed⟩"
 
 # Ids shorter than this are never real Canvas/SIS ids in practice; skipping
 # them avoids pathological corruption from a stray 1-2 char match (e.g. a
@@ -120,6 +121,13 @@ def build_replacement_map(vault_entries: list[dict],
     """
     rules: list[tuple[str, str]] = []  # (regex_string, replacement)
 
+    protected_tokens = {
+        _fold(str(value)).casefold()
+        for value in (protected or set())
+        if str(value or "").strip()
+        for value in str(value).split()
+    }
+
     for entry in vault_entries:
         real_name = entry.get("real_name", "").strip()
         pseudo = entry.get("pseudonym", "")
@@ -146,14 +154,23 @@ def build_replacement_map(vault_entries: list[dict],
         # Folded so an unaccented typing of an accented roster name ("Jose
         # Flores" for vault "José Flores") still matches — matching only;
         # the replacement text is unaffected.
-        rules.append((re.escape(_fold(real_name)), pseudo))
+        collision = any(
+            _fold(token).casefold() in protected_tokens
+            for token in _tokenize(real_name)
+        )
+        name_replacement = NEUTRAL_NAME_PLACEHOLDER if collision else pseudo
+        rules.append((re.escape(_fold(real_name)), name_replacement))
 
         # Every individual token (first, middle, last) resolves to the SAME
         # complete pseudonym -- there is no separate first/last component to
         # map to under the one-word contract.
         for token in _tokenize(real_name):
             if token:
-                rules.append((re.escape(_fold(token)), pseudo))
+                replacement = (
+                    NEUTRAL_NAME_PLACEHOLDER
+                    if _fold(token).casefold() in protected_tokens else pseudo
+                )
+                rules.append((re.escape(_fold(token)), replacement))
 
         # Nicknames/aliases -> full pseudonym so every identity alias resolves
         # consistently to the student's existing pseudonym. Folded like every
@@ -161,7 +178,12 @@ def build_replacement_map(vault_entries: list[dict],
         # guarantee as real_name).
         for nn in nicknames:
             if nn.strip():
-                rules.append((re.escape(_fold(nn.strip())), pseudo))
+                nickname = nn.strip()
+                replacement = (
+                    NEUTRAL_NAME_PLACEHOLDER
+                    if _fold(nickname).casefold() in protected_tokens else pseudo
+                )
+                rules.append((re.escape(_fold(nickname)), replacement))
 
     # Sort by pattern length descending (longest first) so full-name rules beat
     # single-token rules
@@ -179,6 +201,64 @@ def build_replacement_map(vault_entries: list[dict],
             continue
 
     return compiled
+
+
+def _collision_spans(text: str, protected: set[str]) -> list[tuple[int, int]]:
+    """Find roster/protected-token spans in original text coordinates."""
+    folded, index_map = _fold_with_map(text)
+    spans = []
+    tokens = {
+        _fold(str(value)).casefold()
+        for value in (protected or set())
+        if str(value or "").strip()
+        for value in str(value).split()
+    }
+    for token in tokens:
+        for match in re.finditer(rf"\b{re.escape(token)}\b", folded, re.IGNORECASE):
+            start = index_map[match.start()]
+            end = index_map[match.end() - 1] + 1
+            spans.append((start, end))
+    return sorted(set(spans))
+
+
+def _quoted_spans(text: str) -> list[tuple[int, int]]:
+    patterns = (r'"[^"\r\n]*"', r"“[^”\r\n]*”", r"'[^'\r\n]*'")
+    spans = []
+    for pattern in patterns:
+        spans.extend((match.start(), match.end()) for match in re.finditer(pattern, text))
+    return sorted(spans)
+
+
+def scrub_text_with_protected_spans(
+    text: str, replacement_map: list[tuple], protected: set[str], *,
+    quoted_only: bool = False,
+) -> str:
+    """Scrub roster identifiers while preserving colliding literary tokens.
+
+    Source/assignment text may preserve every exact protected token. Student
+    responses preserve one only when it occurs inside an explicit quote; all
+    other collisions use the neutral marker instead of a pseudonym.
+    """
+    text = str(text or "")
+    collisions = _collision_spans(text, protected)
+    if quoted_only:
+        quotes = _quoted_spans(text)
+        collisions = [
+            span for span in collisions
+            if any(start <= span[0] and span[1] <= end for start, end in quotes)
+        ]
+    if not collisions:
+        return scrub_text(text, replacement_map)
+    output = []
+    cursor = 0
+    for start, end in collisions:
+        if start < cursor:
+            continue
+        output.append(scrub_text(text[cursor:start], replacement_map))
+        output.append(text[start:end])
+        cursor = end
+    output.append(scrub_text(text[cursor:], replacement_map))
+    return "".join(output)
 
 
 def scrub_text(text: str, replacement_map: list[tuple]) -> str:
@@ -269,6 +349,16 @@ def find_collisions(vault_entries: list[dict],
         "dup_first": sorted(set(dup_first)),
         "common_word": sorted(set(common_word)),
     }
+
+
+def protected_proper_nouns(text: str) -> set[str]:
+    """Extract a conservative source-derived proper-noun allowlist."""
+    result = set()
+    for match in re.finditer(r"\b[A-Z][A-Za-z][A-Za-z'’-]*\b", str(text or "")):
+        token = match.group(0)
+        if token.casefold() not in COMMON_WORDS:
+            result.add(token.casefold())
+    return result
 
 
 def verify_clean(text: str, vault) -> list[str]:

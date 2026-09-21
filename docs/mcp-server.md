@@ -53,7 +53,7 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 54 (43 tools).
+Tool schema version 55 (44 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -63,6 +63,7 @@ Tool schema version 54 (43 tools).
 | `preview_sis_grade_bridge(course_id, family_title)` | Persists a local aggregate, digest-protected grade-projection review for one exact linked differentiated family | No |
 | `preview_sis_grade_bridge_reconciliation(course_id, family_title)` | Persists a reviewed Operation Ledger repair for one discovered missing or drifted family | No |
 | `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | Copies eligible final Canvas scores to the exact linked bridge through the Operation Ledger | No |
+| `reset_scoring_review(scoring_session_id)` | Reopens the current local scoring review without changing its packet or history | No |
 | `list_sections(course_id)` | Saved section values from the local mirror | No |
 | `get_course_assignments(course_id, full_descriptions=false)` | Disk-only catalog assignments; descriptions are previews unless `full_descriptions=true` | No |
 | `get_modules(course_id, include_items=false)` | Disk-only catalog modules; set `include_items=true` to include their items | No |
@@ -95,7 +96,7 @@ Tool schema version 54 (43 tools).
 | `discover_scoring_work()` | Read every Current course locally and return student-free assignment, freshness, and attention tables; no refresh, preparation, or Canvas write | No |
 | `preview_workspace_reset()` | Dry-runs the explicitly authorized local cleanup and reports classified paths, counts, and refusals | No |
 | `apply_workspace_reset(preview_digest)` | Applies only an unchanged, non-refused workspace cleanup preview and returns a local receipt | No |
-| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false)` | Prepare one exact assignment from current local mirror projections; over-30-minute snapshots require explicit acknowledgement; missing norms return bounded teacher input | No |
+| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input | No |
 | `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
 | `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None)` | Validate and freeze valid SAFE-packet results locally; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |
@@ -219,9 +220,11 @@ The assistant reports all rows and waits for teacher direction, then calls
 `prepare_scoring_session(course_id, assignment_id, scoring_guidance="")` only for
 selected exact assignments. Preparation reads only current local projections and
 saves one assignment-scoped session on success. If the oldest required snapshot is
-over 30 minutes old, it returns `mirror_freshness_confirmation_required`; the agent
-asks whether relevant Canvas work changed and either waits for an explicit refresh
-request or retries with `use_existing_mirror=true`. Once a usable session id exists,
+older than the applicable local-time threshold (60 minutes during Monday-Friday
+07:00-16:30 America/Chicago, 600 minutes otherwise), it returns
+`mirror_freshness_confirmation_required`; the agent asks whether relevant Canvas
+work changed and either waits for an explicit refresh request or retries with
+`use_existing_mirror=true`. At exactly the threshold it does not prompt. Once a usable session id exists,
 continue locally from its immutable packet and do not prepare or refresh that
 assignment again. A repeated call returns `scoring_session_already_open`.
 
@@ -233,7 +236,9 @@ unless the teacher explicitly approved a different scale; (4) writing pieces (SC
 are weighted higher than shorter pieces. If any condition is unmet, the assignment
 is eligible for teacher review only - do not auto-score it.
 
-If the assignment lacks a usable Canvas rubric, preparation returns `needs_teacher_input`
+Non-empty assignment content is the scoring basis. A Canvas rubric is used only when
+assignment content is empty; teacher-authored directives layer on top. If neither
+exists, preparation returns `needs_teacher_input`
 with `needs_scoring_norms` and a concise question. Ask for bounded guidance, then retry
 the same exact course and assignment. If no current work remains, it returns the typed
 `nothing_to_grade` blocker without creating a packet. Every other failed preparation

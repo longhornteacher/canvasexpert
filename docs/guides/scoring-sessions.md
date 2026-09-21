@@ -26,10 +26,13 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
 1. After the teacher selects an exact row, call
    `prepare_scoring_session(course_id, assignment_id, scoring_guidance="")`.
    Preparation consumes only valid local `current` roster, assignment, and
-   submission projections. A Canvas rubric wins; otherwise missing norms return
+   submission projections. Non-empty assignment content is authoritative; a Canvas
+   rubric is used only when assignment content is empty. Otherwise missing norms return
    `needs_scoring_norms` with a bounded teacher question.
 
-   If the oldest required local snapshot is more than 30 minutes old,
+   During Monday-Friday 07:00-16:30 America/Chicago, a valid current snapshot may
+   be silently up to 60 minutes old; outside those hours the threshold is 600
+   minutes. At the threshold itself no prompt is returned. Beyond it,
    preparation returns `mirror_freshness_confirmation_required` without creating
    or replacing a session. Ask whether relevant Canvas work changed. If the
    teacher says no, retry the exact call with `use_existing_mirror=true`; if yes
@@ -79,11 +82,11 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
 | Signal | Meaning | What to do |
 |---|---|---|
 | `needs_scoring_norms` | No rubric or guidance is available | Ask for bounded guidance and retry the same preparation |
-| `mirror_freshness_confirmation_required` | The valid local snapshot is over 30 minutes old | Ask whether relevant Canvas work changed; refresh only after an explicit request, or retry with `use_existing_mirror=true` |
+| `mirror_freshness_confirmation_required` | The valid local snapshot exceeds the applicable America/Chicago 60-minute school-hours or 600-minute outside-hours threshold | Ask whether relevant Canvas work changed; refresh only after an explicit request, or retry with `use_existing_mirror=true` |
 | `mirror_projection_unavailable` | A required projection is missing, corrupt, or not current | Refresh the Current course mirror, then retry the exact call |
 | `scoring_session_already_open` | A usable assignment session already exists | Continue from its packet; do not prepare or refresh it again |
 | `session_superseded` | A non-current session id was supplied | Use the current session listed by `list_scoring_sessions()` |
-| `needs_teacher_input` | A bounded scoring risk needs a decision | Ask only the returned pseudonym-only questions, then stage unchanged results |
+| `needs_teacher_input` | A bounded scoring risk needs a decision | The packet remains readable; ask only the returned pseudonym-only questions, then stage unchanged results. Use `reset_scoring_review` to reopen the local packet review without changing it |
 | `stage_changed` | The frozen stage or private plan no longer matches | Stage the exact intended result set again |
 | `canvas_write_attention` | A previous Canvas write is ambiguous | Review Canvas; do not blind-retry |
 | `write_transport_unknown` | The send returned no HTTP response | Let the teacher review Canvas; CE does not re-read or retry |

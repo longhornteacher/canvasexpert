@@ -16,6 +16,41 @@ from api.platform_services import config
 from api.platform_services import canvas_client
 
 
+_REPAIRABLE_REASONS = frozenset({
+    "source_counts_toward_final_grade",
+    "source_sis_sync_enabled",
+    "family_link_missing",
+    "accepted_existing_bridge",
+    "bridge_missing",
+})
+
+
+def _source_setting_repairs(source_rows: list[dict]) -> list[dict]:
+    repairs = []
+    for row in sorted(source_rows, key=lambda item: str(item.get("id") or "")):
+        fields = []
+        if "omit_from_final_grade" in row and row.get("omit_from_final_grade") is not True:
+            fields.append("omit_from_final_grade")
+        if "post_to_sis" in row and row.get("post_to_sis") is not False:
+            fields.append("post_to_sis")
+        if fields:
+            repairs.append({
+                "source_assignment_id": str(row.get("id") or ""),
+                "fields": fields,
+            })
+    return repairs
+
+
+def _repairable_reconciliation_row(row: dict) -> bool:
+    reasons = {str(value) for value in row.get("reasons") or []}
+    return (
+        str(row.get("status") or "") == "blocked"
+        and bool(reasons)
+        and reasons <= _REPAIRABLE_REASONS
+        and len(row.get("source_assignment_ids") or []) >= 2
+    )
+
+
 def _current_course(course_id: str) -> bool:
     wanted = str(course_id or "").strip()
     return bool(wanted) and wanted in {
@@ -319,8 +354,8 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
                 reasons.append("bridge_shape_drift")
         if bridge is None and not unsafe_bridge_reasons and status == "synced":
             status = "missing"
-            if assignments is None:
-                reasons.append("bridge_missing")
+        if bridge is None and not unsafe_bridge_reasons and assignments is None:
+            reasons.append("bridge_missing")
         if registration is None:
             if status == "synced":
                 status = "missing"
@@ -337,6 +372,16 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
             if not drift_fields and str(registration.get("bridge_state_digest")) != current_digest:
                 status = "blocked"
                 reasons.append("family_link_bridge_digest_drift")
+        action = (
+            "create" if bridge is None else
+            ("link" if registration is None and not drift_fields else
+             ("repair" if drift_fields else "none"))
+        )
+        repairable = _repairable_reconciliation_row({
+            "status": status,
+            "reasons": reasons,
+            "source_assignment_ids": source_ids,
+        })
         matrix.append({
             "family_key": family["family_key"],
             "family_title": title,
@@ -355,7 +400,14 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
             "drift_fields": drift_fields,
             "reasons": sorted(set(reasons)),
             "identity_source": family["identity_source"],
-            "action": ("create" if bridge is None else ("link" if registration is None and not drift_fields else ("repair" if drift_fields else "none"))),
+            "action": action,
+            "repairable": repairable,
+            "repair_plan": {
+                "source_assignment_ids": list(source_ids),
+                "bridge_assignment_id": str(bridge.get("id")) if bridge else None,
+                "action": action,
+                "source_setting_repairs": _source_setting_repairs(source_rows),
+            },
         })
     # A saved registration is proof-bearing exact identity.  If discovery no
     # longer finds its sources, surface attention rather than silently dropping
@@ -375,6 +427,13 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
             "grading_excluded": bool(registration.get("grading_excluded", True)), "bridge_eligible": False,
             "coverage": {"complete": False, "source_count": len(registration.get("source_assignment_ids") or []), "member_count": None, "active_count": None, "overlap_count": None, "exact_source_member_coverage": False},
             "drift_fields": [], "reasons": ["family_linked_but_not_discoverable"], "identity_source": "family_link", "action": "blocked",
+            "repairable": False,
+            "repair_plan": {
+                "source_assignment_ids": list(registration.get("source_assignment_ids") or []),
+                "bridge_assignment_id": registration.get("bridge_assignment_id"),
+                "action": "blocked",
+                "source_setting_repairs": [],
+            },
         })
     return {"ok": True, "course_id": course_key, "matrix": matrix}
 
@@ -496,10 +555,17 @@ def preview_sis_grade_bridge_reconciliation(
     row = next((item for item in matrix["matrix"] if str(item.get("family_title") or "").casefold() == str(family_title).casefold()), None)
     if row is None:
         return {"ok": False, "error": "differentiated family was not discovered", "blocking": True}
-    if row["status"] not in {"missing", "drifted"}:
+    if row["status"] not in {"missing", "drifted"} and not row.get("repairable"):
         return {"ok": False, "error": f"family is {row['status']}", "blocking": row["status"] in {"blocked", "incomplete"}}
     family = dict(row)
-    return preview_sis_grade_bridge(course_id, family_title, discovered_family=family)
+    result = preview_sis_grade_bridge(course_id, family_title, discovered_family=family)
+    if result.get("ok"):
+        result["user_action"] = (
+            "Reconcile -> preview the exact family -> teacher confirms -> apply the "
+            "unchanged operation coordinates."
+        )
+        result["next"] = "Teacher confirms, then call apply_sis_grade_bridge with the unchanged operation coordinates."
+    return result
 
 
 def apply_sis_grade_bridge(

@@ -311,40 +311,61 @@ def _scrub_bundle(bundle: dict, vault: Vault,
                   protected: set[str] | None = None) -> dict:
     """Deep-scrub every text field in a bundle. Returns a new bundle dict
     with prompts and responses scrubbed."""
-    rmap = feedback_scrub.build_replacement_map(vault.entries(),
-                                                protected or set())
     import copy
     out = copy.deepcopy(bundle)
+    shared = out.get("shared_context")
+    source_parts = []
+    if isinstance(shared, dict):
+        source_parts.append(str(shared.get("assignment_description") or ""))
+        source_parts.extend(
+            str(material.get("text") or "")
+            for material in shared.get("materials") or []
+            if isinstance(material, dict)
+        )
+    source_protected = set(protected or set())
+    source_protected.update(
+        feedback_scrub.protected_proper_nouns("\n\n".join(source_parts))
+    )
+    rmap = feedback_scrub.build_replacement_map(vault.entries(), source_protected)
     for s in out.get("students", []):
         for r in s.get("responses", []):
             if r.get("prompt"):
-                r["prompt"] = feedback_scrub.scrub_text(r["prompt"], rmap)
+                r["prompt"] = feedback_scrub.scrub_text_with_protected_spans(
+                    r["prompt"], rmap, source_protected
+                )
             if r.get("response"):
-                r["response"] = feedback_scrub.scrub_text(r["response"], rmap)
+                r["response"] = feedback_scrub.scrub_text_with_protected_spans(
+                    r["response"], rmap, source_protected, quoted_only=True
+                )
             oral = r.get("oral_reading")
             if isinstance(oral, dict):
                 for key in ("passage", "transcript"):
                     if oral.get(key):
-                        oral[key] = feedback_scrub.scrub_text(str(oral[key]), rmap)
+                        oral[key] = feedback_scrub.scrub_text_with_protected_spans(
+                            str(oral[key]), rmap, source_protected, quoted_only=True
+                        )
                 for candidate in oral.get("difference_candidates") or []:
                     if not isinstance(candidate, dict):
                         continue
                     for key in ("expected", "observed"):
                         if candidate.get(key):
-                            candidate[key] = feedback_scrub.scrub_text(str(candidate[key]), rmap)
+                            candidate[key] = feedback_scrub.scrub_text_with_protected_spans(
+                                str(candidate[key]), rmap, source_protected, quoted_only=True
+                            )
                 # Bind the exact scrubbed projection, not private source evidence.
                 oral["evidence_digest"] = _canonical_digest({
                     key: value for key, value in oral.items() if key != "evidence_digest"
                 })
-    shared = out.get("shared_context")
     if isinstance(shared, dict):
         if shared.get("assignment_description"):
-            shared["assignment_description"] = feedback_scrub.scrub_text(
-                shared.get("assignment_description") or "", rmap
+            shared["assignment_description"] = feedback_scrub.scrub_text_with_protected_spans(
+                shared.get("assignment_description") or "", rmap, source_protected
             )
         for material in shared.get("materials") or []:
             if isinstance(material, dict) and material.get("text"):
-                material["text"] = feedback_scrub.scrub_text(material.get("text") or "", rmap)
+                material["text"] = feedback_scrub.scrub_text_with_protected_spans(
+                    material.get("text") or "", rmap, source_protected
+                )
     return out
 
 

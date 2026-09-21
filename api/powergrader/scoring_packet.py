@@ -368,7 +368,7 @@ def build_packet(
     students_without_responses = len(bundle_pseudonyms - responding_pseudonyms)
 
     contract = feedback_contract.build_contract_text(
-        ai_ta_name=str((persona or {}).get("name") or "your teaching assistant"),
+        ai_ta_name=str((persona or {}).get("name") or ""),
         rubric_text=rubric_text,
         persona=persona,
     )

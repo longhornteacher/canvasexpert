@@ -271,6 +271,7 @@ def prepare_scoring_session(
     scoring_guidance: str = "",
     *,
     use_existing_mirror: bool = False,
+    scoring_guidance_provenance: str = "",
     save_session=None,
     activate_session=None,
 ) -> dict:
@@ -386,7 +387,7 @@ def prepare_scoring_session(
                 "retry this exact preparation with use_existing_mirror=true; if yes or "
                 "unsure, wait for an explicit teacher request to refresh."
             ),
-            error="The local CanvasMirror snapshot is over 30 minutes old.",
+            error="The local CanvasMirror snapshot needs teacher freshness confirmation.",
             freshness={
                 "last_success_at": str(freshness.get("last_success_at") or ""),
                 "age_minutes": int(freshness.get("age_minutes") or 0),
@@ -397,16 +398,32 @@ def prepare_scoring_session(
     rubric_text_override = None
     complete_guidance = None
     guidance_projection = None
+    guidance = str(scoring_guidance or "").strip()
+    provenance = str(scoring_guidance_provenance or "").strip().casefold()
+    if guidance and not provenance:
+        provenance = "teacher_authored"
+    if provenance and provenance not in {"teacher_authored", "inherited", "default", "unknown"}:
+        return _typed_failure(
+            "invalid_scoring_guidance_provenance", "basis", retryable=False,
+            user_action="Use teacher_authored, inherited, default, or unknown guidance provenance.",
+            error="The scoring guidance provenance is invalid.",
+            assignment_name=assignment_name,
+        )
+    authoritative_guidance = guidance if provenance in {"", "teacher_authored"} else ""
     canvas_rubric = scoring_rubric_text(assignment.get("rubric"))
-    if canvas_rubric:
+    if assignment_description.strip():
+        rubric_name = "Assignment content"
+        rubric_text_override = assignment_description.strip()
+        scoring_basis = {"source": "assignment_content", "label": "Assignment content"}
+    elif canvas_rubric:
         rubric_name = "Canvas rubric"
         rubric_text_override = canvas_rubric
         scoring_basis = {"source": "canvas_rubric", "label": "Canvas rubric"}
-    elif str(scoring_guidance or "").strip():
-        complete_guidance = str(scoring_guidance).strip()
+    elif authoritative_guidance:
+        complete_guidance = authoritative_guidance
         rubric_text_override, guidance_projection = project_teacher_scoring_guidance(complete_guidance)
-        rubric_name = "Teacher scoring guidance"
-        scoring_basis = {"source": "teacher_guidance", "label": "Teacher scoring guidance"}
+        rubric_name = "Teacher directive"
+        scoring_basis = {"source": "teacher_directive", "label": "Teacher directive"}
     else:
         question = "What bounded scoring guidance should I follow for this assignment?"
         return {
@@ -419,6 +436,16 @@ def prepare_scoring_session(
             "question": question,
             "assignment_name": assignment_name,
         }
+
+    # A teacher-authored directive layers on top of the assignment basis.  A
+    # default/inherited/unknown value is retained privately for provenance but
+    # can never replace the assignment's own content or rubric.
+    if authoritative_guidance and scoring_basis["source"] != "teacher_directive":
+        complete_guidance = authoritative_guidance
+        projected_guidance, guidance_projection = project_teacher_scoring_guidance(complete_guidance)
+        rubric_text_override = "\n\n--- TEACHER DIRECTIVE (layered on top) ---\n".join(
+            [rubric_text_override or "", projected_guidance]
+        )
 
     writing_timeline_tracked = writing_timeline.is_tracked_assignment(assignment)
     if writing_timeline_tracked:
@@ -477,6 +504,7 @@ def prepare_scoring_session(
     session["writing_timeline_tracked"] = writing_timeline_tracked
     session["feedback_pattern_id"] = "basic"
     session["scoring_basis"] = scoring_basis
+    session["scoring_guidance_provenance"] = provenance or None
     session["scoring_freshness"] = {
         "state": str(freshness.get("state") or "current"),
         "last_success_at": str(freshness.get("last_success_at") or ""),
@@ -490,7 +518,8 @@ def prepare_scoring_session(
     session["mirror_snapshot_id"] = str(mirror_result.get("snapshot_id") or "")
     session["submission_snapshot"] = session_store.eligible_submission_snapshot_digest(submissions)
     session["submission_snapshot_count"] = len(submitted)
-    session["scoring_rubric_text"] = complete_guidance if complete_guidance is not None else rubric_text_override
+    session["scoring_rubric_text"] = rubric_text_override
+    session["teacher_scoring_guidance"] = complete_guidance or ""
     assignmentforge_metadata = assignmentforge.for_assignment(course_id, assignment_id)
     if assignmentforge_metadata.get("corrections"):
         session["assignmentforge_corrections"] = assignmentforge_metadata["corrections"]

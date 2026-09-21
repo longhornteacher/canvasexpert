@@ -1,19 +1,24 @@
 """Local-only CanvasMirror input for Scoring Sessions.
 
 This adapter deliberately bypasses the ordinary mirror serve-age policy.  The
-scoring owner applies its own small freshness decision (30 minutes) while still
-requiring every private projection to be current and structurally usable.
+scoring owner applies a teacher-friendly local-time freshness advisory while
+still requiring every private projection to be current and structurally usable.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
+from zoneinfo import ZoneInfo
 
 from api import gradebook_snapshot
 from api.mirror import read_service
 from api.platform_services import workspace
 
 
-SCORING_FRESHNESS_LIMIT_MINUTES = 30
+LOCAL_TIMEZONE = ZoneInfo("America/Chicago")
+SCHOOL_START = time(7, 0)
+SCHOOL_END = time(16, 30)
+WORKING_HOURS_FRESHNESS_MINUTES = 60
+OUTSIDE_HOURS_FRESHNESS_MINUTES = 600
 FRESHNESS_COLUMNS = (
     "course_id", "course_name", "state", "last_success_at", "age_minutes",
     "requires_teacher_confirmation",
@@ -37,6 +42,14 @@ def _age_minutes(timestamp: datetime, now: datetime) -> int:
     return max(0, int((now - timestamp).total_seconds() // 60))
 
 
+def freshness_limit_minutes(now: datetime) -> int:
+    """Return the advisory threshold for the local Chicago clock."""
+    local = now.astimezone(LOCAL_TIMEZONE)
+    if local.weekday() < 5 and SCHOOL_START <= local.time() < SCHOOL_END:
+        return WORKING_HOURS_FRESHNESS_MINUTES
+    return OUTSIDE_HOURS_FRESHNESS_MINUTES
+
+
 def _freshness(course_id: str, course_name: str, scopes: list[dict], *, now=None) -> dict:
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -57,6 +70,7 @@ def _freshness(course_id: str, course_name: str, scopes: list[dict], *, now=None
     oldest = min(valid_timestamps) if usable_timestamps else None
     age_minutes = _age_minutes(oldest, now) if oldest else 0
     state = "current" if all_current and usable_timestamps else "unavailable"
+    threshold = freshness_limit_minutes(now)
     return {
         "course_id": str(course_id),
         "course_name": str(course_name or ""),
@@ -64,7 +78,7 @@ def _freshness(course_id: str, course_name: str, scopes: list[dict], *, now=None
         "last_success_at": oldest.isoformat().replace("+00:00", "Z") if oldest else "",
         "age_minutes": age_minutes,
         "requires_teacher_confirmation": bool(
-            state == "current" and age_minutes > SCORING_FRESHNESS_LIMIT_MINUTES
+            state == "current" and age_minutes > threshold
         ),
     }
 

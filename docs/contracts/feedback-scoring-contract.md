@@ -13,8 +13,11 @@ widens the assignment-scoped authorization described below.
 
 Each discovery freshness row reports the oldest required local scope. A valid old
 snapshot remains usable, but an unavailable, corrupt, or non-current projection is
-reported as `mirror_projection_unavailable`. The 30-minute scoring advisory is
-decided during preparation, not discovery. No discovery path enqueues, waits for,
+reported as `mirror_projection_unavailable`. The scoring freshness advisory is
+decided during preparation, not discovery. A valid current snapshot up to 60
+minutes old during Monday-Friday 07:00-16:30 America/Chicago, or up to 600
+minutes outside those hours, is silently accepted; the exact threshold is also
+accepted. No discovery path enqueues, waits for,
 polls, or retries a refresh.
 
 Privacy invariant: the agent sees pseudonyms and scrubbed work only. Real names,
@@ -28,11 +31,13 @@ shape change requires a major bump.
 ## Direction 1 - SAFE bundle (Canvas Expert -> agent)
 
 `prepare_scoring_session(course_id, assignment_id, scoring_guidance="",
-use_existing_mirror=false)` requires one exact Current course and assignment and
+use_existing_mirror=false, scoring_guidance_provenance="")` requires one exact Current course and assignment and
 prepares it from valid local projections. It performs no refresh, Canvas write, or
 direct Canvas read.
-A usable Canvas assignment rubric always wins.
-Otherwise the teacher provides bounded scoring guidance. Teacher guidance is retained privately
+Non-empty assignment content is authoritative. A Canvas assignment rubric is used
+only when assignment content is empty. Teacher-authored directives layer on top of
+that basis; inherited, defaulted, or unknown guidance never overrides it. Teacher
+guidance is retained privately
 in full; when it exceeds the effective transport ceiling, the model and SAFE packet use
 a deterministic compacted projection with an explicit marker and original/effective/
 omitted character and unit counts. No basis returns a
@@ -107,8 +112,14 @@ returns the identity-safe `scoring_session_already_open` refusal with the existi
 `scoring_session_id`; it does not refresh, save, or supersede anything. The agent must continue
 from that immutable packet and must not call preparation or `refresh_mirror` again for the
 assignment. A failed preparation, a typed blocker, and the basis-stage `needs_scoring_norms`
-state neither save a session nor supersede one. A valid snapshot older than 30 minutes is
-an advisory decision: the teacher may explicitly acknowledge it with `use_existing_mirror=true`.
+state neither save a session nor supersede one. A snapshot beyond the applicable
+local-time threshold is an advisory decision: the teacher may explicitly acknowledge
+it with `use_existing_mirror=true`.
+
+`get_scoring_packet` remains readable while the current session is in
+`needs_teacher_input`. `reset_scoring_review(scoring_session_id)` is local-only,
+returns that current session to `ready`, and preserves the packet, history, and
+private artifacts.
 
 If the current packet is stale, missing, or invalid, preparation may create a replacement. A
 successful replacement activates its newly saved session and marks every earlier actionable

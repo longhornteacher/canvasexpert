@@ -277,7 +277,7 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
         return None, None, _mirror_preparation_failure(
             local.get("error") or "mirror_projection_unavailable")
 
-    # Scoring owns its 30-minute advisory. The adapter still requires all three
+    # Scoring owns its local-time freshness advisory. The adapter still requires all three
     # scopes to be current, but this read must not apply the ordinary six-hour
     # serve-age cutoff used by unrelated MCP readers.
     max_age_hours = None

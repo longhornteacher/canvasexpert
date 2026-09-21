@@ -64,7 +64,7 @@ def test_successful_preparation_uses_local_mirror_and_persists_freshness(monkeyp
 
 
 def test_missing_norms_is_teacher_input_without_persistence(monkeypatch, tmp_path):
-    saved, prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(rubric=[]), guidance="")
+    saved, prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(description="", rubric=[]), guidance="")
     result = prepare()
     assert result["code"] == "needs_scoring_norms"
     assert saved == {}

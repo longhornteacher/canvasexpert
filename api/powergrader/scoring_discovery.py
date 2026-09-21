@@ -11,6 +11,7 @@ ASSIGNMENT_COLUMNS = (
     "points", "ungraded", "partially_scored", "late_ungraded",
     "resumable_status", "scoring_session_id", "mirror_revision",
     "family_title", "family_role", "family_link_state",
+    "bridge_assignment_id", "bridge_status", "bridge_required", "next_step",
 )
 ATTENTION_COLUMNS = (
     "course_id", "course_name", "code", "retryable", "operation_id",
@@ -32,12 +33,31 @@ def _family_advisory(assignments: list[dict], *, tier_tags=None, registrations=(
                 if str(value or "").strip():
                     by_id[str(value)] = registration
     bases = {}
+    bridges_by_base = {}
+    sources_by_base = {}
+
+    def is_bridge_shape(row: dict) -> bool:
+        return (
+            sorted(row.get("submission_types") or []) == ["none"]
+            and row.get("only_visible_to_overrides") is False
+            and row.get("omit_from_final_grade") is False
+            and row.get("post_to_sis") is True
+            and row.get("published") is True
+            and row.get("grading_type") == "points"
+        )
+
     for row in assignments:
         if not isinstance(row, dict):
             continue
         base, tag = differentiated_bridge.title_tag_parts(row.get("name"), tier_tags)
-        if tag:
-            bases.setdefault(base.casefold(), {"title": base, "sources": []})["sources"].append(str(row.get("id") or ""))
+        bridge_named = str(row.get("name") or "").strip().casefold().endswith(" - bridge")
+        if tag or bridge_named or is_bridge_shape(row):
+            family = bases.setdefault(base.casefold(), {"title": base, "sources": []})
+            if is_bridge_shape(row) or bridge_named:
+                bridges_by_base.setdefault(base.casefold(), []).append(str(row.get("id") or ""))
+            else:
+                family["sources"].append(str(row.get("id") or ""))
+                sources_by_base.setdefault(base.casefold(), []).append(str(row.get("id") or ""))
     result = {}
     for row in assignments:
         if not isinstance(row, dict):
@@ -46,12 +66,35 @@ def _family_advisory(assignments: list[dict], *, tier_tags=None, registrations=(
         registration = by_id.get(aid)
         base, tag = differentiated_bridge.title_tag_parts(row.get("name"), tier_tags)
         bridge_named = str(row.get("name") or "").strip().casefold().endswith(" - bridge")
-        family_title = str((registration or {}).get("family_title") or base).strip() if (tag or registration or bridge_named) else None
-        role = "bridge" if (registration and aid == str(registration.get("bridge_assignment_id") or "")) or bridge_named else ("source" if tag else None)
+        shape_bridge = is_bridge_shape(row)
+        family_key = base.casefold()
+        registration_bridge = str((registration or {}).get("bridge_assignment_id") or "")
+        family_title = str((registration or {}).get("family_title") or base).strip() if (tag or registration or bridge_named or shape_bridge) else None
+        role = "bridge" if (registration and aid == registration_bridge) or bridge_named or shape_bridge else ("source" if tag else None)
         family = bases.get(base.casefold())
         source_count = len(family.get("sources") or []) if family else 0
+        bridge_ids = list(bridges_by_base.get(family_key) or [])
+        if registration_bridge and registration_bridge not in bridge_ids:
+            bridge_ids.append(registration_bridge)
+        bridge_id = bridge_ids[0] if len(bridge_ids) == 1 else (registration_bridge or None)
         state = "linked" if registration else ("needs_repair" if source_count >= 2 and role in {"source", "bridge"} else None)
-        result[aid] = {"family_title": family_title, "family_role": role, "family_link_state": state}
+        bridge_status = (
+            "linked" if registration and bridge_id == registration_bridge else
+            ("present" if bridge_id else ("missing" if source_count >= 2 else None))
+        )
+        result[aid] = {
+            "family_title": family_title,
+            "family_role": role,
+            "family_link_state": state,
+            "bridge_assignment_id": bridge_id,
+            "bridge_status": bridge_status,
+            "bridge_required": role == "source",
+            "next_step": (
+                "Scoring this tier is incomplete until the corresponding bridge score "
+                "is prepared and applied through the reviewed SIS bridge operation."
+                if role == "source" else None
+            ),
+        }
     return result
 
 
@@ -207,7 +250,12 @@ def discover_scoring_work(current_courses, *, load_snapshot,
                 "resumable_status": session.get("status") if session else None,
                 "scoring_session_id": (session.get("session_id") or session.get("scoring_session_id")) if session else None,
                 "mirror_revision": result["mirror_revision"],
-                **advisory.get(assignment_id, {"family_title": None, "family_role": None, "family_link_state": None}),
+                **advisory.get(assignment_id, {
+                    "family_title": None, "family_role": None,
+                    "family_link_state": None, "bridge_assignment_id": None,
+                    "bridge_status": None, "bridge_required": False,
+                    "next_step": None,
+                }),
             })
             totals["assignments"] += 1
             totals["ungraded"] += ungraded

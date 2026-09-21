@@ -138,6 +138,10 @@ class SisGradeBridgeAdapter:
                 "module_id": baseline.get("module_id"),
                 "module_name": baseline.get("module_name"),
                 "module_state": copy.deepcopy(baseline.get("module_state") or {}),
+                "source_setting_repairs": copy.deepcopy(
+                    baseline.get("source_setting_repairs") or []
+                ),
+                "repair_plan": copy.deepcopy(baseline.get("repair_plan") or {}),
             })
             return frozen
         frozen.update({
@@ -169,6 +173,7 @@ class SisGradeBridgeAdapter:
             "module_id": payload.get("module_id"),
             "module_name": payload.get("module_name"),
             "write_origin": payload.get("write_origin", "assistant"),
+            "source_setting_repairs": payload.get("source_setting_repairs") or [],
         })
 
     def verify_targets(self, payload: dict, targets: list[dict]) -> list[dict]:
@@ -521,6 +526,13 @@ class SisGradeBridgeAdapter:
                 "repair_fields": list(baseline.get("drift_fields") or []),
                 "action": baseline.get("action"),
                 "source_count": len(baseline.get("source_assignment_ids") or []),
+                "source_setting_repairs": [
+                    {
+                        "source_assignment_id": item.get("assignment_id"),
+                        "fields": sorted((item.get("fields") or {}).keys()),
+                    }
+                    for item in baseline.get("source_setting_repairs") or []
+                ],
             }
         if baseline.get("blocking_error"):
             raise ValueError(str(baseline["blocking_error"]))
@@ -544,7 +556,17 @@ class SisGradeBridgeAdapter:
     def initial_steps(self, payload: dict, baseline: dict) -> list[dict]:
         if payload.get("mode") == "reconcile":
             action = baseline.get("action") or ("create" if not baseline.get("bridge_exists") else "register")
-            return [models.new_step({"create": "create_bridge", "repair": "repair_bridge", "register": "register_bridge"}.get(action, "reconcile_bridge"))]
+            steps = [
+                models.new_step(f"repair_source:{index}")
+                for index, _item in enumerate(
+                    baseline.get("source_setting_repairs") or []
+                )
+            ]
+            steps.append(models.new_step({
+                "create": "create_bridge", "repair": "repair_bridge",
+                "register": "register_bridge", "link": "register_bridge",
+            }.get(action, "reconcile_bridge")))
+            return steps
         keys = (
             f"copy_grade:{index}"
             for index, _entry in enumerate(baseline.get("grade_entries") or [])
@@ -673,8 +695,16 @@ class SisGradeBridgeAdapter:
         source_members = []
         source_target_evidence = []
         source_states = []
+        source_setting_repairs = []
         for source in source_rows:
-            _validate_source_shape(source)
+            repairs = _validate_source_shape(
+                source, allow_source_setting_repairs=True
+            )
+            if repairs:
+                source_setting_repairs.append({
+                    "assignment_id": str(source.get("id")),
+                    "fields": repairs,
+                })
             overrides = _get_all(
                 f"/api/v1/courses/{course_id}/assignments/{source['id']}/overrides",
                 {"per_page": 100},
@@ -779,6 +809,23 @@ class SisGradeBridgeAdapter:
             "module_id": module_id,
             "module_name": module_name,
             "module_state": module_state,
+            "source_setting_repairs": source_setting_repairs,
+            "repair_plan": {
+                "source_assignment_ids": [str(row.get("id")) for row in source_rows],
+                "bridge_assignment_id": bridge_id,
+                "action": "create" if bridge is None else (
+                    "repair" if drift_fields else (
+                        "register" if not payload.get("registered") else "link"
+                    )
+                ),
+                "source_setting_repairs": [
+                    {
+                        "source_assignment_id": item["assignment_id"],
+                        "fields": sorted(item["fields"]),
+                    }
+                    for item in source_setting_repairs
+                ],
+            },
         }
 
     def _execute_reconciliation(self, payload: dict, target: dict, baseline: dict, context) -> dict:
@@ -786,6 +833,63 @@ class SisGradeBridgeAdapter:
             return adapter_support.build_result("blocked", steps=copy.deepcopy(target.get("steps") or []), error_code=baseline["blocking_error"])
         course_id = target["course_id"]
         steps = copy.deepcopy(target.get("steps") or [])
+        # Source-setting PUTs are the first mutation in the reviewed repair
+        # sequence. Their exact assignment reads are also the only recovery
+        # proof accepted after an uncertain transport outcome.
+        for index, repair in enumerate(payload.get("source_setting_repairs") or []):
+            step_key = f"repair_source:{index}"
+            step = adapter_support.ensure_step(steps, step_key)
+            source_id = str(repair.get("assignment_id") or "")
+            fields = {
+                str(key): value for key, value in (repair.get("fields") or {}).items()
+                if key in {"omit_from_final_grade", "post_to_sis"}
+            }
+            if not source_id or not fields:
+                return adapter_support.build_result(
+                    "blocked", steps=steps, error_code="source_setting_repair_invalid"
+                )
+            if step.get("state") == "applied":
+                continue
+            if step.get("state") == "sent_unknown":
+                actual, read_error = adapter_support.get_assignment(course_id, source_id)
+                if read_error or not actual or any(actual.get(key) != value for key, value in fields.items()):
+                    step["error_code"] = "source_repair_unverified"
+                    step = context.checkpoint_step(step)
+                    adapter_support.replace_step(steps, step)
+                    return adapter_support.build_result(
+                        "sent_unknown", steps=steps, error_code=step["error_code"]
+                    )
+                step["state"] = "applied"
+                step["error_code"] = None
+                step = context.checkpoint_step(step)
+                adapter_support.replace_step(steps, step)
+                continue
+            path = f"/api/v1/courses/{course_id}/assignments/{source_id}"
+            request = {"assignment": copy.deepcopy(fields)}
+            marked = context.before_send(
+                step_key,
+                models.sha256_dict({"method": "PUT", "path": path, "payload": request}),
+            )
+            adapter_support.replace_step(steps, marked)
+            step = marked
+            _response, error = canvas_client._canvas_send("PUT", path, request)
+            if error:
+                step["state"] = "sent_unknown" if adapter_support.is_uncertain(error) else "blocked"
+                step["error_code"] = "source_repair_uncertain" if step["state"] == "sent_unknown" else "source_repair_rejected"
+                step = context.checkpoint_step(step)
+                adapter_support.replace_step(steps, step)
+                return adapter_support.build_result(step["state"], steps=steps, error_code=step["error_code"])
+            actual, read_error = adapter_support.get_assignment(course_id, source_id)
+            if read_error or not actual or any(actual.get(key) != value for key, value in fields.items()):
+                step["state"] = "sent_unknown"
+                step["error_code"] = "source_repair_unverified"
+                step = context.checkpoint_step(step)
+                adapter_support.replace_step(steps, step)
+                return adapter_support.build_result("sent_unknown", steps=steps, error_code=step["error_code"])
+            step["state"] = "applied"
+            step["error_code"] = None
+            step = context.checkpoint_step(step)
+            adapter_support.replace_step(steps, step)
         action = baseline.get("action") or payload.get("action") or "create"
         step = steps[0] if steps else models.new_step({"create": "create_bridge", "repair": "repair_bridge", "register": "register_bridge"}.get(action, "reconcile_bridge"))
         expected = baseline["expected_bridge"]
@@ -1301,7 +1405,9 @@ def _validate_source_identity(payload: dict, source_rows: list[dict]) -> None:
         raise _BridgeInvariantError("assignment_outside_selected_course")
 
 
-def _validate_source_shape(source: dict) -> None:
+def _validate_source_shape(
+    source: dict, *, allow_source_setting_repairs: bool = False
+) -> dict[str, object]:
     if source.get("published") is not True:
         raise _BridgeInvariantError("source_not_published")
     if source.get("grading_type") != "points":
@@ -1310,10 +1416,18 @@ def _validate_source_shape(source: dict) -> None:
         raise _BridgeInvariantError("source_not_override_only")
     if not _is_number(source.get("points_possible")):
         raise _BridgeInvariantError("source_points_invalid")
+    repairs: dict[str, object] = {}
     if source.get("omit_from_final_grade") is not True:
-        raise _BridgeInvariantError("source_counts_toward_final_grade")
+        if allow_source_setting_repairs and "omit_from_final_grade" in source:
+            repairs["omit_from_final_grade"] = True
+        else:
+            raise _BridgeInvariantError("source_counts_toward_final_grade")
     if source.get("post_to_sis") is not False:
-        raise _BridgeInvariantError("source_sis_sync_enabled")
+        if allow_source_setting_repairs and "post_to_sis" in source:
+            repairs["post_to_sis"] = False
+        else:
+            raise _BridgeInvariantError("source_sis_sync_enabled")
+    return repairs
 
 
 def _source_override_members(

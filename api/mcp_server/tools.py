@@ -122,7 +122,9 @@ _NEXT_STEPS = {
     "discover_scoring_work": (
         "Report the complete assignment and attention set, then wait for teacher direction. "
         "Call prepare_scoring_session only for the selected exact course_id and assignment_id "
-        "rows; discovery does not prepare packets or write to Canvas."
+        "rows; discovery does not prepare packets or write to Canvas. For differentiated "
+        "source rows, scoring is incomplete until the corresponding bridge score is "
+        "prepared and applied through the reviewed SIS bridge operation."
     ),
     "get_scoring_packet": (
         "Read total as response rows and students_total as people. Keep the scoring "
@@ -149,8 +151,8 @@ _NEXT_STEPS = {
         "apply_sis_grade_bridge with batch_id, operation_id, and review_digest unchanged."
     ),
     "preview_sis_grade_bridge_reconciliation": (
-        "Summarize the discovered family repair and get teacher confirmation, then call "
-        "apply_sis_grade_bridge with batch_id, operation_id, and review_digest unchanged."
+        "Reconcile -> preview the exact family -> teacher confirms -> apply the unchanged "
+        "operation coordinates."
     ),
     "preview_learning_objective": (
         "Summarize the preview and get teacher confirmation, then call "
@@ -1170,6 +1172,7 @@ _TOOL_GROUPS = {
         "get_scoring_packet",
         "stage_scoring_results",
         "apply_staged_scoring_results",
+        "reset_scoring_review",
     ),
     "Gradebook": ("get_gradebook_snapshot",),
     "SIS Grade Bridges": (
@@ -2064,7 +2067,8 @@ def _open_scoring_session_refusal(course_id: str, assignment_id: str) -> dict | 
 
 def prepare_scoring_session(course_id: str, assignment_id: str,
                             scoring_guidance: str = "",
-                            use_existing_mirror: bool = False) -> dict:
+                            use_existing_mirror: bool = False,
+                            scoring_guidance_provenance: str = "") -> dict:
     """Prepare one exact assignment from the local CanvasMirror.
 
     See ScoringSession/SCORING_SESSIONS.md (§2) in your workspace root for the
@@ -2090,9 +2094,11 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
     if existing:
         return existing
     try:
+        prepare_kwargs = {"use_existing_mirror": use_existing_mirror}
+        if str(scoring_guidance_provenance or "").strip():
+            prepare_kwargs["scoring_guidance_provenance"] = scoring_guidance_provenance
         result = scoring_preparation.prepare_scoring_session(
-            course_key, assignment_key, scoring_guidance,
-            use_existing_mirror=use_existing_mirror,
+            course_key, assignment_key, scoring_guidance, **prepare_kwargs
         )
     except Exception:
         return _safe_scoring_preparation_failure()
@@ -2237,10 +2243,7 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
                 "error": "The assignment-scoped Scoring Session was not found."}
     if not _is_current_scoring_session(session):
         return _session_superseded(scoring_session_id)
-    if session.get("status") == "needs_teacher_input":
-        return {"ok": False, "code": "needs_teacher_input",
-                "error": "Prepare this exact assignment with an attached Canvas rubric or bounded guidance before requesting its packet."}
-    if session.get("status") not in {"ready", "staged", "completed", "completed_with_holds"}:
+    if session.get("status") not in {"ready", "needs_teacher_input", "staged", "completed", "completed_with_holds"}:
         return {"ok": False, "code": "packet_unavailable",
                 "error": "The assignment-scoped Scoring Session has no ready packet."}
 
@@ -2301,6 +2304,10 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
             result["rubric"] = {
                 "label": rubric_name,
                 "included": bool(str(rubric_text or "").strip()),
+            }
+            result["scoring_basis"] = {
+                "source": str(basis.get("source") or "none"),
+                "label": str(basis.get("label") or "None"),
             }
             projection = session.get("scoring_guidance_projection")
             if isinstance(projection, dict):
@@ -2462,9 +2469,9 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                     return _record_scoring_session_result(
                         scoring_session_id, pseudonym.gate(response, vault))
             if str(review_digest) != str(plan.get("digest")):
-                return {"ok": False, "code": "review_changed", "error": "The scoring review changed. Submit the current review again."}
+                return _review_changed_response(plan, names, candidate)
         elif review_digest:
-            return {"ok": False, "code": "review_changed", "error": "No teacher questions remain for this review."}
+            return _review_changed_response(plan, names, candidate)
 
         resolved = scoring_apply.resolve_answers(plan, answers)
         if not resolved.get("ok"):
@@ -2671,6 +2678,52 @@ def _record_scoring_session_result(scoring_session_id: str, result: dict) -> dic
             session["last_failure"] = str(result.get("code") or "write_failed")
         session_store.save_session(session)
     return {**result, "scoring_session_id": scoring_session_id}
+
+
+def _review_changed_response(plan: dict, names: dict, session: dict) -> dict:
+    """Return the current pseudonym-only review state after a stale digest."""
+    safe = _scoring_apply_safe(plan, names)
+    candidate_ids = {str(uid) for uid in plan.get("candidate_ids") or []}
+    held = sum(
+        1 for student in session.get("students") or []
+        if str(student.get("user_id") or "") not in candidate_ids
+        and not student.get("posted")
+    )
+    return {
+        "ok": False,
+        "code": "review_changed",
+        "error": "The scoring review changed. Submit the current review again.",
+        "review_digest": str(plan.get("digest") or ""),
+        "questions": safe["questions"],
+        "counts": {"ready": len(candidate_ids), "held": held},
+    }
+
+
+def reset_scoring_review(scoring_session_id: str) -> dict:
+    """Reopen the current local review without changing its packet or history."""
+    from api.powergrader import session_store
+
+    session = _load_scoring_assignment_session(scoring_session_id)
+    if not session:
+        return {"ok": False, "code": "session_not_found",
+                "error": "The assignment-scoped Scoring Session was not found."}
+    with session_store.scope_lock(session.get("course_id"), session.get("assignment_id")):
+        current = _load_scoring_assignment_session(scoring_session_id)
+        if not current or not _is_current_scoring_session(current):
+            return _session_superseded(scoring_session_id)
+        if current.get("status") != "needs_teacher_input":
+            return {"ok": False, "code": "review_not_open",
+                    "error": "The current Scoring Session does not have an open teacher review."}
+        with session_store.session_lock(scoring_session_id):
+            current["status"] = "ready"
+            current["review_reset_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            session_store.save_session(current)
+    return {
+        "ok": True,
+        "status": "ready",
+        "scoring_session_id": scoring_session_id,
+        "next": "Call get_scoring_packet with scoring_session_id.",
+    }
 
 
 def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()) -> dict:

@@ -1,7 +1,14 @@
 """Response and membership arithmetic laws for SAFE packet projections."""
 import pytest
 
+from api import feedback_contract
 from api.powergrader.scoring_packet import build_packet, validate_safe_bundle
+
+
+def test_default_packet_persona_is_teacher_assistant_not_your_assistant():
+    contract = feedback_contract.build_contract_text()
+    assert contract.startswith("You are a teaching assistant helping a real teacher")
+    assert "your teaching assistant" not in contract
 
 
 def test_safe_bundle_validation_rejects_missing_or_identity_bearing_packets():

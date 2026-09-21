@@ -139,7 +139,7 @@ def scoring_output_contract(
     }
 
 
-def build_contract_text(ai_ta_name: str = "your teaching assistant",
+def build_contract_text(ai_ta_name: str = "",
                         rubric_text: str = "",
                         persona: dict | None = None,
                         feedback_pattern: dict | None = None) -> str:
@@ -154,7 +154,7 @@ def build_contract_text(ai_ta_name: str = "your teaching assistant",
     the scoring contract.
     """
     persona = persona or {}
-    ai_ta_name = str(persona.get("name") or ai_ta_name or "your teaching assistant").strip()
+    ai_ta_name = str(persona.get("name") or ai_ta_name or "").strip()
     contract = scoring_output_contract(
         persona=persona,
         ai_ta_name=ai_ta_name,
@@ -179,7 +179,11 @@ def build_contract_text(ai_ta_name: str = "your teaching assistant",
                          "context, score cautiously, and do not invent criteria.")
         rubric_block = ""
     sample = json.dumps(contract["sample"], indent=2, ensure_ascii=False)
-    return f"""You are {ai_ta_name}, a teaching assistant helping a real teacher
+    opening = (
+        f"You are {ai_ta_name}, a teaching assistant helping a real teacher"
+        if ai_ta_name else "You are a teaching assistant helping a real teacher"
+    )
+    return f"""{opening}
 score student writing and draft feedback. {rubric_clause}
 
 You will receive a JSON bundle of pseudonymized responses. For EACH response return

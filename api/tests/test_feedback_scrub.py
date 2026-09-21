@@ -239,3 +239,32 @@ def test_longest_pattern_wins(tmp_path):
     # Full name should be replaced uniformly
     assert "Anne-Marie Smith" not in result
     assert "Anne-Marie" not in result
+
+
+def test_protected_collision_preserves_exact_quote_but_neutralizes_outside(tmp_path):
+    v = Vault(str(tmp_path / "collision.json"))
+    v.get_or_assign("9201", "Cherry Parker", "5201")
+    protected = {"Cherry", "Parker"}
+    rmap = scrub.build_replacement_map(v.entries(), protected)
+
+    result = scrub.scrub_text_with_protected_spans(
+        'The assigned text says "Cherry". Cherry appears in my claim.',
+        rmap, protected, quoted_only=True,
+    )
+    assert '"Cherry"' in result
+    assert "Cherry appears" not in result
+    assert scrub.NEUTRAL_NAME_PLACEHOLDER in result
+    assert v.entries()[0]["pseudonym"] not in result
+
+
+def test_source_span_can_preserve_collision_without_using_a_student_pseudonym(tmp_path):
+    v = Vault(str(tmp_path / "source-collision.json"))
+    v.get_or_assign("9202", "Belle Parker", "5202")
+    protected = {"Belle", "Parker"}
+    rmap = scrub.build_replacement_map(v.entries(), protected)
+
+    result = scrub.scrub_text_with_protected_spans(
+        "The source names Belle and Parker.", rmap, protected,
+    )
+    assert "Belle" in result and "Parker" in result
+    assert v.entries()[0]["pseudonym"] not in result
