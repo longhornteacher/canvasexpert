@@ -8,9 +8,9 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 
-from api.powergrader import canvas_fetch
+from api.powergrader import canvas_fetch, scoring_local
 from api.mirror import new_quizzes, read_service, store as mirror_store
-from api.platform_services import workspace
+from api.platform_services import config, workspace
 
 
 REFRESH_BINARY_LIMIT = 10 * 1024 * 1024
@@ -270,9 +270,17 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
     root = workspace.workspace_root()
     if not root:
         return None, None, _mirror_preparation_failure("mirror_workspace_unavailable")
-    from api.platform_services import config
+    local = scoring_local.load_scoring_snapshot(
+        course_id, course_name=config.course_display_name(course_id), root=root,
+    )
+    if local.get("snapshot") is None:
+        return None, None, _mirror_preparation_failure(
+            local.get("error") or "mirror_projection_unavailable")
 
-    max_age_hours = config.mirror_serve_max_age_hours()
+    # Scoring owns its 30-minute advisory. The adapter still requires all three
+    # scopes to be current, but this read must not apply the ordinary six-hour
+    # serve-age cutoff used by unrelated MCP readers.
+    max_age_hours = None
     try:
         roster = read_service.private_roster(
             course_id, root=root, max_age_hours=max_age_hours)
@@ -426,4 +434,5 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
         "mirror_revision": revision,
         "snapshot_id": snapshot_id,
         "refresh_state": str(submissions_scope.get("refresh_state") or ""),
+        "freshness": local.get("freshness") or {},
     }

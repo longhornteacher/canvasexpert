@@ -4,7 +4,7 @@ Routing scope: read this card only for the internal assignment scoring
 engine. `api/powergrader/` is a legacy package path, not a teacher-facing surface.
 The public flow is MCP `discover_scoring_work` -> teacher direction ->
 `prepare_scoring_session` -> `get_scoring_packet` ->
-`submit_scoring_results`. One assignment-scoped session owns one SAFE packet and
+`stage_scoring_results` -> `apply_staged_scoring_results`. One assignment-scoped session owns one SAFE packet and
 write authorization. Canvas Live is the only review/edit surface.
 
 ## Current ownership
@@ -21,11 +21,11 @@ write authorization. Canvas Live is the only review/edit surface.
   by `(scope_generation, created, session_id)` at the call boundary. Existing
   records without a generation use `(created, session_id)` as the fallback
   regardless of status, with no migration or deletion.
-- `scoring_discovery.py` owns the read-only cross-course digest. It refreshes
-  configured Current courses with bounded concurrency, reads only refreshed local
-  mirror snapshots, projects aggregate assignment counts, and joins at most one
-  current actionable session by exact course/assignment scope. It persists no queue
-  or parent lifecycle record and never opens the identity vault.
+- `scoring_discovery.py` owns the read-only cross-course digest. It reads configured
+  Current-course local mirror snapshots with bounded concurrency, projects aggregate
+  assignment counts plus freshness, and joins at most one current actionable session
+  by exact course/assignment scope. It persists no queue or parent lifecycle record
+  and never opens the identity vault.
 - `scoring_preparation.py` delegates canonical SAFE construction to
   `scoring_artifacts.py`; `session_builder.py` assembles the one private
   assignment-scoped session. Together with the mirror acquisition modules they
@@ -65,8 +65,8 @@ write authorization. Canvas Live is the only review/edit surface.
 - A teacher's request authorizes valid results only for the exact course/assignment
   saved in that assignment-scoped session. It never extends to later-discovered work,
   another Scoring Session, arbitrary grade edit, or SIS action. A superseded or
-  non-current session returns the identity-safe `session_superseded` code for both the
-  packet and the submit call, and the submit refusal happens before result validation,
+  non-current session returns the identity-safe `session_superseded` code for the
+  packet, stage, and apply calls, and the refusal happens before result validation,
   re-identification, Canvas planning, or any Canvas call. Supersession deletes nothing:
   earlier session JSON, SAFE bundles, and receipts stay as teacher history, and no
   supersession metadata, private path, or Canvas id crosses MCP.
@@ -82,7 +82,7 @@ write authorization. Canvas Live is the only review/edit surface.
   writes fail closed and are never blindly retried.
 - Student-facing feedback is not labeled AI unless the teacher asked. Glows & Grows is the default feedback shape.
 - AssignmentForge correction libraries remain private in the local operation/session records;
-  the submit path may append one `📋 COPY THIS:` answer/why block to a missed exact packet
+  the stage path may append one `📋 COPY THIS:` answer/why block to a missed exact packet
   item before the existing `comment[text_comment]` write. They never enter SAFE packet output.
 - Canvas Expert has no hosted scoring model, teacher-facing scoring queue, local approval screen,
   manual result-import flow, scheduled auto-score, late AI catch-up, or teacher-facing

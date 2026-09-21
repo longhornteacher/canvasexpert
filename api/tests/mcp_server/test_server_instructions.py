@@ -35,10 +35,9 @@ INSTRUCTION_BUDGET = 2200
 # exists: both descriptions were already trimmed to single sentences before
 # raising this, so the remaining cost is the two tools' own name/schema
 # structure, not wordy prose.
-# The current unified scoring surface has one preparation, one packet, one submit,
-# and one optional identity-free list tool; no scoring preview/apply pair.
-# v51 adds one zero-argument discovery tool; the measured v50 ceiling was
-# 15,943, so this allows only the observed 7-character increase.
+# The current unified scoring surface has one preparation, one packet, one staged
+# write, one apply, and one optional identity-free list tool.
+# v54 keeps the measured listing ceiling while replacing the old direct submit.
 LISTING_BUDGET = 15950
 DESCRIPTION_BUDGET = 343
 
@@ -64,12 +63,13 @@ def test_instruction_block_stays_within_budget():
     )
 
 
-def test_chat_scoring_uses_one_assignment_type_neutral_submit_flow():
+def test_chat_scoring_uses_one_assignment_type_neutral_stage_apply_flow():
     instructions = server._SERVER_INSTRUCTIONS
 
     assert "prepare_scoring_session" in instructions
     assert "get_scoring_packet" in instructions
-    assert "submit_scoring_results" in instructions
+    assert "stage_scoring_results" in instructions
+    assert "apply_staged_scoring_results" in instructions
     assert "never read back" in instructions
     assert "PowerGrader" not in instructions
     assert "OpenRouter" not in instructions
@@ -78,26 +78,24 @@ def test_chat_scoring_uses_one_assignment_type_neutral_submit_flow():
 def test_chat_side_canvas_landing_is_still_offered():
     instructions = server._SERVER_INSTRUCTIONS
 
-    assert "submit_scoring_results" in instructions
-    assert "resubmit the same results" in instructions
+    assert "apply_staged_scoring_results" in instructions
+    assert "resubmit the same results to stage_scoring_results" in instructions
     assert "bounded scoring guidance" in instructions
 
 
-def test_refreshing_discovery_continuation_is_bounded_and_teacher_free():
+def test_local_discovery_does_not_offer_refresh_continuations():
     instructions = server._SERVER_INSTRUCTIONS
 
-    assert "mirror_refresh_in_progress" in instructions
-    assert "at most four total calls" in instructions
-    assert "initial plus three continuations" in instructions
-    assert "without teacher interruption" in instructions
+    assert "mirror_refresh_in_progress" not in instructions
+    assert "at most four total calls" not in instructions
+    assert "refresh only after an explicit teacher request" in instructions
 
 
 def test_scoring_preparation_wait_and_open_session_rules_are_explicit():
     instructions = server._SERVER_INSTRUCTIONS
 
-    assert "wait 5-10 minutes" in instructions
-    assert "retry preparation once" in instructions
-    assert "do not poll" in instructions
+    assert "over " in instructions
+    assert "use_existing_mirror=true" in instructions
     assert "scoring_session_already_open" in instructions
     assert "do not prepare or refresh the assignment again" in instructions
     assert "work locally" in instructions
@@ -157,7 +155,10 @@ def test_next_procedures_are_static_bounded_and_gate_safe():
     """Every registered tool is checked against B's exact result-advisory allowlist."""
     registered = set(server.mcp._tool_manager._tools)
 
-    expected_next = RESULT_NEXT_TOOLS | {"discover_scoring_work"}
+    expected_next = RESULT_NEXT_TOOLS | {
+        "discover_scoring_work", "stage_scoring_results",
+        "apply_staged_scoring_results",
+    }
     assert set(tools._NEXT_STEPS) == expected_next
     assert RESULT_NEXT_TOOLS < registered
     for name in registered:
@@ -191,7 +192,8 @@ def test_first_lines_disclose_preview_and_canvas_write_boundaries():
         assert "local" in first_lines[name]
     for name in ("apply_sis_grade_bridge", "apply_content_push"):
         assert "Canvas" in first_lines[name]
-    assert "Canvas" in first_lines["submit_scoring_results"]
+    assert "no Canvas write" in first_lines["stage_scoring_results"]
+    assert "Canvas" in first_lines["apply_staged_scoring_results"]
     assert "Canvas membership" in first_lines["apply_roster_student_change"]
     assert "list_courses" in first_lines["list_courses"]
     assert "stand-ins" in first_lines["get_roster"]
@@ -213,7 +215,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 42
+    assert len(listed) == 43
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -322,9 +324,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 42
-    assert len(_synthetic_mcp["calls"]) == 42
-    assert len(_synthetic_mcp["gated"]) == 42
+    assert len(results) == 43
+    assert len(_synthetic_mcp["calls"]) == 43
+    assert len(_synthetic_mcp["gated"]) == 43
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

@@ -10,7 +10,7 @@ from api.mcp_server import contract, server
 
 
 def test_current_schema_matches_the_live_fastmcp_registry():
-    assert contract.TOOL_SCHEMA_VERSION == 53
+    assert contract.TOOL_SCHEMA_VERSION == 54
     expected = contract.load_contract()
     live = contract.live_contract(server.mcp)
     assert live == expected

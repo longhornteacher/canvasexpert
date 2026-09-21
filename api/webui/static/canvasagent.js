@@ -156,8 +156,8 @@
     var result = mirrorSummary(data);
     setComponent("canvas-data", result.state, result.label, result.detail);
     if (refreshButton) {
-      refreshButton.hidden = !result.sync || result.state === "ready";
-      refreshButton.disabled = false;
+      refreshButton.hidden = false;
+      refreshButton.disabled = !result.sync;
     }
     return result.state;
   }

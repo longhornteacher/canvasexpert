@@ -888,7 +888,7 @@ def test_submit_refuses_a_superseded_record_before_any_validation(monkeypatch, t
     monkeypatch.setattr(fp, "validate_results",
                         lambda *_a, **_kw: pytest.fail("validation must not run"))
 
-    result = tools.submit_scoring_results("stale-session", [], "digest")
+    result = tools.stage_scoring_results("stale-session", [], "digest")
 
     assert result["ok"] is False
     assert result["code"] == "session_superseded"

@@ -75,7 +75,7 @@ def packet_digest(scoring_session_id, safe_bundle: dict, *,
                   course_id="", assignment_id="") -> str:
     """Identity of one assignment-scoped scoring session's SAFE bundle.
 
-    ``submit_scoring_results`` recomputes this and refuses to write scores once
+    ``stage_scoring_results`` recomputes this and refuses to stage scores once
     it has moved, so a re-run between retrieval and submission cannot be scored blind.
     The one public session id, exact coordinates, and SAFE content all
     participate so a replay from another assignment fails closed.
@@ -292,7 +292,7 @@ def build_packet(
     ``students_total`` carries the distinct-student count separately.
 
     Returns a dict with:
-    - packet_digest: bundle identity, required by ``submit_scoring_results``
+    - packet_digest: bundle identity, required by ``stage_scoring_results``
     - items: list of {item_id, prompt, possible}, deduplicated by item_id
     - students: list of {pseudonym, item_id, text, segment_index, segment_count}
       for this page

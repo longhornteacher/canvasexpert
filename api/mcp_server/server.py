@@ -28,29 +28,28 @@ _SERVER_INSTRUCTIONS = (
     "projections; real names, Canvas/SIS ids, credentials, and private paths stay "
     "local. Student rows use stable stand-ins. Stale roster, submission, and "
     "gradebook reads refuse; use refresh_mirror once, then retry. "
-    "For broad grading, call discover_scoring_work first. It refreshes every Current "
-    "course, reads only each refreshed local mirror, and returns the complete "
+    "For broad grading, call discover_scoring_work first. It reads every Current "
+    "course's local mirror and returns the complete "
     "assignment and attention set without preparation or writes. Report all rows, "
     "wait for teacher direction, then use selected exact course_id/assignment_id "
     "rows. "
-    "For mirror_refresh_in_progress, "
-    "retry discovery only within at most four total calls for this teacher request "
-    "(initial plus three continuations), without teacher interruption; "
-    "then report remaining attention and wait. Discovery continuations reuse its operation; "
-    "they do not start refresh or invalidate a session. "
-    "Call prepare_scoring_session once for one exact assignment; it performs one "
-    "private full refresh. If it returns mirror_refresh_in_progress, wait "
-    "5-10 minutes, retry preparation once, then accept/report the outcome; do not poll. "
+    "If discovery reports an unavailable projection, ask the teacher to refresh the "
+    "Current course mirror, then retry. Call prepare_scoring_session once for one "
+    "exact assignment; it reads only the local projection. If the snapshot is over "
+    "30 minutes old, ask whether relevant Canvas work changed; refresh only after "
+    "an explicit teacher request, or retry with use_existing_mirror=true when the "
+    "teacher says no. "
     "If it returns scoring_session_already_open, use that session and do not prepare "
     "or refresh the assignment again. Once a usable session id exists, work locally "
     "from its immutable packet. For needs_scoring_norms, ask its bounded question and "
     "retry with bounded scoring guidance; never ask the teacher to choose a scoring transport "
     "or assignment type. Read every SAFE page with get_scoring_packet, including "
     "contract/rubric; held work and evidence gaps are not empty. Submit only that "
-    "packet's pseudonym/item results with expected_packet_digest; call submit_scoring_results once. "
-    "Canvas applies gradebook or late-policy adjustments; "
+    "packet's pseudonym/item results with expected_packet_digest; call stage_scoring_results. "
+    "Summarize the staged aggregate and wait for a direct teacher instruction to post "
+    "that exact stage before calling apply_staged_scoring_results. Canvas applies gradebook or late-policy adjustments; "
     "never read back the grade. For needs_teacher_input, ask only its questions and "
-    "resubmit the same results with the review digest and answers. "
+    "resubmit the same results to stage_scoring_results with the review digest and answers. "
     "Canvas Live is the review surface; list_scoring_sessions is an identity-free resume "
     "aid. Teacher score/post direction authorizes selected discovery rows together; it never extends beyond "
     "rows or another session. For content/product, call get_authoring_contract "
@@ -61,7 +60,7 @@ mcp = FastMCP("canvas-expert", instructions=_SERVER_INSTRUCTIONS)
 
 
 class ScoringResult(TypedDict):
-    """One SAFE packet row posted by submit_scoring_results."""
+    """One SAFE packet row supplied to stage_scoring_results."""
 
     pseudonym: str
     item_id: str
@@ -418,11 +417,12 @@ def discover_scoring_work() -> str:
 
 @mcp.tool(structured_output=False)
 def prepare_scoring_session(course_id: str, assignment_id: str,
-                            scoring_guidance: str = "") -> str:
-    """Prepare one exact assignment after one private full mirror refresh.
+                             scoring_guidance: str = "",
+                             use_existing_mirror: bool = False) -> str:
+    """Prepare one exact assignment from the local CanvasMirror.
     Returns a session id ready for packet paging, or a typed identity-safe blocker."""
     return _compact(tools.prepare_scoring_session(
-        course_id, assignment_id, scoring_guidance))
+        course_id, assignment_id, scoring_guidance, use_existing_mirror))
 
 
 @mcp.tool(structured_output=False)
@@ -442,21 +442,26 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
 
 
 @mcp.tool(structured_output=False)
-def submit_scoring_results(
+def stage_scoring_results(
     scoring_session_id: str,
     results: list[ScoringResult],
     expected_packet_digest: str,
     review_digest: str = "",
     answers: dict[str, str] | None = None,
-    idempotency_key: str = "",
 ) -> str:
-    """Write one raw score and one plain-text comment per SAFE packet row to Canvas.
-    Each results item needs pseudonym, item_id, score, and feedback from get_scoring_packet.
-    Canvas applies any gradebook or late-policy adjustment; the grade is never read back.
-    If teacher judgment is needed, resubmit the same results with review_digest and answers."""
-    return _compact(tools.submit_scoring_results(
-        scoring_session_id, results, expected_packet_digest, review_digest, answers,
-        idempotency_key))
+    """Validate and stage SAFE results locally; no Canvas write.
+    Supply one result per packet row; resubmit unchanged with review_digest and answers if needed."""
+    return _compact(tools.stage_scoring_results(
+        scoring_session_id, results, expected_packet_digest, review_digest, answers))
+
+
+@mcp.tool(structured_output=False)
+def apply_staged_scoring_results(scoring_session_id: str,
+                                 expected_stage_digest: str,
+                                 idempotency_key: str = "") -> str:
+    """Post the unchanged private stage to Canvas after a direct teacher instruction."""
+    return _compact(tools.apply_staged_scoring_results(
+        scoring_session_id, expected_stage_digest, idempotency_key))
 
 
 def _strip_generated_schema_titles(mcp_server) -> int:

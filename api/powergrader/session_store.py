@@ -36,7 +36,7 @@ SCORING_ASSIGNMENT_KIND = "scoring_assignment"
 # packet, or the submit-stage teacher questions. The basis-stage
 # ``needs_scoring_norms`` state never saves a session at all. Terminal
 # ``completed``/``completed_with_holds`` records are history, not resumable.
-ACTIONABLE_STATUSES = frozenset({"ready", "needs_teacher_input"})
+ACTIONABLE_STATUSES = frozenset({"ready", "needs_teacher_input", "staged"})
 SUPERSEDED_STATUS = "superseded"
 
 

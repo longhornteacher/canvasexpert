@@ -39,7 +39,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
 from api import content_push, course_scope, feedback_scrub, gradebook_queries, gradebook_snapshot, learning_objectives, operational_log, roster_context, roster_service, sis_grade_bridge
-from api.powergrader import scoring_discovery
+from api.powergrader import scoring_discovery, scoring_local
 from api.mirror import queries as mirror_queries
 from api.mirror import read_service
 from api.mirror import store as mirror_store
@@ -127,9 +127,17 @@ _NEXT_STEPS = {
     "get_scoring_packet": (
         "Read total as response rows and students_total as people. Keep the scoring "
         "contract and rubric on page zero; use next_offset for later pages. After "
-        "reading every page, call submit_scoring_results with one "
+        "reading every page, call stage_scoring_results with one "
         "{pseudonym, item_id, score, feedback} row per packet student row and "
         "packet_digest as expected_packet_digest."
+    ),
+    "stage_scoring_results": (
+        "Stage validated results locally. Summarize the staged aggregate and wait for "
+        "a direct teacher request to post this exact stage before applying it."
+    ),
+    "apply_staged_scoring_results": (
+        "Wait for a direct teacher instruction to post this exact stage before calling "
+        "this tool. It accepts only the unchanged stage digest."
     ),
     "prepare_scoring_session": (
         "When status is ready, call get_scoring_packet with scoring_session_id. "
@@ -170,18 +178,9 @@ _NEXT_STEPS = {
     ),
 }
 
-_DISCOVERY_REFRESHING_NEXT = (
-    "Discovery is still refreshing one or more Current courses. Automatically retry "
-    "discover_scoring_work only within at most four total calls for this teacher request "
-    "(the initial call plus three continuations), without asking the teacher; "
-    "then report the remaining attention and wait for teacher direction."
-)
-
 def _with_next(tool_name: str, result: dict) -> dict:
     """Attach the bounded post-result procedure to an authorized success payload."""
     if result.get("ok"):
-        if tool_name == "discover_scoring_work" and result.get("status") == "refreshing":
-            return {**result, "next": _DISCOVERY_REFRESHING_NEXT}
         return {**result, "next": _NEXT_STEPS[tool_name]}
     return result
 
@@ -402,6 +401,11 @@ def _load_snapshot(course_id: str):
     snapshot["source"] = "mirror"
     snapshot["synced_at"] = synced_at
     return snapshot, None
+
+
+def _load_scoring_snapshot(course_id: str, *, course_name: str = ""):
+    """Read scoring's local projection without the ordinary serve-age cutoff."""
+    return scoring_local.load_scoring_snapshot(course_id, course_name=course_name)
 
 
 _VAULT_UNAVAILABLE_ERROR = (
@@ -1164,7 +1168,8 @@ _TOOL_GROUPS = {
         "prepare_scoring_session",
         "list_scoring_sessions",
         "get_scoring_packet",
-        "submit_scoring_results",
+        "stage_scoring_results",
+        "apply_staged_scoring_results",
     ),
     "Gradebook": ("get_gradebook_snapshot",),
     "SIS Grade Bridges": (
@@ -1850,7 +1855,7 @@ def get_gradebook_snapshot(course_id: str) -> dict:
 
 
 def discover_scoring_work() -> dict:
-    """Refresh every Current course and return a student-free grading digest."""
+    """Read every Current course locally and return a student-free grading digest."""
     from api.powergrader import session_store
 
     try:
@@ -1858,8 +1863,7 @@ def discover_scoring_work() -> dict:
         if not active_courses:
             return scoring_discovery.discover_scoring_work(
                 active_courses,
-                refresh_course=_refresh_course_for_discovery,
-                load_snapshot=_load_snapshot,
+                load_snapshot=_load_scoring_snapshot,
                 actionable_sessions=(),
                 tier_tags=config.get_tier_tags(),
                 registrations_by_course={},
@@ -1869,8 +1873,7 @@ def discover_scoring_work() -> dict:
         )
         result = scoring_discovery.discover_scoring_work(
             active_courses,
-            refresh_course=_refresh_course_for_discovery,
-            load_snapshot=_load_snapshot,
+            load_snapshot=_load_scoring_snapshot,
             actionable_sessions=sessions,
             tier_tags=config.get_tier_tags(),
             registrations_by_course={
@@ -1905,62 +1908,6 @@ _REFRESH_TIMEOUT_SECONDS = 25.0
 _REFRESH_SCOPES = ["course.refresh", "roster", "groups"]
 # Scoring does not use the ordinary delta refresh. Its runner performs a full
 # rebuild so unchanged or malformed local assignment rows are replaced too.
-_SCORING_REFRESH_SCOPES = ["course.scoring_refresh"]
-_SCORING_DISCOVERY_REFRESH_SCOPES = ["course.scoring_discovery_refresh"]
-_SCORING_DISCOVERY_REUSE_SECONDS = 300.0
-
-
-def _refresh_course_for_scoring(course_id: str) -> dict:
-    """Force one foreground CanvasMirror refresh before scoring uses it.
-
-    Scoring is intentionally stricter than ordinary mirror-backed reads: a
-    mirror that is merely inside its serve-age window may still predate a
-    teacher's recent Canvas Live edit.  Keep the refresh private to Canvas
-    Expert and return only lifecycle facts to the scoring orchestration.
-    """
-    return _refresh_course_for_scoring_scope(
-        course_id, _SCORING_REFRESH_SCOPES,
-    )
-
-
-def _refresh_course_for_discovery(course_id: str) -> dict:
-    """Refresh discovery through its idempotent continuation scope."""
-    return _refresh_course_for_scoring_scope(
-        course_id, _SCORING_DISCOVERY_REFRESH_SCOPES,
-        reuse_completed_within_seconds=_SCORING_DISCOVERY_REUSE_SECONDS,
-    )
-
-
-def _refresh_course_for_scoring_scope(
-    course_id: str, scopes: list[str], *, reuse_completed_within_seconds: float = 0,
-) -> dict:
-    try:
-        kwargs = {}
-        if reuse_completed_within_seconds:
-            kwargs["reuse_completed_within_seconds"] = reuse_completed_within_seconds
-        plan_id = _enqueue_sync(course_id, scopes, **kwargs)
-        plan = _wait_for_plan(plan_id, timeout_seconds=_REFRESH_TIMEOUT_SECONDS)
-    except Exception:
-        return False
-    identity = _refresh_identity(plan)
-    result = {
-        "ok": plan.get("state") == "succeeded",
-        "state": plan.get("state"),
-        "status": plan.get("status") or (
-            "synced" if plan.get("state") == "succeeded" else "failed"
-        ),
-    }
-    result.update(identity)
-    if "mirror_revision" in identity:
-        result["usable"] = bool(
-            result["ok"] and int(identity.get("mirror_revision") or 0) > 0
-        )
-    else:
-        # Compatibility seam for focused callers that return only state.
-        result["usable"] = result["ok"]
-    return result
-
-
 def _refresh_identity(plan: dict) -> dict:
     """Project the coordinator's opaque plan to additive lifecycle facts."""
     if not isinstance(plan, dict):
@@ -2095,9 +2042,6 @@ def _open_scoring_session_refusal(course_id: str, assignment_id: str) -> dict | 
     if not isinstance(session, dict):
         return None
 
-    freshness = _ensure_session_usable(session)
-    if not freshness.get("ok"):
-        return None
     health = session_store.packet_health(session)
     if not health.get("ok"):
         return None
@@ -2111,16 +2055,17 @@ def _open_scoring_session_refusal(course_id: str, assignment_id: str) -> dict | 
         "scoring_session_id": session_id,
         "user_action": (
             "Use get_scoring_packet with the existing scoring_session_id, "
-            "work locally on that snapshot, then submit once. Do not prepare "
-            "or refresh this assignment again."
+            "work locally on that snapshot, then stage once. Do not prepare "
+            "this assignment again."
         ),
         "error": "A usable Scoring Session is already open for this assignment.",
     }
 
 
 def prepare_scoring_session(course_id: str, assignment_id: str,
-                            scoring_guidance: str = "") -> dict:
-    """Prepare one exact assignment after one private full mirror refresh.
+                            scoring_guidance: str = "",
+                            use_existing_mirror: bool = False) -> dict:
+    """Prepare one exact assignment from the local CanvasMirror.
 
     See ScoringSession/SCORING_SESSIONS.md (§2) in your workspace root for the
     Scoring Session workflow, failure modes, and known patterns."""
@@ -2147,7 +2092,7 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
     try:
         result = scoring_preparation.prepare_scoring_session(
             course_key, assignment_key, scoring_guidance,
-            refresh_course=_refresh_course_for_scoring,
+            use_existing_mirror=use_existing_mirror,
         )
     except Exception:
         return _safe_scoring_preparation_failure()
@@ -2200,79 +2145,6 @@ def _is_current_scoring_session(session: dict) -> bool:
         return not has_scope
     except Exception:
         return False
-
-
-def _session_mirror_check(session: dict) -> dict:
-    """Validate the usable mirror revision and submission snapshot for a session."""
-    expected_revision = session.get("mirror_revision")
-    if expected_revision in (None, ""):
-        # Pre-lifecycle records remain readable; new preparations always bind
-        # a revision before they can expose a SAFE packet.
-        return {"ok": True}
-    from api.powergrader import session_store
-
-    course_id = str(session.get("course_id") or "")
-    assignment_id = str(session.get("assignment_id") or "")
-    root = workspace.workspace_root()
-    if not root:
-        return {"ok": False, "code": "mirror_revision_unusable",
-                "error": "The usable CanvasMirror revision is unavailable. Refresh this course and retry."}
-    try:
-        scope = read_service.private_submissions(
-            course_id, root=root, max_age_hours=None,
-        )
-    except Exception:
-        scope = None
-    if not isinstance(scope, dict) or scope.get("state") != "current":
-        return {"ok": False, "code": "mirror_revision_unusable",
-                "error": "The usable CanvasMirror revision is unavailable. Refresh this course and retry."}
-    revision = int(scope.get("mirror_revision") or 0)
-    if revision < 1:
-        return {"ok": False, "code": "mirror_revision_unusable",
-                "error": "The usable CanvasMirror revision is unavailable. Refresh this course and retry."}
-    if str(revision) != str(expected_revision):
-        return {"ok": False, "code": "session_stale",
-                "error": "A newer CanvasMirror revision exists. Prepare a replacement Scoring Session before continuing."}
-    expected_snapshot_id = str(session.get("mirror_snapshot_id") or "")
-    current_snapshot_id = str(scope.get("snapshot_id") or "")
-    if expected_snapshot_id and current_snapshot_id and expected_snapshot_id != current_snapshot_id:
-        return {"ok": False, "code": "session_stale",
-                "error": "A newer CanvasMirror snapshot exists. Prepare a replacement Scoring Session before continuing."}
-    try:
-        document = mirror_store.read_submissions(course_id, assignment_id, root=root)
-        entries = (document or {}).get("submissions") if isinstance(document, dict) else None
-        if not isinstance(entries, dict):
-            raise ValueError("submission projection unavailable")
-        rows = [entry.get("current") for entry in entries.values()
-                if isinstance(entry, dict) and isinstance(entry.get("current"), dict)]
-        snapshot = session_store.eligible_submission_snapshot_digest(rows)
-    except Exception:
-        return {"ok": False, "code": "mirror_revision_unusable",
-                "error": "The current submission snapshot is unavailable. Refresh this course and retry."}
-    verdict = session_store.session_staleness(
-        session, mirror_revision=revision, submission_snapshot=snapshot,
-    )
-    if verdict.get("stale"):
-        return {"ok": False, "code": verdict.get("code") or "session_stale",
-                "error": "The current submission snapshot changed. Prepare a replacement Scoring Session before continuing."}
-    return {"ok": True, "mirror_revision": revision,
-            "snapshot_id": current_snapshot_id, "submission_snapshot": snapshot}
-
-
-def _ensure_session_usable(session: dict) -> dict:
-    """Return a safe lifecycle refusal and persist stale-session invalidation."""
-    from api.powergrader import session_store
-
-    verdict = _session_mirror_check(session)
-    if verdict.get("ok"):
-        return verdict
-    if verdict.get("code") in {"session_stale", "submission_identity_mismatch"}:
-        try:
-            session_store.mark_session_stale(session, code=verdict["code"])
-            session_store.save_session(session)
-        except Exception:
-            pass
-    return verdict
 
 
 def list_scoring_sessions() -> dict:
@@ -2328,7 +2200,7 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     differences separately from response paging.
 
     Returns a packet with:
-    - packet_digest: bundle identity, required by submit_scoring_results
+    - packet_digest: bundle identity, required by stage_scoring_results
     - items: {columns, rows} table of prompts, deduplicated by item_id
     - students: {columns, rows} table of (pseudonym, item_id, text,
       segment_index, segment_count)
@@ -2365,13 +2237,10 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
                 "error": "The assignment-scoped Scoring Session was not found."}
     if not _is_current_scoring_session(session):
         return _session_superseded(scoring_session_id)
-    freshness = _ensure_session_usable(session)
-    if not freshness.get("ok"):
-        return freshness
     if session.get("status") == "needs_teacher_input":
         return {"ok": False, "code": "needs_teacher_input",
                 "error": "Prepare this exact assignment with an attached Canvas rubric or bounded guidance before requesting its packet."}
-    if session.get("status") not in {"ready", "completed", "completed_with_holds"}:
+    if session.get("status") not in {"ready", "staged", "completed", "completed_with_holds"}:
         return {"ok": False, "code": "packet_unavailable",
                 "error": "The assignment-scoped Scoring Session has no ready packet."}
 
@@ -2446,15 +2315,15 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     return result
 
 
-def submit_scoring_results(scoring_session_id: str, results: list,
-                           expected_packet_digest: str, review_digest: str = "",
-                           answers: dict | None = None,
-                           idempotency_key: str = "") -> dict:
-    """Submit one session while holding its scope lifecycle lock throughout.
+def stage_scoring_results(scoring_session_id: str, results: list,
+                          expected_packet_digest: str, review_digest: str = "",
+                          answers: dict | None = None) -> dict:
+    """Validate and freeze one exact scoring result set without Canvas I/O.
 
     One {pseudonym, item_id, score, feedback} result per packet row. If the tool
     returns needs_teacher_input, ask the flagged questions and resubmit unchanged
-    with answers filled in. See ScoringSession/SCORING_SESSIONS.md §2 steps 5–6."""
+    with answers filled in. A successful call stores the private write plan for
+    a later explicit apply."""
     from api.powergrader import session_store
 
     session = _load_scoring_assignment_session(scoring_session_id)
@@ -2466,20 +2335,18 @@ def submit_scoring_results(scoring_session_id: str, results: list,
     # session between validation, planning, Canvas apply, and outcome save.
     with session_store.scope_lock(session.get("course_id"),
                                   session.get("assignment_id")):
-        return _submit_scoring_results_locked(
+        return _stage_scoring_results_locked(
             scoring_session_id, results, expected_packet_digest,
-            review_digest=review_digest, answers=answers,
-            idempotency_key=idempotency_key)
+            review_digest=review_digest, answers=answers)
 
 
-def _submit_scoring_results_locked(scoring_session_id: str, results: list,
-                                   expected_packet_digest: str,
-                                   review_digest: str = "",
-                                   answers: dict | None = None,
-                                   idempotency_key: str = "") -> dict:
-    """Validate SAFE results, ask only bounded risk questions, then write them.
+def _stage_scoring_results_locked(scoring_session_id: str, results: list,
+                                  expected_packet_digest: str,
+                                  review_digest: str = "",
+                                  answers: dict | None = None) -> dict:
+    """Validate SAFE results, ask bounded risk questions, then freeze locally.
 
-    The Canvas transport and identity lookup stay below this MCP boundary.
+    The Canvas transport stays below this MCP boundary and is never reached.
     No result content or real identity is returned, including on failure.
     """
     from api import feedback_pipeline as fp
@@ -2494,9 +2361,6 @@ def _submit_scoring_results_locked(scoring_session_id: str, results: list,
                 "error": "The assignment-scoped Scoring Session was not found."}
     if not _is_current_scoring_session(session):
         return _session_superseded(scoring_session_id)
-    freshness = _ensure_session_usable(session)
-    if not freshness.get("ok"):
-        return freshness
     gate_error = _course_gate_check(str(session.get("course_id") or ""))
     if gate_error:
         return {"ok": False, "code": "course_unavailable", "error": gate_error}
@@ -2606,14 +2470,8 @@ def _submit_scoring_results_locked(scoring_session_id: str, results: list,
         if not resolved.get("ok"):
             return {"ok": False, "code": resolved.get("code") or "invalid_answer",
                     "error": "Answer every listed scoring question with one of its offered options."}
-        # Lock order is scope, then session. The scope lock spans the final
-        # currentness check, the staged-result mutation, the Canvas apply, and
-        # the terminal outcome save, so an activation for the same exact scope
-        # cannot slip a supersession between the check and the write. If
-        # activation won the race, submission refuses here before any Canvas
-        # call. The session lock is still held inside for the apply sequence;
-        # session_store uses re-entrant locks, so the guarded helpers can
-        # safely acquire the same session lock again.
+        # Lock order is scope, then session. Staging freezes the validated
+        # private values and plan coordinates; it never enters the Canvas lane.
         with session_store.scope_lock(session.get("course_id"),
                                       session.get("assignment_id")):
             if not _is_current_scoring_session(
@@ -2630,30 +2488,168 @@ def _submit_scoring_results_locked(scoring_session_id: str, results: list,
                         target["ai_score"] = staged.get("ai_score")
                         target["ai_feedback"] = staged.get("ai_feedback")
                         target["ai_item_results"] = staged.get("ai_item_results") or []
+                normalized_answers = {str(key): str(value) for key, value in (answers or {}).items()}
+                selected_ids = [str(uid) for uid in resolved.get("user_ids") or []]
+                stage_identity = {
+                    "expected_packet_digest": str(expected_packet_digest),
+                    "plan_digest": str(plan["digest"]),
+                    "selected_user_ids": selected_ids,
+                    "answers": {key: normalized_answers[key] for key in sorted(normalized_answers)},
+                }
+                stage_digest = _canonical_digest(stage_identity)
+                current["staged_scoring_apply"] = {
+                    **stage_identity,
+                    "stage_digest": stage_digest,
+                    "skipped_user_ids": [str(uid) for uid in resolved.get("skipped") or []],
+                    "candidate_user_ids": [str(uid) for uid in plan.get("candidate_ids") or []],
+                }
+                current["status"] = "staged"
                 session_store.save_session(current)
-                apply_kwargs = dict(
-                    session_id=scoring_session_id,
-                    expected_digest=plan["digest"], answers=answers,
-                    load_session=session_store.load_session, save_session=session_store.save_session,
-                    pseudonyms=every_pseudonym,
-                )
-                if str(idempotency_key or ""):
-                    apply_kwargs["idempotency_key"] = str(idempotency_key)
-                payload, _status = scoring_apply.apply_plan(
-                    **apply_kwargs,
-                )
             held_user_ids = {str(st.get("user_id") or "") for st in session.get("students") or []
                              if str(st.get("user_id") or "") not in set(plan.get("candidate_ids") or [])}
             held_user_ids.update(str(uid) for uid in resolved.get("skipped") or [])
-            return _record_scoring_session_result(
-                scoring_session_id,
-                _scoring_apply_result(payload, names, vault, held_user_ids=held_user_ids))
+            response = {
+                "ok": True, "status": "staged",
+                "scoring_session_id": scoring_session_id,
+                "stage_digest": stage_digest,
+                "counts": {"ready": len(selected_ids), "held": len(held_user_ids)},
+            }
+            return _with_next("stage_scoring_results", pseudonym.gate(response, vault))
 
     return {
         "ok": False,
         "code": "invalid_scoring_session",
         "error": "This Scoring Session is not an ordinary Canvas assignment.",
     }
+
+
+def apply_staged_scoring_results(scoring_session_id: str,
+                                 expected_stage_digest: str,
+                                 idempotency_key: str = "") -> dict:
+    """Apply only the unchanged private stage after direct teacher instruction."""
+    from api.powergrader import session_store
+
+    session = _load_scoring_assignment_session(scoring_session_id)
+    if not session:
+        return {"ok": False, "code": "session_not_found",
+                "error": "The assignment-scoped Scoring Session was not found."}
+    with session_store.scope_lock(session.get("course_id"), session.get("assignment_id")):
+        return _apply_staged_scoring_results_locked(
+            scoring_session_id, expected_stage_digest,
+            idempotency_key=idempotency_key,
+        )
+
+
+def _apply_staged_scoring_results_locked(scoring_session_id: str,
+                                         expected_stage_digest: str,
+                                         *, idempotency_key: str = "") -> dict:
+    from api.powergrader import scoring_apply, scoring_packet as sp, session_store
+
+    session = _load_scoring_assignment_session(scoring_session_id)
+    if not session:
+        return {"ok": False, "code": "session_not_found",
+                "error": "The assignment-scoped Scoring Session was not found."}
+    if not _is_current_scoring_session(session):
+        return _session_superseded(scoring_session_id)
+    if session.get("status") != "staged":
+        return {"ok": False, "code": "stage_unavailable",
+                "error": "The exact scoring stage is unavailable. Stage the results again."}
+    stage = session.get("staged_scoring_apply")
+    if not isinstance(stage, dict):
+        return {"ok": False, "code": "stage_invalid",
+                "error": "The exact scoring stage is malformed and cannot be applied."}
+    identity = {
+        "expected_packet_digest": str(stage.get("expected_packet_digest") or ""),
+        "plan_digest": str(stage.get("plan_digest") or ""),
+        "selected_user_ids": [str(uid) for uid in stage.get("selected_user_ids") or []],
+        "answers": {str(key): str(value) for key, value in (stage.get("answers") or {}).items()},
+    }
+    if not identity["expected_packet_digest"] or not identity["plan_digest"]:
+        return {"ok": False, "code": "stage_invalid",
+                "error": "The exact scoring stage is malformed and cannot be applied."}
+    if _canonical_digest({**identity, "answers": {
+            key: identity["answers"][key] for key in sorted(identity["answers"])
+    }}) != str(stage.get("stage_digest") or ""):
+        return {"ok": False, "code": "stage_invalid",
+                "error": "The exact scoring stage is malformed and cannot be applied."}
+    if str(expected_stage_digest or "") != str(stage.get("stage_digest") or ""):
+        return {"ok": False, "code": "stage_changed",
+                "error": "The staged scoring results changed. Stage the exact results again."}
+
+    gate_error = _course_gate_check(str(session.get("course_id") or ""))
+    if gate_error:
+        return {"ok": False, "code": "course_unavailable", "error": gate_error}
+    if not session.get("scoring_basis"):
+        return {"ok": False, "code": "invalid_scoring_session", "error": "This is not a Scoring Session."}
+    bundle_path = _safe_bundle_path(session)
+    if not bundle_path:
+        return {"ok": False, "code": "packet_missing", "error": "The SAFE scoring packet is unavailable."}
+    health = session_store.packet_health(session)
+    if not health.get("ok"):
+        return {"ok": False, "code": health.get("code") or "packet_invalid",
+                "error": "The SAFE scoring packet is missing or invalid."}
+    try:
+        with open(bundle_path, encoding="utf-8") as handle:
+            safe_bundle = json.load(handle)
+    except Exception:
+        return {"ok": False, "code": "packet_unavailable",
+                "error": "The SAFE scoring packet could not be read."}
+    packet_digest = sp.packet_digest(
+        scoring_session_id, safe_bundle,
+        course_id=session.get("course_id"), assignment_id=session.get("assignment_id"),
+    )
+    if packet_digest != identity["expected_packet_digest"]:
+        return {"ok": False, "code": "stale_packet",
+                "error": "The scoring packet changed. Stage the current packet before applying."}
+
+    vault, vault_error = _open_vault()
+    if vault_error:
+        return {"ok": False, "code": "identity_unavailable",
+                "error": "The private identity vault is unavailable."}
+    names = {}
+    pseudonyms = []
+    for entry in vault.entries():
+        label = str(entry.get("pseudonym") or "").strip()
+        if label:
+            names[str(entry.get("canvas_id"))] = label
+            pseudonyms.append(label)
+    plan = scoring_apply.build_plan(session, pseudonyms=pseudonyms)
+    if not plan.get("ok"):
+        return {"ok": False, "code": str(plan.get("code") or "stage_invalid"),
+                "error": "The staged scoring plan is no longer safe to apply."}
+    if str(plan.get("digest") or "") != identity["plan_digest"]:
+        return {"ok": False, "code": "stage_changed",
+                "error": "The staged scoring plan changed. Stage the exact results again."}
+    resolved = scoring_apply.resolve_answers(plan, identity["answers"])
+    if (not resolved.get("ok")
+            or [str(uid) for uid in resolved.get("user_ids") or []] != identity["selected_user_ids"]):
+        return {"ok": False, "code": "stage_changed",
+                "error": "The staged scoring answers no longer match the frozen plan."}
+
+    with session_store.session_lock(scoring_session_id):
+        current = session_store.load_session(scoring_session_id)
+        if not current or current.get("status") != "staged":
+            return {"ok": False, "code": "stage_unavailable",
+                    "error": "The exact scoring stage is unavailable. Stage the results again."}
+        apply_kwargs = {
+            "session_id": scoring_session_id,
+            "expected_digest": identity["plan_digest"],
+            "answers": identity["answers"],
+            "load_session": session_store.load_session,
+            "save_session": session_store.save_session,
+            "pseudonyms": pseudonyms,
+        }
+        if str(idempotency_key or ""):
+            apply_kwargs["idempotency_key"] = str(idempotency_key)
+        payload, _status = scoring_apply.apply_plan(**apply_kwargs)
+    held_user_ids = {str(st.get("user_id") or "") for st in session.get("students") or []
+                     if str(st.get("user_id") or "") not in set(plan.get("candidate_ids") or [])}
+    held_user_ids.update(str(uid) for uid in stage.get("skipped_user_ids") or [])
+    result = _record_scoring_session_result(
+        scoring_session_id,
+        _scoring_apply_result(payload, names, vault, held_user_ids=held_user_ids),
+    )
+    return _with_next("apply_staged_scoring_results", result)
 
 
 def _record_scoring_session_result(scoring_session_id: str, result: dict) -> dict:

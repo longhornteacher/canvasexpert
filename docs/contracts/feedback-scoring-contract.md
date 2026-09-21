@@ -2,34 +2,20 @@
 
 The data contract between the MCP-connected scoring agent and Canvas Expert's
 private scoring engine. Canvas Expert has no hosted grader. The agent prepares one
-exact assignment-bounded SAFE pseudonymized packet at a time, then submits results
-to Canvas Expert for validation and the exact assignment Canvas write.
+exact assignment-bounded SAFE pseudonymized packet at a time, then stages results
+locally and explicitly applies the exact frozen stage to Canvas.
 
 Before preparation, `discover_scoring_work()` is the broad, read-only entry point:
-it strictly refreshes every configured Current course, projects only aggregate local
-mirror state, and returns a student-free digest. The teacher directs which exact
+it reads every configured Current course from the local mirror, projects only aggregate
+local state, and returns a student-free digest. The teacher directs which exact
 course/assignment rows to continue. Discovery creates no session or packet and never
 widens the assignment-scoped authorization described below.
 
-Discovery refreshes use a dedicated read-only full-refresh scope. In-flight
-continuations reuse the same coordinator job and operation id. A successful
-discovery refresh is reusable for a bounded continuation window, so retrying
-discovery does not create a new mirror revision or invalidate a session surfaced
-by the earlier call. After that window, a new discovery refresh may run.
-Discovery refreshes are bounded per call. A Current-course refresh that remains
-`queued` or `running` after the wait bound is reported as the retryable,
-student-free attention code `mirror_refresh_in_progress`, with its opaque
-`operation_id`, `refresh_status`, and an instruction to retry discovery without
-teacher interruption. If every Current course is still refreshing, discovery is
-`ok: true` with `status: "refreshing"`, empty assignment rows, standard totals, and
-the complete attention table. Usable rows remain visible when only some courses are
-refreshing, but the top-level status stays `refreshing`. Terminal refresh failures
-retain the existing partial or `scoring_discovery_failed` semantics. The existing
-CanvasMirror coordinator owns the physical two-worker limit and coalesces repeated
-course/scope refreshes. The host may make at most four total discovery calls for the
-current teacher request (the initial call plus three continuations), then must report
-remaining attention and wait for teacher direction; a repeated advisory does not reset
-that cap.
+Each discovery freshness row reports the oldest required local scope. A valid old
+snapshot remains usable, but an unavailable, corrupt, or non-current projection is
+reported as `mirror_projection_unavailable`. The 30-minute scoring advisory is
+decided during preparation, not discovery. No discovery path enqueues, waits for,
+polls, or retries a refresh.
 
 Privacy invariant: the agent sees pseudonyms and scrubbed work only. Real names,
 Canvas/SIS IDs, signed URLs, credentials, and private paths remain in the local
@@ -41,10 +27,10 @@ shape change requires a major bump.
 
 ## Direction 1 - SAFE bundle (Canvas Expert -> agent)
 
-`prepare_scoring_session(course_id, assignment_id, scoring_guidance="")` requires
-one exact Current course and assignment, performs one foreground scoring-specific
-full CanvasMirror rebuild, and prepares the assignment from the resulting local
-projections. It performs no Canvas write and does not make a direct Canvas read.
+`prepare_scoring_session(course_id, assignment_id, scoring_guidance="",
+use_existing_mirror=false)` requires one exact Current course and assignment and
+prepares it from valid local projections. It performs no refresh, Canvas write, or
+direct Canvas read.
 A usable Canvas assignment rubric always wins.
 Otherwise the teacher provides bounded scoring guidance. Teacher guidance is retained privately
 in full; when it exceeds the effective transport ceiling, the model and SAFE packet use
@@ -85,9 +71,12 @@ authors future writing portions as separate 100-point AssignmentForge assignment
 
 ## Direction 2 - Results (agent -> Canvas Expert)
 
-The agent submits one result per `(pseudonym, item_id)` supplied by the packet, using
-`submit_scoring_results(scoring_session_id, results, expected_packet_digest,
-review_digest="", answers=None)`.
+The agent stages one result per `(pseudonym, item_id)` supplied by the packet, using
+`stage_scoring_results(scoring_session_id, results, expected_packet_digest,
+review_digest="", answers=None)`. A separate
+`apply_staged_scoring_results(scoring_session_id, expected_stage_digest,
+idempotency_key="")` applies only the unchanged private stage after a direct,
+contemporaneous teacher request to post it.
 
 | Field | Required | Shape and meaning |
 |---|---:|---|
@@ -101,25 +90,25 @@ Duplicates, unknown pseudonyms/items, malformed values, and stale packet digests
 closed. The complete result set is validated before re-identification. Out-of-range
 scores and other judgment conditions do not receive implicit defaults.
 
-If a safe ordinary-assignment plan has no questions, Canvas Expert freezes and applies
-it immediately. When teacher judgment is required (for example, overwriting a score,
+If a safe ordinary-assignment plan has no questions, Canvas Expert freezes it locally
+without a Canvas call. When teacher judgment is required (for example, overwriting a score,
 exceeding the maximum, ordinary-assignment comment-only posting, a pseudonym in feedback, or held work
 receiving nothing), the tool returns `needs_teacher_input`, pseudonym-only questions,
 the allowed answers, and a review digest without writing. The agent asks the teacher,
 then resubmits the unchanged results and packet digest with every explicit answer and
-the exact review digest. A changed review plan or invalid answer fails closed.
+the exact review digest. A successful stage returns an opaque stage digest and
+aggregate counts. A changed review plan or invalid answer fails closed.
 ## Session consumption and write safety
 
 One exact course-and-assignment scope has at most one actionable Scoring Session. Before starting
 another full scoring refresh, preparation checks that exact scope. When a usable actionable
-record exists (`ready` or submit-stage `needs_teacher_input` with a valid SAFE packet), it
+record exists (`ready` or staging `needs_teacher_input` with a valid SAFE packet), it
 returns the identity-safe `scoring_session_already_open` refusal with the existing
 `scoring_session_id`; it does not refresh, save, or supersede anything. The agent must continue
 from that immutable packet and must not call preparation or `refresh_mirror` again for the
 assignment. A failed preparation, a typed blocker, and the basis-stage `needs_scoring_norms`
-state neither save a session nor supersede one. `mirror_refresh_in_progress` is a wait signal:
-the agent may retry preparation once after waiting 5-10 minutes, then must accept/report the
-outcome rather than poll.
+state neither save a session nor supersede one. A valid snapshot older than 30 minutes is
+an advisory decision: the teacher may explicitly acknowledge it with `use_existing_mirror=true`.
 
 If the current packet is stale, missing, or invalid, preparation may create a replacement. A
 successful replacement activates its newly saved session and marks every earlier actionable
@@ -135,10 +124,10 @@ private positive scope generation; current-session resolution ranks generated re
 actionable duplicates. For pre-lifecycle records with no generation, the deterministic fallback
 is newest by `(created, session_id)` regardless of status. Older records are treated as
 superseded at the call boundary without a migration.
-`get_scoring_packet()` and `submit_scoring_results()` return identity-safe
+`get_scoring_packet()`, `stage_scoring_results()`, and `apply_staged_scoring_results()` return identity-safe
 `{"ok": false, "code": "session_superseded", ...}` for a superseded or non-current duplicate; the
-submit refusal occurs before result validation, re-identification, Canvas planning, or any Canvas
-call. Activation and final submission are serialized by one deterministic course/assignment
+stage/apply refusal occurs before result validation, re-identification, Canvas planning, or any Canvas
+call. Activation and final apply are serialized by one deterministic course/assignment
 scope lock, and the lock order is scope, then session.
 
 AssignmentForge corrections are a private, teacher-authored scoring aid. When a
@@ -155,15 +144,14 @@ never enters the SAFE packet or MCP response.
 Teacher guidance remains available privately in full for the session record. When oversized,
 its effective model and packet projection carries the compaction marker and counts above;
 those counts are the signal that effective text was omitted. Ordinary assignments use the
-public prepare -> packet -> submit flow and write through one narrow lane: the reviewed raw
+public prepare -> packet -> stage -> explicit apply flow and write through one narrow lane: the reviewed raw
 score (`submission.posted_grade`) and one plain-text submission comment
 (`comment.text_comment`) go to the existing Canvas Submissions endpoint once. That endpoint is
 the API counterpart of entering the raw score in SpeedGrader; it is not the LTI Score API and
 adds no rubric-assessment or New Quiz item-score write. `item_id` remains the SAFE
 packet/result identity and correction-selection key, not a separate writable Canvas score
-field for ordinary Assignments. An explicit teacher direction to score/post a selected
-discovery set authorizes submit for those exact assignments together; a review-only or
-no-submit direction stops before submit.
+field for ordinary Assignments. A direct teacher request to post a named staged result
+authorizes apply for that exact stage; a review-only or no-submit direction stops before apply.
 
 Canvas Expert does not read the resulting grade back. There is no post-write GET, no mirror
 refresh, no score equality comparison, no comment-count or latest-comment comparison, no

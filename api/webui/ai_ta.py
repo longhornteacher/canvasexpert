@@ -64,6 +64,8 @@ RETIRED_FILES = {
     # Same-name updates. Teachers are told to hand this file to an AI, so a
     # stale copy answers setup questions wrongly rather than harmlessly.
     "START HERE - CanvasAgent.txt": frozenset({
+        # Before the local-first discovery and stage-then-explicit-apply workflow.
+        "bd3fd6da937207228b588fff12b1705beec4fa62412f035c33f5886d87a95377",
         # First release, before the procedure-first rewrite.
         "66fb445401ff147e03b727d01d70e08f8337563f94d954ef6ac6fae9dfa0706b",
         # Procedure-first rewrite, before Appendix A on installing and running.

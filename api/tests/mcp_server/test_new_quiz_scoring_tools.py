@@ -5,7 +5,8 @@ from api.mcp_server import server, tools
 def test_new_quiz_has_no_assignment_type_specific_mcp_tools_or_parameters():
     names = set(server.mcp._tool_manager._tools)
     assert {"prepare_scoring_session", "list_scoring_sessions",
-            "get_scoring_packet", "submit_scoring_results"} <= names
+            "get_scoring_packet", "stage_scoring_results",
+            "apply_staged_scoring_results"} <= names
     assert not names.intersection({
         "stage_scores", "preview_assignment_scores", "apply_assignment_scores",
         "preview_new_quiz_scores", "apply_new_quiz_scores",
@@ -14,13 +15,13 @@ def test_new_quiz_has_no_assignment_type_specific_mcp_tools_or_parameters():
     prepare = next(tool for tool in server.mcp._tool_manager._tools.values()
                    if tool.name == "prepare_scoring_session")
     submit = next(tool for tool in server.mcp._tool_manager._tools.values()
-                  if tool.name == "submit_scoring_results")
+                  if tool.name == "stage_scoring_results")
     for public_tool in (prepare, submit):
         properties = public_tool.parameters.get("properties") or {}
         assert not any("quiz" in key.casefold() or "assignment_type" in key.casefold()
                        for key in properties)
 
-    assert callable(tools.submit_scoring_results)
+    assert callable(tools.stage_scoring_results)
 
 
 def test_signed_new_quiz_finalization_members_are_retired():
@@ -36,9 +37,9 @@ def test_signed_new_quiz_finalization_members_are_retired():
         assert not hasattr(tools, name)
 
 
-def test_submit_scoring_results_schema_names_the_canvas_score_row():
+def test_stage_scoring_results_schema_names_the_canvas_score_row():
     submit = next(tool for tool in server.mcp._tool_manager._tools.values()
-                  if tool.name == "submit_scoring_results")
+                  if tool.name == "stage_scoring_results")
     schema = submit.parameters
     result = (schema.get("$defs") or {}).get("ScoringResult") or {}
     properties = result.get("properties") or {}

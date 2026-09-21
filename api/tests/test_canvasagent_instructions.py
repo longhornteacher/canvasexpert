@@ -76,7 +76,9 @@ def test_the_write_default_is_in_the_core(core):
     """The core must carry the exact Scoring Session authorization boundary."""
     lowered = core.lower()
     assert "scoring session" in lowered
-    assert "valid results post" in lowered
+    assert "stage_scoring_results" in lowered
+    assert "apply_staged_scoring_results" in lowered
+    assert "direct teacher" in lowered
     assert "canvas live" in lowered
 
 
@@ -135,12 +137,13 @@ def test_scoring_session_flow_is_assignment_type_neutral(text):
     lowered = text.lower()
     assert "prepare_scoring_session" in lowered
     assert "get_scoring_packet" in lowered
-    assert "submit_scoring_results" in lowered
+    assert "stage_scoring_results" in lowered
+    assert "apply_staged_scoring_results" in lowered
     assert "never ask the teacher to choose a scoring transport" in lowered
     assert "loop through the teacher-selected exact assignment set" in lowered
     assert "per-assignment reconfirmation" in lowered
-    assert "each safe packet and write remains bounded" in lowered
-    assert "assignment; canvas expert persists no backlog queue" in lowered
+    assert "each safe packet and staged apply stays" in lowered
+    assert "assignment-bounded; no queue" in lowered
     assert "selected exact assignments one at a time" not in lowered
 
 

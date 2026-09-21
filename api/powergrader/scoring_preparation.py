@@ -1,19 +1,10 @@
-"""Single owner for assignment-scoped Scoring Session preparation.
-
-The MCP layer supplies the course gate and one full CanvasMirror refresh
-callback. This module then consumes only the resulting local projections,
-constructs the existing SAFE artifact, and saves exactly one
-``scoring_assignment`` session record.
-"""
+"""Single owner for assignment-scoped Scoring Session preparation."""
 from __future__ import annotations
 
 import json
 import os
 import re
 import uuid
-from datetime import datetime, timezone
-
-from api import gradebook_snapshot
 from api.nq_report import html_to_text
 from api.platform_services import config, workspace
 from api.powergrader import (
@@ -52,35 +43,6 @@ def _typed_failure(code: str, stage: str, *, retryable: bool, user_action: str,
     }
     result.update(extra)
     return result
-
-
-def _refresh_failure_facts(refresh_result) -> dict:
-    """Project a failed scoring refresh to identity-safe lifecycle facts.
-
-    Only the runner's own stable code and opaque lifecycle identifiers cross
-    this boundary. Canvas response bodies, URLs, student data, credentials,
-    filesystem paths, and arbitrary exception text never do.
-    """
-    if not isinstance(refresh_result, dict):
-        return {}
-    facts = {}
-    code = str(refresh_result.get("error_code") or "").strip()
-    if code:
-        facts["code"] = code
-    for key in ("operation_id", "snapshot_id"):
-        value = str(refresh_result.get(key) or "").strip()
-        if value:
-            facts[key] = value
-    revision = refresh_result.get("mirror_revision")
-    if revision not in (None, ""):
-        try:
-            facts["mirror_revision"] = int(revision)
-        except (TypeError, ValueError):
-            pass
-    state = str(refresh_result.get("state") or refresh_result.get("status") or "").strip()
-    if state:
-        facts["refresh_state"] = state
-    return facts
 
 
 def _guidance_units(text: str) -> list[str]:    return [unit.strip() for unit in re.split(r"(?:\r?\n){1,2}", text) if unit.strip()]
@@ -308,11 +270,11 @@ def prepare_scoring_session(
     assignment_id: str,
     scoring_guidance: str = "",
     *,
-    refresh_course,
+    use_existing_mirror: bool = False,
     save_session=None,
     activate_session=None,
 ) -> dict:
-    """Refresh once, classify and prepare one exact assignment from the mirror.
+    """Prepare one exact assignment from the local CanvasMirror.
 
     The successful save goes through the lifecycle owner so the newest
     preparation becomes the one current session and earlier actionable records
@@ -335,50 +297,14 @@ def prepare_scoring_session(
             error="The private workspace is unavailable.",
         )
 
-    # Guidance is teacher-authored private state. Keep it available when the
-    # mirror refresh fails after the teacher has already answered the norms
-    # question; a retry need not ask the same question again.
+    # Guidance is teacher-authored private state. Keep it available across a
+    # freshness decision; a retry need not ask the same question again.
     if str(scoring_guidance or "").strip():
         session_store.save_preparation_state(
             course_id, assignment_id, scoring_guidance=str(scoring_guidance).strip())
     else:
         scoring_guidance = (session_store.load_preparation_state(
             course_id, assignment_id).get("scoring_guidance") or "")
-
-    try:
-        refresh_result = refresh_course(course_id)
-        if isinstance(refresh_result, dict):
-            refreshed = bool(refresh_result.get("ok") and
-                             refresh_result.get("usable", True))
-        else:
-            refreshed = bool(refresh_result)
-    except Exception:
-        refresh_result = None
-        refreshed = False
-    if not refreshed:
-        # Carry the scoring-refresh runner's own identity-safe lifecycle facts
-        # (opaque operation id, mirror revision/snapshot, stable error code)
-        # instead of flattening every cause to one generic message. The runner
-        # is the scoring-specific full rebuild, so an ordinary refresh_mirror
-        # success is never evidence that this succeeded.
-        facts = _refresh_failure_facts(refresh_result)
-        refresh_state = str(facts.get("refresh_state") or "").casefold()
-        if refresh_state in {"queued", "running", "syncing"}:
-            stable_error_code = facts.pop("code", None)
-            if stable_error_code:
-                facts["error_code"] = stable_error_code
-            return _typed_failure(
-                "mirror_refresh_in_progress", "refresh", retryable=True,
-                user_action="Retry preparation after the Current course mirror refresh completes.",
-                error="CanvasMirror is still refreshing this assignment.",
-                **facts,
-            )
-        return _typed_failure(
-            facts.pop("code", "mirror_refresh_failed"), "refresh", retryable=True,
-            user_action="Retry preparation after the Current course mirror refresh completes.",
-            error="CanvasMirror could not be refreshed for this assignment.",
-            **facts,
-        )
 
     try:
         submissions, assignment, mirror_result = assignment_refresh.prepare_assignment_from_mirror(
@@ -441,6 +367,31 @@ def prepare_scoring_session(
             user_action="Choose an assignment with current submitted writing to score.",
             error="This assignment has no current submitted work needing grading.",
             assignment_name=assignment_name,
+        )
+
+    freshness = mirror_result.get("freshness") or {}
+    if (str(freshness.get("state") or "").casefold() != "current"
+            or not str(freshness.get("last_success_at") or "").strip()):
+        return _typed_failure(
+            "mirror_projection_unavailable", "freshness", retryable=True,
+            user_action="Refresh the Current course mirror, then retry this exact assignment.",
+            error="The local CanvasMirror projection is unavailable or not current.",
+        )
+    if (freshness.get("requires_teacher_confirmation")
+            and not bool(use_existing_mirror)):
+        return _typed_failure(
+            "mirror_freshness_confirmation_required", "freshness", retryable=True,
+            user_action=(
+                "Ask whether relevant Canvas work changed since this snapshot. If not, "
+                "retry this exact preparation with use_existing_mirror=true; if yes or "
+                "unsure, wait for an explicit teacher request to refresh."
+            ),
+            error="The local CanvasMirror snapshot is over 30 minutes old.",
+            freshness={
+                "last_success_at": str(freshness.get("last_success_at") or ""),
+                "age_minutes": int(freshness.get("age_minutes") or 0),
+                "requires_teacher_confirmation": True,
+            },
         )
 
     rubric_text_override = None
@@ -526,6 +477,13 @@ def prepare_scoring_session(
     session["writing_timeline_tracked"] = writing_timeline_tracked
     session["feedback_pattern_id"] = "basic"
     session["scoring_basis"] = scoring_basis
+    session["scoring_freshness"] = {
+        "state": str(freshness.get("state") or "current"),
+        "last_success_at": str(freshness.get("last_success_at") or ""),
+        "age_minutes": int(freshness.get("age_minutes") or 0),
+        "requires_teacher_confirmation": bool(freshness.get("requires_teacher_confirmation")),
+        "use_existing_mirror": bool(use_existing_mirror),
+    }
     session["mirror_revision"] = (mirror_result.get("mirror_revision")
                                    or mirror_result.get("revision")
                                    or mirror_result.get("snapshot_id"))
