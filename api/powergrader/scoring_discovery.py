@@ -25,6 +25,44 @@ def _family_advisory(assignments: list[dict], *, tier_tags=None, registrations=(
     from api.operation_ledger.adapters import differentiated_bridge
 
     registrations = [row for row in (registrations or ()) if isinstance(row, dict)]
+    # Stable family/tier metadata is authoritative when a teacher has renamed
+    # a source or uses public tags that are not the current Settings values.
+    # Keep the title-based path below for ordinary mirror rows, but seed it
+    # with the same family facts used by bridge reconciliation so every
+    # differentiated source receives one bridge obligation.
+    metadata_by_id = {}
+    for family in differentiated_bridge.discover_families(
+        assignments, registrations, tier_tags
+    ):
+        source_ids = {str(value) for value in family.get("source_assignment_ids") or []}
+        bridge_ids = [str(value) for value in family.get("bridge_assignment_ids") or []]
+        registration = next(
+            (
+                item for item in registrations
+                if str(item.get("family_key") or item.get("family_title") or "").casefold()
+                == str(family.get("family_key") or family.get("family_title") or "").casefold()
+            ),
+            None,
+        )
+        registered_bridge_id = str((registration or {}).get("bridge_assignment_id") or "")
+        if registered_bridge_id and registered_bridge_id not in bridge_ids:
+            bridge_ids.append(registered_bridge_id)
+        bridge_id = bridge_ids[0] if len(bridge_ids) == 1 else (registered_bridge_id or None)
+        bridge_status = (
+            "ambiguous" if len(bridge_ids) > 1 else
+            ("linked" if registration and bridge_id == registered_bridge_id else
+             ("present" if bridge_id else "missing"))
+        )
+        facts = {
+            "family_title": str(family.get("family_title") or "").strip(),
+            "source_count": len(source_ids),
+            "bridge_id": bridge_id,
+            "bridge_status": bridge_status,
+        }
+        for assignment_id in source_ids:
+            metadata_by_id[assignment_id] = {"role": "source", **facts}
+        for assignment_id in bridge_ids:
+            metadata_by_id[assignment_id] = {"role": "bridge", **facts}
     by_id = {}
     for registration in registrations:
         for key in ("source_assignment_ids", "bridge_assignment_id"):
@@ -64,23 +102,40 @@ def _family_advisory(assignments: list[dict], *, tier_tags=None, registrations=(
             continue
         aid = str(row.get("id") or "")
         registration = by_id.get(aid)
+        metadata_family = metadata_by_id.get(aid)
         base, tag = differentiated_bridge.title_tag_parts(row.get("name"), tier_tags)
         bridge_named = str(row.get("name") or "").strip().casefold().endswith(" - bridge")
         shape_bridge = is_bridge_shape(row)
         family_key = base.casefold()
         registration_bridge = str((registration or {}).get("bridge_assignment_id") or "")
-        family_title = str((registration or {}).get("family_title") or base).strip() if (tag or registration or bridge_named or shape_bridge) else None
-        role = "bridge" if (registration and aid == registration_bridge) or bridge_named or shape_bridge else ("source" if tag else None)
+        family_title = str(
+            (metadata_family or {}).get("family_title")
+            or (registration or {}).get("family_title")
+            or base
+        ).strip() if (metadata_family or tag or registration or bridge_named or shape_bridge) else None
+        role = (
+            (metadata_family or {}).get("role")
+            or ("bridge" if (registration and aid == registration_bridge) or bridge_named or shape_bridge else ("source" if tag else None))
+        )
         family = bases.get(base.casefold())
-        source_count = len(family.get("sources") or []) if family else 0
+        source_count = (
+            (metadata_family or {}).get("source_count")
+            if metadata_family else len(family.get("sources") or []) if family else 0
+        )
         bridge_ids = list(bridges_by_base.get(family_key) or [])
         if registration_bridge and registration_bridge not in bridge_ids:
             bridge_ids.append(registration_bridge)
-        bridge_id = bridge_ids[0] if len(bridge_ids) == 1 else (registration_bridge or None)
+        bridge_id = (
+            (metadata_family or {}).get("bridge_id")
+            if metadata_family else
+            (bridge_ids[0] if len(bridge_ids) == 1 else (registration_bridge or None))
+        )
         state = "linked" if registration else ("needs_repair" if source_count >= 2 and role in {"source", "bridge"} else None)
         bridge_status = (
-            "linked" if registration and bridge_id == registration_bridge else
-            ("present" if bridge_id else ("missing" if source_count >= 2 else None))
+            (metadata_family or {}).get("bridge_status")
+            if metadata_family else
+            ("linked" if registration and bridge_id == registration_bridge else
+             ("present" if bridge_id else ("missing" if source_count >= 2 else None)))
         )
         result[aid] = {
             "family_title": family_title,
@@ -90,8 +145,14 @@ def _family_advisory(assignments: list[dict], *, tier_tags=None, registrations=(
             "bridge_status": bridge_status,
             "bridge_required": role == "source",
             "next_step": (
-                "Scoring this tier is incomplete until the corresponding bridge score "
-                "is prepared and applied through the reviewed SIS bridge operation."
+                (
+                    "This differentiated family has no bridge yet. Reconcile the exact "
+                    "family before scoring; scoring remains incomplete until the bridge "
+                    "score is prepared and applied through the reviewed SIS bridge operation."
+                    if bridge_status == "missing" else
+                    "Scoring this tier is incomplete until the corresponding bridge score "
+                    "is prepared and applied through the reviewed SIS bridge operation."
+                )
                 if role == "source" else None
             ),
         }

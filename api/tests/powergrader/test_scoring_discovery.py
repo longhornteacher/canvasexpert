@@ -91,3 +91,63 @@ def test_stale_freshness_is_reported_but_does_not_trigger_refresh():
     assert result["status"] == "ready"
     assert result["freshness"]["rows"][0][4] == 31
     assert result["freshness"]["rows"][0][5] is True
+
+
+def test_metadata_driven_differentiated_sources_always_show_bridge_state():
+    rows = [
+        {
+            **_assignment("tier-a", "Renamed support", ungraded=1),
+            "metadata": {"family_id": "family-1", "tier": "Support"},
+        },
+        {
+            **_assignment("tier-b", "Renamed core", partially=1),
+            "metadata": {"family_id": "family-1", "tier": "Core"},
+        },
+        {
+            **_assignment("bridge-1", "Renamed gradebook column"),
+            "metadata": {"family_id": "family-1", "bridge": True},
+        },
+    ]
+    result = discover_scoring_work(
+        [{"id": "c1", "name": "One"}],
+        load_snapshot=lambda _cid, **_kw: {
+            "snapshot": _snapshot(rows),
+            "freshness": _fresh("c1", "One"),
+            "error": None,
+        },
+        tier_tags={"Support": "Red", "Core": "Blue"},
+    )
+
+    projected = {row[2]: row for row in result["assignments"]["rows"]}
+    source = projected["tier-a"]
+    assert source[12:19] == [
+        "Renamed support", "source", "needs_repair", "bridge-1", "present", True,
+        "Scoring this tier is incomplete until the corresponding bridge score is prepared and applied through the reviewed SIS bridge operation.",
+    ]
+
+
+def test_metadata_driven_family_without_bridge_requires_reconciliation():
+    rows = [
+        {
+            **_assignment("tier-a", "Renamed support", ungraded=1),
+            "metadata": {"family_id": "family-2", "tier": "Support"},
+        },
+        {
+            **_assignment("tier-b", "Renamed core", partially=1),
+            "metadata": {"family_id": "family-2", "tier": "Core"},
+        },
+    ]
+    result = discover_scoring_work(
+        [{"id": "c1", "name": "One"}],
+        load_snapshot=lambda _cid, **_kw: {
+            "snapshot": _snapshot(rows),
+            "freshness": _fresh("c1", "One"),
+            "error": None,
+        },
+        tier_tags={"Support": "Red", "Core": "Blue"},
+    )
+
+    projected = {row[2]: row for row in result["assignments"]["rows"]}
+    source = projected["tier-a"]
+    assert source[15:18] == [None, "missing", True]
+    assert "no bridge yet" in source[18].casefold()

@@ -48,66 +48,60 @@ Live to review them and make any teacher-owned changes.
 
 ## 4. What CanvasExpert verifies
 
-Before saving a family link, CanvasExpert verifies:
+Bridge discovery, reconciliation, and preview read the local sync/mirror only. The local
+assignment projection must be current; a missing or stale projection returns a refusal and
+does not fall back to Canvas Live. Preview does not inspect due dates, student coverage,
+overrides, or module placement.
 
-- every exact `Base - <configured-tag>` source is published, points-graded, group-restricted,
-  override-only, omitted from the final grade, SIS-disabled, and attached exactly once to
-  the selected module;
-- an existing exact `Base` or `Base - Bridge` bridge is a published, counted, SIS-enabled
-  no-submission assignment with no overrides and whole-course visibility; a missing bridge is
-  created as `Base - Bridge`;
-- the bridge description links to the runtime Canvas Dashboard and directs students to their
-  configured-tag-suffixed work;
-- every exact source has exactly one Assignment-type item in the selected module, and
-  no module item points to the bridge ID; and
-- all exact IDs, titles, and the bridge structural digest can be saved and read back without
-  student data.
+The mirror-backed preview verifies exact source IDs and titles, the exact bridge ID when one
+is registered, the two-source threshold, compatible points and assignment group values, and
+the bridge identity needed for the reviewed operation. It also reads mirrored submissions so
+present numeric scores and excused states can be shown in the review.
 
-Unknown same-title objects block delivery. Retry uses only checkpointed exact IDs, so it does
-not duplicate sources, overrides, bridge, module, or source module item.
+Only the explicit, teacher-approved apply crosses the live boundary. That push creates or
+registers a missing bridge when required, copies the frozen scores, and performs live
+postconditions for the writes. Bridge operations do not repair or rearrange module items.
 
 ## 5. Grade-projection tools
 
 | Tool | Purpose |
 |---|---|
 | `list_sis_grade_bridges(course_id)` | List student-free family links for one Current course. |
-| `reconcile_sis_grade_bridges(course_id)` | Discover CE-owned differentiated families and return a student-free missing/drifted/incomplete matrix. |
-| `preview_sis_grade_bridge_reconciliation(course_id, family_title)` | Turn one discovered missing or drifted family into the reviewed repair path. |
-| `preview_sis_grade_bridge(course_id, family_title)` | Re-read one exact linked family, enforce its laws, and freeze an aggregate review. |
-| `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | Copy the unchanged eligible final scores to the exact linked bridge through the Operation Ledger. |
+| `reconcile_sis_grade_bridges(course_id)` | Discover differentiated families from the current local sync/mirror and return a student-free bridge matrix. |
+| `preview_sis_grade_bridge_reconciliation(course_id, family_title)` | Turn one discovered missing bridge into a reviewed bridge-only operation. |
+| `preview_sis_grade_bridge(course_id, family_title)` | Read the exact linked family from the local sync/mirror and freeze the score projection review. |
+| `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | After teacher approval, push the unchanged reviewed scores to the exact linked bridge. |
 
 Grade projection is available only after the exact family link exists. Calling projection
-for an unlinked family returns typed guidance to run reconciliation. Reconciliation may
-repair or adopt an existing bridge only after source laws, exact IDs, coverage, and bridge structure pass;
-ambiguous or unsafe same-title objects fail closed and all actions use the Operation Ledger.
+for an unlinked family returns typed guidance to run reconciliation. Missing local data is a
+hard stop; Canvas Live is not an alternate read source for preview. All approved writes use
+the Operation Ledger.
 
 The retained control console's Routines page also provides **Differentiated bridge grade sync**. It is a built-in Canvas
 write routine, disabled by default, with manual Run and the existing local interval schedule.
 
 ## 6. Which grades move
 
-A posted final numeric source score copies as the same number of points. Multiple agreeing finals
-resolve to that same value. One or more agreeing posted excused finals excuse the bridge. The
-routine checks every linked source for every active student; the student's tier membership
-does not choose the grade.
+A present numeric source score copies as the same number of points, including zero, even when
+the mirrored record does not yet carry a separate posting marker. Multiple agreeing source
+scores resolve to that same value. One or more agreeing excused source states excuse the
+bridge. The student's tier membership does not choose the grade.
 
-Differing final values are reported as `conflicting_final_values` and left unchanged. Hidden or
-unposted grades are held without exposing their value. Submitted-but-ungraded work stays blank.
-Before the bridge due time, blank, absent, or unsubmitted work stays blank; after it, the routine
-writes zero with Canvas missing status. It clears a bridge value only when the private ledger
-proves the unchanged value came from an earlier run of this routine. Teacher edits and values
-without that provenance are held. Comments, rubrics, attempts, submission text, feedback, and
-New Quiz item scores do not move.
+Differing source values are reported as `conflicting_final_values` and left unchanged. A blank
+or submitted-but-ungraded source stays blank. Bridge preview has no due-date rule and does not
+manufacture missing zeroes. Teacher edits and values without the reviewed projection's
+provenance are held. Comments, rubrics, attempts, submission text, feedback, and New Quiz item
+scores do not move.
 
 ## 7. Update all linked families
 
-One Routine run visits every linked family in Current courses and performs a separate frozen
-preview/apply cycle for each. Each operation has its own drift check, checkpoints, verification,
-targeted CanvasMirror submissions refresh, and receipt. A blocked or Attention family does not
-prevent another safe family from running.
+One Routine run visits every linked family in Current courses and creates a separate frozen
+mirror-backed review for each. Nothing is pushed while discovery, reconciliation, or preview
+runs. After the teacher approves an unchanged operation, the apply step pushes the reviewed
+grades to Canvas Live, verifies the writes, and requests the targeted local mirror refresh.
+A blocked or Attention family does not prevent another safe family from running.
 
-CanvasExpert writes only to Canvas Live. After the results are verified, review them there. The
-teacher decides when to use Canvas Grade Sync to send grades to the SIS.
+The teacher decides when to use Canvas Grade Sync to send the bridge grades to the SIS.
 
 ## 8. Attention and recovery
 
@@ -131,9 +125,9 @@ aggregate counts, warnings, opaque coordinates, content-free step states, and th
 The synced family link contains only course-scoped family/source/bridge identity and the verified
 bridge digest.
 
-CanvasMirror may provide local context and receives targeted refresh requests after grade writes,
-but it never authorizes a Canvas mutation. If fresh context is required and the mirror is stale,
-refresh CanvasMirror from CanvasExpert before continuing.
+CanvasMirror is the read authority for this workflow and receives targeted refresh requests
+after approved grade writes. It never authorizes a Canvas mutation. If the required assignment
+or submission snapshot is stale or missing, refresh the local sync/mirror before continuing.
 
 ## 10. Verification
 

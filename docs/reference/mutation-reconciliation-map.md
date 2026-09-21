@@ -64,14 +64,15 @@ reconciles, the latter is Batch 7 unit 02. The dead ledger adapter file and its
 contract and test entries have been removed.
 
 **Covered (targeted) — SIS bridge:**
-`operation_ledger/adapters/sis_grade_bridge.py` copies only finalized source
-grades/statuses to the whole-course bridge, verifies each write, then invokes
-`mirror_service.notify_course_changed` once for the course. Pending-review,
-unsubmitted, uncovered, and inactive rows never become scores.
-It starts only from the exact family registered by differentiated content
-delivery and performs no structure repair, registration, or SIS-sync request.
-An ambiguous grade write is reconciled only from its exact bridge-submission
-postcondition and is never resent by guess.
+`operation_ledger/adapters/sis_grade_bridge.py` reads the current local
+assignment/submission sync for discovery, preview, and drift checks. After an
+approved apply it copies present numeric source grades/statuses to the
+whole-course bridge, verifies each live write, then invokes
+`mirror_service.notify_course_changed` once for the course. Missing local data
+refuses without a live fallback; due dates, student coverage, overrides, and
+module placement are not preview invariants. An ambiguous grade write is
+reconciled only from its exact bridge-submission postcondition and is never
+resent by guess.
 
 ### 2. Assignment/Quiz/Module/Page structure (`catalog.assignments`, `catalog.modules`, `catalog.pages`, `new_quiz.metadata`)
 
@@ -99,9 +100,10 @@ teacher refreshes the catalog by hand. `content.page` invalidates
 `catalog.pages` unconditionally and reaches this through the same post-apply
 hook; nothing in the push path itself changed.
 
-The `gradebook.sis_bridge` adapter is also covered: bridge create plus the
-source/bridge publish, exclusion, and SIS-flag patches map conservatively to
-`catalog.assignments` through the central post-apply invalidation hook.
+The `gradebook.sis_bridge` adapter is also covered: approved bridge creation or
+registration and grade writes map conservatively to `catalog.assignments`
+through the central post-apply invalidation hook. Module placement is outside
+the bridge-only path.
 
 ### 3. Per-student assignment facts (`private.assignments`)
 

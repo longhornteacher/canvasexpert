@@ -59,10 +59,10 @@ Tool schema version 55 (44 tools).
 |---|---|---|
 | `list_courses` | First call for every saved course (Current + Previous) and the `course_id` used by course-scoped tools | No |
 | `list_sis_grade_bridges(course_id)` | Configured whole-course SIS bridges for a Current `course_id` returned by `list_courses` | No |
-| `reconcile_sis_grade_bridges(course_id)` | Discovers differentiated families from configured public tags and stable metadata, then returns a student-free synced/missing/drifted/incomplete/blocked matrix | No |
-| `preview_sis_grade_bridge(course_id, family_title)` | Persists a local aggregate, digest-protected grade-projection review for one exact linked differentiated family | No |
-| `preview_sis_grade_bridge_reconciliation(course_id, family_title)` | Persists a reviewed Operation Ledger repair for one discovered missing or drifted family | No |
-| `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | Copies eligible final Canvas scores to the exact linked bridge through the Operation Ledger | No |
+| `reconcile_sis_grade_bridges(course_id)` | Discovers differentiated families from the current local sync/mirror and returns a student-free bridge matrix | No |
+| `preview_sis_grade_bridge(course_id, family_title)` | Persists a mirror-backed, digest-protected score projection review for one exact linked differentiated family | No |
+| `preview_sis_grade_bridge_reconciliation(course_id, family_title)` | Persists a reviewed bridge-only Operation Ledger repair for one discovered missing bridge | No |
+| `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | After approval, pushes the unchanged reviewed scores to the exact linked bridge through the Operation Ledger | No |
 | `reset_scoring_review(scoring_session_id)` | Reopens the current local scoring review without changing its packet or history | No |
 | `list_sections(course_id)` | Saved section values from the local mirror | No |
 | `get_course_assignments(course_id, full_descriptions=false)` | Disk-only catalog assignments; descriptions are previews unless `full_descriptions=true` | No |
@@ -168,18 +168,17 @@ Canvas is ever called, and apply is blocked as `drift_detected`, not overwritten
 assignment changed in Canvas since the preview.
 
 The SIS grade-bridge pair is a bounded, linked-family grade-projection surface.
+Discovery, reconciliation, and preview read the current local sync/mirror only.
 Preview persists a local frozen operation and returns all three coordinates apply needs:
-`operation_id`, `batch_id`, and `review_digest`. Apply copies only eligible final Canvas
-scores to the exact linked bridge. Reconciliation is the separate reviewed path for
-existing families: it may repair a safe existing bridge or create a missing `Base - Bridge`,
-but never guesses from title alone, changes source safety fields, or starts Canvas Grade Sync.
-A teacher who asks for the write has authorized it: the assistant runs the
-preview/apply cycle and reports what landed, rather than asking a second time
-for what was just requested. The authorization covers the course and family
-they named, or all already-linked bridges when they say so explicitly, and
-does not extend to another family or to an unbounded Canvas write. An assistant
-choosing the target itself should summarize the preview first. Any invariant
-failure still stops the write.
+`operation_id`, `batch_id`, and `review_digest`. A stale or missing mirror refuses with no
+live fallback. Preview does not inspect due dates, student coverage, overrides, or module
+placement. After teacher approval, apply pushes only the unchanged reviewed scores to the
+exact linked bridge, performs live postconditions for those writes, and requests a targeted
+mirror refresh. Bridge operations do not repair or rearrange modules.
+
+Reconciliation is the separate reviewed path for missing bridge links: it may create or
+register a bridge from exact local IDs, but never guesses from title alone or starts Canvas
+Grade Sync. Any invariant failure still stops the write.
 
 See the [SIS Grade Bridges guide](guides/sis-grade-bridges.md) for the complete three-tool
 workflow, automatic family creation, recurring updates, privacy boundaries, and exact-ID

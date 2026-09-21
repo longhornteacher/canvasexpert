@@ -41,11 +41,12 @@ authoring contract so an assistant authors only deliverable tiers.
 Differentiated families built as independent assignments rather than through the `tiers` field do
 not enter automatic family linking. A family without a verified link cannot use
 `preview_sis_grade_bridge` or `apply_sis_grade_bridge` until the teacher runs
-`reconcile_sis_grade_bridges` and reviews the exact source IDs, coverage, and bridge shape.
-Reconciliation may link a safe existing bridge or create the server-named bridge; it may
-also repair a legacy module that contains only the bridge by attaching the exact source assignments and
-removing the bridge module item. Ambiguous or unsafe structures fail closed; no family is
-silently backfilled from a name-only guess.
+`reconcile_sis_grade_bridges` and reviews the exact source IDs and bridge identity
+from the current local sync/mirror. Reconciliation may register a safe existing
+bridge or create the server-named bridge. It does not inspect due dates, student
+coverage, overrides, or module placement, and it does not fall back to live Canvas
+when local state is stale or missing. Ambiguous identity still fails closed; no
+family is silently backfilled from a name-only guess.
 
 The manual path is reachable because separately titled assignments are valid ordinary assignments.
 The cost appears later at the SIS step, after the work has already been authored and delivered.

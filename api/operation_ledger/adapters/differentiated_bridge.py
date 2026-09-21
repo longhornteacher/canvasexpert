@@ -843,9 +843,26 @@ def _fields_match(actual: dict, expected: dict) -> bool:
         elif key == "submission_types":
             if sorted(current or []) != sorted(value or []):
                 return False
+        elif key == "due_at":
+            if not _timestamps_equal(current, value):
+                return False
         elif current != value:
             return False
     return True
+
+
+def _timestamps_equal(current: object, expected: object) -> bool:
+    """Compare Canvas ISO timestamps by instant, not serialization spelling."""
+    if current == expected:
+        return True
+    if not isinstance(current, str) or not isinstance(expected, str):
+        return False
+    try:
+        left = datetime.fromisoformat(current.replace("Z", "+00:00"))
+        right = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return left == right
 
 
 def _override_student_ids(overrides: list[dict]) -> list[str]:

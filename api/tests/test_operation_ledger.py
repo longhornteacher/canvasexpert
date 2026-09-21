@@ -689,7 +689,7 @@ def test_recovery_apply_invalidates_catalog_scopes(tmp_path, monkeypatch):
         ("content.assignment", {}, {"assignments", "modules"}),
         ("content.quiz", {}, {"assignments", "modules"}),
         ("content.quick_assignment", {}, {"assignments"}),
-            ("gradebook.sis_bridge", {}, {"assignments", "modules"}),
+        ("gradebook.sis_bridge", {}, {"assignments"}),
         # A page always lands a Canvas page, so `pages` is unconditional; the
         # module scope stays payload-sensitive (a bare page touches no module).
         ("content.page", {}, {"pages"}),

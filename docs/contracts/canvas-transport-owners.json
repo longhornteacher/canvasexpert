@@ -108,6 +108,45 @@
       "reason": "Repairs only the frozen drift fields of the exact discovered bridge after review and re-verifies the result before saving the family link."
     },
     {
+      "path": "api/operation_ledger/adapters/sis_grade_bridge.py",
+      "symbol": "SisGradeBridgeAdapter._execute_reconciliation",
+      "detector": "attr:_canvas_send",
+      "call_index": 3,
+      "call_form": "canvas_client._canvas_send(\"PUT\", <source_assignment_path>, request) [approved source-setting repair]",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "catalog.assignments"
+      ],
+      "reconciliation": "invalidate",
+      "reason": "An explicit mirror-backed repair, when present in the reviewed operation, is applied only after approval and verified before bridge registration."
+    },
+    {
+      "path": "api/operation_ledger/adapters/assignment_tiered.py",
+      "symbol": "_create_group_override",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(\"POST\", path, request) [approved exact group override]",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "catalog.assignments"
+      ],
+      "reconciliation": "invalidate",
+      "reason": "Creates the exact tier override inside the reviewed tiered-assignment operation; the central post-apply hook invalidates the assignment catalog after confirmation."
+    },
+    {
+      "path": "api/operation_ledger/adapters/assignment_tiered.py",
+      "symbol": "_put_and_verify",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(\"PUT\", path, request) [approved tiered-assignment shape update]",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "catalog.assignments"
+      ],
+      "reconciliation": "invalidate",
+      "reason": "Applies the exact reviewed tiered-assignment settings and verifies them before the operation completes."
+    },
+    {
       "path": "api/operation_ledger/adapters/assignment_tiered.py",
       "symbol": "execute",
       "detector": "attr:_canvas_send",

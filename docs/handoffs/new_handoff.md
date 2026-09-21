@@ -30,28 +30,24 @@ Owners:
 
 Required behavior:
 
-- `preview_sis_grade_bridge_reconciliation()` must accept a `blocked` family when the only blocking reasons are repairable source settings:
-  - `source_counts_toward_final_grade`
-  - `source_sis_sync_enabled`
-  - `family_link_missing`
-  - `accepted_existing_bridge`
-  - `bridge_missing`
-- It must still refuse genuinely unrepairable states:
-  - fewer than two source assignments
-  - ambiguous family identity
-  - multiple bridge candidates
-  - ambiguous bridge title
-  - missing exact assignment IDs
-  - incomplete or overlapping student coverage
-  - mixed points, groups, or due dates
-  - unsafe bridge shape
-  - unverified Canvas reads
-- Add a student-free `repairable` flag and a clear `repair_plan` to reconciliation output. The plan must include the source assignment IDs, bridge ID if present, action (`create`, `link`, `repair`, or `register`), and source-setting repairs.
-- Never expose names, Canvas IDs for students, submissions, scores, or private operation details.
+- `reconcile_sis_grade_bridges()` and both SIS bridge preview paths must read the
+  current local sync/mirror. Missing or stale local assignment/submission data
+  returns a typed refusal; there is no live Canvas fallback.
+- Bridge-only reconciliation must cover every discovered tiered family and
+  surface `bridge_missing` when a family has no bridge. It must not inspect due
+  dates, student coverage, overrides, or module placement.
+- The reviewed operation must carry `read_source: mirror` and `bridge_only: true`.
+  Only the unchanged teacher-approved apply may push to Canvas Live and verify
+  those writes.
+- Every present numeric tier score, including zero and scores without a posting
+  marker, must be eligible for the exact bridge. Agreeing excused states excuse
+  the bridge; conflicting values remain held.
+- Never expose names, Canvas IDs for students, submissions, scores, or private
+  operation details in assistant-facing results.
 
 The unsuffixed bridge rule:
 
-- Preserve and test the existing behavior that recognizes exactly one unsuffixed assignment as the bridge when its live shape proves it is a bridge:
+- Preserve and test the existing behavior that recognizes exactly one unsuffixed assignment as the bridge when its synced shape proves it is a bridge:
   - `submission_types == ["none"]`
   - `only_visible_to_overrides == false`
   - `omit_from_final_grade == false`
@@ -64,23 +60,17 @@ The unsuffixed bridge rule:
 
 Source-setting repair:
 
-- In reconciliation mode only, do not treat `omit_from_final_grade == false` or `post_to_sis == true` as fatal preconditions.
-- Continue enforcing every other source invariant.
-- Add a frozen `source_setting_repairs` list to the private baseline.
-- Before creating/repairing/registering the bridge, issue deterministic assignment PUT steps for each source that needs repair:
-  - Path: `/api/v1/courses/{course_id}/assignments/{source_assignment_id}`
-  - Payload must contain only the necessary fields:
-    - `omit_from_final_grade: true`
-    - `post_to_sis: false`
-- Use checkpointed operation-ledger steps, for example `repair_source:0`, `repair_source:1`.
-- Verify the exact source settings after each PUT.
-- If transport is uncertain, persist `sent_unknown` and recover by reading the exact assignment. Never send the PUT twice.
-- Source-setting repairs must happen before bridge creation, bridge repair, module changes, or family-link persistence.
-- Existing registered-family operations must keep their current fail-closed behavior; only the reviewed reconciliation path may repair these fields.
+- The assignment catalog currently does not assert optional source-setting flags
+  that are absent from the mirror. Do not infer or repair missing flags during
+  bridge preview.
+- If a future mirror projection carries explicit source-setting drift, keep the
+  repair in the approved bridge-only operation and never perform it during
+  discovery or preview.
 
 After a successful repair:
 
-- Persist the verified family link only after all source settings, bridge shape, module membership, and bridge removal checks pass.
+- Persist the verified family link only after the approved bridge write and its
+  exact live postcondition pass.
 - Update the preview `user_action` so it describes a completable sequence:
   `reconcile -> preview exact family -> teacher confirms -> apply unchanged operation coordinates`.
 - Do not tell the caller to run a workflow that the server itself will reject.

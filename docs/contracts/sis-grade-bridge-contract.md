@@ -2,8 +2,9 @@
 
 This contract is renderer-neutral. AssignmentForge and QuizForge may author
 different source content, but differentiated delivery produces one verified
-family: exact source objects, exact group targets, one module placement, one
-bridge, and one private family link.
+family: exact source objects, exact group targets, one bridge, and one private
+family link. This contract's bridge workflow is mirror-first; module placement
+and authoring delivery are separate concerns.
 
 ## 1. Scope
 
@@ -16,14 +17,14 @@ separate path.
 ## 2. Family identity and verified link
 
 A family is identified by course-scoped source assignment IDs, source titles,
-safe tier/group facts, the exact module identity, the bridge assignment ID, and a
-structural membership digest. The persisted private link retains its existing
-storage keys; product-facing language calls it a **family link**.
+safe tier/group facts, the bridge assignment ID, and a structural family digest.
+The persisted private link retains its existing storage keys; product-facing
+language calls it a **family link**.
 
-The link is written only after all source and bridge postconditions have been
-re-read from Canvas. A discovered title or a set of assignment IDs is not a link.
-Missing or unverifiable link state is `needs_repair` and cannot authorize scoring
-or SIS projection.
+The link is written only after the approved bridge push has verified its exact
+live postconditions. A discovered title or a set of assignment IDs is not a
+link. Missing or unverifiable link state is `needs_repair` and cannot authorize
+scoring or SIS projection.
 
 ## 3. Delivery laws
 
@@ -40,19 +41,19 @@ Every differentiated family must satisfy all of these laws:
    transient and never leave the token-holding operation.
 5. Every source appears exactly once in the selected module and no source appears
    in any other module.
-6. The bridge appears in no module.
-7. The family has one verified bridge and one saved family link.
+6. The family has one verified bridge and one saved family link.
 
 ## 4. Bridge shape
 
-The bridge is server-named `<family> - Bridge`, unpublished, omitted from the
-final grade, and SIS-disabled. Its points, submission type, due-date semantics,
-and description are frozen by the family operation. It is not a tier source and
-is never a source of group membership.
+The bridge is server-named `<family> - Bridge`, published, counted toward the
+final grade, SIS-enabled, and a no-submission assignment. Its points, group,
+publication, submission type, and description are verified at the approved push
+boundary. Due dates are not a bridge-preview invariant. It is not a tier source
+and is never a source of group membership.
 
 ## 5. Ordered write and verification path
 
-The operation performs these bounded steps:
+The authoring/delivery operation performs these bounded steps:
 
 1. Validate authored content, tier targets, exact groups, module choice, and
    dates; capture safe baseline facts.
@@ -68,20 +69,26 @@ The operation performs these bounded steps:
 7. Re-read the entire family and save the private family link last.
 
 Any failed postcondition returns a typed recovery state and never reports a
-complete family. Reconciliation follows the same live reads, repairs only frozen
-family invariants, and writes the link only after verification.
+complete family. Bridge reconciliation is separate: it reads the current local
+sync/mirror, freezes a bridge-only review, and refuses when the mirror is stale
+or missing. It does not read due dates, student coverage, overrides, or module
+placement. Only the unchanged, teacher-approved operation may read live Canvas
+for the actual bridge push and its postconditions.
 
 ## 6. Discovery and projection
 
-Discovery lists only student-free family facts and exact link state. Scoring
-discovery and SIS bridge preview start from the verified link, re-read all exact
-source and bridge IDs inside the token-holding runtime, and refuse with typed
-`family_link_required` guidance when the link is absent or unverifiable.
+Discovery lists only student-free family facts and exact link state from the
+local sync/mirror. Scoring discovery and SIS bridge preview require a current
+local assignment/submission snapshot, re-read exact source and bridge IDs from
+that snapshot, and refuse with typed `mirror_read_failed` or
+`family_link_required` guidance when the local state is unavailable.
 
 Assignment and Quiz renderer identity does not change projection behavior. The
-projection writes only eligible final scores to the exact verified bridge through
-the Operation Ledger. New Quiz item scores and per-item feedback remain out of
-scope.
+approved projection writes each present numeric source score, including zero
+and scores without a separate posting marker, to the exact verified bridge
+through the Operation Ledger. Agreeing excused source states excuse the bridge;
+conflicting source states remain held. New Quiz item scores and per-item
+feedback remain out of scope.
 
 ## 7. Privacy, review, and recovery
 
@@ -91,14 +98,16 @@ and recovery guidance only. They never expose student names, IDs, submissions,
 raw roster membership, or private notes.
 
 Every external write is review-first, idempotent, checkpointed, and re-readable.
-Recovery must identify the exact family and repair only its frozen structure; it
-must not infer a group, module, bridge, or publication choice.
+Recovery must identify the exact family and repair only its frozen bridge/score
+operation; it must not infer a group, module, bridge, publication choice, or due
+date from live Canvas during preview.
 
 ## 8. Non-goals
 
 - No authoring-grammar merger between AssignmentForge and QuizForge.
 - No independent unrestricted tier drafts or later teacher placement workflow.
-- Bridge module placement and duplicate source items are prohibited.
+- Bridge module placement and duplicate source items are outside the bridge-only
+  reconciliation/apply path.
 - No automatic group/module/date/publication inference.
 - No SIS opt-in from a tier source and no New Quiz item writes.
 - No browser UI expansion; the MCP/runtime contract is the primary boundary.

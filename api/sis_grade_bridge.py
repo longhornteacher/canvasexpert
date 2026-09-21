@@ -1,8 +1,8 @@
 """Assistant-facing SIS grade-bridge use case.
 
-This is the shared non-HTTP boundary used by MCP.  Live Canvas behavior stays
-inside the ledger adapter; this module creates one frozen operation and shapes
-only aggregate, student-free results.
+This is the shared non-HTTP boundary used by MCP. Discovery and preview read the
+local sync/mirror and create one frozen operation; only the approved ledger apply
+may reach Canvas Live. Results remain aggregate and student-free.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ import copy
 from api.operation_ledger import batches, executor, models, operations, receipts, registry
 from api.operation_ledger.adapters.sis_grade_bridge import KIND
 from api.operation_ledger.adapters import differentiated_bridge
+from api import course_catalog
 from api.platform_services import config
-from api.platform_services import canvas_client
 
 
 _REPAIRABLE_REASONS = frozenset({
@@ -98,54 +98,19 @@ def list_sis_grade_bridges(course_id: str) -> dict:
 
 
 def _course_assignments(course_id: str) -> list[dict]:
-    rows, error, complete = canvas_client.canvas_get_all_complete(
-        f"/api/v1/courses/{course_id}/assignments", {"per_page": 100}
-    )
-    if error or not complete or not isinstance(rows, list):
-        raise ValueError("assignment discovery is incomplete")
-    return [row for row in rows if isinstance(row, dict)]
-
-
-def _student_free_coverage(course_id: str, source_ids: list[str]) -> dict:
-    active_rows, error, complete = canvas_client.canvas_get_all_complete(
-        f"/api/v1/courses/{course_id}/users",
-        {"enrollment_type[]": "student", "enrollment_state[]": "active", "per_page": 100},
-    )
-    if error or not complete or not isinstance(active_rows, list):
-        return {"complete": False, "source_count": len(source_ids), "member_count": 0, "overlap_count": None, "active_count": None, "exact_source_member_coverage": False}
-    active = {str(row.get("id")) for row in active_rows if str(row.get("id") or "").strip()}
-    member_sets = []
-    for assignment_id in source_ids:
-        overrides, error, complete = canvas_client.canvas_get_all_complete(
-            f"/api/v1/courses/{course_id}/assignments/{assignment_id}/overrides",
-            {"per_page": 100},
-        )
-        if error or not complete or not isinstance(overrides, list):
-            return {"complete": False, "source_count": len(source_ids), "member_count": 0, "overlap_count": None, "active_count": len(active), "exact_source_member_coverage": False}
-        members = set()
-        for override in overrides:
-            for value in (override.get("student_ids") or []):
-                if str(value).strip():
-                    members.add(str(value).strip())
-            group_id = str(override.get("group_id") or "").strip()
-            if group_id:
-                group_rows, group_error, group_complete = canvas_client.canvas_get_all_complete(
-                    f"/api/v1/groups/{group_id}/users", {"per_page": 100}
-                )
-                if group_error or not group_complete or not isinstance(group_rows, list):
-                    return {"complete": False, "source_count": len(source_ids), "member_count": 0, "overlap_count": None, "active_count": len(active), "exact_source_member_coverage": False}
-                members.update(str(row.get("id")) for row in group_rows if str(row.get("id") or "").strip())
-        member_sets.append(members)
-    union = set().union(*member_sets) if member_sets else set()
-    overlaps = sum(1 for member in active if sum(member in values for values in member_sets) > 1)
-    return {
-        "complete": bool(member_sets) and all(member_sets),
-        "source_count": len(source_ids),
-        "member_count": len(union & active),
-        "active_count": len(active),
-        "overlap_count": overlaps,
-        "exact_source_member_coverage": bool(member_sets) and all(member_sets) and overlaps == 0 and (union & active) == active,
-    }
+    result = course_catalog.read_catalog(course_id)
+    catalog = result.get("catalog") if isinstance(result, dict) else None
+    scope = catalog.get("assignments") if isinstance(catalog, dict) else None
+    if not isinstance(scope, dict) or scope.get("state") != "current":
+        raise ValueError("local assignment sync is not current")
+    records = scope.get("records")
+    if not isinstance(records, dict):
+        raise ValueError("local assignment projection is incomplete")
+    return [
+        {"course_id": str(course_id), "id": str(assignment_id), **row}
+        for assignment_id, row in records.items()
+        if isinstance(row, dict)
+    ]
 
 
 def _source_shape_reasons(row: dict) -> list[str]:
@@ -167,7 +132,7 @@ def _source_shape_reasons(row: dict) -> list[str]:
     return reasons
 
 
-def _bridge_safety_reasons(row: dict, *, expected_points=None, expected_group=None, expected_due=None) -> list[str]:
+def _bridge_safety_reasons(row: dict, *, expected_points=None, expected_group=None) -> list[str]:
     checks = (
         ("published", True, "bridge_not_published"),
         ("grading_type", "points", "bridge_not_point_graded"),
@@ -186,8 +151,6 @@ def _bridge_safety_reasons(row: dict, *, expected_points=None, expected_group=No
             reasons.append("bridge_points_drift")
     if expected_group is not None and "assignment_group_id" in row and str(row.get("assignment_group_id")) != str(expected_group):
         reasons.append("bridge_assignment_group_drift")
-    if expected_due is not None and "due_at" in row and row.get("due_at") != expected_due:
-        reasons.append("bridge_due_date_drift")
     if row.get("overrides") not in (None, []):
         reasons.append("bridge_overrides_present")
     return sorted(set(reasons))
@@ -208,6 +171,10 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
         return {"ok": False, "error": "course_id is required"}
     try:
         rows = assignments if assignments is not None else _course_assignments(course_key)
+        # Discovery is mirror-backed even when the caller did not provide a
+        # synthetic assignment list. This keeps the rest of the matrix logic
+        # on the supplied, local snapshot branch and out of CanvasLive.
+        assignments = rows
         registrations = config.list_sis_grade_bridges(course_key)
         families = differentiated_bridge.discover_families(
             rows, registrations, config.get_tier_tags()
@@ -256,11 +223,6 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
                 source_ids.append(str(row.get("id")))
                 source_rows.append(row)
                 source_titles.append(str(row.get("name") or ""))
-        coverage = _student_free_coverage(course_key, source_ids) if assignments is None else {
-            "complete": None, "source_count": len(source_ids),
-            "member_count": None, "active_count": None, "overlap_count": None,
-            "exact_source_member_coverage": None,
-        }
         reasons = []
         status = "synced"
         if title_counts.get(title.casefold(), 0) > 1:
@@ -269,45 +231,19 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
         source_failures = []
         for row in source_rows:
             source_failures.extend(_source_shape_reasons(row))
-        supplied_due = [row.get("due_at") for row in source_rows if row.get("due_at") is not None]
-        if supplied_due and len(set(supplied_due)) != 1:
-            source_failures.append("mixed_effective_due_dates")
         supplied_points = [str(row.get("points_possible")) for row in source_rows if row.get("points_possible") is not None]
         if supplied_points and len(set(supplied_points)) != 1:
             source_failures.append("mixed_points_possible")
         supplied_groups = [str(row.get("assignment_group_id")) for row in source_rows if row.get("assignment_group_id") is not None]
         if supplied_groups and len(set(supplied_groups)) != 1:
             source_failures.append("mixed_assignment_groups")
-        # Supplied rows in unit tests may intentionally be slim projections;
-        # live reconciliation always re-reads exact assignment structures.
-        if assignments is None and source_failures:
-            status = "blocked"
-            reasons.extend(sorted(set(source_failures)))
         if len(source_ids) < 2:
             status = "incomplete"
             reasons.append("two_source_threshold_not_met")
-        if assignments is None and not coverage.get("exact_source_member_coverage"):
-            if coverage.get("complete") is False:
-                status = "incomplete" if status != "blocked" else status
-                reasons.append("source_member_coverage_incomplete")
-            elif coverage.get("overlap_count"):
-                status = "incomplete" if status != "blocked" else status
-                reasons.append("source_member_coverage_overlaps")
-            elif assignments is None:
-                status = "incomplete" if status != "blocked" else status
-                reasons.append("source_member_coverage_incomplete")
-        if len(source_ids) >= 2 and assignments is not None and source_failures:
+        if len(source_ids) >= 2 and source_failures:
             status = "blocked"
             reasons.extend(sorted(set(source_failures)))
 
-        raw_due = next((row.get("due_at") for row in source_rows if row.get("due_at")), None)
-        expected_due = None
-        if raw_due:
-            try:
-                expected_due = differentiated_bridge.require_family_delivery(raw_due, "matrix")[2]
-            except ValueError:
-                status = "blocked"
-                reasons.append("effective_due_time_invalid")
         expected_name = differentiated_bridge.bridge_title(title)
         bridge_candidates = []
         for row in rows:
@@ -330,7 +266,6 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
                 bridge,
                 expected_points=(source_rows[0].get("points_possible") if source_rows else None),
                 expected_group=(source_rows[0].get("assignment_group_id") if source_rows else None),
-                expected_due=expected_due,
             )
             if not safety:
                 safe_bridges.append(bridge)
@@ -344,17 +279,9 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
             reasons.extend(sorted(set(unsafe_bridge_reasons)))
         bridge = safe_bridges[0] if len(safe_bridges) == 1 else None
         drift_fields = []
-        if bridge and expected_due:
-            expected = {"name": expected_name, "description": differentiated_bridge.bridge_description(), "due_at": expected_due}
-            drift_fields = sorted(field for field, value in expected.items() if bridge.get(field) != value)
-            if str(bridge.get("name") or "").casefold() == title.casefold():
-                drift_fields = [field for field in drift_fields if field != "name"]
-            if drift_fields and status == "synced":
-                status = "drifted"
-                reasons.append("bridge_shape_drift")
         if bridge is None and not unsafe_bridge_reasons and status == "synced":
             status = "missing"
-        if bridge is None and not unsafe_bridge_reasons and assignments is None:
+        if bridge is None and not unsafe_bridge_reasons:
             reasons.append("bridge_missing")
         if registration is None:
             if status == "synced":
@@ -365,13 +292,6 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
         elif bridge and str(registration.get("bridge_assignment_id") or "") != str(bridge.get("id") or ""):
             status = "blocked"
             reasons.append("family_link_bridge_not_in_family")
-        elif bridge and registration.get("bridge_state_digest"):
-            current_digest = differentiated_bridge.structural_digest(
-                differentiated_bridge.assignment_shape(bridge, [])
-            )
-            if not drift_fields and str(registration.get("bridge_state_digest")) != current_digest:
-                status = "blocked"
-                reasons.append("family_link_bridge_digest_drift")
         action = (
             "create" if bridge is None else
             ("link" if registration is None and not drift_fields else
@@ -382,6 +302,15 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
             "reasons": reasons,
             "source_assignment_ids": source_ids,
         })
+        mirror_coverage = {
+            "source": "mirror",
+            "complete": None,
+            "source_count": len(source_ids),
+            "member_count": None,
+            "active_count": None,
+            "overlap_count": None,
+            "exact_source_member_coverage": None,
+        }
         matrix.append({
             "family_key": family["family_key"],
             "family_title": title,
@@ -396,7 +325,7 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
             "bridge_count": len(safe_bridges),
             "grading_excluded": all(row.get("omit_from_final_grade") is True for row in source_rows if "omit_from_final_grade" in row),
             "bridge_eligible": status not in {"blocked", "incomplete"},
-            "coverage": coverage,
+            "coverage": mirror_coverage,
             "drift_fields": drift_fields,
             "reasons": sorted(set(reasons)),
             "identity_source": family["identity_source"],
