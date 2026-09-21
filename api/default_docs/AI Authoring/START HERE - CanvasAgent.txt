@@ -109,14 +109,12 @@ other program relies on, and needs no admin.
 
 Appendix B. What CanvasExpert can do
 
-Create and Forge. Author a quiz, assignment, or page, validate it, then
-stage it for review and push to one course or several with due dates, grading
-category, module
-placement, and publish state set together. When connected, the assistant is the primary
-working surface for staging, review, and bounded delivery. The retained Create tab
-remains available for local review, repair, and teacher-owned actions. Per-course details
-are matched by name, so one file works across sections. Quizzes can compile offline into
-a Canvas-importable ZIP plus printable copies. Assignments and
+Create and Forge. Author a quiz, assignment, or page, validate it, then stage it
+for review and push to one or several courses with dates, category, module, and
+publish state. The assistant is the primary surface; the retained Create tab
+remains available for local review, repair, and teacher-owned actions. Per-course
+details are matched by name, so one file works across sections. Quizzes can compile
+offline into a Canvas-importable ZIP plus printable copies. Assignments and
 quizzes can carry differentiation tiers that produce scaffolded variants instead of three
 hand-made copies. AssignmentForge tiers are differentiated-family content: Settings maps
 pedagogical labels to configured public tags (including public color tags), and the reviewed
@@ -209,9 +207,6 @@ Routines. Small jobs that run on the teacher's own computer on a schedule
 or at app launch: download new submissions, flag late work, keep a running
 report of what still needs grading. Local on purpose, because school-issued
 machines usually do not permit background cloud services.
-
-Home. A roll-up of what needs attention across every course: grading debt,
-late work, students to check in on.
 
 Speed. CanvasExpert keeps a local copy of course data and serves most screens
 from it, so it stays usable when Canvas or school wifi is slow. It always

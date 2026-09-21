@@ -20,7 +20,10 @@ For "what needs grading," the agent calls `discover_scoring_work()` with no
 arguments. Canvas Expert strictly refreshes every Current course through the
 existing CanvasMirror coordinator, whose physical limit is two workers, reads only
 the refreshed local mirror, and returns the complete
-assignment and attention tables. The result includes assignments with positive
+assignment and attention tables. Its discovery-specific refresh scope reuses the
+same in-flight operation and a recent successful refresh during continuations, so
+retrying discovery does not create a new mirror revision or invalidate a session
+it just advertised. The result includes assignments with positive
 `ungraded` or `partially_scored` work, an accurate `late_ungraded` aggregate, and
 at most one current actionable session joined to its exact row. The agent reports
 the full digest and waits for teacher direction. Discovery persists no backlog

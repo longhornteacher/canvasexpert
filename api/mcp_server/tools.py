@@ -1858,7 +1858,7 @@ def discover_scoring_work() -> dict:
         if not active_courses:
             return scoring_discovery.discover_scoring_work(
                 active_courses,
-                refresh_course=_refresh_course_for_scoring,
+                refresh_course=_refresh_course_for_discovery,
                 load_snapshot=_load_snapshot,
                 actionable_sessions=(),
                 tier_tags=config.get_tier_tags(),
@@ -1869,7 +1869,7 @@ def discover_scoring_work() -> dict:
         )
         result = scoring_discovery.discover_scoring_work(
             active_courses,
-            refresh_course=_refresh_course_for_scoring,
+            refresh_course=_refresh_course_for_discovery,
             load_snapshot=_load_snapshot,
             actionable_sessions=sessions,
             tier_tags=config.get_tier_tags(),
@@ -1906,6 +1906,8 @@ _REFRESH_SCOPES = ["course.refresh", "roster", "groups"]
 # Scoring does not use the ordinary delta refresh. Its runner performs a full
 # rebuild so unchanged or malformed local assignment rows are replaced too.
 _SCORING_REFRESH_SCOPES = ["course.scoring_refresh"]
+_SCORING_DISCOVERY_REFRESH_SCOPES = ["course.scoring_discovery_refresh"]
+_SCORING_DISCOVERY_REUSE_SECONDS = 300.0
 
 
 def _refresh_course_for_scoring(course_id: str) -> dict:
@@ -1916,8 +1918,27 @@ def _refresh_course_for_scoring(course_id: str) -> dict:
     teacher's recent Canvas Live edit.  Keep the refresh private to Canvas
     Expert and return only lifecycle facts to the scoring orchestration.
     """
+    return _refresh_course_for_scoring_scope(
+        course_id, _SCORING_REFRESH_SCOPES,
+    )
+
+
+def _refresh_course_for_discovery(course_id: str) -> dict:
+    """Refresh discovery through its idempotent continuation scope."""
+    return _refresh_course_for_scoring_scope(
+        course_id, _SCORING_DISCOVERY_REFRESH_SCOPES,
+        reuse_completed_within_seconds=_SCORING_DISCOVERY_REUSE_SECONDS,
+    )
+
+
+def _refresh_course_for_scoring_scope(
+    course_id: str, scopes: list[str], *, reuse_completed_within_seconds: float = 0,
+) -> dict:
     try:
-        plan_id = _enqueue_sync(course_id, _SCORING_REFRESH_SCOPES)
+        kwargs = {}
+        if reuse_completed_within_seconds:
+            kwargs["reuse_completed_within_seconds"] = reuse_completed_within_seconds
+        plan_id = _enqueue_sync(course_id, scopes, **kwargs)
         plan = _wait_for_plan(plan_id, timeout_seconds=_REFRESH_TIMEOUT_SECONDS)
     except Exception:
         return False

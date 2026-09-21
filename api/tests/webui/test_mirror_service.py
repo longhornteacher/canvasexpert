@@ -460,6 +460,31 @@ def test_scoring_refresh_runs_a_full_pass_without_comments(monkeypatch, _configu
     assert captured["bypass_new_quiz_cooldown"] is True
 
 
+def test_scoring_discovery_refresh_uses_a_distinct_full_refresh_runner(monkeypatch, _configure):
+    _configure(courses=({"id": "111", "name": "Course One"},))
+    captured = {}
+
+    def refresh(course_id, **kwargs):
+        captured["course_id"] = course_id
+        captured.update(kwargs)
+        return {
+            "ok": True, "status": "synced", "state": "synced",
+            "usable": True, "mirror_revision": 1, "snapshot_id": "111:1",
+        }
+
+    monkeypatch.setattr(mirror_service.sync, "refresh", refresh)
+
+    result = mirror_service._run_scoring_discovery_refresh("111")
+
+    assert result["ok"] is True
+    assert result["status"] == "synced"
+    assert result["mirror_revision"] == 1
+    assert captured["course_id"] == "111"
+    assert captured["force"] is False
+    assert captured["full"] is True
+    assert captured["with_comments"] is False
+
+
 # --- sync_now -------------------------------------------------------------------
 
 def test_sync_now_scopes_to_saved_courses(monkeypatch, tmp_path, _configure):

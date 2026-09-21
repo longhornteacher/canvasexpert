@@ -81,3 +81,24 @@ def test_scoring_refresh_preserves_queued_or_running_coordinator_identity(monkey
     assert result["state"] == "running"
     assert result["operation_id"] == "opaque-operation"
     assert result["status"] == "syncing"
+
+
+def test_discovery_refresh_uses_idempotent_scope_and_reuse_window(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        tools, "_enqueue_sync",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or "plan-1",
+    )
+    monkeypatch.setattr(tools, "_wait_for_plan", lambda *_args, **_kwargs: {
+        "plan_id": "plan-1", "operation_id": "operation-1",
+        "state": "succeeded", "status": "synced",
+        "jobs": [{"state": "succeeded", "mirror_revision": 7}],
+    })
+
+    result = tools._refresh_course_for_discovery("c1")
+
+    assert result["ok"] is True
+    assert calls == [(
+        ("c1", ["course.scoring_discovery_refresh"]),
+        {"reuse_completed_within_seconds": 300.0},
+    )]

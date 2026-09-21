@@ -11,6 +11,11 @@ mirror state, and returns a student-free digest. The teacher directs which exact
 course/assignment rows to continue. Discovery creates no session or packet and never
 widens the assignment-scoped authorization described below.
 
+Discovery refreshes use a dedicated read-only full-refresh scope. In-flight
+continuations reuse the same coordinator job and operation id. A successful
+discovery refresh is reusable for a bounded continuation window, so retrying
+discovery does not create a new mirror revision or invalidate a session surfaced
+by the earlier call. After that window, a new discovery refresh may run.
 Discovery refreshes are bounded per call. A Current-course refresh that remains
 `queued` or `running` after the wait bound is reported as the retryable,
 student-free attention code `mirror_refresh_in_progress`, with its opaque

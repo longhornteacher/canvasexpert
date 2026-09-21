@@ -189,6 +189,27 @@ def _run_scoring_course_refresh(course_id: str):
         )
 
 
+def _run_scoring_discovery_refresh(course_id: str):
+    """Run the discovery-owned full refresh scope.
+
+    The coordinator reuses this scope's recent successful job for discovery
+    continuations. The runner stays a real full refresh when a new job is
+    needed, while assignment preparation keeps its stricter separate scope.
+    """
+    with _telemetry("course.scoring_discovery_refresh"):
+        course = next((item for item in config.saved_courses()
+                       if str(item.get("id")) == str(course_id)), None)
+        if not course:
+            return {"ok": False, "error_class": "course_unavailable"}
+        return sync.refresh(
+            course_id,
+            canvas_get_all=canvas_get_all,
+            canvas_get_all_complete=canvas_get_all_complete,
+            course_name=course.get("name"),
+            force=False, full=True, with_comments=False,
+        )
+
+
 def coordinator_instance() -> coordinator.MirrorCoordinator:
     """The sole production registry.  Every runner above is read-only."""
     return coordinator.configure_default({
@@ -197,20 +218,26 @@ def coordinator_instance() -> coordinator.MirrorCoordinator:
         "roster": _run_roster,
         "groups": _run_groups,
         "course.scoring_refresh": _run_scoring_course_refresh,
+        "course.scoring_discovery_refresh": _run_scoring_discovery_refresh,
         "submissions.course_delta": _run_submission_delta,
         "new_quizzes.metadata": _run_new_quiz_metadata,
         "course.structure_refresh": _run_structure_refresh,
     })
 
 
-def enqueue_sync(course_id: str | None = None, scopes: list[str] | None = None) -> str:
+def enqueue_sync(course_id: str | None = None, scopes: list[str] | None = None,
+                 *, reuse_completed_within_seconds: float = 0) -> str:
     """Queue manual read-only work; HTTP callers receive the opaque plan ID."""
     courses = [course for course in config.saved_courses()
                if not course_id or str(course.get("id")) == str(course_id)]
     if not courses:
         raise ValueError("Not a saved course.")
-    return coordinator_instance().submit((str(course.get("id")) for course in courses), scopes,
-                                         priority="manual")
+    kwargs = {"priority": "manual"}
+    if reuse_completed_within_seconds:
+        kwargs["reuse_completed_within_seconds"] = reuse_completed_within_seconds
+    return coordinator_instance().submit(
+        (str(course.get("id")) for course in courses), scopes, **kwargs
+    )
 
 
 def refresh_course_structure(course_id: str, *, timeout_seconds: float = 30.0) -> dict:

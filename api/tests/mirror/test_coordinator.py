@@ -43,6 +43,50 @@ def test_coalescing_and_priority_promotion():
     assert calls == ["local-course"]
     assert all(set(job) <= {"job_id", "course_id", "scope", "priority", "state",
                             "error_class", "error_code", "queue_wait_ms", "yield_count"} for job in first_plan["jobs"])
+    assert first_plan["operation_id"] == second_plan["operation_id"]
+
+
+def test_recent_successful_discovery_job_is_reused_with_stable_operation_id():
+    calls = []
+    coordinator = MirrorCoordinator({
+        "course.scoring_discovery_refresh": lambda course: calls.append(course) or {
+            "ok": True, "mirror_revision": 7, "snapshot_id": "snap-7",
+        },
+    })
+
+    first = coordinator.submit(["course"], ["course.scoring_discovery_refresh"])
+    first_plan = _wait(coordinator, first)
+    second = coordinator.submit(
+        ["course"], ["course.scoring_discovery_refresh"],
+        reuse_completed_within_seconds=300,
+    )
+    second_plan = _wait(coordinator, second)
+
+    assert calls == ["course"]
+    assert second_plan["operation_id"] == first_plan["operation_id"]
+    assert second_plan["jobs"][0]["job_id"] == first_plan["jobs"][0]["job_id"]
+
+
+def test_discovery_reuse_window_does_not_reuse_an_old_success():
+    calls = []
+    coordinator = MirrorCoordinator({
+        "course.scoring_discovery_refresh": lambda course: calls.append(course) or {
+            "ok": True, "mirror_revision": len(calls),
+        },
+    })
+
+    first = coordinator.submit(["course"], ["course.scoring_discovery_refresh"])
+    _wait(coordinator, first)
+    with coordinator._lock:
+        job = next(iter(coordinator._jobs.values()))
+        job.finished_at = time.monotonic() - 301
+    second = coordinator.submit(
+        ["course"], ["course.scoring_discovery_refresh"],
+        reuse_completed_within_seconds=300,
+    )
+    _wait(coordinator, second)
+
+    assert calls == ["course", "course"]
 
 
 def test_independent_scopes_fail_and_succeed_independently():

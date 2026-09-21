@@ -20,7 +20,8 @@ PRIORITIES = ("post_write", "manual", "background", "concluded")
 _PRIORITY_VALUE = {name: index for index, name in enumerate(PRIORITIES)}
 PRODUCTION_SCOPES = (
     "course.refresh", "course_context", "roster", "groups",
-    "course.scoring_refresh", "submissions.course_delta", "new_quizzes.metadata",
+    "course.scoring_refresh", "course.scoring_discovery_refresh",
+    "submissions.course_delta", "new_quizzes.metadata",
     "course.structure_refresh",
 )
 
@@ -53,6 +54,7 @@ class _Plan:
     state: str = "queued"
     jobs: list[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.monotonic)
+    operation_id: str = ""
 
 
 class MirrorCoordinator:
@@ -81,9 +83,12 @@ class MirrorCoordinator:
             thread.start()
 
     def submit(self, course_ids: Iterable[str], scopes: Iterable[str] | None = None,
-               *, priority: str = "manual") -> str:
+               *, priority: str = "manual",
+               reuse_completed_within_seconds: float = 0) -> str:
         if priority not in _PRIORITY_VALUE:
             raise ValueError("unsupported coordinator priority")
+        if reuse_completed_within_seconds < 0:
+            raise ValueError("reuse window must not be negative")
         requested = tuple(scopes or ("course.refresh",))
         if not requested or any(scope not in PRODUCTION_SCOPES for scope in requested):
             raise ValueError("unsupported mirror scope")
@@ -94,6 +99,8 @@ class MirrorCoordinator:
             plan_id = uuid.uuid4().hex
             plan = _Plan(plan_id)
             self._plans[plan_id] = plan
+            reused_plan_ids = set()
+            reused_all = True
             for course_id in course_ids:
                 for scope in requested:
                     key = (course_id, scope)
@@ -101,6 +108,7 @@ class MirrorCoordinator:
                     existing = self._jobs.get(existing_id) if existing_id else None
                     if existing and existing.state in {"queued", "running"}:
                         plan.jobs.append(existing.job_id)
+                        reused_plan_ids.add(existing.plan_id)
                         if _PRIORITY_VALUE[priority] < _PRIORITY_VALUE[existing.priority]:
                             existing.priority = priority
                             if existing.state == "queued":
@@ -109,6 +117,18 @@ class MirrorCoordinator:
                                 heapq.heappush(self._queue, (_PRIORITY_VALUE[priority], existing.sequence,
                                                             existing.job_id))
                         continue
+                    if (
+                        existing
+                        and existing.state == "succeeded"
+                        and reuse_completed_within_seconds
+                        and existing.finished_at is not None
+                        and time.monotonic() - existing.finished_at
+                        <= reuse_completed_within_seconds
+                    ):
+                        plan.jobs.append(existing.job_id)
+                        reused_plan_ids.add(existing.plan_id)
+                        continue
+                    reused_all = False
                     self._sequence += 1
                     job = _Job(uuid.uuid4().hex, plan_id, course_id, scope, priority,
                                self._sequence)
@@ -116,6 +136,8 @@ class MirrorCoordinator:
                     self._by_key[key] = job.job_id
                     plan.jobs.append(job.job_id)
                     heapq.heappush(self._queue, (_PRIORITY_VALUE[priority], job.sequence, job.job_id))
+            if reused_all and len(reused_plan_ids) == 1:
+                plan.operation_id = next(iter(reused_plan_ids))
             self._trim_locked()
             self._refresh_plan_locked(plan)
             self._lock.notify_all()
@@ -178,7 +200,7 @@ class MirrorCoordinator:
 
     def _plan_view(self, plan: _Plan) -> dict:
         self._refresh_plan_locked(plan)
-        return {"plan_id": plan.plan_id, "operation_id": plan.plan_id,
+        return {"plan_id": plan.plan_id, "operation_id": plan.operation_id or plan.plan_id,
                 "state": plan.state,
                 "status": "syncing" if plan.state in {"queued", "running"}
                           else ("synced" if plan.state == "succeeded" else "failed"),

@@ -2,8 +2,8 @@
 
 CanvasMirror scheduling is process-local, read-only, and bounded to two workers. It
 accepts production scopes `course.refresh`, `course_context`, `course_structure`,
-`roster`, `groups`, `course.scoring_refresh`, `submissions.course_delta`, and
-`new_quizzes.metadata`.
+`roster`, `groups`, `course.scoring_refresh`, `course.scoring_discovery_refresh`,
+`submissions.course_delta`, and `new_quizzes.metadata`.
 `course.refresh` is one compatibility orchestration job: manual work invokes the
 reviewed legacy sync once, and heartbeat work invokes the filtered due-maintenance
 path once. It is never a claim that a legacy pass and a scope mean the same thing.
@@ -13,8 +13,11 @@ silently fan out into duplicate structure, roster, submission, or New Quiz reads
 Priorities are fixed: `preflight`, `post_write`, `focus`, `manual`, `background`,
 then `concluded`. Heartbeat plans use `background` or `concluded`; write-through
 submission refresh uses `post_write`. A request for an already queued/running `(course, scope)` coalesces
-with that job and may promote its priority. Job state is only `queued`, `running`,
-`succeeded`, `failed`, or `cancelled`; plans aggregate those jobs. State is bounded
+with that job and may promote its priority. The scoring-discovery scope may also
+reuse a recent successful job when its caller supplies a bounded reuse window;
+the returned plan preserves the original operation id and does not run the
+Canvas runner again. Job state is only `queued`, `running`, `succeeded`, `failed`,
+or `cancelled`; plans aggregate those jobs. State is bounded
 and disappears on process restart. Status may contain local course IDs, but logs and
 benchmark output never contain course IDs, URLs, request parameters, bodies, or text.
 
