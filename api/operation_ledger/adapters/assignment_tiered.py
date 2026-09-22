@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import html
+import re
+
 from .. import models
 from .adapter_support import (
     build_result,
@@ -34,17 +37,48 @@ def execute(
         assignment_url = assignment_step.get("returned_object_url")
 
         if assignment_id:
+            assignment_data = _assignment_data(
+                payload, tier["title"], tier["description"], course_id,
+                find_assignment_group,
+            )
             existing, error = canvas_client.canvas_get(
                 f"/api/v1/courses/{course_id}/assignments/{assignment_id}"
             )
             if error or not existing:
                 return build_result("sent_unknown", steps=steps, error_code="assignment_exact_id_unverified")
+            needs_create_verification = assignment_step.get("state") not in {"applied", "skipped"}
+            if needs_create_verification and not _source_shape_matches(
+                existing, assignment_data, published=False,
+            ):
+                marked = context.checkpoint_step(
+                    dict(assignment_step,
+                         state="sent_unknown",
+                         error_code="assignment_create_unverified",
+                         returned_object_id=str(assignment_id),
+                         returned_object_url=existing.get("html_url") or assignment_url,
+                         private_diagnostic=_shape_mismatch_diagnostic(
+                             existing, assignment_data, published=False,
+                         )),
+                    returned_object_id=str(assignment_id),
+                    returned_object_url=existing.get("html_url") or assignment_url,
+                )
+                _replace_local_step(steps, marked)
+                return build_result(
+                    "sent_unknown", steps=steps,
+                    returned_object_id=str(assignment_id),
+                    returned_object_url=existing.get("html_url") or assignment_url,
+                    error_code=marked["error_code"],
+                    private_diagnostic=marked["private_diagnostic"],
+                )
             assignment_step["state"] = "skipped"
             assignment_url = existing.get("html_url") or assignment_url
         elif assignment_step.get("outbound_started_at"):
             return build_result("sent_unknown", steps=steps, error_code="assignment_creation_unresolved")
         else:
-            assignment_data = _assignment_data(payload, tier["title"], tier["description"], course_id, find_assignment_group)
+            assignment_data = _assignment_data(
+                payload, tier["title"], tier["description"], course_id,
+                find_assignment_group,
+            )
             request = {"assignment": assignment_data}
             path = f"/api/v1/courses/{course_id}/assignments"
             marked = context.before_send(
@@ -79,10 +113,22 @@ def execute(
             if verify_error or not verified or not _source_shape_matches(verified, assignment_data, published=False):
                 marked["state"] = "sent_unknown"
                 marked["error_code"] = "assignment_create_unverified"
-                marked["private_diagnostic"] = verify_error or "assignment postcondition mismatch"
-                marked = context.checkpoint_step(marked)
+                marked["private_diagnostic"] = verify_error or _shape_mismatch_diagnostic(
+                    verified or {}, assignment_data, published=False,
+                )
+                marked = context.checkpoint_step(
+                    marked,
+                    returned_object_id=assignment_id,
+                    returned_object_url=assignment_url,
+                )
                 _replace_local_step(steps, marked)
-                return build_result("sent_unknown", steps=steps, error_code=marked["error_code"])
+                return build_result(
+                    "sent_unknown", steps=steps,
+                    returned_object_id=assignment_id,
+                    returned_object_url=assignment_url,
+                    error_code=marked["error_code"],
+                    private_diagnostic=marked["private_diagnostic"],
+                )
             marked["state"] = "applied"
             marked = context.checkpoint_step(
                 marked,
@@ -200,19 +246,48 @@ def _assignment_data(
 
 
 def _source_shape_matches(actual: dict, expected: dict, *, published: bool) -> bool:
+    return not _shape_mismatches(actual, expected, published=published)
+
+
+def _shape_mismatch_diagnostic(actual: dict, expected: dict, *, published: bool) -> str:
+    mismatches = _shape_mismatches(actual, expected, published=published)
+    return "assignment postcondition mismatch: " + ", ".join(mismatches or ["unknown"])
+
+
+def _shape_mismatches(actual: dict, expected: dict, *, published: bool) -> list[str]:
+    mismatches = []
     for key in (
         "name", "description", "submission_types", "grading_type",
         "only_visible_to_overrides", "omit_from_final_grade", "post_to_sis",
     ):
-        if key in expected and actual.get(key) != expected[key]:
-            return False
-    if "points_possible" in expected and float(actual.get("points_possible", 0)) != float(expected["points_possible"]):
-        return False
+        if key in expected and not _shape_value_matches(key, actual.get(key), expected[key]):
+            mismatches.append(key)
+    if "points_possible" in expected:
+        try:
+            points_match = float(actual.get("points_possible", 0)) == float(expected["points_possible"])
+        except (TypeError, ValueError):
+            points_match = False
+        if not points_match:
+            mismatches.append("points_possible")
     if "assignment_group_id" in expected and str(actual.get("assignment_group_id")) != str(expected["assignment_group_id"]):
-        return False
-    if published and actual.get("published") is not True:
-        return False
-    return actual.get("published") is published
+        mismatches.append("assignment_group_id")
+    if actual.get("published") is not published:
+        mismatches.append("published")
+    return mismatches
+
+
+def _shape_value_matches(key: str, actual: object, expected: object) -> bool:
+    if key == "description":
+        return _canonical_description(actual) == _canonical_description(expected)
+    if key == "submission_types":
+        return sorted(actual or []) == sorted(expected or [])
+    return actual == expected
+
+
+def _canonical_description(value: object) -> str:
+    """Compare Canvas HTML descriptions after entity/whitespace normalization."""
+    text = html.unescape(str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _publish_assignment(*, course_id, assignment_id, payload, steps, context, step_key, failure_state):

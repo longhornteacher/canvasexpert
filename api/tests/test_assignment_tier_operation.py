@@ -312,6 +312,83 @@ def test_differentiated_assignment_family_is_unrestricted_and_student_free(monke
     assert len(fake.sends) == sends_before
 
 
+def test_created_tier_id_survives_create_verification_mismatch_and_resumes(monkeypatch):
+    payload = _build(monkeypatch, module_id="501")
+    fake = FakeCanvas()
+    original_get = fake.get
+    mismatch_once = {"value": True}
+
+    def get_with_transient_canvas_normalization(path, params=None, timeout=20):
+        row, error = original_get(path, params, timeout)
+        if (
+            mismatch_once["value"]
+            and path.endswith("/assignments/101")
+            and isinstance(row, dict)
+        ):
+            mismatch_once["value"] = False
+            row["description"] = "Canvas returned a different description"
+        return row, error
+
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    monkeypatch.setattr(canvas_client, "canvas_get", get_with_transient_canvas_normalization)
+    monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
+    baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
+    context = Context()
+
+    first = AssignmentAdapter().execute(
+        payload, {"course_id": "42", "steps": []}, baseline, {}, context
+    )
+
+    assert first["state"] == "sent_unknown"
+    assert first["error_code"] == "assignment_create_unverified"
+    create_step = next(row for row in first["steps"] if row["step_key"] == "create_tier_assignment:0")
+    assert create_step["returned_object_id"] == "101"
+    assert not AssignmentAdapter().check_drift(
+        payload, {"course_id": "42", "steps": copy.deepcopy(context.steps)}, baseline
+    )
+    assert len([
+        body for _method, path, body in fake.sends
+        if path.endswith("/assignments")
+        and body.get("assignment", {}).get("name") == "Practice - Red"
+    ]) == 1
+    assert not any(path.endswith("/assignments/101") and method == "PUT" for method, path, _body in fake.sends)
+
+    retry = AssignmentAdapter().execute(
+        payload,
+        {"course_id": "42", "steps": copy.deepcopy(context.steps)},
+        baseline,
+        {},
+        context,
+    )
+
+    assert retry["state"] == "applied", retry
+    assert len([
+        body for _method, path, body in fake.sends
+        if path.endswith("/assignments")
+        and body.get("assignment", {}).get("name") == "Practice - Red"
+    ]) == 1
+    assert any(path.endswith("/assignments/101") and method == "PUT" for method, path, _body in fake.sends)
+
+
+def test_source_shape_matching_tolerates_canvas_html_normalization():
+    from api.operation_ledger.adapters.assignment_tiered import _source_shape_matches
+
+    expected = {
+        "name": "Practice - Red",
+        "description": "ECR & prep",
+        "submission_types": ["on_paper"],
+        "grading_type": "points",
+        "only_visible_to_overrides": False,
+        "omit_from_final_grade": True,
+        "post_to_sis": False,
+        "points_possible": 100.0,
+        "published": False,
+    }
+    actual = {**expected, "description": "  ECR &amp;   prep  ", "submission_types": ["on_paper"]}
+
+    assert _source_shape_matches(actual, expected, published=False)
+
+
 def test_whole_class_payload_has_no_bridge(monkeypatch):
     data = {"title": "Whole", "description": "body", "points": 10}
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.parse_file", lambda _path: (data, []))
