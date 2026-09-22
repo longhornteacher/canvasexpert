@@ -226,10 +226,9 @@ ANTHROPIC_KEY=
   writing portion as a separate 100-point AssignmentForge artifact.
 - `numeric` needs `scoring_algorithm:"Numeric"` + a `scoring_data.value` array;
   `rich-fill-blank` needs `edit_distance ≥ 1`.
-- Per-student / per-group **assignment overrides work** (drives differentiation).
-  For true tier isolation, PATCH the assignment `only_visible_to_overrides: true`
-  **after** the override exists — otherwise Canvas keeps an "Everyone else"
-  assignee and the whole class can see the tier.
+- Canvas supports per-student / per-group assignment overrides, but CanvasExpert's
+  differentiated delivery intentionally does not use them. Sources are published
+  unrestricted and tier placement remains manual in Canvas.
 - The New Quiz assignment shell accepts and reports `omit_from_final_grade` and
   `post_to_sis`. Differentiated delivery verifies both flags on every exact source and
   bridge assignment before the family link is saved.
@@ -245,7 +244,8 @@ ANTHROPIC_KEY=
   show feedback with that toggle fully off. Feedback wins; the toggle label is
   cosmetic.
 - New Quiz create does not own final publish state. The reviewed operation applies and
-  verifies `published` on the backing assignment after items and overrides are safe.
+  verifies `published` on the backing assignment after items are safe. Differentiated sources
+  are unrestricted; no group overrides are created.
 - **New Quizzes do NOT launch in "Student View" (Test Student).** A correctly
   published New Quiz with items will show the generic *"Oops, something went wrong"*
   page when opened as the Test Student. New Quizzes are an LTI tool

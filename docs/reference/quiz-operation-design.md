@@ -53,22 +53,21 @@ Sources:
 - `Support`, `Core`, `Accelerate`, and `Extend` resolve through `config.get_tier_tags()` to required,
   unique, trimmed public Canvas tags. The server appends ` - <tag>`; an authored suffix or a
   differing title is rejected.
-- Selected `group_name` remains separate Canvas membership authority. The server resolves groups
-  in the teacher-selected category and requires nonempty, nonoverlapping exact active-roster
-  coverage. Raw student IDs remain transient.
-- Preparation requires one timezone-aware due timestamp, a selected module, equal New Quiz totals,
-  one assignment group, valid public tags, and no unknown same-title collision.
+- Any legacy `group_name` values are ignored. CanvasExpert does not resolve pod/group membership,
+  read group sets, create student/group overrides, or restrict source visibility. Student
+  placement is manual in Canvas after delivery.
+- Preparation requires a selected module, equal New Quiz totals, valid public tags, and no unknown
+  same-title collision. Dates are optional and remain teacher-owned; an `assignment_group_name`,
+  when supplied, is only the Canvas gradebook category.
 
 ### Ordered mutation steps
 
 For each source in request order:
 
 1. create the color-suffixed New Quiz and checkpoint its exact quiz/assignment ID;
-2. restrict the assignment before any possible publish;
-3. create and verify every transient group/extra-time override bucket by exact ID;
-4. create and verify every ordered item by exact ID; and
-5. patch and verify the assignment as published, override-only, points-graded, omitted from the
-   final grade, SIS-disabled, and due at the requested timestamp.
+2. create and verify every ordered item by exact ID; and
+3. patch and verify the assignment as published, unrestricted, points-graded, omitted from the
+   final grade, SIS-disabled, and carrying any teacher-supplied date (or no date).
 
 Each source gets exactly one Assignment-type module item. After every source verifies, the shared differentiated-family tail
 creates the unsuffixed bridge in a safe inactive shape, attaches each exact source assignment ID to the
@@ -83,15 +82,15 @@ matches block; only checkpointed exact IDs are excluded during retry.
 
 An uncertain send is `sent_unknown` and is never repeated by guess. A definitive downstream
 failure is partial and resumes only from exact-ID reconciliation. Retry cannot duplicate quizzes,
-overrides, items, bridge, module, or module item. The family link is saved only after all required
+items, bridge, module, or module item. The family link is saved only after all required
 live postconditions pass.
 
 ### Browser and teacher workflow
 
-The browser sends ordered `{path, group_name}` variants and shared delivery settings. It sends no
-Canvas URL, group/category ID, student ID, or pre-suffixed title. Frozen review shows each
-pedagogical tier, public tag, exact source title, group/count facts, common settings, and the
-planned bridge.
+The browser sends ordered `{path}` variants and shared delivery settings. A legacy `group_name`
+field is ignored for compatibility. It sends no Canvas URL, group/category ID, student ID, or
+pre-suffixed title. Frozen review shows each pedagogical tier, public tag, exact source title,
+unrestricted source behavior, common settings, and the planned bridge.
 
 A teacher request to land the family authorizes the internal reviewed sequence for that exact
 course and family. Results report the created source and bridge URLs and direct the teacher to

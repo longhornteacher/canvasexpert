@@ -56,10 +56,11 @@ or group suffix. Canvas Expert resolves the declared metadata tier through Setti
 appends the configured public tag when it creates the real quiz, for example
 `Reading Check - <configured-tag>`.
 
-The Canvas group is chosen separately at delivery time. Differentiated delivery requires a
-timezone-aware due date, a module, equal point totals, and one assignment group. Canvas
-Expert publishes each real quiz only to its group, omits it from the final grade, disables
-its SIS Sync setting, and keeps it out of modules. It also creates one unsuffixed
+Differentiated delivery requires a module and equal point totals. Dates are optional because
+the teacher sets them in Canvas after delivery. CanvasExpert does not resolve Canvas pods or
+groups, create placement overrides, or restrict visibility: it publishes each real quiz as an
+unrestricted source, omits it from the final grade, disables its SIS Sync setting, and places it
+in the selected module. It also creates one unsuffixed
 no-submission bridge as a gradebook-only record; the configured-tag source assignments are the module items. The teacher reviews the family in Canvas Live
 and owns Canvas Grade Sync.
 
@@ -228,7 +229,7 @@ a watered-down standard. **Support is access to the same work, not a smaller ver
 
 **Use one unsuffixed base title for a differentiated family.** Public Canvas suffixes come
 from the teacher's Settings mapping, not authored title text. The pedagogical tier comes
-from `metadata.variant`; Canvas group membership remains a separate delivery choice.
+from `metadata.variant`; student placement remains a separate teacher-owned Canvas choice.
 
 **The four tiers (lowest → highest readiness)** — Canvas Expert's fixed product standard:
 - **Support** *(below grade level)* — the **same Bloom target and standard as Core**, reached by removing barriers: high-frequency vocabulary, define complex terms, active voice, shorter sentences; reduce extraneous load with Word Banks or Dropdowns for FITB, chunking, and text descriptions for visuals. Addresses **language or motivation** barriers, **never** ability — do not lower the cognitive bar or condescend.

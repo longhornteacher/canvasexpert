@@ -229,9 +229,6 @@ class AssignmentAdapter:
                 payload.get("due_at"), payload.get("module_name"), payload.get("module_id"),
                 require_exact_module=True,
                 create_module=bool(payload.get("create_module")),
-                # AssignmentForge delivery is intentionally undated. The teacher
-                # owns due dates and can set them after the family lands in Canvas.
-                allow_missing_due=True,
             )
             payload["due_at"] = due_at
             payload["module_name"] = module_name

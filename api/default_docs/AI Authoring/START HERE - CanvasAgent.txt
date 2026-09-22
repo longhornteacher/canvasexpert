@@ -340,9 +340,8 @@ Delivery options are per kind: a page takes published and module_name, and a qui
 or assignment also takes assignment_group_name,
 post_to_sis, and -- on the preview pair only -- ISO 8601 due_at, unlock_at, and
 lock_at. Naming one a kind cannot carry is refused rather than quietly dropped.
-Differentiated quizzes require due_at plus an exact module_id (or explicit module creation with module_name), and their used canonical tiers must
-have unique public tags in Settings. AssignmentForge tier delivery requires unique public tags
-and a selected module; due_at is optional because the teacher sets dates in Canvas. Report each
+Differentiated quizzes require an exact module (or explicit module creation) and unique public tags.
+Dates are optional; set them in Canvas. AssignmentForge tiers also require a selected module. Report each
 exact source URL, bridge, module,
 and family-link state; do not ask the teacher for Canvas group or pod targets.
 

@@ -32,13 +32,14 @@ Every differentiated family must satisfy all of these laws:
 
 1. There are at least two unique tiers.
 2. AssignmentForge sources are whole-course visible and have no placement overrides;
-   QuizForge sources retain their explicit target-group contract.
-3. Every source assignment is ordinary Canvas content with authored content and
+   QuizForge sources are also whole-course visible and have no placement overrides.
+   Student placement is always teacher-owned and manual in Canvas.
+3. Every source assignment is ordinary Canvas content with authored content and optional
    dates. It is created unpublished, then published only after its source shape is
    verified. Its final source state is published, omitted from the final grade,
    and SIS-disabled.
-4. Raw membership IDs, when used by QuizForge, are transient and never leave the
-   token-holding operation.
+4. No student membership or pod/group assignment is read or written by differentiated
+   delivery.
 5. Every source appears exactly once in the selected module and no source appears
    in any other module.
 6. The family has one verified bridge and one saved family link.
@@ -55,18 +56,16 @@ and is never a source of group membership.
 
 The authoring/delivery operation performs these bounded steps:
 
-1. Validate authored content, module choice, and
-   dates; capture safe baseline facts.
+1. Validate authored content and module choice; capture safe baseline facts. Dates are
+   optional and remain teacher-owned.
 2. Create each source, re-read its exact ID, and verify its authored shape and
    server-owned safety fields.
-3. For QuizForge only, restrict each source to its resolved group and create/verify
-   its group override.
-4. Publish only after every source is verified.
-5. Attach the verified sources exactly once to the selected module and prove the
+3. Publish only after every source is verified.
+4. Attach the verified sources exactly once to the selected module and prove the
    bridge is absent from all modules.
-6. Create or adopt the bridge, activate it with the locked safe shape, and verify
+5. Create or adopt the bridge, activate it with the locked safe shape, and verify
    it.
-7. Re-read the entire family and save the private family link last.
+6. Re-read the entire family and save the private family link last.
 
 Any failed postcondition returns a typed recovery state and never reports a
 complete family. Bridge reconciliation is separate: it reads the current local

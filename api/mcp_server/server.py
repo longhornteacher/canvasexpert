@@ -319,7 +319,7 @@ def preview_differentiated_quiz_push(
     unlock_at: str = "", lock_at: str = "", post_to_sis: bool = False,
     module_id: str = "", create_module: bool = False,
 ) -> str:
-    """Freeze staged QuizForge labels into a reviewed group-restricted plan."""
+    """Freeze staged QuizForge labels into a reviewed unrestricted family plan."""
     return _compact(tools.preview_differentiated_quiz_push(
         course_id, variants, published=published, module_name=module_name,
         assignment_group_name=assignment_group_name, due_at=due_at,

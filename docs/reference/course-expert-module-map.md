@@ -61,8 +61,8 @@ Student Reports feature scripts are loaded only by `student_reports.html`:
 Shared push scripts still own the core push cards:
 
 - `push/quiz.js` - QuizForge validation and preview plus typed whole-class and
-  differentiated `content.quiz` operation preparation; group data is used to build
-  teacher controls but browser-observed membership IDs are not sent for preparation
+  differentiated `content.quiz` operation preparation; tier delivery is unrestricted and
+  placement is teacher-owned in Canvas
 - `push/assignment.js` - AssignmentForge validation/push card behavior
 - `push/page.js` - PageForge validation/push card behavior
 

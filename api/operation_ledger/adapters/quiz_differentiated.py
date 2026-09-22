@@ -15,28 +15,12 @@ def execute(
     context,
     *,
     ordered_steps,
-    resolve_assignment_groups,
-    group_resolution_error,
 ) -> dict:
     course_id = target["course_id"]
     variants = payload.get("variants", [])
     steps = ordered_steps(target)
-    try:
-        resolved = resolve_assignment_groups(
-            course_id,
-            [{"label": f"variant_{index}", "group": variant["group_name"]} for index, variant in enumerate(variants)],
-        )
-    except group_resolution_error:
-        return build_result("failed", steps=steps, error_code="group_resolution_failed")
-    if resolved["safe"] != baseline.get("group_snapshot"):
-        return build_result("failed", steps=steps, error_code="group_membership_drift")
-
-    safe_by_index = {row["index"]: row for row in resolved["safe"]["tiers"]}
-    transient_ids = resolved["student_ids_by_group"]
     last_quiz_id = None
     last_quiz_url = None
-    settings = payload.get("settings", {})
-
     for index, variant in enumerate(variants):
         plan = variant["plan"]
         title = plan.get("title", f"Untitled variant {index}")
@@ -60,47 +44,6 @@ def execute(
         if result is not None:
             return result
         last_quiz_id, last_quiz_url = quiz_id, quiz_url
-
-        result = quiz_steps.restrict_assignment(
-            course_id=course_id,
-            quiz_id=quiz_id,
-            quiz_url=quiz_url,
-            step_key=f"restrict_assignment:{index}",
-            steps=steps,
-            context=context,
-            failure_state=_variant_failure_state(steps),
-        )
-        if result is not None:
-            return result
-
-        safe_tier = safe_by_index[index]
-        group_id = safe_tier["group_id"]
-        for bucket_index, bucket in enumerate(_split_for_extra_time_buckets(course_id, safe_tier, settings)):
-            override_request = {
-                "assignment_override": {
-                    "title": f"{title} - {bucket['kind']}",
-                    "student_ids": transient_ids.get(group_id, []),
-                }
-            }
-            if bucket.get("due_at"):
-                override_request["assignment_override"]["due_at"] = bucket["due_at"]
-            if bucket.get("lock_at"):
-                override_request["assignment_override"]["lock_at"] = bucket["lock_at"]
-            result = quiz_steps.create_override(
-                course_id=course_id,
-                quiz_id=quiz_id,
-                quiz_url=quiz_url,
-                step_key=f"create_override:{index}:{bucket_index}",
-                steps=steps,
-                context=context,
-                failure_state=_variant_failure_state(steps),
-                override_request=override_request,
-                membership_digest=safe_tier["membership_digest"],
-                bucket_index=bucket_index,
-                bucket_kind=bucket["kind"],
-            )
-            if result is not None:
-                return result
 
         for ordinal, item in enumerate(plan.get("items", []), start=1):
             result = quiz_steps.ensure_item(
@@ -201,29 +144,6 @@ def reconcile(payload: dict, target: dict) -> dict:
             "error_code": None,
         })
 
-        restrict_key = f"restrict_assignment:{index}"
-        restrict_step = stored_steps.get(restrict_key, models.new_step(restrict_key))
-        if restrict_step.get("state") not in {"applied", "skipped"}:
-            return {"state": "sent_unknown" if has_marker else "pending", "steps": projected}
-        projected.append({"step_key": restrict_key, "state": "applied", "returned_object_id": None, "returned_object_url": None, "error_code": None})
-
-        override_keys = sorted(
-            key for key in stored_steps if key.startswith(f"create_override:{index}:")
-        )
-        if not override_keys:
-            return {"state": "sent_unknown" if has_marker else "pending", "steps": projected}
-        for override_key in override_keys:
-            override_step = stored_steps[override_key]
-            override_id = override_step.get("returned_object_id")
-            if not override_id:
-                return {"state": "sent_unknown" if has_marker else "pending", "steps": projected}
-            override, override_error = canvas_client.canvas_get(
-                f"/api/v1/courses/{course_id}/assignments/{quiz_id}/overrides/{override_id}"
-            )
-            if override_error or not override:
-                return {"state": "sent_unknown", "steps": projected}
-            projected.append({"step_key": override_key, "state": "applied", "returned_object_id": override_id, "returned_object_url": None, "error_code": None})
-
         for item in plan.get("items", []):
             item_key = f"create_item:{index}:{item.get('index', 0)}"
             item_step = stored_steps.get(item_key, models.new_step(item_key))
@@ -261,39 +181,3 @@ def _variant_failure_state(steps: list[dict]) -> str:
         if step.get("state") in ("applied", "skipped") and step.get("returned_object_id"):
             return "partial"
     return "failed"
-
-
-def _split_for_extra_time_buckets(course_id: str, safe_tier: dict, settings: dict) -> list[dict]:
-    roster = {str(entry["id"]): int(entry.get("days", 1)) for entry in config.get_extra_time(course_id)}
-    base_due = settings.get("due_at")
-    base_lock = settings.get("lock_at")
-    if not roster or not base_due:
-        return [{
-            "bucket_index": 0,
-            "kind": "standard",
-            "days": None,
-            "student_count": safe_tier.get("student_count", 0),
-            "membership_digest": safe_tier.get("membership_digest", ""),
-            "due_at": base_due,
-            "lock_at": base_lock,
-            "student_ids": [],
-        }]
-    return [{
-        "bucket_index": 0,
-        "kind": "standard",
-        "days": None,
-        "student_count": safe_tier.get("student_count", 0),
-        "membership_digest": safe_tier.get("membership_digest", ""),
-        "due_at": base_due,
-        "lock_at": base_lock,
-        "student_ids": [],
-    }, {
-        "bucket_index": 1,
-        "kind": "extended",
-        "days": None,
-        "student_count": 0,
-        "membership_digest": "",
-        "due_at": None,
-        "lock_at": None,
-        "student_ids": [],
-    }]

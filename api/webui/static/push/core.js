@@ -233,13 +233,7 @@
       }
       if (review.mode === "differentiated") {
         (review.variants || []).forEach(function (variant) {
-          var tier = (review.tiers || []).find(function (row) {
-            return row.group === variant.group_name;
-          });
-          var count = tier && tier.student_count != null
-            ? " (" + tier.student_count + " students)" : "";
-          details.push(prefix + (variant.title || "Quiz variant") + " — " +
-            (variant.group_name || "Canvas group") + count);
+          details.push(prefix + (variant.title || "Quiz variant") + " — unrestricted source");
           if (variant.item_count != null || variant.total_points != null) {
             details.push(prefix + "Variant totals: " +
               (variant.item_count != null ? variant.item_count + " items" : "") +
@@ -266,7 +260,7 @@
     var action = reviews.find(function (review) { return review.teacher_action; });
     return action && action.teacher_action
       ? action.teacher_action
-      : "Teacher action: in Canvas, assign each draft to the intended students, groups, or pods, then publish the drafts.";
+      : "Teacher action: assign each draft to the intended students, groups, or pods in Canvas, then set dates and publish the drafts.";
   }
 
   async function reviewAndApply(operationId, logFn, bannerEl, confirmLabel) {

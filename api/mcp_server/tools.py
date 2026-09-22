@@ -1459,7 +1459,7 @@ def preview_content_push(
     Canvas is read only to capture the baseline apply drift-checks against.
 
     Delivery options are per kind -- a page takes published and module_name, a
-    quiz takes differentiated grouping options, and an
+    quiz takes tier/module options, and an
     assignment takes ordinary grading-category options plus post_to_sis and optional
     ISO 8601 due_at/unlock_at/lock_at. Differentiated AssignmentForge deliveries are
     unrestricted and may be undated; tier placement remains manual and teacher-owned.
@@ -1493,7 +1493,10 @@ def preview_differentiated_quiz_push(
     lock_at: str = "",
     post_to_sis: bool = False, module_id: str = "", create_module: bool = False,
 ) -> dict:
-    """Freeze several staged QuizForge labels for distinct selected groups."""
+    """Freeze several staged QuizForge labels for unrestricted teacher-assigned tiers.
+
+    Legacy group fields in variant objects are ignored.
+    """
     return _with_next("preview_differentiated_quiz_push", content_push.preview_differentiated_quiz_push(
         course_id, variants, published=published, module_name=module_name,
         assignment_group_name=assignment_group_name, due_at=due_at,

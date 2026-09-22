@@ -59,7 +59,6 @@ def _request(**settings):
         (_plan(title="Reading Check – Bridge"), _plan("Extend", title="Reading Check – Bridge"), {}, "unsuffixed"),
         (_plan(points=20), _plan("Extend", points=25), {}, "equal total points"),
         (_plan(), _plan("Unknown"), {}, "canonical tier"),
-        (_plan(), _plan("Extend"), {"due_at": ""}, "due_at"),
         (_plan(), _plan("Extend"), {"due_at": "2026-09-14T10:00:00"}, "UTC offset"),
         (_plan(), _plan("Extend"), {"module_name": ""}, "module_name"),
     ],
@@ -82,10 +81,19 @@ def test_prepare_normalizes_server_owned_titles_and_shapes(monkeypatch):
     for variant in payload["variants"]:
         settings = variant["plan"]["assignment_settings"]
         assert settings["published"] is True
-        assert settings["only_visible_to_overrides"] is True
+        assert settings["only_visible_to_overrides"] is False
         assert settings["omit_from_final_grade"] is True
         assert settings["post_to_sis"] is False
         assert variant["plan"]["module"] == {}
+
+
+def test_prepare_allows_teacher_owned_dates_and_ignores_legacy_group_names(monkeypatch):
+    _plans(monkeypatch)
+    payload = QuizAdapter().build_payload(_request(due_at=""))
+    assert payload["due_at"] is None
+    assert payload["bridge_due_at"] is None
+    assert payload["unrestricted_tiers"] is True
+    assert all("group_name" not in variant for variant in payload["variants"])
 
 
 def test_bridge_title_is_server_owned_and_bridge_tag_is_reserved(monkeypatch):
@@ -240,15 +248,9 @@ class FakeCanvas:
         return [], None
 
 
-def test_differentiated_quiz_family_example_places_only_sources_in_module(monkeypatch):
+def test_differentiated_quiz_family_publishes_unrestricted_sources_in_module(monkeypatch):
     _plans(monkeypatch)
     payload = QuizAdapter().build_payload(_request())
-    resolved = {"safe": {"tiers": [
-        {"index": 0, "label": "variant_0", "group_name": "Blue", "group_id": "10", "student_count": 1, "membership_digest": "a"},
-        {"index": 1, "label": "variant_1", "group_name": "Gold", "group_id": "20", "student_count": 1, "membership_digest": "b"},
-    ]}, "student_ids_by_group": {"10": ["9001"], "20": ["9002"]}}
-    monkeypatch.setattr(quiz_module, "resolve_assignment_groups", lambda *args, **kwargs: resolved)
-    monkeypatch.setattr(config, "get_extra_time", lambda _course: [])
     fake = FakeCanvas()
     registrations = {}
     monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
@@ -258,25 +260,25 @@ def test_differentiated_quiz_family_example_places_only_sources_in_module(monkey
     monkeypatch.setattr(config, "get_sis_grade_bridge", lambda course, title: copy.deepcopy(registrations.get((course, title))))
 
     context = Context()
-    result = QuizAdapter().execute(payload, {"course_id": "42", "steps": []}, {"group_snapshot": resolved["safe"]}, {}, context)
+    result = QuizAdapter().execute(payload, {"course_id": "42", "steps": []}, {}, {}, context)
 
     assert result["state"] == "applied"
     bridge_name = differentiated_bridge.bridge_title("Reading Check")
     sources = [row for row in fake.assignments.values() if row["name"] != bridge_name]
     assert [row["name"] for row in sources] == ["Reading Check - Red", "Reading Check - Gold"]
-    assert all(row["published"] and row["only_visible_to_overrides"] and row["omit_from_final_grade"] and not row["post_to_sis"] for row in sources)
+    assert all(row["published"] and not row["only_visible_to_overrides"] and row["omit_from_final_grade"] and not row["post_to_sis"] for row in sources)
     bridge = next(row for row in fake.assignments.values() if row["name"] == bridge_name)
     assert {str(row["content_id"]) for row in fake.module_items.values()} == {row["id"] for row in sources}
     assert bridge["id"] not in {str(row["content_id"]) for row in fake.module_items.values()}
     assert registrations[("42", "Reading Check")]["source_assignment_ids"] == [row["id"] for row in sources]
-    assert all(value not in json.dumps(context.steps) for value in ("9001", "9002"))
+    assert not any(path.endswith("/overrides") for _method, path, _body in fake.sends)
     assert not any(path.endswith("/post_grades") for _method, path, _body in fake.sends)
 
     sent_count = len(fake.sends)
     retry = QuizAdapter().execute(
         payload,
         {"course_id": "42", "steps": copy.deepcopy(context.steps)},
-        {"group_snapshot": resolved["safe"]},
+        {},
         {},
         context,
     )

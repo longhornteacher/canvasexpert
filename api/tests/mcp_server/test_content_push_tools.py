@@ -103,7 +103,7 @@ class DifferentiatedAdapter(RecordingAdapter):
 
     def freeze_review(self, payload, target, baseline):
         return {"mode": "differentiated", "variants": [
-            {"group_name": row["group_name"], "title": "Same Quiz"}
+            {"label": row["label"], "title": "Same Quiz"}
             for row in payload["variants"]
         ]}
 
@@ -148,21 +148,36 @@ def test_tools_delegate_to_the_shared_use_case(monkeypatch):
     assert "next" not in tools.preview_content_push("course-x", "page", "gone")
 
 
-def test_differentiated_preview_validates_exact_staged_labels_and_groups(_workspace, monkeypatch):
+def test_differentiated_preview_ignores_deprecated_group_names(_workspace, monkeypatch):
     _stage("quiz", "one")
     _stage("quiz", "two")
     adapter = DifferentiatedAdapter()
     monkeypatch.setattr(content_push.registry, "get_adapter", lambda _kind: adapter)
-    for variants, expected in [
-        ([{"label": "one", "group_name": "Blue"}], "at least two"),
-        ([{"label": "one", "group_name": "Blue", "extra": 1}, {"label": "two", "group_name": "Gold"}], "exactly"),
-        ([{"label": "one", "group_name": "Blue"}, {"label": "ONE.TXT", "group_name": "Gold"}], "unique"),
-        ([{"label": "one", "group_name": "Blue"}, {"label": "two", "group_name": " blue "}], "unique"),
-        ([{"label": r"C:\secret\one.txt", "group_name": "Blue"}, {"label": "two", "group_name": "Gold"}], "path"),
-    ]:
-        result = content_push.preview_differentiated_quiz_push("course-x", variants)
-        assert result["ok"] is False
-        assert expected in result["error"]
+    result = content_push.preview_differentiated_quiz_push(
+        "course-x", [{"label": "one"}, {"label": "two", "group_name": "ignored"}]
+    )
+    assert result["ok"] is True
+    assert result["variants"] == [{"label": "one.txt"}, {"label": "two.txt"}]
+    assert all("group_name" not in row for row in adapter.requests[0]["variants"])
+
+
+@pytest.mark.parametrize(
+    ("variants", "expected"),
+    [
+        ([{"label": "one"}], "at least two"),
+        ([{"label": "one", "extra": 1}, {"label": "two"}], "staged label"),
+        ([{"label": "one"}, {"label": "ONE.TXT"}], "unique"),
+        ([{"label": r"C:\secret\one.txt"}, {"label": "two"}], "path"),
+    ],
+)
+def test_differentiated_preview_validates_staged_labels(_workspace, monkeypatch, variants, expected):
+    _stage("quiz", "one")
+    _stage("quiz", "two")
+    adapter = DifferentiatedAdapter()
+    monkeypatch.setattr(content_push.registry, "get_adapter", lambda _kind: adapter)
+    result = content_push.preview_differentiated_quiz_push("course-x", variants)
+    assert result["ok"] is False
+    assert expected in result["error"]
     assert adapter.requests == []
 
 

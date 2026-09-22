@@ -25,7 +25,6 @@ from .adapter_support import (
     prepend_step as _step,
     replace_step as _replace_local_step,
 )
-from .assignment_groups import GroupResolutionError, resolve_assignment_groups
 from .module_placement import attach_assignment_type_module_item
 from api.platform_services import canvas_client, config
 from api.webui.runner import run_json_object
@@ -38,7 +37,7 @@ def _variant_identity(variant: dict, index: int) -> str:
     plan = variant.get("plan") or {}
     metadata = plan.get("metadata") or {}
     explicit = metadata.get("variant") or metadata.get("variant_label")
-    return _normalize(explicit or variant.get("group_name") or f"variant_{index}")
+    return _normalize(explicit or f"variant_{index}")
 
 
 class QuizAdapter:
@@ -93,15 +92,14 @@ class QuizAdapter:
         settings = copy.deepcopy(prepare_request.get("settings") or {})
         due_at, module_name, bridge_due_at = (
             differentiated_bridge.require_family_delivery(
-                settings.get("due_at"), settings.get("module_name"), settings.get("module_id")
+                settings.get("due_at"), settings.get("module_name"), settings.get("module_id"),
             )
         )
         variants = []
         for row in variants_in:
             path = row.get("path")
-            group_name = row.get("group_name")
-            if not path or not group_name:
-                raise ValueError("each variant requires path and group_name")
+            if not path:
+                raise ValueError("each variant requires a staged path")
             plan = run_json_object(
                 ["qf_pusher.py", path, "--plan-json"],
                 extra_env={"QF_PUSH_SETTINGS": json.dumps(settings)},
@@ -120,7 +118,6 @@ class QuizAdapter:
                 raise ValueError("variant plan missing quiz_payload")
             variants.append({
                 "path": path,
-                "group_name": str(group_name).strip(),
                 "plan": plan,
             })
         base_titles = [
@@ -162,14 +159,6 @@ class QuizAdapter:
             for total in numeric_totals[1:]
         ):
             raise ValueError("Differentiated QuizForge variants must have equal total points")
-        group_names = [
-            str((variant["plan"].get("assignment_settings") or {}).get(
-                "assignment_group_name", settings.get("assignment_group_name") or ""
-            )).strip().casefold()
-            for variant in variants
-        ]
-        if len(set(group_names)) != 1:
-            raise ValueError("Differentiated QuizForge variants must use one assignment group")
         base_title = base_titles[0]
         settings.update({"due_at": due_at, "module_name": module_name,
                          "module_id": str(settings.get("module_id") or "").strip(),
@@ -183,7 +172,7 @@ class QuizAdapter:
             assignment_settings.update({
                 "due_at": due_at,
                 "published": True,
-                "only_visible_to_overrides": True,
+                "only_visible_to_overrides": False,
                 "omit_from_final_grade": True,
                 "post_to_sis": False,
             })
@@ -199,6 +188,7 @@ class QuizAdapter:
             "create_module": bool(settings.get("create_module")),
             "bridge_due_at": bridge_due_at,
             "bridge_description": differentiated_bridge.bridge_description(),
+            "unrestricted_tiers": True,
         }
 
     def source_digest(self, payload: dict) -> str:
@@ -208,7 +198,6 @@ class QuizAdapter:
                 "mode": "differentiated",
                 "variants": [
                     {
-                        "group_name": v["group_name"],
                         "plan": {
                             "version": v["plan"].get("version"),
                             "title": v["plan"].get("title"),
@@ -232,6 +221,7 @@ class QuizAdapter:
                 "create_module": payload.get("create_module"),
                 "bridge_due_at": payload.get("bridge_due_at"),
                 "bridge_description": payload.get("bridge_description"),
+                "unrestricted_tiers": payload.get("unrestricted_tiers"),
             })
         plan = payload.get("plan", {})
         return models.sha256_dict({
@@ -293,8 +283,6 @@ class QuizAdapter:
         course_id = target["course_id"]
         if payload.get("mode") == "differentiated":
             baseline = self._capture_baseline_differentiated(course_id, payload)
-            if isinstance(baseline.get("group_snapshot"), dict):
-                payload["group_snapshot"] = copy.deepcopy(baseline["group_snapshot"])
             return baseline
         plan = payload.get("plan", {})
         title = plan.get("title", "")
@@ -322,17 +310,8 @@ class QuizAdapter:
         return baseline
 
     def _capture_baseline_differentiated(self, course_id: str, payload: dict) -> dict:
-        """Capture group snapshot and existing quiz assignments per variant."""
+        """Capture existing quiz assignments per variant without student placement reads."""
         variants = payload.get("variants", [])
-        try:
-            resolved = resolve_assignment_groups(
-                course_id,
-                [{"label": f"variant_{i}", "group": v["group_name"]}
-                 for i, v in enumerate(variants)],
-            )
-        except GroupResolutionError as exc:
-            return {"canvas_error": str(exc)}
-
         existing_by_title = {}
         existing_by_variant = {}
         titles = [differentiated_bridge.bridge_title(payload.get("base_title", "")), *[
@@ -358,7 +337,6 @@ class QuizAdapter:
             )
 
         return {
-            "group_snapshot": resolved["safe"],
             "existing_by_title": existing_by_title,
             "existing_by_variant": existing_by_variant,
         }
@@ -369,26 +347,23 @@ class QuizAdapter:
         if "canvas_error" in baseline:
             return True
         if payload.get("mode") == "differentiated":
-            if "group_snapshot" in baseline:
-                fresh = self.capture_baseline(payload, target)
-                if "canvas_error" in fresh:
+            fresh = self.capture_baseline(payload, target)
+            if "canvas_error" in fresh:
+                return True
+            known = {
+                str(step.get("returned_object_id"))
+                for step in target.get("steps", [])
+                if (
+                    step.get("step_key", "").startswith("create_quiz:")
+                    or step.get("step_key") == "create_bridge"
+                )
+                and step.get("returned_object_id") is not None
+            }
+            existing_map = fresh.get("existing_by_title", {})
+            for matches in existing_map.values():
+                current = {m["id"] for m in matches}
+                if current - known:
                     return True
-                if fresh.get("group_snapshot") != baseline.get("group_snapshot"):
-                    return True
-                known = {
-                    str(step.get("returned_object_id"))
-                    for step in target.get("steps", [])
-                    if (
-                        step.get("step_key", "").startswith("create_quiz:")
-                        or step.get("step_key") == "create_bridge"
-                    )
-                    and step.get("returned_object_id") is not None
-                }
-                existing_map = fresh.get("existing_by_title", {})
-                for matches in existing_map.values():
-                    current = {m["id"] for m in matches}
-                    if current - known:
-                        return True
             return False
         existing = baseline.get("existing_quiz")
         if existing is None:
@@ -486,7 +461,6 @@ class QuizAdapter:
         self, payload: dict, course_name: str, baseline: dict,
     ) -> dict:
         variants = payload.get("variants", [])
-        safe = baseline.get("group_snapshot") or {}
         existing_by_title = baseline.get("existing_by_title", {})
 
         variant_summaries = []
@@ -500,7 +474,6 @@ class QuizAdapter:
             variant_summaries.append({
                 "tier": v.get("tier"),
                 "public_tag": v.get("tag"),
-                "group_name": v["group_name"],
                 "title": plan.get("title"),
                 "item_count": len(items),
                 "item_types": item_types,
@@ -518,21 +491,14 @@ class QuizAdapter:
                 "module_name": payload.get("module_name"),
                 "post_to_sis": True,
             },
-            "only_visible_to_overrides": True,
+            "only_visible_to_overrides": False,
+            "unrestricted_tiers": True,
             "tier_warning": (
                 "Canvas will create one configured-tag-suffixed New Quiz per tier and one "
                 "gradebook-only '<family> - Bridge'; only the source assignments are module items. Review them in Canvas Live; "
                 "the teacher initiates SIS sync there."
             ),
         }
-
-        # Group snapshot from baseline
-        if safe.get("tiers"):
-            review["tiers"] = [
-                {"label": row.get("label"), "group": row.get("group_name"),
-                 "student_count": row.get("student_count")}
-                for row in safe["tiers"]
-            ]
 
         # Existing quiz info
         has_existing = any(matches for matches in existing_by_title.values())
@@ -555,8 +521,6 @@ class QuizAdapter:
                 baseline,
                 context,
                 ordered_steps=_ordered_steps,
-                resolve_assignment_groups=resolve_assignment_groups,
-                group_resolution_error=GroupResolutionError,
             )
         return quiz_whole.execute(payload, target, context, ordered_steps=_ordered_steps)
 
@@ -615,10 +579,8 @@ def _ordered_steps(target: dict) -> list[dict]:
         prefix, _, suffix = key.partition(":")
         rank = {
             "create_quiz": 0,
-            "restrict_assignment": 1,
-            "create_override": 2,
-            "create_item": 3,
-            "patch_assignment": 4,
+            "create_item": 1,
+            "patch_assignment": 2,
         }.get(prefix, 9)
         parts = suffix.split(":") if suffix else ["0"]
         variant = int(parts[0]) if parts[0].isdigit() else 0

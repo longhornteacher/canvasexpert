@@ -266,7 +266,11 @@ def preview_differentiated_quiz_push(
     module_id: str = "",
     create_module: bool = False,
 ) -> dict:
-    """Freeze a group-restricted QuizForge operation from staged labels."""
+    """Freeze an unrestricted QuizForge family from staged labels.
+
+    Legacy ``group_name`` fields are accepted and ignored so old callers do not
+    become a new delivery dependency.
+    """
     course_key = str(course_id or "").strip()
     if not course_key:
         return {"ok": False, "error": "course_id is required"}
@@ -285,18 +289,16 @@ def preview_differentiated_quiz_push(
 
     resolved = []
     seen_labels = set()
-    seen_groups = set()
     for variant in variants:
-        if not isinstance(variant, dict) or set(variant) != {"label", "group_name"}:
-            return {"ok": False, "error": "each variant must contain exactly label and group_name"}
+        if (not isinstance(variant, dict) or "label" not in variant or
+                set(variant) - {"label", "group_name"}):
+            return {"ok": False, "error": "each variant must contain a staged label"}
         label = variant["label"]
-        group_name = variant["group_name"]
-        if not isinstance(label, str) or not isinstance(group_name, str):
-            return {"ok": False, "error": "variant label and group_name must be strings"}
+        if not isinstance(label, str):
+            return {"ok": False, "error": "variant label must be a string"}
         label = label.strip()
-        group_name = group_name.strip()
-        if not label or not group_name:
-            return {"ok": False, "error": "variant label and group_name cannot be blank"}
+        if not label:
+            return {"ok": False, "error": "variant label cannot be blank"}
         if os.path.isabs(label) or "/" in label or "\\" in label or ".." in label:
             return {"ok": False, "error": "variant label must be a staged label, not a path"}
         path, resolve_error = _resolve_staged_draft("quiz", label)
@@ -305,12 +307,8 @@ def preview_differentiated_quiz_push(
         resolved_label = Path(path).name.casefold()
         if resolved_label in seen_labels:
             return {"ok": False, "error": "variant labels must be unique after resolution"}
-        group_key = group_name.casefold()
-        if group_key in seen_groups:
-            return {"ok": False, "error": "group names must be unique after trim and case-folding"}
         seen_labels.add(resolved_label)
-        seen_groups.add(group_key)
-        resolved.append({"label": Path(path).name, "path": path, "group_name": group_name})
+        resolved.append({"label": Path(path).name, "path": path})
 
     adapter = registry.get_adapter(QUIZ_KIND)
     try:
@@ -318,13 +316,8 @@ def preview_differentiated_quiz_push(
                                          "settings": dict(named)})
         target = adapter.verify_targets(payload, [{"course_id": course_key}])[0]
         baseline = adapter.capture_baseline(payload, target)
-        safe = baseline.get("group_snapshot") if isinstance(baseline, dict) else None
-        tiers = safe.get("tiers") if isinstance(safe, dict) else None
-        if (not isinstance(safe, dict) or "canvas_error" in baseline or
-                not isinstance(tiers, list) or len(tiers) != len(resolved) or
-                any(not isinstance(tier, dict) or "student_count" not in tier
-                    for tier in tiers)):
-            return {"ok": False, "error": "the differentiated quiz baseline could not resolve every requested group", "blocking": True}
+        if not isinstance(baseline, dict) or "canvas_error" in baseline:
+            return {"ok": False, "error": "the differentiated quiz baseline could not be read", "blocking": True}
         target_record = models.new_target(target_key=target["target_key"],
                                           idempotency_key=target["idempotency_key"],
                                           course_id=target["course_id"], baseline=baseline)
@@ -342,7 +335,7 @@ def preview_differentiated_quiz_push(
     except Exception:
         return {"ok": False, "error": "the differentiated quiz push could not be prepared"}
     return {"ok": True, "kind": "quiz", "variants": [
-        {"label": row["label"], "group_name": row["group_name"]} for row in resolved
+        {"label": row["label"]} for row in resolved
     ], "operation_id": operation_id, "batch_id": batch["batch_id"],
             "review_digest": batch["review_digest"], "preview": _scrub_paths(frozen)}
 
@@ -690,9 +683,6 @@ def _result_projection(operation: dict, result: dict) -> dict:
                         "title": ((variant.get("plan") or {}).get("title") or variant.get("title")),
                         "url": step.get("returned_object_url"),
                     }
-                    group_name = variant.get("group_name") or variant.get("group")
-                    if group_name:
-                        created_row["group_name"] = group_name
                     created.append(created_row)
             if created:
                 row["created"] = created
@@ -712,13 +702,6 @@ def _result_projection(operation: dict, result: dict) -> dict:
                 "module_id": module_step.get("module_id") if module_step else normalized.get("module_id"),
                 "module_name": normalized.get("module_name"),
             }
-            safe_groups = ((stored_target.get("baseline") or {}).get("group_snapshot") or {}).get("tiers") or []
-            if safe_groups:
-                row["groups"] = [
-                    {"tier": item.get("label"), "group_name": item.get("group_name"),
-                     "student_count": item.get("student_count")}
-                    for item in safe_groups
-                ]
             link_step = next((step for step in step_source if step.get("step_key") == "register_family"), None)
             row["family_link"] = {
                 "state": "linked" if link_step and link_step.get("state") in ("applied", "skipped") else "needs_repair",

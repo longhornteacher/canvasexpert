@@ -37,11 +37,10 @@ one file per source, gives every file the same exact unsuffixed title, and decla
 tier in `metadata.variant` or `metadata.variant_label`. Do not write the public suffix into a
 QuizForge title; CanvasExpert appends it.
 
-QuizForge differentiated delivery requires a timezone-aware due timestamp and a selected
-module. AssignmentForge differentiated delivery requires the selected module but may be
-undated; the teacher sets due, unlock, and lock dates in Canvas after delivery. All sources
-must use equal points possible and one assignment group. When QuizForge supplies a due date,
-the source timestamp is preserved and the bridge is due at 23:59 on the same date and offset.
+Both differentiated delivery paths require a selected module but may be undated; the teacher
+sets due, unlock, and lock dates in Canvas after delivery. CanvasExpert never asks for or applies
+pod/group placement. All sources must use equal points possible. When a teacher supplies a due
+date, the source timestamp is preserved and the bridge is due at 23:59 on the same date and offset.
 
 A teacher request to land the family authorizes the complete reviewed Operation Ledger
 sequence for that course and family. CanvasExpert reports the exact created objects. Open Canvas

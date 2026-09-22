@@ -264,7 +264,6 @@ def require_family_delivery(
     *,
     require_exact_module: bool = False,
     create_module: bool = False,
-    allow_missing_due: bool = False,
 ) -> tuple[str | None, str, str | None]:
     due_text = str(due_at or "").strip()
     module_text = str(module_name or "").strip()
@@ -280,9 +279,7 @@ def require_family_delivery(
     elif not module_text and not module_id_text:
         raise ValueError("Differentiated delivery requires module_id or module_name")
     if not due_text:
-        if allow_missing_due:
-            return None, module_text, None
-        raise ValueError("Differentiated delivery requires due_at")
+        return None, module_text, None
     try:
         parsed = datetime.fromisoformat(due_text.replace("Z", "+00:00"))
     except ValueError as exc:
