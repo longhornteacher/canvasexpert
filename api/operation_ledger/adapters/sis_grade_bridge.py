@@ -249,6 +249,12 @@ class SisGradeBridgeAdapter:
         if len(source_rows) < 2:
             raise _BridgeInvariantError("two_source_threshold_not_met")
         _validate_source_identity(payload, source_rows)
+        points = [row.get("points_possible") for row in source_rows]
+        if any(not _numbers_equal(points[0], value) for value in points[1:]):
+            raise _BridgeInvariantError("mixed_points_possible")
+        groups = [str(row.get("assignment_group_id") or "") for row in source_rows]
+        if len(set(groups)) != 1:
+            raise _BridgeInvariantError("mixed_assignment_groups")
 
         bridge_id = str(payload.get("bridge_assignment_id") or "") or None
         bridge = assignments.get(bridge_id) if bridge_id else None
@@ -425,6 +431,7 @@ class SisGradeBridgeAdapter:
                 "repair_fields": list(baseline.get("drift_fields") or []),
                 "action": baseline.get("action"),
                 "source_count": len(baseline.get("source_assignment_ids") or []),
+                "source_titles": list(baseline.get("source_titles") or []),
                 "source_setting_repairs": [
                     {
                         "source_assignment_id": item.get("assignment_id"),

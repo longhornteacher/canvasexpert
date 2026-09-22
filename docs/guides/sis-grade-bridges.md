@@ -42,6 +42,10 @@ sets due, unlock, and lock dates in Canvas after delivery. CanvasExpert never as
 pod/group placement. All sources must use equal points possible. When a teacher supplies a due
 date, the source timestamp is preserved and the bridge is due at 23:59 on the same date and offset.
 
+If real Canvas titles drift from the configured `Base - <tag>` shape, the family remains
+recoverable without renaming anything in Canvas; an agent can propose the exact source IDs for
+teacher confirmation.
+
 A teacher request to land the family authorizes the complete reviewed Operation Ledger
 sequence for that course and family. CanvasExpert reports the exact created objects. Open Canvas
 Live to review them and make any teacher-owned changes.
@@ -75,7 +79,7 @@ postconditions for the writes. Bridge operations do not repair or rearrange modu
 |---|---|
 | `list_sis_grade_bridges(course_id)` | List student-free family links for one Current course. |
 | `reconcile_sis_grade_bridges(course_id)` | Discover differentiated families from the current local sync/mirror and return a student-free bridge matrix. |
-| `preview_sis_grade_bridge_reconciliation(course_id, family_title)` | Turn one discovered missing bridge into a reviewed bridge-only operation. |
+| `preview_sis_grade_bridge_reconciliation(course_id, family_title, source_assignment_ids?, bridge_assignment_id?)` | Turn one discovered or agent-proposed grouping into a reviewed bridge-only operation. |
 | `preview_sis_grade_bridge(course_id, family_title)` | Read the exact linked family from the local sync/mirror and freeze the score projection review. |
 | `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | After teacher approval, push the unchanged reviewed scores to the exact linked bridge. |
 

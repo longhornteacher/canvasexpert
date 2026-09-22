@@ -234,11 +234,22 @@ def reconcile_sis_grade_bridges(course_id: str) -> dict:
     return sis_grade_bridge.reconcile_sis_grade_bridges(course_id)
 
 
-def preview_sis_grade_bridge_reconciliation(course_id: str, family_title: str) -> dict:
-    """Freeze a reviewed Operation Ledger repair for one discovered family."""
+def preview_sis_grade_bridge_reconciliation(
+    course_id: str,
+    family_title: str,
+    source_assignment_ids: list[str] | None = None,
+    bridge_assignment_id: str | None = None,
+) -> dict:
+    """Freeze a reviewed repair for one differentiated family.
+    Pass source_assignment_ids to propose a grouping that title-based discovery did not find; the teacher confirms the frozen review before any write."""
     return _with_next(
         "preview_sis_grade_bridge_reconciliation",
-        sis_grade_bridge.preview_sis_grade_bridge_reconciliation(course_id, family_title),
+        sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+            course_id,
+            family_title,
+            source_assignment_ids=source_assignment_ids,
+            bridge_assignment_id=bridge_assignment_id,
+        ),
     )
 
 

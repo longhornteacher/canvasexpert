@@ -1,12 +1,18 @@
 """Student-free, mirror-backed differentiated bridge reconciliation laws."""
 
+import copy
+
 from api import sis_grade_bridge
+from api import course_catalog
+from api.operation_ledger import operations, paths
 from api.operation_ledger.adapters import differentiated_bridge
-from api.platform_services import config
+from api.platform_services import canvas_client, config
 
 
 def _assignment(assignment_id, name, *, family="fam-1", tier=None, bridge=False, excluded=True):
-    metadata = {"family_id": family}
+    metadata = {}
+    if family is not None:
+        metadata["family_id"] = family
     if tier:
         metadata["tier"] = tier
     if bridge:
@@ -22,6 +28,70 @@ def _assignment(assignment_id, name, *, family="fam-1", tier=None, bridge=False,
         "omit_from_final_grade": excluded,
         "post_to_sis": bridge,
     }
+
+
+def _messy_rows(*, points=(10, 10, 10), groups=("g", "g", "g")):
+    titles = [
+        "Outsiders - Chapter 7 SCRS - Blue",
+        "The Outsiders - Chapter 7 SCRs Red",
+        "Outsiders - Ch 7 SCRs - Silver",
+    ]
+    return [
+        {
+            **_assignment(
+                assignment_id,
+                title,
+                family=None,
+            ),
+            "points_possible": points[index],
+            "assignment_group_id": groups[index],
+        }
+        for index, (assignment_id, title) in enumerate(
+            zip(("source-blue", "source-red", "source-silver"), titles)
+        )
+    ]
+
+
+def _wire_proposed_snapshot(monkeypatch, tmp_path, rows, registrations=None):
+    monkeypatch.setattr(paths, "private_root", lambda: tmp_path / "private")
+    monkeypatch.setattr(
+        config,
+        "active_courses",
+        lambda: [{"id": "course-1", "name": "Synthetic Course", "active": True}],
+    )
+    monkeypatch.setattr(config, "get_sis_grade_bridge", lambda *_args: None)
+    monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
+    monkeypatch.setattr(
+        config,
+        "list_sis_grade_bridges",
+        lambda _course: copy.deepcopy(registrations or []),
+    )
+    monkeypatch.setattr(
+        course_catalog,
+        "read_catalog",
+        lambda _course: {
+            "catalog": {
+                "updated_at": "2026-09-21T12:00:00Z",
+                "assignments": {
+                    "state": "current",
+                    "records": {
+                        str(row["id"]): copy.deepcopy(row) for row in rows
+                    },
+                },
+                "modules": {"state": "current", "records": []},
+            }
+        },
+    )
+
+
+def _preview_proposed(monkeypatch, tmp_path, rows, **kwargs):
+    _wire_proposed_snapshot(monkeypatch, tmp_path, rows)
+    return sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1",
+        "Chapter 7 reading",
+        source_assignment_ids=[row["id"] for row in rows],
+        **kwargs,
+    )
 
 
 def test_discovery_prefers_stable_family_and_tier_metadata_over_title():
@@ -105,3 +175,168 @@ def test_discovery_keeps_two_source_threshold_and_ambiguity_rules(monkeypatch):
     assert result["matrix"]
     assert all(row["status"] == "blocked" for row in result["matrix"])
     assert all("ambiguous_family_identity" in row["reasons"] for row in result["matrix"])
+
+
+def test_agent_proposed_grouping_recovers_the_real_messy_title_case(monkeypatch, tmp_path):
+    rows = _messy_rows()
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {
+        "Support": "Blue", "Core": "Red", "Accelerate": "Silver", "Extend": "",
+    })
+
+    matrix = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+
+    assert len(matrix["matrix"]) == 3
+    assert all(row["status"] == "incomplete" for row in matrix["matrix"])
+    result = _preview_proposed(monkeypatch, tmp_path, rows)
+
+    assert result["ok"] is True
+    assert result["preview"]["source_titles"] == [row["name"] for row in rows]
+
+
+def test_agent_proposed_grouping_never_calls_canvas_live(monkeypatch, tmp_path):
+    rows = _messy_rows()
+    _wire_proposed_snapshot(monkeypatch, tmp_path, rows)
+
+    def fail_live(*_args, **_kwargs):
+        raise AssertionError("proposed grouping reached CanvasLive")
+
+    for name in ("canvas_get", "canvas_get_all", "canvas_get_all_complete", "_canvas_send"):
+        if hasattr(canvas_client, name):
+            monkeypatch.setattr(canvas_client, name, fail_live)
+
+    result = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "Chapter 7 reading",
+        source_assignment_ids=[row["id"] for row in rows],
+    )
+
+    assert result["ok"] is True
+
+
+def test_agent_proposed_grouping_uses_mirror_titles_not_caller_assignments(monkeypatch, tmp_path):
+    rows = _messy_rows()
+    result = _preview_proposed(
+        monkeypatch,
+        tmp_path,
+        rows,
+        assignments=[{**row, "name": "Caller supplied title"} for row in rows],
+    )
+
+    assert result["ok"] is True
+    assert result["preview"]["source_titles"] == [row["name"] for row in rows]
+
+
+def test_agent_proposed_grouping_refuses_mixed_points_without_persisting(monkeypatch, tmp_path):
+    rows = _messy_rows(points=(10, 20, 10))
+    result = _preview_proposed(monkeypatch, tmp_path, rows)
+
+    assert result["ok"] is False
+    assert result["code"] == "mixed_points_possible"
+    assert result["points_possible"] == [10, 20]
+    assert operations.list_operations() == []
+
+
+def test_agent_proposed_grouping_refuses_mixed_assignment_groups(monkeypatch, tmp_path):
+    rows = _messy_rows(groups=("g1", "g2", "g1"))
+    result = _preview_proposed(monkeypatch, tmp_path, rows)
+
+    assert result["ok"] is False
+    assert result["code"] == "mixed_assignment_groups"
+    assert result["assignment_group_ids"] == ["g1", "g2"]
+
+
+def test_agent_proposed_grouping_refuses_title_and_source_link_collisions(monkeypatch, tmp_path):
+    rows = _messy_rows()
+    _wire_proposed_snapshot(
+        monkeypatch,
+        tmp_path,
+        rows,
+        registrations=[{
+            "family_title": "Existing Family",
+            "source_assignment_ids": ["other-source"],
+            "bridge_assignment_id": "other-bridge",
+        }],
+    )
+    monkeypatch.setattr(
+        config,
+        "list_sis_grade_bridges",
+        lambda _course: [{
+            "family_title": "Chapter 7 reading",
+            "source_assignment_ids": ["other-source"],
+            "bridge_assignment_id": "other-bridge",
+        }],
+    )
+    title_collision = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "CHAPTER 7 READING",
+        source_assignment_ids=[row["id"] for row in rows],
+    )
+    assert title_collision["code"] == "family_already_linked"
+    assert title_collision["conflicting_family_title"] == "Chapter 7 reading"
+
+    monkeypatch.setattr(
+        config,
+        "list_sis_grade_bridges",
+        lambda _course: [{
+            "family_title": "Existing Family",
+            "source_assignment_ids": ["source-red"],
+            "bridge_assignment_id": "other-bridge",
+        }],
+    )
+    source_collision = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "Chapter 7 reading",
+        source_assignment_ids=[row["id"] for row in rows],
+    )
+    assert source_collision["code"] == "family_already_linked"
+    assert source_collision["conflicting_family_title"] == "Existing Family"
+
+
+def test_agent_proposed_grouping_deduplicates_ids_before_threshold_check(monkeypatch):
+    monkeypatch.setattr(config, "active_courses", lambda: [{"id": "course-1"}])
+
+    result = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "Chapter 7 reading", source_assignment_ids=["source-blue", "source-blue"]
+    )
+
+    assert result == {
+        "ok": False,
+        "code": "two_source_threshold_not_met",
+        "error": "A proposed family must contain at least two distinct source assignments.",
+    }
+
+
+def test_agent_proposed_grouping_refuses_missing_source_ids(monkeypatch, tmp_path):
+    rows = _messy_rows()
+    _wire_proposed_snapshot(monkeypatch, tmp_path, rows)
+
+    result = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "Chapter 7 reading",
+        source_assignment_ids=["source-blue", "missing-source", "source-silver"],
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "source_exact_id_unverified"
+    assert result["missing_assignment_ids"] == ["missing-source"]
+
+
+def test_agent_proposed_grouping_preserves_family_link_identity(monkeypatch):
+    rows = _messy_rows()
+    registrations = []
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {
+        "Support": "Blue", "Core": "Red", "Accelerate": "Silver", "Extend": "",
+    })
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: registrations)
+
+    registration = {
+        "family_title": "Chapter 7 reading",
+        "source_assignment_ids": [row["id"] for row in rows],
+        "source_titles": [row["name"] for row in rows],
+        "bridge_assignment_id": "bridge-1",
+        "bridge_state_digest": "a" * 64,
+    }
+    registrations.append(registration)
+
+    families = differentiated_bridge.discover_families(rows, registrations)
+
+    assert len(families) == 1
+    assert families[0]["identity_source"] == "family_link"
+    assert families[0]["source_assignment_ids"] == [row["id"] for row in rows]

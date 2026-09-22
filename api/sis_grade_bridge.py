@@ -8,6 +8,7 @@ may reach Canvas Live. Results remain aggregate and student-free.
 from __future__ import annotations
 
 import copy
+import math
 
 from api.operation_ledger import batches, executor, models, operations, receipts, registry
 from api.operation_ledger.adapters.sis_grade_bridge import KIND
@@ -156,6 +157,43 @@ def _bridge_safety_reasons(row: dict, *, expected_points=None, expected_group=No
     return sorted(set(reasons))
 
 
+def _points_equal(left, right) -> bool:
+    try:
+        left_number = float(left)
+        right_number = float(right)
+    except (TypeError, ValueError):
+        return left == right
+    if not math.isfinite(left_number) or not math.isfinite(right_number):
+        return False
+    return math.isclose(left_number, right_number, rel_tol=0.0, abs_tol=1e-6)
+
+
+def _distinct_point_values(values: list[object]) -> list[object]:
+    raw_values = []
+    display_values = []
+    for value in values:
+        if any(_points_equal(value, previous) for previous in raw_values):
+            continue
+        raw_values.append(value)
+        try:
+            number = float(value)
+            if math.isfinite(number):
+                value = int(number) if number.is_integer() else number
+        except (TypeError, ValueError):
+            pass
+        display_values.append(value)
+    return display_values
+
+
+def _distinct_group_values(values: list[object]) -> list[str]:
+    result = []
+    for value in values:
+        display = str(value or "")
+        if display not in result:
+            result.append(display)
+    return result
+
+
 def _family_row_identity(family: dict) -> str:
     return str(family.get("family_key") or family.get("family_title") or "").strip().casefold()
 
@@ -231,8 +269,8 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
         source_failures = []
         for row in source_rows:
             source_failures.extend(_source_shape_reasons(row))
-        supplied_points = [str(row.get("points_possible")) for row in source_rows if row.get("points_possible") is not None]
-        if supplied_points and len(set(supplied_points)) != 1:
+        supplied_points = [row.get("points_possible") for row in source_rows if row.get("points_possible") is not None]
+        if supplied_points and not all(_points_equal(supplied_points[0], value) for value in supplied_points[1:]):
             source_failures.append("mixed_points_possible")
         supplied_groups = [str(row.get("assignment_group_id")) for row in source_rows if row.get("assignment_group_id") is not None]
         if supplied_groups and len(set(supplied_groups)) != 1:
@@ -474,10 +512,168 @@ def preview_sis_grade_bridge(
     }
 
 
+def _preview_agent_grouping(
+    course_id: str,
+    family_title: str,
+    *,
+    source_assignment_ids: list[str],
+    bridge_assignment_id: str | None = None,
+) -> dict:
+    course_key = str(course_id or "").strip()
+    title = str(family_title or "").strip()
+    if not _current_course(course_key):
+        return {"ok": False, "error": "course is not in Current courses"}
+
+    source_ids = []
+    seen_ids = set()
+    for value in source_assignment_ids or []:
+        assignment_id = str(value).strip() if value is not None else ""
+        if assignment_id and assignment_id not in seen_ids:
+            seen_ids.add(assignment_id)
+            source_ids.append(assignment_id)
+    if len(source_ids) < 2:
+        return {
+            "ok": False,
+            "code": "two_source_threshold_not_met",
+            "error": "A proposed family must contain at least two distinct source assignments.",
+        }
+
+    try:
+        rows = _course_assignments(course_key)
+    except ValueError:
+        return {
+            "ok": False,
+            "code": "mirror_read_failed",
+            "error": "The current course assignment mirror is unavailable or incomplete.",
+            "user_action": "Refresh the course mirror once, then retry this proposal.",
+            "blocking": True,
+        }
+    by_id = {
+        str(row.get("id")): row
+        for row in rows
+        if isinstance(row, dict) and str(row.get("id") or "").strip()
+    }
+    missing_ids = [assignment_id for assignment_id in source_ids if assignment_id not in by_id]
+    if missing_ids:
+        return {
+            "ok": False,
+            "code": "source_exact_id_unverified",
+            "missing_assignment_ids": missing_ids,
+            "error": "The proposed source assignment IDs are not all present in the local mirror.",
+            "user_action": "Refresh the course mirror once, then retry this proposal.",
+        }
+
+    try:
+        registrations = config.list_sis_grade_bridges(course_key)
+    except Exception:
+        return {
+            "ok": False,
+            "code": "family_links_read_failed",
+            "error": "Existing bridge family links could not be read.",
+            "blocking": True,
+        }
+    proposed_ids = set(source_ids)
+    requested_title_key = title.casefold()
+    for registration in registrations or []:
+        if not isinstance(registration, dict):
+            continue
+        existing_title = str(registration.get("family_title") or "").strip()
+        existing_ids = {
+            str(value).strip()
+            for value in (registration.get("source_assignment_ids") or [])
+            if str(value).strip()
+        }
+        bridge_id = str(registration.get("bridge_assignment_id") or "").strip()
+        if (
+            existing_title.casefold() == requested_title_key
+            or proposed_ids.intersection(existing_ids)
+            or bridge_id in proposed_ids
+        ):
+            return {
+                "ok": False,
+                "code": "family_already_linked",
+                "error": "A proposed source or family title is already linked.",
+                "conflicting_family_title": existing_title,
+            }
+
+    source_rows = [by_id[assignment_id] for assignment_id in source_ids]
+    point_values = [row.get("points_possible") for row in source_rows]
+    if point_values and not all(_points_equal(point_values[0], value) for value in point_values[1:]):
+        values = _distinct_point_values(point_values)
+        return {
+            "ok": False,
+            "code": "mixed_points_possible",
+            "points_possible": values,
+            "values": values,
+        }
+    group_values = _distinct_group_values(
+        [row.get("assignment_group_id") for row in source_rows]
+    )
+    if len(group_values) > 1:
+        return {
+            "ok": False,
+            "code": "mixed_assignment_groups",
+            "assignment_group_ids": group_values,
+            "values": group_values,
+        }
+
+    bridge_id = str(bridge_assignment_id).strip() if bridge_assignment_id is not None else ""
+    if bridge_id:
+        if bridge_id not in by_id or bridge_id in proposed_ids:
+            return {
+                "ok": False,
+                "code": "bridge_exact_id_unverified",
+                "bridge_assignment_id": bridge_id,
+                "error": "The proposed bridge assignment ID is missing or is also a source.",
+            }
+
+    discovered = {
+        "family_key": title,
+        "family_title": title,
+        "source_assignment_ids": source_ids,
+        "source_titles": [str(row.get("name") or "") for row in source_rows],
+        "bridge_assignment_id": bridge_id or None,
+        "module_id": None,
+        "module_name": None,
+    }
+    result = preview_sis_grade_bridge(
+        course_key, title, discovered_family=discovered
+    )
+    reserved_error = "Differentiated family titles must be unsuffixed; '- Bridge' is reserved"
+    if result.get("error") == reserved_error:
+        return {
+            "ok": False,
+            "code": "family_title_reserved_suffix",
+            "error": "Choose a family title that does not end in '- Bridge'.",
+        }
+    if result.get("ok"):
+        result["user_action"] = (
+            "Teacher confirms the exact source titles in the frozen review, then call "
+            "apply_sis_grade_bridge with the unchanged operation coordinates."
+        )
+        result["next"] = (
+            "Teacher confirms the frozen review, then call apply_sis_grade_bridge "
+            "with the unchanged operation coordinates."
+        )
+    return result
+
+
 def preview_sis_grade_bridge_reconciliation(
-    course_id: str, family_title: str, *, assignments: list[dict] | None = None,
+    course_id: str,
+    family_title: str,
+    *,
+    source_assignment_ids: list[str] | None = None,
+    bridge_assignment_id: str | None = None,
+    assignments: list[dict] | None = None,
 ) -> dict:
     """Create a reviewed operation for a CE-discovered missing/drifted family."""
+    if source_assignment_ids:
+        return _preview_agent_grouping(
+            course_id,
+            family_title,
+            source_assignment_ids=source_assignment_ids,
+            bridge_assignment_id=bridge_assignment_id,
+        )
     matrix = reconcile_sis_grade_bridges(course_id, assignments=assignments)
     if not matrix.get("ok"):
         return matrix

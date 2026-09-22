@@ -139,7 +139,7 @@ def discover_families(
         if registration:
             family_key = str(registration.get("family_key") or registration.get("family_title") or "").strip()
             base_title = str(registration.get("family_title") or base_title).strip()
-            tier = tier or public_tag or "registered"
+            tier = tier or public_tag or ("registered" if is_bridge else "registered_source")
             identity = "family_link"
         if not family_key or not tier:
             if family_key and is_bridge:

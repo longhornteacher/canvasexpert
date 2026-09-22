@@ -21,6 +21,9 @@ safe tier facts, the exact module identity, the bridge assignment ID, and a
 structural family digest. The persisted private link retains its existing
 storage keys; product-facing language calls it a **family link**.
 
+A teacher-confirmed agent grouping is a valid origin for that identity, alongside
+authoring delivery and title-based discovery.
+
 The link is written only after the approved bridge push has verified its exact
 live postconditions. A discovered title or a set of assignment IDs is not a
 link. Missing or unverifiable link state is `needs_repair` and cannot authorize

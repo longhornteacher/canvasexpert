@@ -97,9 +97,19 @@ def reconcile_sis_grade_bridges(course_id: str) -> str:
 
 
 @mcp.tool(structured_output=False)
-def preview_sis_grade_bridge_reconciliation(course_id: str, family_title: str) -> str:
-    """Freeze a reviewed repair for one discovered differentiated family."""
-    return _compact(tools.preview_sis_grade_bridge_reconciliation(course_id, family_title))
+def preview_sis_grade_bridge_reconciliation(
+    course_id: str,
+    family_title: str,
+    source_assignment_ids: list[str] | None = None,
+    bridge_assignment_id: str | None = None,
+) -> str:
+    """Agent chooses sources; teacher confirms before write."""
+    return _compact(tools.preview_sis_grade_bridge_reconciliation(
+        course_id,
+        family_title,
+        source_assignment_ids,
+        bridge_assignment_id,
+    ))
 
 
 @mcp.tool(structured_output=False)

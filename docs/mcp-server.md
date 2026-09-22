@@ -53,7 +53,7 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 55 (44 tools).
+Tool schema version 56 (44 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -61,7 +61,7 @@ Tool schema version 55 (44 tools).
 | `list_sis_grade_bridges(course_id)` | Configured whole-course SIS bridges for a Current `course_id` returned by `list_courses` | No |
 | `reconcile_sis_grade_bridges(course_id)` | Discovers differentiated families from the current local sync/mirror and returns a student-free bridge matrix | No |
 | `preview_sis_grade_bridge(course_id, family_title)` | Persists a mirror-backed, digest-protected score projection review for one exact linked differentiated family | No |
-| `preview_sis_grade_bridge_reconciliation(course_id, family_title)` | Persists a reviewed bridge-only Operation Ledger repair for one discovered missing bridge | No |
+| `preview_sis_grade_bridge_reconciliation(course_id, family_title, source_assignment_ids?, bridge_assignment_id?)` | Persists a reviewed bridge-only repair; optionally proposes an exact grouping when title discovery did not find the family | No |
 | `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | After approval, pushes the unchanged reviewed scores to the exact linked bridge through the Operation Ledger | No |
 | `reset_scoring_review(scoring_session_id)` | Reopens the current local scoring review without changing its packet or history | No |
 | `list_sections(course_id)` | Saved section values from the local mirror | No |
