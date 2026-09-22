@@ -109,25 +109,24 @@ other program relies on, and needs no admin.
 Appendix B. What CanvasExpert can do
 
 Create and Forge. Author a quiz, assignment, or page, validate it, then stage it
-for review and push to one or several courses with dates, category, module, and
-publish state. The assistant is the primary surface. Per-course
-details are matched by name, so one file works across sections. Quizzes can compile
-offline into a Canvas-importable ZIP plus printable copies. Assignments and
-quizzes can carry differentiation tiers that produce scaffolded variants instead of three
-hand-made copies. AssignmentForge tiers are differentiated-family content: Settings maps
-pedagogical labels to configured public tags (including public color tags), and the reviewed
-delivery operation creates unrestricted sources, places only sources in the selected module,
-and creates/verifies the shared bridge and family link. Tier placement is manual and
-teacher-owned; Canvas group/pod settings are not used for AssignmentForge delivery. QuizForge uses
-the same renderer-neutral family tail.
+for review and push to one or more courses with dates, category, module, and
+publish state. The assistant is the primary surface; per-course details match by
+name, so one file works across sections. Quizzes can compile offline into a
+Canvas-importable ZIP plus printable copies. Assignments and quizzes can carry
+differentiation tiers that produce scaffolded variants instead of three hand-made
+copies. AssignmentForge tiers are differentiated-family content: Settings maps
+pedagogical labels to configured public tags (including public color tags), and reviewed delivery
+creates unrestricted sources, places only sources in the selected module, and creates/verifies
+the shared bridge and family link. Tier placement is manual and teacher-owned; AssignmentForge
+delivery does not use Canvas group/pod settings. QuizForge uses the same renderer-neutral family tail.
 
 If one assessment combines objective questions and writing, author the objective
 portion as an auto-graded QuizForge file and each writing portion as its own
 AssignmentForge file with `points: 100`; use paired names such as `Major - Questions`
 and `Major - ECR`.
 
-AssignmentForge auto-scoring. Note whether an assignment qualifies. Only assignments
-with zero writing pieces go to NewQuiz. Canvas Assignments qualify only when the text
+AssignmentForge auto-scoring. Only assignments with zero writing pieces go to
+NewQuiz. Canvas Assignments qualify only when the text
 specifies how to submit and each piece's points, the total is 0-100 unless the teacher
 says otherwise, and writing pieces outweigh shorter pieces. Otherwise mark teacher review.
 If all four conditions are met, the assignment qualifies for auto-scoring in a Scoring

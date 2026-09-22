@@ -30,10 +30,19 @@ shape change requires a major bump.
 
 ## Direction 1 - SAFE bundle (Canvas Expert -> agent)
 
-`prepare_scoring_session(course_id, assignment_id, scoring_guidance="",
-use_existing_mirror=false, scoring_guidance_provenance="")` requires one exact Current course and assignment and
-prepares it from valid local projections. It performs no refresh, Canvas write, or
-direct Canvas read.
+`list_feedback_contracts()` lists the teacher's private Markdown feedback
+contracts without course or student data. Each row carries the contract id,
+name, conversational `applies_to` text, a short summary, and projected token
+size. `prepare_scoring_session(course_id, assignment_id, scoring_guidance="",
+use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")`
+requires one exact Current course and assignment and prepares it from valid
+local projections. It performs no refresh, Canvas write, or direct Canvas read.
+An explicit `feedback_contract_id` selects one workspace contract. Without an id,
+non-empty `scoring_guidance` becomes this session's conversational contract body;
+otherwise the seeded default contract is used. The selected body is carried
+verbatim in page zero and is bound to the private session by a digest. Contract
+files are teacher-owned prose: transport/privacy rules remain product-owned,
+while judgment, feedback shape, tone, and quoting guidance are overridable.
 Non-empty assignment content is authoritative. A Canvas assignment rubric is used
 only when assignment content is empty. Teacher-authored directives layer on top of
 that basis; inherited, defaulted, or unknown guidance never overrides it. Teacher
@@ -44,11 +53,12 @@ omitted character and unit counts. No basis returns a
 successful conversation state with `ok: true`, `status: "needs_teacher_input"`, code
 `needs_scoring_norms`, the assignment name, and a concise question. The agent asks
 and retries the same exact preparation with bounded guidance. Page zero from
-`get_scoring_packet` includes the server-authored feedback
-contract and resolved basis.
+`get_scoring_packet` includes the selected feedback contract and resolved basis.
+When teacher-authored guidance layers on assignment content or a Canvas rubric,
+`scoring_basis.layered` is `true`; the original basis source remains visible.
 Later pages may omit context. Optional shared assignment materials may be compacted or
 omitted when needed to fit the transport ceiling, but the packet carries an explicit
-machine-readable and human-readable compaction marker. The server-authored scoring
+machine-readable and human-readable compaction marker. The selected scoring
 contract and resolved scoring basis remain on page zero.
 
 Every SAFE bundle contains exactly one active assignment: pseudonym/item response rows, full response text without

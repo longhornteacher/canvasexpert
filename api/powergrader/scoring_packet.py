@@ -27,6 +27,17 @@ class PacketTooLarge(Exception):
     """A required packet envelope or one response segment cannot fit."""
 
 
+class ContractTooLarge(PacketTooLarge):
+    """The selected teacher contract cannot fit page zero."""
+
+    code = "scoring_contract_too_large"
+
+    def __init__(self, message: str, *, contract_file: str, projected_tokens: int):
+        super().__init__(message)
+        self.contract_file = str(contract_file or "")
+        self.projected_tokens = int(projected_tokens)
+
+
 def validate_safe_bundle(bundle: object) -> dict:
     """Validate the minimum SAFE bundle contract before it can authorize work.
 
@@ -281,6 +292,8 @@ def build_packet(
     include_context: bool = True,
     rubric_text: str = "",
     persona: dict | None = None,
+    contract_text: str | None = None,
+    contract_name: str = "",
 ) -> dict:
     """Project one page of scorable responses out of a SAFE bundle.
 
@@ -371,7 +384,33 @@ def build_packet(
         ai_ta_name=str((persona or {}).get("name") or ""),
         rubric_text=rubric_text,
         persona=persona,
+        contract_text=(
+            contract_text if contract_text is not None
+            else session.get("feedback_contract_text")
+        ),
+        contract_name=(
+            contract_name
+            or str(session.get("feedback_contract_filename")
+                   or session.get("feedback_contract_id") or "")
+        ),
     )
+
+    # Keep this check independent of the packet estimator seam: tests and
+    # diagnostics may replace that estimator to force response-segmentation
+    # failures, which must not be mislabeled as a contract refusal.
+    contract_tokens = max(0, len(contract) // 4)
+    if contract_tokens > _TOKEN_BUDGET:
+        contract_file = (
+            contract_name
+            or str(session.get("feedback_contract_filename")
+                   or session.get("feedback_contract_id") or "selected contract")
+        )
+        raise ContractTooLarge(
+            f"Feedback contract '{contract_file}' projects to {contract_tokens:,} tokens, "
+            f"exceeding the {_TOKEN_BUDGET:,} token page limit.",
+            contract_file=contract_file,
+            projected_tokens=contract_tokens,
+        )
 
     # Calculate context using the complete page-zero envelope. This also makes
     # segmentation independent of whether later pages ask to omit context.

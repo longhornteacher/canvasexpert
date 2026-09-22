@@ -11,7 +11,7 @@ monkeypatch them without touching the real Canvas API or identity vault
 
 Every ``course_id`` tool gates on ``config.active_courses()`` — the same
 Current-course scope the web UI uses. ``list_courses``, ``discover_scoring_work``,
-``get_authoring_contract``, ``get_product_guide`` and ``list_staged_content``
+``list_feedback_contracts``, ``get_authoring_contract``, ``get_product_guide`` and ``list_staged_content``
 are the only tools with no ``course_id`` and no student data, so they skip both
 the course gate and the outbound safety gate. ``get_writing_history`` breaks that
 pairing on purpose: it has no ``course_id`` either (the daily-writing store has
@@ -1177,6 +1177,7 @@ _TOOL_GROUPS = {
         "apply_workspace_reset",
     ),
     "Scoring Sessions": (
+        "list_feedback_contracts",
         "discover_scoring_work",
         "prepare_scoring_session",
         "list_scoring_sessions",
@@ -1870,6 +1871,21 @@ def get_gradebook_snapshot(course_id: str) -> dict:
     return result
 
 
+def list_feedback_contracts() -> dict:
+    """List teacher-authored scoring contracts without course/student data."""
+    rows = []
+    for item in config.list_feedback_contracts():
+        body = str(item.get("body") or "")
+        rows.append({
+            "id": str(item.get("id") or ""),
+            "name": str(item.get("name") or item.get("id") or ""),
+            "applies_to": str(item.get("applies_to") or ""),
+            "summary": str(item.get("summary") or ""),
+            "projected_tokens": max(0, len(body) // 4),
+        })
+    return {"ok": True, "contracts": rows}
+
+
 def discover_scoring_work() -> dict:
     """Read every Current course locally and return a student-free grading digest."""
     from api.powergrader import session_store
@@ -2081,7 +2097,8 @@ def _open_scoring_session_refusal(course_id: str, assignment_id: str) -> dict | 
 def prepare_scoring_session(course_id: str, assignment_id: str,
                             scoring_guidance: str = "",
                             use_existing_mirror: bool = False,
-                            scoring_guidance_provenance: str = "") -> dict:
+                            scoring_guidance_provenance: str = "",
+                            feedback_contract_id: str = "") -> dict:
     """Prepare one exact assignment from the local CanvasMirror.
 
     See ScoringSession/SCORING_SESSIONS.md (§2) in your workspace root for the
@@ -2110,6 +2127,8 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
         prepare_kwargs = {"use_existing_mirror": use_existing_mirror}
         if str(scoring_guidance_provenance or "").strip():
             prepare_kwargs["scoring_guidance_provenance"] = scoring_guidance_provenance
+        if str(feedback_contract_id or "").strip():
+            prepare_kwargs["feedback_contract_id"] = feedback_contract_id
         result = scoring_preparation.prepare_scoring_session(
             course_key, assignment_key, scoring_guidance, **prepare_kwargs
         )
@@ -2164,6 +2183,83 @@ def _is_current_scoring_session(session: dict) -> bool:
         return not has_scope
     except Exception:
         return False
+
+
+def _session_mirror_check(session: dict) -> dict:
+    """Check the frozen mirror identity before exposing or applying a packet."""
+    expected_revision = session.get("mirror_revision")
+    if expected_revision in (None, ""):
+        # Older private records did not bind a mirror revision. Keep them
+        # readable; newly prepared sessions always carry one.
+        return {"ok": True}
+
+    from api.powergrader import session_store
+
+    course_id = str(session.get("course_id") or "")
+    assignment_id = str(session.get("assignment_id") or "")
+    root = workspace.workspace_root()
+    if not root:
+        return {"ok": False, "code": "mirror_revision_unusable",
+                "error": "The usable CanvasMirror revision is unavailable. Refresh this course and retry."}
+    try:
+        scope = read_service.private_submissions(
+            course_id, root=root, max_age_hours=None,
+        )
+    except Exception:
+        scope = None
+    if not isinstance(scope, dict) or scope.get("state") != "current":
+        return {"ok": False, "code": "mirror_revision_unusable",
+                "error": "The usable CanvasMirror revision is unavailable. Refresh this course and retry."}
+    revision = int(scope.get("mirror_revision") or 0)
+    if revision < 1:
+        return {"ok": False, "code": "mirror_revision_unusable",
+                "error": "The usable CanvasMirror revision is unavailable. Refresh this course and retry."}
+    if str(revision) != str(expected_revision):
+        return {"ok": False, "code": "session_stale",
+                "error": "A newer CanvasMirror revision exists. Prepare a replacement Scoring Session before continuing."}
+
+    expected_snapshot_id = str(session.get("mirror_snapshot_id") or "")
+    current_snapshot_id = str(scope.get("snapshot_id") or "")
+    if expected_snapshot_id and current_snapshot_id and expected_snapshot_id != current_snapshot_id:
+        return {"ok": False, "code": "session_stale",
+                "error": "A newer CanvasMirror snapshot exists. Prepare a replacement Scoring Session before continuing."}
+
+    try:
+        document = mirror_store.read_submissions(course_id, assignment_id, root=root)
+        entries = (document or {}).get("submissions") if isinstance(document, dict) else None
+        if not isinstance(entries, dict):
+            raise ValueError("submission projection unavailable")
+        rows = [entry.get("current") for entry in entries.values()
+                if isinstance(entry, dict) and isinstance(entry.get("current"), dict)]
+        snapshot = session_store.eligible_submission_snapshot_digest(rows)
+    except Exception:
+        return {"ok": False, "code": "mirror_revision_unusable",
+                "error": "The current submission snapshot is unavailable. Refresh this course and retry."}
+
+    verdict = session_store.session_staleness(
+        session, mirror_revision=revision, submission_snapshot=snapshot,
+    )
+    if verdict.get("stale"):
+        return {"ok": False, "code": verdict.get("code") or "session_stale",
+                "error": "The current submission snapshot changed. Prepare a replacement Scoring Session before continuing."}
+    return {"ok": True, "mirror_revision": revision,
+            "snapshot_id": current_snapshot_id, "submission_snapshot": snapshot}
+
+
+def _ensure_session_usable(session: dict) -> dict:
+    """Persist stale-session invalidation while keeping the refusal identity-safe."""
+    from api.powergrader import session_store
+
+    verdict = _session_mirror_check(session)
+    if verdict.get("ok"):
+        return verdict
+    if verdict.get("code") in {"session_stale", "submission_identity_mismatch"}:
+        try:
+            session_store.mark_session_stale(session, code=verdict["code"])
+            session_store.save_session(session)
+        except Exception:
+            pass
+    return verdict
 
 
 def list_scoring_sessions() -> dict:
@@ -2256,6 +2352,9 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
                 "error": "The assignment-scoped Scoring Session was not found."}
     if not _is_current_scoring_session(session):
         return _session_superseded(scoring_session_id)
+    freshness = _ensure_session_usable(session)
+    if not freshness.get("ok"):
+        return freshness
     if session.get("status") not in {"ready", "needs_teacher_input", "staged", "completed", "completed_with_holds"}:
         return {"ok": False, "code": "packet_unavailable",
                 "error": "The assignment-scoped Scoring Session has no ready packet."}
@@ -2291,7 +2390,13 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
                    or session.get("scoring_rubric_text")
                    or session.get("rubric_text")
                    or "")
-    persona = None
+    persona = config.get_persona(str(session.get("persona_id") or ""))
+    contract_text = session.get("feedback_contract_text")
+    contract_name = str(
+        session.get("feedback_contract_filename")
+        or session.get("feedback_contract_id")
+        or ""
+    )
 
     try:
         packet = sp.build_packet(
@@ -2302,7 +2407,18 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
             include_context=include_context,
             rubric_text=rubric_text,
             persona=persona,
+            contract_text=contract_text,
+            contract_name=contract_name,
         )
+    except sp.ContractTooLarge as e:
+        return {
+            "ok": False,
+            "code": e.code,
+            "error": str(e),
+            "contract_file": e.contract_file,
+            "projected_tokens": e.projected_tokens,
+            "token_limit": sp._TOKEN_BUDGET,
+        }
     except sp.PacketTooLarge as e:
         return {"ok": False, "error": str(e)}
     except Exception as e:
@@ -2322,6 +2438,8 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
                 "source": str(basis.get("source") or "none"),
                 "label": str(basis.get("label") or "None"),
             }
+            if "layered" in basis:
+                result["scoring_basis"]["layered"] = bool(basis.get("layered"))
             projection = session.get("scoring_guidance_projection")
             if isinstance(projection, dict):
                 result["scoring_guidance_projection"] = projection

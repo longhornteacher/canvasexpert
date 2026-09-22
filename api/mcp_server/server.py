@@ -39,8 +39,7 @@ _SERVER_INSTRUCTIONS = (
     "the local threshold, ask whether Canvas work changed; refresh only after "
     "an explicit teacher request, or retry with use_existing_mirror=true when the "
     "teacher says no. "
-    "If it returns scoring_session_already_open, use that session and do not prepare or refresh the assignment again. Once a usable session id exists, work locally "
-    "from its immutable packet. For needs_scoring_norms, ask its bounded question and "
+    "If it returns scoring_session_already_open, use that session and do not prepare or refresh the assignment again. Use list_feedback_contracts for feedback rules. Once a session exists, work locally from its immutable packet. For needs_scoring_norms, ask its question and "
     "retry with bounded scoring guidance; never ask the teacher to choose a scoring transport "
     "or assignment type. An explicit score/post direction authorizes the selected discovery rows together "
     "without reconfirming each assignment, but never extends beyond those rows or another session. Read every SAFE page with get_scoring_packet, including "
@@ -284,8 +283,7 @@ def get_authoring_contract(kind: str) -> str:
 
 @mcp.tool(structured_output=False)
 def get_product_guide(topic: str = "") -> str:
-    """Read CanvasExpert's own product guide before planning or describing its capabilities.
-    Omit topic for the compact overview; responses annotate every available topic."""
+    """Read CanvasExpert's product guide; omit topic for the overview."""
     return _compact(tools.get_product_guide(topic))
 
 
@@ -413,8 +411,14 @@ def refresh_course_structure(course_id: str) -> str:
 
 
 @mcp.tool(structured_output=False)
+def list_feedback_contracts() -> str:
+    """List teacher feedback contracts."""
+    return _compact(tools.list_feedback_contracts())
+
+
+@mcp.tool(structured_output=False)
 def discover_scoring_work() -> str:
-    """Discover outstanding grading work across every Current course without preparing or writing."""
+    """Discover grading work without preparing or writing."""
     return _compact(tools.discover_scoring_work())
 
 
@@ -422,19 +426,17 @@ def discover_scoring_work() -> str:
 def prepare_scoring_session(course_id: str, assignment_id: str,
                             scoring_guidance: str = "",
                             use_existing_mirror: bool = False,
-                            scoring_guidance_provenance: str = "") -> str:
-    """Prepare one exact assignment from the local CanvasMirror.
-    Returns a session id ready for packet paging, or a typed identity-safe blocker."""
+                            scoring_guidance_provenance: str = "",
+                            feedback_contract_id: str = "") -> str:
+    """Prepare one exact assignment for packet paging or return a typed blocker."""
     return _compact(tools.prepare_scoring_session(
         course_id, assignment_id, scoring_guidance, use_existing_mirror,
-        scoring_guidance_provenance))
+        scoring_guidance_provenance, feedback_contract_id))
 
 
 @mcp.tool(structured_output=False)
 def list_scoring_sessions() -> str:
-    """List identity-free assignment-scoped Scoring Session summaries.
-
-    Returns at most one resumable row per exact course/assignment scope."""
+    """List identity-free Scoring Session summaries."""
     return _compact(tools.list_scoring_sessions())
 
 

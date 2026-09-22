@@ -113,8 +113,6 @@ EXPECTED = [
     ('/api/feedback/personas', ('GET',)),
     ('/api/feedback/personas/custom', ('POST',)),
     ('/api/feedback/personas/custom', ('DELETE',)),
-    ('/api/feedback/patterns', ('GET',)),
-    ('/api/feedback/patterns', ('POST',)),
     ('/api/names/backup-vault', ('POST',)),
     ('/api/names/protected', ('GET',)),
     ('/api/names/protected', ('POST',)),

@@ -1,9 +1,11 @@
-"""Feedback tools configuration — AI Authoring persona library and feedback patterns (synced).
+"""Feedback tools configuration — persona and teacher-authored contract libraries.
 
 Uses lazy module-reference so monkeypatches to config._io propagate correctly.
 """
 import json
 import os
+import re
+import shutil
 
 from .. import workspace
 from . import _io as _io_mod
@@ -30,14 +32,6 @@ BUILTIN_PERSONAS = [
 ]
 
 BUILTIN_PERSONAS_BY_ID = {p["id"]: p for p in BUILTIN_PERSONAS}
-
-FEEDBACK_PATTERNS_DEFAULT = [
-    {"id": "basic", "name": "Glows & Grows (Basic)",
-     "score_from_rubric": True,
-     "glows": {"min": 2, "max": 3}, "grows": {"min": 1, "max": 2},
-     "strategy_sentences": {"min": 2, "max": 3}, "sign_with_persona": True},
-]
-
 
 def _persona_folder() -> str | None:
     ai_ta_dir = workspace.library_folder("AI Authoring")
@@ -110,6 +104,146 @@ def _list_file_personas() -> list[dict]:
     return out
 
 
+_CONTRACT_EXTENSIONS = frozenset({".md", ".markdown", ".txt"})
+
+
+def _feedback_contracts_folder() -> str | None:
+    return workspace.library_folder(workspace.FEEDBACK_CONTRACTS_SUBFOLDER)
+
+
+def get_feedback_contracts_folder() -> str | None:
+    folder = _feedback_contracts_folder()
+    if folder:
+        os.makedirs(workspace.extended_path(folder), exist_ok=True)
+        _seed_feedback_contracts_folder_once(folder)
+    return folder
+
+
+def _seed_feedback_contracts_folder_once(folder: str) -> None:
+    marker = os.path.join(folder, ".contracts_seeded")
+    marker_ext = workspace.extended_path(marker)
+    if os.path.exists(marker_ext):
+        return
+
+    folder_ext = workspace.extended_path(folder)
+    try:
+        names = os.listdir(folder_ext) if os.path.isdir(folder_ext) else []
+    except OSError:
+        names = []
+    has_contract = any(
+        os.path.splitext(name)[1].lower() in _CONTRACT_EXTENSIONS
+        for name in names
+    )
+    if not has_contract:
+        source_folder = os.path.join(
+            workspace.DEFAULT_DOCS_DIR, workspace.FEEDBACK_CONTRACTS_SUBFOLDER,
+        )
+        if os.path.isdir(source_folder):
+            for name in sorted(os.listdir(source_folder)):
+                if os.path.splitext(name)[1].lower() not in _CONTRACT_EXTENSIONS:
+                    continue
+                source = os.path.join(source_folder, name)
+                target = os.path.join(folder, name)
+                if not os.path.isfile(workspace.extended_path(source)):
+                    continue
+                shutil.copy2(workspace.extended_path(source), workspace.extended_path(target))
+
+    # Write the marker last. Once the teacher has a folder, deleting the
+    # starter is an intentional choice and must not trigger reseeding.
+    with open(marker_ext, "w", encoding="utf-8") as handle:
+        handle.write("Canvas Expert seeded the starter feedback contract here once.\n")
+
+
+def _frontmatter_scalar(value: str) -> str:
+    value = str(value or "").strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _parse_feedback_contract(text: str, filename: str) -> dict | None:
+    lines = str(text or "").splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return None
+    closing_index = next(
+        (index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---"),
+        None,
+    )
+    if closing_index is None:
+        return None
+    metadata: dict[str, str] = {}
+    for line in lines[1:closing_index]:
+        match = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*?)\s*$", line.rstrip("\r\n"))
+        if match:
+            metadata[match.group(1)] = _frontmatter_scalar(match.group(2))
+    body = "".join(lines[closing_index + 1:])
+    contract_id = str(metadata.get("id") or os.path.splitext(filename)[0]).strip()
+    name = str(metadata.get("name") or contract_id).strip()
+    if not contract_id or not name:
+        return None
+    return {
+        "id": contract_id,
+        "name": name,
+        "applies_to": str(metadata.get("applies_to") or "").strip(),
+        "version": str(metadata.get("version") or "").strip(),
+        "body": body,
+        "source": "file",
+    }
+
+
+def _contract_summary(body: str) -> str:
+    for line in str(body or "").splitlines():
+        value = line.strip()
+        if not value:
+            continue
+        return value.lstrip("#").strip()
+    return ""
+
+
+def _list_file_feedback_contracts() -> list[dict]:
+    folder = get_feedback_contracts_folder()
+    if not folder or not os.path.isdir(workspace.extended_path(folder)):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    folder_ext = workspace.extended_path(folder)
+    try:
+        names = sorted(os.listdir(folder_ext))
+    except OSError:
+        return []
+    for name in names:
+        if os.path.splitext(name)[1].lower() not in _CONTRACT_EXTENSIONS:
+            continue
+        path = os.path.abspath(os.path.join(folder, name))
+        if not workspace.path_within_workspace(path):
+            continue
+        try:
+            with open(workspace.extended_path(path), encoding="utf-8") as handle:
+                parsed = _parse_feedback_contract(handle.read(), name)
+        except Exception:
+            continue
+        if not parsed or parsed["id"] in seen:
+            continue
+        seen.add(parsed["id"])
+        parsed.update({
+            "path": path,
+            "summary": _contract_summary(parsed.get("body") or ""),
+        })
+        out.append(parsed)
+    return out
+
+
+def list_feedback_contracts() -> list[dict]:
+    return _list_file_feedback_contracts()
+
+
+def get_feedback_contract(contract_id: str = "") -> dict | None:
+    wanted = str(contract_id or "").strip()
+    if not wanted:
+        return None
+    return next((item for item in list_feedback_contracts() if item.get("id") == wanted), None)
+
+
 def list_personas() -> list[dict]:
     folder_enabled = bool(_persona_folder())
     file_personas = _list_file_personas()
@@ -173,27 +307,4 @@ def set_ai_ta_persona(name: str, personality: str = ""):
             "ai_ta_persona",
             {"name": (name or "").strip(), "personality": (personality or "").strip()},
         ) or state
-    )
-
-
-def list_feedback_patterns() -> list[dict]:
-    return list(_io_mod._synced_state().get("feedback_patterns", FEEDBACK_PATTERNS_DEFAULT))
-
-
-def get_feedback_pattern(pattern_id: str = "") -> dict:
-    """Return the named feedback pattern, defaulting to Glows & Grows (`basic`)."""
-    wanted = str(pattern_id or "").strip() or "basic"
-    catalog = list_feedback_patterns() or list(FEEDBACK_PATTERNS_DEFAULT)
-    for pattern in catalog:
-        if str(pattern.get("id") or "") == wanted:
-            return dict(pattern)
-    for pattern in catalog:
-        if str(pattern.get("id") or "") == "basic":
-            return dict(pattern)
-    return dict(FEEDBACK_PATTERNS_DEFAULT[0])
-
-
-def set_feedback_patterns(patterns: list[dict]):
-    _io_mod._modify_synced(
-        lambda state: state.__setitem__("feedback_patterns", patterns) or state
     )

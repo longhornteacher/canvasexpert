@@ -43,18 +43,19 @@ from .gradebook import (
     get_tier_tags, set_tier_tags,
 )
 
-# --- Feedback tools personas and patterns ---
+# --- Feedback tools personas and teacher-authored contracts ---
 from .feedback import (
     AI_TA_PERSONA_DEFAULT, DEFAULT_AI_DISCLOSURE_SIGNOFF,
     BUILTIN_PERSONAS, BUILTIN_PERSONAS_BY_ID,
-    FEEDBACK_PATTERNS_DEFAULT,
     _persona_folder, get_persona_folder,
     _safe_persona_filename, _seed_persona_folder_once,
     _list_file_personas,
     list_personas, get_persona,
     save_custom_persona, remove_custom_persona,
     get_ai_ta_persona, set_ai_ta_persona,
-    list_feedback_patterns, get_feedback_pattern, set_feedback_patterns,
+    _feedback_contracts_folder, get_feedback_contracts_folder,
+    _seed_feedback_contracts_folder_once, _list_file_feedback_contracts,
+    list_feedback_contracts, get_feedback_contract,
 )
 
 # --- protected names ---

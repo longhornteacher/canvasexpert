@@ -143,11 +143,18 @@ def _preparation_state_path(course_id, assignment_id) -> str | None:
     return os.path.join(d, f"prep-{scope_digest(course_id, assignment_id)}.json")
 
 
-def save_preparation_state(course_id, assignment_id, *, scoring_guidance: str) -> None:
-    """Keep teacher guidance private while a refresh is retrying."""
+def save_preparation_state(course_id, assignment_id, *, scoring_guidance: str,
+                           scoring_guidance_provenance: str = "",
+                           feedback_contract_id: str = "") -> None:
+    """Keep teacher guidance/contract choice private while a refresh is retrying."""
     path = _preparation_state_path(course_id, assignment_id)
-    if path and str(scoring_guidance or "").strip():
-        atomic_write_json(Path(path), {"scoring_guidance": str(scoring_guidance).strip()})
+    if path and (str(scoring_guidance or "").strip()
+                 or str(feedback_contract_id or "").strip()):
+        atomic_write_json(Path(path), {
+            "scoring_guidance": str(scoring_guidance).strip(),
+            "scoring_guidance_provenance": str(scoring_guidance_provenance or "").strip().casefold(),
+            "feedback_contract_id": str(feedback_contract_id or "").strip(),
+        })
 
 
 def load_preparation_state(course_id, assignment_id) -> dict:

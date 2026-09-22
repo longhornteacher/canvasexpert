@@ -39,9 +39,11 @@ WORKSPACE_NAME = "CanvasExpert"
 LIBRARY_NAME = "Library"
 AI_AUTHORING_SUBFOLDER = "AI Authoring"
 LEARNING_OBJECTIVES_SUBFOLDER = "Learning Objectives"
+FEEDBACK_CONTRACTS_SUBFOLDER = "Feedback Contracts"
 LIBRARY_SUBFOLDERS = [
     AI_AUTHORING_SUBFOLDER, "Quizzes", "Pages",
     "Calendars", "Source Materials", LEARNING_OBJECTIVES_SUBFOLDER,
+    FEEDBACK_CONTRACTS_SUBFOLDER,
 ]
 
 # Authored/staged assignment content has one source tree.  ``_Shared`` is
@@ -781,7 +783,11 @@ def ensure_workspace():
     for subfolder in LIBRARY_SUBFOLDERS:
         target_dir = os.path.join(root, LIBRARY_NAME, subfolder)
         os.makedirs(target_dir, exist_ok=True)
-        _seed_folder_if_missing(os.path.join(DEFAULT_DOCS_DIR, subfolder), target_dir)
+        # Feedback Contracts are seeded by their marker-gated config owner.
+        # The generic copy-on-every-ensure path would resurrect a teacher's
+        # deliberate deletion after the one-time starter seed.
+        if subfolder != FEEDBACK_CONTRACTS_SUBFOLDER:
+            _seed_folder_if_missing(os.path.join(DEFAULT_DOCS_DIR, subfolder), target_dir)
     os.makedirs(shared_assignments_root(root), exist_ok=True)
     os.makedirs(assignments_root(root), exist_ok=True)
     os.makedirs(os.path.join(root, TO_REVIEW_NAME), exist_ok=True)

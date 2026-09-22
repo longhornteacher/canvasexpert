@@ -53,7 +53,7 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 56 (44 tools).
+Tool schema version 57 (45 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -93,10 +93,11 @@ Tool schema version 56 (44 tools).
 | `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |
 | `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state | Yes, pseudonymized |
 | `refresh_mirror(course_id)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |
+| `list_feedback_contracts()` | List teacher-authored judgment and feedback-shape contracts available in the private workspace; returns ids, summaries, and projected sizes only | No |
 | `discover_scoring_work()` | Read every Current course locally and return student-free assignment, freshness, and attention tables; no refresh, preparation, or Canvas write | No |
 | `preview_workspace_reset()` | Dry-runs the explicitly authorized local cleanup and reports classified paths, counts, and refusals | No |
 | `apply_workspace_reset(preview_digest)` | Applies only an unchanged, non-refused workspace cleanup preview and returns a local receipt | No |
-| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input | No |
+| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input; a selected contract travels in page zero | No |
 | `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
 | `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None)` | Validate and freeze valid SAFE-packet results locally; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |

@@ -12,32 +12,41 @@ from engine.utils.text_utils import safe_filename_component
 
 CONTRACT_VERSION = "1.0"
 REVIEW_NOTE = ("Pseudonymized for privacy. Review the response text for any "
-                "self-identifying details (names, places) before sending to an LLM.")
-_DEFAULT_FEEDBACK_PATTERN = {
-    "id": "basic",
-    "name": "Glows & Grows (Basic)",
-    "glows": {"min": 2, "max": 3},
-    "grows": {"min": 1, "max": 2},
-    "strategy_sentences": {"min": 2, "max": 3},
-}
+                 "self-identifying details (names, places) before sending to an LLM.")
 
 
-def feedback_pattern_hint(pattern: dict | None = None) -> str:
-    """Student-facing feedback shape. Glows & Grows is the default."""
-    pattern = pattern or _DEFAULT_FEEDBACK_PATTERN
-    glows = pattern.get("glows") or _DEFAULT_FEEDBACK_PATTERN["glows"]
-    grows = pattern.get("grows") or _DEFAULT_FEEDBACK_PATTERN["grows"]
-    strategy = (
-        pattern.get("strategy_sentences")
-        or _DEFAULT_FEEDBACK_PATTERN["strategy_sentences"]
+def _default_contract_body() -> str:
+    """Read the repository seed for legacy/offline packet paths.
+
+    Assignment-scoped Scoring Sessions pass the teacher's workspace copy
+    explicitly. This fallback keeps the older private packet builders useful
+    without maintaining a second Python copy of the teacher-authored shape.
+    """
+    path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "default_docs", "Feedback Contracts", "Glows & Grows (Basic).md",
     )
-    name = str(pattern.get("name") or "Glows & Grows").strip()
-    return (
-        f"{name}: {glows.get('min')}-{glows.get('max')} glows (what worked); "
-        f"{grows.get('min')}-{grows.get('max')} grows (what to improve); "
-        f"{strategy.get('min')}-{strategy.get('max')} strategy sentences "
-        "for the next attempt."
-    )
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return "Use a clear, supportive, evidence-based feedback shape."
+    lines = text.splitlines(keepends=True)
+    if lines and lines[0].strip() == "---":
+        closing = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), None)
+        if closing is not None:
+            return "".join(lines[closing + 1:])
+    return text
+
+
+def _default_feedback_hint() -> str:
+    """Describe the seeded contract without duplicating its editable rules."""
+    for line in _default_contract_body().splitlines():
+        value = line.strip()
+        if value:
+            heading = value.lstrip("#").strip()
+            return f"Follow the teacher-authored feedback contract: {heading}."
+    return "Follow the seeded teacher-authored feedback contract."
 
 
 def safe(name, max_len=80):
@@ -68,14 +77,18 @@ def scoring_output_contract(
         pseudonym: str = "<copy>",
         item_id: str = "<copy>",
         feedback_hint: str = "",
-        feedback_pattern: dict | None = None,
+        teacher_contract: str | None = None,
         include_signoff_in_feedback: bool = False,
         packet_digest: str = "",
 ) -> dict:
     """Return the shared scoring output contract and its JSON example."""
     persona = persona or {}
     signoff = persona_signoff(persona, ai_ta_name)
-    feedback = feedback_hint.strip() or feedback_pattern_hint(feedback_pattern)
+    feedback = feedback_hint.strip() or (
+        "Follow the selected teacher-authored feedback contract exactly."
+        if teacher_contract is not None
+        else _default_feedback_hint()
+    )
     if signoff and include_signoff_in_feedback:
         feedback = f"{feedback} End with the persona signoff exactly once. {signoff}"
     sample = {
@@ -88,7 +101,9 @@ def scoring_output_contract(
     rules = [
         f"Copy pseudonym and item_id exactly from {identity_source} so results can be matched.",
         "If the bundle includes `shared_context`, use that assignment/source material when scoring every response. Do not ask for missing source material unless it is truly impossible to score without it.",
-        "Quote briefly from the response to justify the score.",
+        *([] if teacher_contract is not None else [
+            "Quote briefly from the response to justify the score.",
+        ]),
         "Never quote a pseudonym back in `feedback`. Scrubbing replaces real names "
         "wherever they appear as whole words, so an ordinary word in a response may "
         "have been swapped for a pseudonym: a student surname that is also a common "
@@ -142,23 +157,31 @@ def scoring_output_contract(
 def build_contract_text(ai_ta_name: str = "",
                         rubric_text: str = "",
                         persona: dict | None = None,
-                        feedback_pattern: dict | None = None) -> str:
+                        teacher_contract: str | None = None,
+                        *,
+                        contract_text: str | None = None,
+                        contract_name: str = "") -> str:
     """Instructions the teacher pastes into their LLM alongside the bundle.
 
     When `rubric_text` is provided it is inlined below so the file is self-contained
     (prompt context lives in the bundle; the rubric travels here) - no separate
     attach step. When omitted, the contract keeps its general "attach the rubric
     as Knowledge" wording; Scoring Sessions resolve their scoring basis privately.
-    Extends the Essay Scorer skill: keyed batch output for automatic
-    re-identification. Student-facing signoff is persona-controlled, not part of
-    the scoring contract.
+    ``teacher_contract`` is the body selected for an assignment-scoped session
+    and is included verbatim. When omitted, the repository seed is loaded for
+    older offline packet paths. Transport/privacy rules remain product-owned;
+    judgment and feedback shape live in the selected teacher body.
     """
+    if contract_text is not None:
+        teacher_contract = contract_text
+    legacy_default = teacher_contract is None
+    teacher_body = _default_contract_body() if legacy_default else str(teacher_contract)
     persona = persona or {}
     ai_ta_name = str(persona.get("name") or ai_ta_name or "").strip()
     contract = scoring_output_contract(
         persona=persona,
         ai_ta_name=ai_ta_name,
-        feedback_pattern=feedback_pattern,
+        teacher_contract=None if legacy_default else teacher_body,
         identity_source="the bundle",
         pseudonym="<copy>",
         item_id="<copy>",
@@ -183,6 +206,7 @@ def build_contract_text(ai_ta_name: str = "",
         f"You are {ai_ta_name}, a teaching assistant helping a real teacher"
         if ai_ta_name else "You are a teaching assistant helping a real teacher"
     )
+    contract_label = f" ({contract_name})" if str(contract_name or "").strip() else ""
     return f"""{opening}
 score student writing and draft feedback. {rubric_clause}
 
@@ -192,4 +216,7 @@ one result object. {contract["format_instruction"]}
 {sample}
 
 Rules:
-{contract["rules_text"]}{signoff_clause}{rubric_block}"""
+{contract["rules_text"]}{signoff_clause}
+
+--- TEACHER FEEDBACK CONTRACT{contract_label} (verbatim) ---
+{teacher_body}{rubric_block}"""

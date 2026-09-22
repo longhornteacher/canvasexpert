@@ -89,6 +89,7 @@ def test_gradebook_snapshot_route_aggregates_mocked_canvas_data(monkeypatch):
         "graded": 1,
         "ungraded": 1,
         "partially_scored": 0,
+        "late_ungraded": 0,
         "missing": 0,
         "late": 0,
         "avg_pct": 90,

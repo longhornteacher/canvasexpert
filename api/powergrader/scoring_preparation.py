@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import uuid
@@ -213,6 +214,8 @@ def _safe_bundle_path(session: dict) -> str:
 
 def _ready_payload(session: dict) -> dict:
     """Return only identity-free facts after the private session is persisted."""
+    from api.powergrader import scoring_packet
+
     result = {
         "ok": True,
         "status": "ready",
@@ -229,7 +232,6 @@ def _ready_payload(session: dict) -> dict:
     try:
         with open(bundle_path, encoding="utf-8") as handle:
             safe_bundle = json.load(handle)
-        from api.powergrader import scoring_packet
         verdict = scoring_packet.validate_safe_bundle(safe_bundle)
         if not verdict.get("ok"):
             return _typed_failure(
@@ -244,6 +246,17 @@ def _ready_payload(session: dict) -> dict:
         return _typed_failure(
             "packet_missing", "prepare", retryable=True,
             user_action="The SAFE scoring packet could not be verified. Retry preparation.",
+        )
+    except scoring_packet.ContractTooLarge as error:
+        return _typed_failure(
+            error.code, "packet", retryable=False,
+            user_action=(
+                "Edit or replace the selected feedback contract so it fits the page-zero "
+                "transport budget, then prepare this exact assignment again."
+            ),
+            error=str(error), contract_file=error.contract_file,
+            projected_tokens=error.projected_tokens,
+            token_limit=scoring_packet._TOKEN_BUDGET,
         )
     except Exception:
         return _typed_failure(
@@ -272,6 +285,7 @@ def prepare_scoring_session(
     *,
     use_existing_mirror: bool = False,
     scoring_guidance_provenance: str = "",
+    feedback_contract_id: str = "",
     save_session=None,
     activate_session=None,
 ) -> dict:
@@ -298,14 +312,30 @@ def prepare_scoring_session(
             error="The private workspace is unavailable.",
         )
 
-    # Guidance is teacher-authored private state. Keep it available across a
-    # freshness decision; a retry need not ask the same question again.
-    if str(scoring_guidance or "").strip():
+    # Guidance, provenance, and the selected contract are teacher-authored
+    # private state. Keep them available across a freshness decision; a retry
+    # need not ask the same question again or silently promote inherited
+    # guidance to teacher-authored.
+    preparation_state = session_store.load_preparation_state(course_id, assignment_id)
+    supplied_guidance = str(scoring_guidance or "").strip()
+    supplied_provenance = str(scoring_guidance_provenance or "").strip().casefold()
+    supplied_contract_id = str(feedback_contract_id or "").strip()
+    if supplied_guidance or supplied_contract_id:
+        if not supplied_provenance:
+            supplied_provenance = "teacher_authored" if supplied_guidance else ""
         session_store.save_preparation_state(
-            course_id, assignment_id, scoring_guidance=str(scoring_guidance).strip())
+            course_id, assignment_id, scoring_guidance=supplied_guidance,
+            scoring_guidance_provenance=supplied_provenance,
+            feedback_contract_id=supplied_contract_id,
+        )
+        scoring_guidance = supplied_guidance
+        scoring_guidance_provenance = supplied_provenance
     else:
-        scoring_guidance = (session_store.load_preparation_state(
-            course_id, assignment_id).get("scoring_guidance") or "")
+        scoring_guidance = preparation_state.get("scoring_guidance") or ""
+        if not supplied_provenance:
+            scoring_guidance_provenance = preparation_state.get("scoring_guidance_provenance") or ""
+        if not supplied_contract_id:
+            feedback_contract_id = preparation_state.get("feedback_contract_id") or ""
 
     try:
         submissions, assignment, mirror_result = assignment_refresh.prepare_assignment_from_mirror(
@@ -410,6 +440,53 @@ def prepare_scoring_session(
             assignment_name=assignment_name,
         )
     authoritative_guidance = guidance if provenance in {"", "teacher_authored"} else ""
+
+    # A contract governs judgment and feedback shape. Explicit workspace files
+    # win; conversational guidance is the body when no file id was selected;
+    # otherwise use the marker-gated seeded default. Oversized conversational
+    # guidance uses the deterministic transport projection while the complete
+    # text remains private in the session's guidance field below.
+    contract_id = str(feedback_contract_id or "").strip()
+    contract_source = ""
+    contract_name = ""
+    contract_filename = ""
+    contract_body = ""
+    if contract_id:
+        selected_contract = config.get_feedback_contract(contract_id)
+        if not selected_contract:
+            return _typed_failure(
+                "feedback_contract_not_found", "contract", retryable=False,
+                user_action="Choose one of the contracts returned by list_feedback_contracts().",
+                error="The selected feedback contract was not found in the private workspace.",
+                assignment_name=assignment_name,
+            )
+        contract_source = "file"
+        contract_name = str(selected_contract.get("name") or contract_id)
+        contract_filename = os.path.basename(str(selected_contract.get("path") or ""))
+        contract_body = str(selected_contract.get("body") or "")
+    elif guidance:
+        contract_source = "conversation"
+        contract_id = "conversation"
+        contract_name = "Conversational teacher contract"
+        contract_body, _contract_projection = project_teacher_scoring_guidance(guidance)
+    else:
+        selected_contract = next(
+            (item for item in config.list_feedback_contracts() if item.get("id") == "basic"),
+            None,
+        )
+        if not selected_contract:
+            return _typed_failure(
+                "feedback_contract_unavailable", "contract", retryable=True,
+                user_action="Create or restore a feedback contract in the private workspace, then retry.",
+                error="No feedback contract is available in the private workspace.",
+                assignment_name=assignment_name,
+            )
+        contract_source = "seeded_default"
+        contract_id = str(selected_contract.get("id") or "basic")
+        contract_name = str(selected_contract.get("name") or contract_id)
+        contract_filename = os.path.basename(str(selected_contract.get("path") or ""))
+        contract_body = str(selected_contract.get("body") or "")
+
     canvas_rubric = scoring_rubric_text(assignment.get("rubric"))
     if assignment_description.strip():
         rubric_name = "Assignment content"
@@ -446,6 +523,7 @@ def prepare_scoring_session(
         rubric_text_override = "\n\n--- TEACHER DIRECTIVE (layered on top) ---\n".join(
             [rubric_text_override or "", projected_guidance]
         )
+        scoring_basis["layered"] = True
 
     writing_timeline_tracked = writing_timeline.is_tracked_assignment(assignment)
     if writing_timeline_tracked:
@@ -502,7 +580,14 @@ def prepare_scoring_session(
     session["status"] = "ready"
     session["assignment"] = {"points_possible": points_possible}
     session["writing_timeline_tracked"] = writing_timeline_tracked
-    session["feedback_pattern_id"] = "basic"
+    session["feedback_contract_id"] = contract_id
+    session["feedback_contract_source"] = contract_source
+    session["feedback_contract_name"] = contract_name
+    session["feedback_contract_filename"] = contract_filename
+    session["feedback_contract_text"] = contract_body
+    session["feedback_contract_digest"] = hashlib.sha256(
+        contract_body.encode("utf-8")
+    ).hexdigest()
     session["scoring_basis"] = scoring_basis
     session["scoring_guidance_provenance"] = provenance or None
     session["scoring_freshness"] = {
@@ -528,6 +613,14 @@ def prepare_scoring_session(
     if guidance_projection is not None:
         session["effective_scoring_rubric_text"] = rubric_text_override
         session["scoring_guidance_projection"] = guidance_projection
+
+    # Verify the SAFE packet, contract, and required page envelope before the
+    # session becomes the current actionable record. In particular, an
+    # oversized contract must not leave an apparently usable session that
+    # blocks the teacher from replacing it.
+    ready = _ready_payload(session)
+    if not ready.get("ok"):
+        return ready
     try:
         _activate(session, activate_session=activate_session, save_session=save_session)
     except Exception:
@@ -538,7 +631,7 @@ def prepare_scoring_session(
             assignment_name=assignment_name,
         )
     session_store.clear_preparation_state(course_id, assignment_id)
-    return _ready_payload(session)
+    return ready
 
 
 def _activate(session: dict, *, activate_session, save_session) -> list[dict]:

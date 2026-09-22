@@ -224,6 +224,7 @@ def _mirror_settings_context() -> dict:
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
     root = workspace.workspace_root()
+    ai_authoring_folder = workspace.library_folder("AI Authoring")
     saved_courses = config.saved_courses()
     return templates.TemplateResponse(request, "settings.html", {
         **_mirror_settings_context(),
@@ -238,7 +239,10 @@ def settings_page(request: Request):
         "ai_ta_dir":     str(runtime_paths.ai_ta_dir()),
         "workspace_root": root,
         "workspace_files": [
-            {"name": "Library / AI Authoring", "path": workspace.library_folder("AI Authoring")},
+            {"name": "Library / AI Authoring", "path": ai_authoring_folder},
+            {"name": "Library / AI Authoring / Personas",
+             "path": os.path.join(ai_authoring_folder, "Personas") if ai_authoring_folder else None},
+            {"name": "Library / Feedback Contracts", "path": workspace.library_folder("Feedback Contracts")},
             {"name": "Library / Quizzes", "path": workspace.library_folder("Quizzes")},
             {"name": "Assignments", "path": workspace.assignments_root()},
             {"name": "Library / Pages", "path": workspace.library_folder("Pages")},

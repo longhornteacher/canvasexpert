@@ -646,7 +646,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 44
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 45
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -1675,8 +1675,8 @@ def test_server_registers_the_expected_tool_set():
         "list_courses", "list_sections", "list_groups", "get_course_assignments", "get_modules",
             "get_roster", "get_submissions", "refresh_course_structure",
         "get_writing_history", "get_gradebook_snapshot", "refresh_mirror",
-        "get_authoring_contract", "get_product_guide",
-        "list_staged_content", "preview_content_push", "preview_differentiated_quiz_push", "apply_content_push",
+            "get_authoring_contract", "get_product_guide",
+            "list_staged_content", "preview_content_push", "preview_differentiated_quiz_push", "apply_content_push",
         "stage_content", "push_content_live",
         "preview_assignment_update", "apply_assignment_update",
         # Shipped with the SIS grade bridge; this set was never updated with them.
@@ -1687,8 +1687,8 @@ def test_server_registers_the_expected_tool_set():
         "get_course_pages", "list_learning_objectives", "preview_learning_objective",
             "apply_learning_objective", "delete_learning_objective",
             "get_roster_student_settings", "preview_roster_student_change",
-            "apply_roster_student_change", "clear_roster_student_field",
-                "prepare_scoring_session", "list_scoring_sessions", "get_scoring_packet",
+                    "apply_roster_student_change", "clear_roster_student_field",
+                    "list_feedback_contracts", "prepare_scoring_session", "list_scoring_sessions", "get_scoring_packet",
                 "stage_scoring_results", "apply_staged_scoring_results",
                 "reset_scoring_review",
                 "discover_scoring_work",
