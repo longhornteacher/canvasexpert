@@ -170,8 +170,9 @@ reconciliation; scoring requires the verified family link.
 
 Differentiated quiz delivery retains its timezone-aware due timestamp, module, unique public
 tags, equal points, and assignment-group requirements. AssignmentForge family sources preserve
-the ordinary assignment dates, grading category, submission settings, points, and final-grade/
-SIS safety; tier placement is manual and teacher-owned.
+ordinary assignment dates when supplied, while due/unlock/lock dates may be entered by the
+teacher after delivery; grading category, submission settings, points, and final-grade/SIS
+safety remain part of the reviewed family operation. Tier placement is manual and teacher-owned.
 
 ### Pages (PageForge)
 - Extracts JSON from the `<PAGEFORGE_JSON>` envelope.

@@ -1460,9 +1460,9 @@ def preview_content_push(
 
     Delivery options are per kind -- a page takes published and module_name, a
     quiz takes differentiated grouping options, and an
-    assignment takes ordinary grading-category options plus post_to_sis and ISO 8601
-     due_at/unlock_at/lock_at. Differentiated AssignmentForge deliveries are
-     unrestricted; tier placement remains manual and teacher-owned.
+    assignment takes ordinary grading-category options plus post_to_sis and optional
+    ISO 8601 due_at/unlock_at/lock_at. Differentiated AssignmentForge deliveries are
+    unrestricted and may be undated; tier placement remains manual and teacher-owned.
     Naming one a kind cannot carry is refused, not dropped. Drafts stay
     unpublished unless published=true.
 

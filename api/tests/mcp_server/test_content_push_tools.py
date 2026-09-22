@@ -589,6 +589,34 @@ def test_a_real_assignmentforge_draft_carries_its_schedule(_ledger):
     assert result["preview"]["published"] is False
 
 
+def test_a_real_tiered_assignmentforge_preview_allows_teacher_owned_dates(
+    _ledger, monkeypatch,
+):
+    _stage("assignment", "tiered-essay", body=(
+        '<ASSIGNMENTFORGE_JSON>{"version":"1.0-json","type":"ASSIGNMENT",'
+        '"title":"Tiered Essay","description":"<p>Write the thing.</p>",'
+        '"points":100,"tiers":[{"label":"Support"},{"label":"Core"}]}'
+        '</ASSIGNMENTFORGE_JSON>'
+    ))
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {
+        "Support": "Red", "Core": "Blue",
+    })
+    monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
+    monkeypatch.setattr(canvas_client, "canvas_get", lambda path, **_kwargs: (
+        ({"id": "501"}, None) if path.endswith("/modules/501") else (None, None)
+    ))
+    monkeypatch.setattr(canvas_client, "canvas_get_all", lambda *_args, **_kwargs: ([], None))
+
+    result = content_push.preview_content_push(
+        "course-x", "assignment", "tiered-essay", module_id="501",
+    )
+
+    assert result["ok"] is True
+    assert result["preview"]["tiered"] is True
+    assert result["preview"]["due_at"] is None
+    assert result["preview"]["bridge"]["due_at"] is None
+
+
 def test_a_malformed_draft_is_refused_with_the_validator_problem(_ledger):
     _stage("page", "broken", body="no envelope here")
 

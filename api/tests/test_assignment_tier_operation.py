@@ -233,7 +233,7 @@ def test_prepare_ignores_deprecated_tier_targets(monkeypatch):
     assert all("group_name" not in tier for tier in payload["tiers"])
 
 
-def test_unrestricted_family_can_omit_group_category_and_due_for_live_push(monkeypatch):
+def test_unrestricted_family_can_omit_group_category_and_due_without_a_bypass_flag(monkeypatch):
     monkeypatch.setattr(canvas_client, "canvas_get_all", lambda *_args, **_kwargs: ([], None))
     monkeypatch.setattr(canvas_client, "canvas_get", lambda *_args, **_kwargs: ({"id": "501"}, None))
     payload = _build(
@@ -242,7 +242,6 @@ def test_unrestricted_family_can_omit_group_category_and_due_for_live_push(monke
         assignment_group_name="",
         due_at="",
         module_id="501",
-        allow_missing_due=True,
     )
     baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
     assert baseline["existing_assignments"] == []

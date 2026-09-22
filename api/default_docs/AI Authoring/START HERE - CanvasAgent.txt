@@ -323,8 +323,9 @@ what they asked for, not by a default that outranks them:
     Whole-class drafts may remain unpublished. Differentiated delivery uses the reviewed
     family path and is never left as unrestricted teacher-assignment work. Report what
     landed, including the URL it returns.
-    A differentiated quiz or assignment needs its exact target/module/due inputs, so use
-    the staged preview/apply path below for it.
+    A differentiated quiz needs its exact target/module/due inputs. A differentiated
+    AssignmentForge family needs its exact module input; the teacher may enter dates later.
+    Use the staged preview/apply path below for both.
   * They asked you to prepare it for their review. Call
     stage_content(kind, label, content) and stop there. Tell them it is
     staged; it appears under "Staged by your assistant (pending review)" in the
@@ -340,8 +341,9 @@ or assignment also takes assignment_group_name,
 post_to_sis, and -- on the preview pair only -- ISO 8601 due_at, unlock_at, and
 lock_at. Naming one a kind cannot carry is refused rather than quietly dropped.
 Differentiated quizzes require due_at plus an exact module_id (or explicit module creation with module_name), and their used canonical tiers must
-have unique public tags in Settings. AssignmentForge tier delivery requires unique public tags,
-a selected module, and the reviewed family path. Report each exact source URL, bridge, module,
+have unique public tags in Settings. AssignmentForge tier delivery requires unique public tags
+and a selected module; due_at is optional because the teacher sets dates in Canvas. Report each
+exact source URL, bridge, module,
 and family-link state; do not ask the teacher for Canvas group or pod targets.
 
 Every route stages the draft, so there is always a file the teacher can read

@@ -101,8 +101,6 @@ class AssignmentAdapter:
             payload["tiers"] = tiers
             payload["base_title"] = base_title
             payload["unrestricted_tiers"] = True
-            if prepare_request.get("allow_missing_due"):
-                payload["allow_missing_due"] = True
             if prepare_request.get("post_to_sis") is True:
                 raise ValueError(
                     "tiered AssignmentForge sources are SIS-disabled; omit post_to_sis"
@@ -165,7 +163,6 @@ class AssignmentAdapter:
             "base_title": payload.get("base_title"),
             "supports": payload.get("supports"),
             "corrections": payload.get("corrections"),
-            "allow_missing_due": payload.get("allow_missing_due"),
             "unrestricted_tiers": payload.get("unrestricted_tiers"),
         }
         return models.sha256_dict(keys)
@@ -232,7 +229,9 @@ class AssignmentAdapter:
                 payload.get("due_at"), payload.get("module_name"), payload.get("module_id"),
                 require_exact_module=True,
                 create_module=bool(payload.get("create_module")),
-                allow_missing_due=bool(payload.get("allow_missing_due")),
+                # AssignmentForge delivery is intentionally undated. The teacher
+                # owns due dates and can set them after the family lands in Canvas.
+                allow_missing_due=True,
             )
             payload["due_at"] = due_at
             payload["module_name"] = module_name
