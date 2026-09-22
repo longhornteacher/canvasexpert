@@ -36,46 +36,6 @@ def supported_renderers() -> tuple[str, ...]:
     return SUPPORTED_RENDERERS
 
 
-def normalize_tier_targets(labels: list[object], tier_targets: object) -> list[dict]:
-    """Validate teacher-supplied Canvas group targets without exposing students.
-
-    ``tier_targets`` is delivery input, not authoring content.  The returned
-    rows intentionally contain only canonical tiers and group names; the live
-    resolver adds transient membership evidence later.
-    """
-    if not isinstance(tier_targets, list):
-        raise ValueError("tier_targets is required for tiered AssignmentForge delivery")
-    expected = [canonical_tier(value) for value in labels]
-    if len(expected) < 2:
-        raise ValueError("Differentiated delivery requires at least two tiers")
-    if len(set(expected)) != len(expected):
-        raise ValueError("authored tiers must use each canonical tier at most once")
-    normalized = []
-    seen = set()
-    for row in tier_targets:
-        if not isinstance(row, dict) or set(row) != {"tier", "group_name"}:
-            raise ValueError("each tier_target must contain exactly tier and group_name")
-        tier = canonical_tier(row.get("tier"))
-        group_name = str(row.get("group_name") or "").strip()
-        if not group_name:
-            raise ValueError(f"tier target for {tier} requires a non-empty group_name")
-        if tier in seen:
-            raise ValueError(f"tier_targets contains duplicate tier {tier!r}")
-        seen.add(tier)
-        normalized.append({"tier": tier, "group_name": group_name})
-    if set(seen) != set(expected) or len(normalized) != len(expected):
-        missing = [tier for tier in expected if tier not in seen]
-        extra = [row["tier"] for row in normalized if row["tier"] not in expected]
-        detail = []
-        if missing:
-            detail.append(f"missing {', '.join(missing)}")
-        if extra:
-            detail.append(f"unknown {', '.join(extra)}")
-        raise ValueError("tier_targets must cover exactly every authored tier" + (f" ({'; '.join(detail)})" if detail else ""))
-    by_tier = {row["tier"]: row for row in normalized}
-    return [{"tier": tier, "group_name": by_tier[tier]["group_name"]} for tier in expected]
-
-
 def _metadata_value(assignment: dict, keys: tuple[str, ...]):
     metadata = assignment.get("metadata")
     candidates = [assignment, metadata if isinstance(metadata, dict) else {}]
@@ -304,11 +264,10 @@ def require_family_delivery(
     *,
     require_exact_module: bool = False,
     create_module: bool = False,
-) -> tuple[str, str, str]:
+    allow_missing_due: bool = False,
+) -> tuple[str | None, str, str | None]:
     due_text = str(due_at or "").strip()
     module_text = str(module_name or "").strip()
-    if not due_text:
-        raise ValueError("Differentiated delivery requires due_at")
     module_id_text = str(module_id or "").strip()
     if require_exact_module:
         if module_id_text and create_module:
@@ -320,6 +279,10 @@ def require_family_delivery(
             )
     elif not module_text and not module_id_text:
         raise ValueError("Differentiated delivery requires module_id or module_name")
+    if not due_text:
+        if allow_missing_due:
+            return None, module_text, None
+        raise ValueError("Differentiated delivery requires due_at")
     try:
         parsed = datetime.fromisoformat(due_text.replace("Z", "+00:00"))
     except ValueError as exc:
@@ -344,7 +307,7 @@ def bridge_description() -> str:
         "<p><strong>No submission is made here.</strong> This bridge keeps the "
         "assignment visible in the gradebook (the source assignments are in the selected module). Open your "
         f'<a href="{url}">Canvas Dashboard</a> and complete the configured-tag-suffixed '
-        "version assigned to you.</p>"
+        "version your teacher assigned to you.</p>"
     )
 
 
@@ -777,6 +740,7 @@ def _verified_family_sources(
     rows = []
     points = []
     groups = []
+    unrestricted = payload.get("unrestricted_tiers") is True
     safe_tiers = ((payload.get("group_snapshot") or {}).get("tiers")
                   if isinstance(payload.get("group_snapshot"), dict) else None)
     for index, (source_id, title) in enumerate(zip(source_ids, source_titles)):
@@ -786,11 +750,11 @@ def _verified_family_sources(
         expected = {
             "name": title,
             "published": True,
-            "only_visible_to_overrides": True,
+            "only_visible_to_overrides": not unrestricted,
             "omit_from_final_grade": True,
             "post_to_sis": False,
             "grading_type": "points",
-            "due_at": payload["due_at"],
+            "due_at": payload.get("due_at") or None,
         }
         if not _fields_match(assignment, expected):
             return {}, rows, "source_final_shape_unverified"
@@ -798,23 +762,29 @@ def _verified_family_sources(
             f"/api/v1/courses/{course_id}/assignments/{source_id}/overrides",
             {"per_page": 100},
         )
-        if override_error or not overrides:
+        if override_error:
             return {}, rows, "source_override_unverified"
-        if safe_tiers and index < len(safe_tiers):
-            expected_group = safe_tiers[index]
-            expected_group_id = str(expected_group.get("group_id") or "")
-            actual_group_ids = {
-                str(row.get("group_id") or "") for row in overrides
-                if row.get("group_id") not in (None, "")
-            }
-            override_ids = _override_student_ids(overrides)
-            expected_digest = str(expected_group.get("membership_digest") or "")
-            if expected_group_id and actual_group_ids and expected_group_id not in actual_group_ids:
-                return {}, rows, "source_group_override_unverified"
-            if expected_digest and override_ids and _membership_digest(override_ids) != expected_digest:
-                return {}, rows, "source_group_override_unverified"
-            if expected_digest and not actual_group_ids and not override_ids:
-                return {}, rows, "source_group_override_unverified"
+        if unrestricted:
+            if overrides:
+                return {}, rows, "source_overrides_present"
+        else:
+            if not overrides:
+                return {}, rows, "source_override_unverified"
+            if safe_tiers and index < len(safe_tiers):
+                expected_group = safe_tiers[index]
+                expected_group_id = str(expected_group.get("group_id") or "")
+                actual_group_ids = {
+                    str(row.get("group_id") or "") for row in overrides
+                    if row.get("group_id") not in (None, "")
+                }
+                override_ids = _override_student_ids(overrides)
+                expected_digest = str(expected_group.get("membership_digest") or "")
+                if expected_group_id and actual_group_ids and expected_group_id not in actual_group_ids:
+                    return {}, rows, "source_group_override_unverified"
+                if expected_digest and override_ids and _membership_digest(override_ids) != expected_digest:
+                    return {}, rows, "source_group_override_unverified"
+                if expected_digest and not actual_group_ids and not override_ids:
+                    return {}, rows, "source_group_override_unverified"
         points.append(_number(assignment.get("points_possible")))
         groups.append(str(assignment.get("assignment_group_id") or ""))
         rows.append(assignment)
@@ -937,7 +907,6 @@ __all__ = [
     "require_family_delivery",
     "reconcile_family_tail",
     "resolve_public_tags",
-    "normalize_tier_targets",
     "supported_renderers",
     "source_title",
     "structural_digest",

@@ -1,6 +1,6 @@
 """AssignmentForge adapter for the crash-safe ``content.assignment`` kind.
 
-Parse and safely apply whole-class or Canvas-group-differentiated assignments.
+Parse and safely apply whole-class or differentiated assignments.
 
 Excluded from this adapter:
 - Rubric association (slice 11c1).
@@ -10,7 +10,6 @@ import requests
 
 from .. import models
 from . import assignment_tiered, assignment_whole, differentiated_bridge
-from .assignment_groups import GroupResolutionError, resolve_assignment_groups
 from .adapter_support import (
     as_list as _as_list,
     build_result as _build_result,
@@ -56,9 +55,6 @@ class AssignmentAdapter:
             raise ValueError("Printable attachments are not supported for tiered assignments")
 
         if tiers:
-            target_rows = differentiated_bridge.normalize_tier_targets(
-                [row["label"] for row in tiers], prepare_request.get("tier_targets")
-            )
             tags = differentiated_bridge.resolve_public_tags(
                 [row["label"] for row in tiers]
             )
@@ -66,10 +62,9 @@ class AssignmentAdapter:
                 {
                     **row,
                     **resolved,
-                    "group_name": target["group_name"],
                 }
-                for row, resolved, target in zip(
-                    af.add_supports(tiers, data.get("supports"), tags), tags, target_rows
+                for row, resolved in zip(
+                    af.add_supports(tiers, data.get("supports"), tags), tags
                 )
             ]
             base_title = differentiated_bridge.normalize_base_title(name)
@@ -105,14 +100,9 @@ class AssignmentAdapter:
         if tiers:
             payload["tiers"] = tiers
             payload["base_title"] = base_title
-            payload["tier_targets"] = target_rows
-            # Family safety is server-owned; an omitted value is the normal
-            # path while an explicit unrestricted draft is a contradiction.
-            if prepare_request.get("published") is False:
-                raise ValueError(
-                    "tiered AssignmentForge delivery cannot publish an unrestricted draft; "
-                    "sources are published only after exact group restriction"
-                )
+            payload["unrestricted_tiers"] = True
+            if prepare_request.get("allow_missing_due"):
+                payload["allow_missing_due"] = True
             if prepare_request.get("post_to_sis") is True:
                 raise ValueError(
                     "tiered AssignmentForge sources are SIS-disabled; omit post_to_sis"
@@ -175,6 +165,8 @@ class AssignmentAdapter:
             "base_title": payload.get("base_title"),
             "supports": payload.get("supports"),
             "corrections": payload.get("corrections"),
+            "allow_missing_due": payload.get("allow_missing_due"),
+            "unrestricted_tiers": payload.get("unrestricted_tiers"),
         }
         return models.sha256_dict(keys)
 
@@ -229,39 +221,30 @@ class AssignmentAdapter:
                     "html_url": row.get("html_url"),
                 } for row in (assignments or []) if row.get("id") is not None
                     and _normalize(row.get("name")) == _normalize(title))
-            try:
-                resolved = resolve_assignment_groups(
-                    course_id,
-                    [{"label": row["label"], "group": row["group_name"]}
-                     for row in payload["tiers"]],
+            if payload.get("assignment_group_name"):
+                assignment_group_id = _find_assignment_group(
+                    course_id, payload["assignment_group_name"]
                 )
-            except GroupResolutionError as exc:
-                return {"blocking_error": "group_resolution_failed", "error": str(exc)}
-            if not payload.get("assignment_group_name"):
-                return {"blocking_error": "assignment_group_required"}
-            assignment_group_id = _find_assignment_group(
-                course_id, payload["assignment_group_name"]
-            )
-            if assignment_group_id is None:
-                return {"blocking_error": "assignment_group_not_found"}
-            payload["assignment_group_id"] = assignment_group_id
+                if assignment_group_id is None:
+                    return {"blocking_error": "assignment_group_not_found"}
+                payload["assignment_group_id"] = assignment_group_id
             due_at, module_name, bridge_due_at = differentiated_bridge.require_family_delivery(
                 payload.get("due_at"), payload.get("module_name"), payload.get("module_id"),
                 require_exact_module=True,
                 create_module=bool(payload.get("create_module")),
+                allow_missing_due=bool(payload.get("allow_missing_due")),
             )
             payload["due_at"] = due_at
             payload["module_name"] = module_name
             payload["bridge_due_at"] = bridge_due_at
             payload["bridge_description"] = differentiated_bridge.bridge_description()
-            payload["group_snapshot"] = resolved["safe"]
             if payload.get("module_id"):
                 module, module_error = canvas_client.canvas_get(
                     f"/api/v1/courses/{course_id}/modules/{payload['module_id']}"
                 )
                 if module_error or not module or str(module.get("id")) != str(payload["module_id"]):
                     return {"blocking_error": "module_exact_id_unverified"}
-            return {"existing_assignments": matches, "group_snapshot": resolved["safe"]}
+            return {"existing_assignments": matches}
 
         baseline = {"existing_assignment": None}
         assignments, error = canvas_client.canvas_get(
@@ -361,11 +344,12 @@ class AssignmentAdapter:
                     "source_title": row.get("title"),
                 } for row in payload["tiers"]],
                 "tier_warning": (
-                    "Canvas will create one published, exact-group-restricted source assignment per tier "
+                    "Canvas will create one published, unrestricted source assignment per tier "
                     "and one whole-course grade bridge. Only the sources appear in the selected module."
                 ),
                 "teacher_action": (
-                    "Review the exact family in Canvas Live; Canvas Expert will not perform Canvas Grade Sync."
+                    "Review the exact family in Canvas Live; tier placement is manual and teacher-owned. "
+                    "Canvas Expert will not use Canvas Groups or perform Canvas Grade Sync."
                 ),
             })
             review["published"] = True
@@ -378,12 +362,6 @@ class AssignmentAdapter:
                 "due_at": payload.get("bridge_due_at"),
                 "post_to_sis": True,
             }
-            review["groups"] = [
-                {"tier": row.get("label"), "public_tag": row.get("tag"),
-                 "group_name": safe.get("group_name"),
-                 "student_count": safe.get("student_count")}
-                for row, safe in zip(payload["tiers"], (baseline.get("group_snapshot") or {}).get("tiers", []))
-            ]
             review["baseline_has_existing"] = bool(baseline.get("existing_assignments"))
             review["baseline_existing_id"] = None
             review["baseline_existing_url"] = None

@@ -15,8 +15,7 @@ student work uses the base title plus a configured public tag, such as `Reading 
 or a teacher-defined suffix. The unsuffixed `Reading Check` may be a source or a bridge;
 Canvas structure decides which role it has.
 
-Only the configured-tag-suffixed source assignments appear in the selected module; the bridge is gradebook-only. Each student opens the
-assigned to their Canvas group. The bridge keeps one whole-course gradebook column available
+Only the configured-tag-suffixed source assignments appear in the selected module; the bridge is gradebook-only. Source-tier placement is manual and teacher-owned. The bridge keeps one whole-course gradebook column available
 for teacher-owned Canvas Grade Sync.
 
 Whole-class delivery creates one ordinary Canvas object and does not create a bridge.
@@ -29,7 +28,7 @@ be unique after trimming and case-folding. A missing or duplicate tag blocks del
 Canvas write.
 
 The pedagogical label remains the authoring and instructional meaning. The configured tag is
-only the public title suffix. Canvas group names remain separate membership authority.
+only the public title suffix. Canvas group and pod settings are not delivery authority.
 
 ## 3. Author and deliver a family
 
@@ -57,6 +56,13 @@ The mirror-backed preview verifies exact source IDs and titles, the exact bridge
 is registered, the two-source threshold, compatible points and assignment group values, and
 the bridge identity needed for the reviewed operation. It also reads mirrored submissions so
 present numeric scores and excused states can be shown in the review.
+
+At the approved live apply, CanvasExpert additionally verifies that every exact
+`Base - <configured-tag>` source is published, points-graded, unrestricted, omitted from the
+final grade, SIS-disabled, and attached exactly once to the selected module; that the bridge is
+published, counted, SIS-enabled, no-submission, whole-course visible, and has the expected
+description; and that all exact IDs, titles, and the bridge structural digest can be saved and
+read back without student data. AssignmentForge source placement remains manual and teacher-owned.
 
 Only the explicit, teacher-approved apply crosses the live boundary. That push creates or
 registers a missing bridge when required, copies the frozen scores, and performs live

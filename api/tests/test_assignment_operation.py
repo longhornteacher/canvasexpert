@@ -181,11 +181,11 @@ def test_payload_build_accepts_tiers(tmp_path, monkeypatch):
     })
     assert payload["tiers"] == [{
         "label": "Support", "tier": "Support",
-        "tag": "Red", "group_name": "Blue", "title": "Tiered - Red",
+        "tag": "Red", "title": "Tiered - Red",
         "description": "<p>Hi</p>",
     }, {
         "label": "Core", "tier": "Core",
-        "tag": "Blue", "group_name": "Gold", "title": "Tiered - Blue",
+        "tag": "Blue", "title": "Tiered - Blue",
         "description": "<p>Hi</p>",
     }]
 

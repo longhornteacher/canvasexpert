@@ -300,7 +300,6 @@ def preview_content_push(
     post_to_sis: bool | None = None,
     module_id: str = "",
     create_module: bool = False,
-    tier_targets: list | None = None,
 ) -> str:
     """Persist a local frozen staged quiz, assignment, or page draft; no Canvas write."""
     return _compact(tools.preview_content_push(
@@ -309,7 +308,7 @@ def preview_content_push(
         assignment_group_name=assignment_group_name,
         due_at=due_at, unlock_at=unlock_at, lock_at=lock_at,
         post_to_sis=post_to_sis, module_id=module_id,
-         create_module=create_module, tier_targets=tier_targets,
+         create_module=create_module,
     ))
 
 

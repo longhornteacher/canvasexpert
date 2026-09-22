@@ -2,13 +2,13 @@
 
 This contract is renderer-neutral. AssignmentForge and QuizForge may author
 different source content, but differentiated delivery produces one verified
-family: exact source objects, exact group targets, one bridge, and one private
+family: exact source objects, one module placement, one bridge, and one private
 family link. This contract's bridge workflow is mirror-first; module placement
 and authoring delivery are separate concerns.
 
 ## 1. Scope
 
-AssignmentForge uses explicit `tier_targets` and exact module delivery. QuizForge
+AssignmentForge uses exact module delivery and leaves student placement to the teacher. QuizForge
 uses its differentiated target grammar and the same family tail. Both renderers
 must return the same semantic family facts and obey the same source, module,
 bridge, verification, recovery, and link laws. Whole-class delivery remains a
@@ -17,9 +17,9 @@ separate path.
 ## 2. Family identity and verified link
 
 A family is identified by course-scoped source assignment IDs, source titles,
-safe tier/group facts, the bridge assignment ID, and a structural family digest.
-The persisted private link retains its existing storage keys; product-facing
-language calls it a **family link**.
+safe tier facts, the exact module identity, the bridge assignment ID, and a
+structural family digest. The persisted private link retains its existing
+storage keys; product-facing language calls it a **family link**.
 
 The link is written only after the approved bridge push has verified its exact
 live postconditions. A discovered title or a set of assignment IDs is not a
@@ -31,14 +31,14 @@ scoring or SIS projection.
 Every differentiated family must satisfy all of these laws:
 
 1. There are at least two unique tiers.
-2. Every tier names exactly one target group and every target group resolves in the
-   current course with an exact, unchanged roster snapshot.
+2. AssignmentForge sources are whole-course visible and have no placement overrides;
+   QuizForge sources retain their explicit target-group contract.
 3. Every source assignment is ordinary Canvas content with authored content and
-   dates. It is created unpublished, then published only after exact group
-   restriction and override verification. Its final source state is published,
-   override-only, omitted from the final grade, and SIS-disabled.
-4. Each source is restricted to its exact target group; raw membership IDs are
-   transient and never leave the token-holding operation.
+   dates. It is created unpublished, then published only after its source shape is
+   verified. Its final source state is published, omitted from the final grade,
+   and SIS-disabled.
+4. Raw membership IDs, when used by QuizForge, are transient and never leave the
+   token-holding operation.
 5. Every source appears exactly once in the selected module and no source appears
    in any other module.
 6. The family has one verified bridge and one saved family link.
@@ -55,13 +55,13 @@ and is never a source of group membership.
 
 The authoring/delivery operation performs these bounded steps:
 
-1. Validate authored content, tier targets, exact groups, module choice, and
+1. Validate authored content, module choice, and
    dates; capture safe baseline facts.
 2. Create each source, re-read its exact ID, and verify its authored shape and
    server-owned safety fields.
-3. Restrict each source to its resolved group and create/verify its group
-   override.
-4. Publish only after every source is restricted and verified.
+3. For QuizForge only, restrict each source to its resolved group and create/verify
+   its group override.
+4. Publish only after every source is verified.
 5. Attach the verified sources exactly once to the selected module and prove the
    bridge is absent from all modules.
 6. Create or adopt the bridge, activate it with the locked safe shape, and verify

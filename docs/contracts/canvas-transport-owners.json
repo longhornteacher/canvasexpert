@@ -160,6 +160,19 @@
       "reason": "The central operation-ledger post-apply hook invalidates applicable catalog scopes after the confirmed operation succeeds."
     },
     {
+      "path": "api/operation_ledger/adapters/assignment_tiered.py",
+      "symbol": "_put_and_verify",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(\"PUT\", path, request) [publish unrestricted tier assignment]",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "catalog.assignments"
+      ],
+      "reconciliation": "invalidate",
+      "reason": "Publishes an exact tier source only after creation verification; the central operation-ledger post-apply hook invalidates catalog.assignments after the confirmed operation succeeds."
+    },
+    {
       "path": "api/operation_ledger/adapters/assignment_update.py",
       "symbol": "AssignmentUpdateAdapter.execute",
       "detector": "attr:_canvas_send",

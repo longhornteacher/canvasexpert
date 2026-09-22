@@ -80,9 +80,9 @@ bundled Pandoc through `pypandoc-binary`.
 - **Validate**: `py validate_qf.py <file.txt>`
 
 Differentiated live delivery has no direct CLI. Use the reviewed AssignmentForge or
-QuizForge Operation Ledger path so exact tier targets, group restrictions, bridge
-creation, exact-ID recovery, module placement, and the verified family link are one
-operation.
+QuizForge Operation Ledger path so bridge creation, exact-ID recovery, module placement,
+and the verified family link are one operation. QuizForge retains explicit group targets;
+AssignmentForge sources are unrestricted and manually placed by the teacher.
 
 ## Control console (not the primary working surface)
 
@@ -162,16 +162,16 @@ reconciliation; scoring requires the verified family link.
 - Extracts JSON from the `<ASSIGNMENTFORGE_JSON>` envelope.
 - Resolves course-resource placeholders (`{{file:NAME}}`, `{{page:Title}}` per course).
 - Creates assignment(s) with configurable submission types, points, dates, grading category.
-- **Differentiated family**: one file with two or more canonical tiers requires exact
-  `tier_targets`, a selected module, and a reviewed delivery operation. Each source is
-  restricted to its named group, override-only, omitted from the final grade, and SIS-disabled;
-  the shared family owner attaches sources, creates/verifies the gradebook-only bridge, and
-  saves the family link only after all postconditions pass.
+- **Differentiated family**: one file with two or more canonical tiers requires a selected
+  module and a reviewed delivery operation. Each unrestricted source is published, omitted
+  from the final grade, and SIS-disabled; tier placement is teacher-owned and manual. The
+  shared family owner attaches sources, creates/verifies the gradebook-only bridge, and saves
+  the family link only after all postconditions pass.
 
 Differentiated quiz delivery retains its timezone-aware due timestamp, module, unique public
 tags, equal points, and assignment-group requirements. AssignmentForge family sources preserve
-the ordinary assignment dates, grading category, submission settings, points, and SIS/final-
-runtime owns group restriction and final-grade/SIS safety.
+the ordinary assignment dates, grading category, submission settings, points, and final-grade/
+SIS safety; tier placement is manual and teacher-owned.
 
 ### Pages (PageForge)
 - Extracts JSON from the `<PAGEFORGE_JSON>` envelope.

@@ -10,29 +10,26 @@ Canvas delivery instruction and does not authorize student placement. Assignment
 and Quiz Forge are two renderers under one differentiated-family contract. The
 shared owner is `api/operation_ledger/adapters/differentiated_bridge.py`.
 
-The family owner is responsible for exact group coverage, source safety, module
-placement, bridge creation and activation, verification, recovery, reconciliation,
-and the private family link. Renderer adapters create and verify their source
+The family owner is responsible for source safety, module placement, bridge creation and
+activation, verification, recovery, reconciliation, and the private family link. Renderer adapters create and verify their source
 objects, then call the shared family tail.
 
 ## Preparation and payload
 
 The authored envelope contains content only. Delivery preview requires at least
-two unique tiers and an exact `tier_targets` list with one Canvas group name per
-tier. The teacher must also choose the due date, module placement, and publication
+two unique tiers. The teacher must also choose the due date, module placement, and publication
 intent. A module is either an exact existing `module_id` or an explicit
 `create_module` request with a name; the runtime never guesses.
 
-Preparation resolves the named groups and captures only safe labels, counts, and
-course-scoped identity facts. Raw membership IDs are transient operation inputs
-and are never returned in MCP results, receipts, docs, or durable family facts.
+Canvas group and pod settings are intentionally ignored. Tier placement is manual and
+teacher-owned after delivery.
 
 ## Canvas delivery
 
 Each tier becomes an ordinary Assignment with the authored title, content, points,
 submission settings, dates, and assignment group. The server owns the safety
-fields: the source is created unpublished, restricted to the exact target group,
-override-only, omitted from the final grade, and SIS-disabled. The source is
+fields: the source starts unpublished and has whole-course visibility, is omitted from the final grade,
+and SIS-disabled. The source is
 re-read after each mutation before the next step.
 
 After all sources are verified, the shared tail attaches each source exactly once
@@ -57,8 +54,8 @@ names, or raw membership data.
 ## Non-goals
 
 - Do not merge the AssignmentForge and QuizForge authoring grammars.
-- Do not infer groups, modules, due dates, publication, or bridge ownership.
-- Do not create unrestricted tier drafts or leave family placement incomplete.
+- Do not infer modules, due dates, publication, or bridge ownership.
+- Do not leave family placement incomplete; tier sources are intentionally unrestricted and manually placed by the teacher.
 - Do not place the bridge in a module or duplicate a source module item.
 - Do not enable SIS posting or write New Quiz item scores.
 - Do not change whole-class delivery or build browser UI parity with the host agent.

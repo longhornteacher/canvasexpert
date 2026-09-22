@@ -77,7 +77,7 @@ Tool schema version 55 (44 tools).
 | `get_product_guide(topic="")` | CanvasExpert product knowledge; omit `topic` for the overview, use the annotated topic map to choose detail, or select `tools` for the complete generated inventory | No |
 | `stage_content(kind, label, content)` | Writes one authored draft and its `.done` marker into the per-kind review Inbox; refuses an existing label rather than overwriting | No |
 | `list_staged_content(kind="")` | Drafts in the local review Inbox; pass `kind` to filter or omit it for all drafts | No |
-| `preview_content_push(course_id, kind, label, published=None, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=None, tier_targets=[])` | Persists a local frozen review of one staged draft for one Current course; differentiated AssignmentForge also requires exact tier targets; existing module IDs are exact, while module creation is explicit | No |
+| `preview_content_push(course_id, kind, label, published=None, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=None)` | Persists a local frozen review of one staged draft for one Current course; differentiated AssignmentForge creates unrestricted tier sources and the shared bridge; existing module IDs are exact, while module creation is explicit | No |
 | `list_groups(course_id)` | Current-course group-set and group names from the fresh local mirror, including the group set selected in Roster; no memberships or Canvas IDs | No |
 | `preview_differentiated_quiz_push(course_id, variants, published=false, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=false)` | Persists a frozen review for one staged QuizForge family; sources attach to the selected module and the gradebook-only bridge does not | No |
 | `apply_content_push(operation_id, batch_id, review_digest)` | Creates the exact frozen draft in Canvas through the Operation Ledger; same claims, drift check, and receipt as the push tab | No |
@@ -138,9 +138,9 @@ links the verified family. The result directs the teacher to Canvas Live for rev
 the teacher owns Canvas Grade Sync.
 
 The reviewed-preview machinery runs on every route. Whole-class drafts may remain
-unpublished. Differentiated sources use the reviewed family operation, including exact group
-restriction, source-only module placement, bridge verification, and family-link save; they are
-never left as unrestricted teacher-assignment work.
+unpublished. Differentiated sources use the reviewed family operation, including source-only
+module placement, bridge verification, and family-link save. QuizForge retains group
+restriction; AssignmentForge sources are unrestricted and tier placement is teacher-owned.
 
 The live push carries no due, unlock, or lock dates. Scheduling stays on
 `preview_content_push`, because dated work is the case that most wants a look before it

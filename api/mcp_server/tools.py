@@ -1324,7 +1324,7 @@ def _staging_appendix(kind: str) -> str:
         "not stage it instead and ask, and do not ask them to confirm a "
         "preview they did not ask for. Whole-class drafts may remain unpublished; "
         "tiered deliveries are reviewed differentiated families and are not "
-        "left as unrestricted teacher-assignment work. What you create is visible to them and "
+        "left without teacher-owned tier placement. What you create is visible to them and "
         "not yet to students -- they can edit or delete it by hand in Canvas "
         "and tell you what to change.\n\n"
         "**If they asked you to prepare it for their review**, call "
@@ -1452,7 +1452,6 @@ def preview_content_push(
     post_to_sis: bool | None = None,
     module_id: str = "",
     create_module: bool = False,
-    tier_targets: list | None = None,
 ) -> dict:
     """Freeze one staged draft (quiz/assignment/page, by the label
     list_staged_content returns) into a persisted, digest-protected review for
@@ -1462,8 +1461,8 @@ def preview_content_push(
     Delivery options are per kind -- a page takes published and module_name, a
     quiz takes differentiated grouping options, and an
     assignment takes ordinary grading-category options plus post_to_sis and ISO 8601
-     due_at/unlock_at/lock_at. Tiered AssignmentForge additionally takes
-     tier_targets, one exact Canvas group name for every authored tier.
+     due_at/unlock_at/lock_at. Differentiated AssignmentForge deliveries are
+     unrestricted; tier placement remains manual and teacher-owned.
     Naming one a kind cannot carry is refused, not dropped. Drafts stay
     unpublished unless published=true.
 
@@ -1479,7 +1478,7 @@ def preview_content_push(
         assignment_group_name=assignment_group_name,
         due_at=due_at, unlock_at=unlock_at, lock_at=lock_at,
         post_to_sis=post_to_sis, module_id=module_id,
-        create_module=create_module, tier_targets=tier_targets,
+        create_module=create_module,
     ))
 
 

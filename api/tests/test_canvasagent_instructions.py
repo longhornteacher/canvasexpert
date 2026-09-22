@@ -152,7 +152,7 @@ def test_connected_guidance_describes_differentiated_delivery_ownership(text):
     for phrase in (
         "public color tags",
         "same renderer-neutral family tail",
-        "exact `tier_targets`",
+        "tier placement is manual",
         "shared bridge",
         "family-link repair",
         "canvas live",
@@ -235,8 +235,9 @@ def test_family_contract_distinguishes_creation_and_final_source_safety():
         encoding="utf-8"
     )
     normalized = re.sub(r"\s+", " ", contract).casefold()
-    assert "created unpublished, then published only after exact group restriction" in normalized
-    assert "final source state is published, override-only, omitted from the final grade, and sis-disabled" in normalized
+    assert "assignmentforge sources are whole-course visible" in normalized
+    assert "created unpublished, then published only after its source shape is verified" in normalized
+    assert "final source state is published, omitted from the final grade, and sis-disabled" in normalized
     assert "server-owned safety fields are unpublished" not in normalized
 
 

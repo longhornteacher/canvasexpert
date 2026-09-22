@@ -48,7 +48,7 @@ _KIND_OPTIONS = {
     "quiz": ("published", "module_name", "module_id", "create_module", "assignment_group_name",
              "post_to_sis", *_SCHEDULE_OPTIONS),
     "assignment": ("published", "module_name", "module_id", "create_module", "assignment_group_name",
-                    "post_to_sis", "tier_targets", *_SCHEDULE_OPTIONS),
+                    "post_to_sis", *_SCHEDULE_OPTIONS),
     "page": ("published", "module_name", "module_id", "create_module"),
 }
 
@@ -117,8 +117,6 @@ def _collect_options(kind: str, options: dict) -> tuple[dict, str | None]:
         value = str(options.get(key) or "").strip()
         if value:
             named[key] = value
-    if options.get("tier_targets") is not None:
-        named["tier_targets"] = options.get("tier_targets")
     if bool(options.get("create_module")):
         named["create_module"] = True
 
@@ -138,7 +136,7 @@ def _collect_options(kind: str, options: dict) -> tuple[dict, str | None]:
     return named, None
 
 
-def _prepare_request(kind: str, path: str, named: dict) -> dict:
+def _prepare_request(kind: str, path: str, named: dict, *, allow_missing_due: bool = False) -> dict:
     """Build the adapter's prepare request from one resolved draft and options.
 
     A quiz carries its options as QuizForge push settings rather than as
@@ -147,7 +145,7 @@ def _prepare_request(kind: str, path: str, named: dict) -> dict:
     """
     if kind == "quiz":
         return {"mode": "whole", "path": path, "settings": dict(named)}
-    return {"path": path, **named}
+    return {"path": path, **named, **({"allow_missing_due": True} if allow_missing_due else {})}
 
 
 def preview_content_push(
@@ -164,7 +162,7 @@ def preview_content_push(
     post_to_sis: bool | None = None,
     module_id: str = "",
     create_module: bool = False,
-    tier_targets: list | None = None,
+    _allow_missing_due: bool = False,
 ) -> dict:
     """Freeze one staged draft into a persisted, digest-protected review.
 
@@ -190,7 +188,6 @@ def preview_content_push(
         "unlock_at": unlock_at,
         "lock_at": lock_at,
         "post_to_sis": post_to_sis,
-        "tier_targets": tier_targets,
     })
     if option_error:
         return {"ok": False, "error": option_error}
@@ -202,7 +199,9 @@ def preview_content_push(
     ledger_kind = _LEDGER_KINDS[content_kind]
     adapter = registry.get_adapter(ledger_kind)
     try:
-        payload = adapter.build_payload(_prepare_request(content_kind, path, named))
+        payload = adapter.build_payload(_prepare_request(
+            content_kind, path, named, allow_missing_due=_allow_missing_due,
+        ))
         target = adapter.verify_targets(payload, [{"course_id": course_key}])[0]
         baseline = adapter.capture_baseline(payload, target)
         if isinstance(baseline, dict) and baseline.get("blocking_error"):
@@ -237,9 +236,7 @@ def preview_content_push(
         message = str(exc)
         code = None
         lowered = message.casefold()
-        if "tier_targets" in lowered:
-            code = "tier_targets_required"
-        elif "assignmentforge" in lowered and "module" in lowered:
+        if "assignmentforge" in lowered and "module" in lowered:
             code = "module_selection_required"
         elif "assignmentforge" in lowered and "due" in lowered:
             code = "due_at_required"
@@ -554,6 +551,7 @@ def push_content_live(
         module_id=module_id, create_module=create_module,
         assignment_group_name=assignment_group_name,
         post_to_sis=post_to_sis,
+        _allow_missing_due=True,
     )
     if not review.get("ok"):
         return {
@@ -689,14 +687,17 @@ def _result_projection(operation: dict, result: dict) -> dict:
                              and step.get("state") in ("applied", "skipped")
                              and step.get("returned_object_url")), None)
                 if step:
-                    created.append({
+                    created_row = {
                         "tier": variant.get("tier") or variant.get("label"),
                         "public_tag": variant.get("tag"),
-                        "group_name": (variant.get("group_name") or variant.get("group")),
                         "assignment_id": step.get("returned_object_id"),
                         "title": ((variant.get("plan") or {}).get("title") or variant.get("title")),
                         "url": step.get("returned_object_url"),
-                    })
+                    }
+                    group_name = variant.get("group_name") or variant.get("group")
+                    if group_name:
+                        created_row["group_name"] = group_name
+                    created.append(created_row)
             if created:
                 row["created"] = created
             bridge_step = next((step for step in step_source

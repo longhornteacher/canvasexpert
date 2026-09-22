@@ -227,9 +227,28 @@ def _build(monkeypatch, **request_overrides):
     return AssignmentAdapter().build_payload(request)
 
 
-def test_prepare_requires_exact_tier_targets(monkeypatch):
-    with pytest.raises(ValueError, match="tier_targets is required"):
-        _build(monkeypatch, tier_targets=None)
+def test_prepare_ignores_deprecated_tier_targets(monkeypatch):
+    payload = _build(monkeypatch, tier_targets=None)
+    assert "tier_targets" not in payload
+    assert all("group_name" not in tier for tier in payload["tiers"])
+
+
+def test_unrestricted_family_can_omit_group_category_and_due_for_live_push(monkeypatch):
+    monkeypatch.setattr(canvas_client, "canvas_get_all", lambda *_args, **_kwargs: ([], None))
+    monkeypatch.setattr(canvas_client, "canvas_get", lambda *_args, **_kwargs: ({"id": "501"}, None))
+    payload = _build(
+        monkeypatch,
+        tier_targets=None,
+        assignment_group_name="",
+        due_at="",
+        module_id="501",
+        allow_missing_due=True,
+    )
+    baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
+    assert baseline["existing_assignments"] == []
+    assert payload.get("assignment_group_id") is None
+    assert payload["due_at"] is None
+    assert payload["bridge_due_at"] is None
 
 
 def test_prepare_preserves_ordinary_dates_for_each_tier(monkeypatch):
@@ -260,7 +279,7 @@ def test_prepare_requires_unique_public_tags(monkeypatch):
         })
 
 
-def test_differentiated_assignment_family_is_group_restricted_and_student_free(monkeypatch):
+def test_differentiated_assignment_family_is_unrestricted_and_student_free(monkeypatch):
     payload = _build(
         monkeypatch,
         unlock_at="2026-09-01T08:00:00-05:00",
@@ -271,31 +290,6 @@ def test_differentiated_assignment_family_is_group_restricted_and_student_free(m
     monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
     monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
     monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
-    monkeypatch.setattr(
-        "api.operation_ledger.adapters.assignment.resolve_assignment_groups",
-        lambda _course, _tiers: {
-            "safe": {"tiers": [
-                {"label": "Support", "group_name": "Blue", "group_id": "10", "student_count": 2,
-                 "membership_digest": "a" * 64},
-                {"label": "Extend", "group_name": "Gold", "group_id": "20", "student_count": 1,
-                 "membership_digest": "b" * 64},
-            ]},
-            "student_ids_by_group": {"10": ["9001", "9002"], "20": ["9003"]},
-        },
-    )
-    monkeypatch.setattr(
-        "api.operation_ledger.adapters.assignment_tiered.resolve_assignment_groups",
-        lambda _course, _tiers: {
-            "safe": {"tiers": [
-                {"label": "Support", "group_name": "Blue", "group_id": "10", "student_count": 2,
-                 "membership_digest": "a" * 64},
-                {"label": "Extend", "group_name": "Gold", "group_id": "20", "student_count": 1,
-                 "membership_digest": "b" * 64},
-            ]},
-            "student_ids_by_group": {"10": ["9001", "9002"], "20": ["9003"]},
-        },
-    )
-
     baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
     assert baseline["existing_assignments"] == []
     context = Context()
@@ -306,9 +300,10 @@ def test_differentiated_assignment_family_is_group_restricted_and_student_free(m
     assert all(row["due_at"] == "2026-09-14T15:30:00-05:00" for row in sources)
     assert all(row["unlock_at"] == "2026-09-01T08:00:00-05:00" for row in sources)
     assert all(row["lock_at"] == "2026-09-30T23:59:00-05:00" for row in sources)
-    assert all(row["published"] and row["only_visible_to_overrides"] for row in sources)
+    assert all(row["published"] and not row["only_visible_to_overrides"] for row in sources)
     assert all(row["omit_from_final_grade"] and not row["post_to_sis"] for row in sources)
-    assert all(len(fake.overrides[row["id"]]) == 1 for row in sources)
+    assert all(len(fake.overrides[row["id"]]) == 0 for row in sources)
+    assert not any("override" in step["step_key"] or "restrict" in step["step_key"] for step in context.steps)
     assert {str(row["content_id"]) for row in fake.module_items.values()} == {row["id"] for row in sources}
     assert all(value not in json.dumps(context.steps) for value in ("9001", "9002", "9003"))
 

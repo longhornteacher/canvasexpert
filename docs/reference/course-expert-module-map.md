@@ -130,5 +130,5 @@ updated in the same change.
 
 Differentiated QuizForge delivery requires Settings-backed public tags, a timezone-aware
 due timestamp, and a module; its configured-tag source assignments are module-visible while the unsuffixed bridge is gradebook-only. AssignmentForge
-tier delivery is a reviewed family operation with exact group targets, override-only
-sources, a shared bridge, source-only module placement, and a verified family link.
+tier delivery is a reviewed family operation with unrestricted sources, a shared bridge,
+source-only module placement, and a verified family link; the teacher owns tier placement.

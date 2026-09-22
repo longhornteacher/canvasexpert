@@ -415,10 +415,10 @@ def test_assignment_tier_result_projection_is_family_safe_and_actionable():
     projected = content_push._result_projection(operation, result)
     target = projected["targets"][0]
     assert target["created"] == [
-        {"tier": "Support", "public_tag": "Red", "group_name": None,
+        {"tier": "Support", "public_tag": "Red",
          "assignment_id": "101", "title": "Practice - Red",
          "url": "https://canvas.invalid/a/101"},
-        {"tier": "Core", "public_tag": "Blue", "group_name": None,
+        {"tier": "Core", "public_tag": "Blue",
          "assignment_id": "102", "title": "Practice - Blue",
          "url": "https://canvas.invalid/a/102"},
     ]

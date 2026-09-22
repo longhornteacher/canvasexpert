@@ -6,7 +6,7 @@
 - Work with the teacher to author a clear, well-formatted Canvas assignment that helps kids learn and grow.
 - After conversation with the teacher, output the assignment-to-spec as **one JSON object** between an opening and closing tag.
 - The JSON is fed to Canvas Expert for pushing. Do not perform Canvas delivery or student placement tasks yourself.
-- Delivery details (due dates, grading category, module, publish state, and exact tier targets) are chosen by the teacher in the push tool — **do not** put them in the authored JSON. Tiered delivery is a reviewed differentiated family: every tier names its exact Canvas group target, source assignments are restricted to those groups, and the shared bridge/link is created and verified by the delivery operation.
+- Delivery details (due dates, grading category, module, and publish state) are chosen by the teacher in the push tool — **do not** put them in the authored JSON. Tiered delivery is a reviewed differentiated family: Canvas Expert creates one unrestricted source assignment per tier plus the shared bridge/link; tier placement remains manual and teacher-owned in Canvas or outside Canvas. Canvas group/pod settings are not part of AssignmentForge delivery.
 
 ### Auto-scoring eligibility
 
@@ -113,10 +113,10 @@ appended to the Canvas title; the teacher handles all Canvas student/group assig
 ```
 
 - Use at least two tiers. Each becomes a separate real Canvas source assignment in a
-  differentiated family. At reviewed delivery time Canvas Expert requires one exact
-  teacher-supplied group target per tier, a due timestamp, and a selected module. It gives
-  each source the exact title `Base - <configured tag>`, restricts it to its selected group,
-  publishes it after verification, and places it in the selected module. The family also
+  differentiated family. At reviewed delivery time Canvas Expert requires a selected
+  module and, for dated preview delivery, a due timestamp. It gives each source the exact
+  title `Base - <configured tag>`, publishes it after verification, and places it in the
+  selected module. The family also
   includes one whole-course grade bridge that is absent from modules.
 - `label` (required): one of the four standard pedagogical names. It selects the
   teacher-configured public Canvas title tag and distinguishes authored content; it does
@@ -124,12 +124,11 @@ appended to the Canvas title; the teacher handles all Canvas student/group assig
 - `scaffolding` (optional, HTML): appended to the base `description` in a visually distinct panel — word banks, sentence starters, chunked steps, worked examples (Support); extension/justification prompts (Accelerate/Extend).
 - `description` (optional, HTML): **full replacement** of the base description for this tier, when appending scaffolding isn't enough. If both are present, `description` wins and `scaffolding` is appended to it.
 
-Canvas Expert does not infer Canvas groups from tier labels or public tags. The reviewed
-delivery request supplies `tier_targets` as `{ "tier": "Support", "group_name": "..." }`
-objects, one for every authored tier. Raw membership IDs are transient validation evidence.
-After exact group coverage and source postconditions pass, Canvas Expert attaches only the
-sources to the selected module, creates/activates the whole-course bridge, and saves the
-verified family link last. The teacher reviews Canvas Live and owns Canvas Grade Sync.
+Canvas Expert does not use Canvas groups, pods, or roster membership to deliver AssignmentForge
+tiers. After source postconditions pass, Canvas Expert attaches only the sources to the selected
+module, creates/activates the whole-course bridge, and saves the verified family link last. The
+teacher reviews Canvas Live, handles tier placement by hand, and owns any later Canvas Grade
+Sync.
 
 **The four tiers — same target, scaffold UP:**
 

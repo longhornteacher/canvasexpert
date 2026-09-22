@@ -41,10 +41,10 @@ teacher explicitly asks for that. Dated or otherwise reviewed delivery uses the 
 preview/apply path. QuizForge can also compile offline into a Canvas-importable package
 and printable student and answer-key DOCX/PDF files.
 
-AssignmentForge tier delivery is a reviewed differentiated family. Each used tier becomes a
-group-restricted source assignment named with the configured public tag. The runtime resolves
-the exact named group, applies override-only/final-grade/SIS safety, places only sources in the
-selected module, and creates/verifies the shared bridge and family link. The assistant must not
+AssignmentForge tier delivery is a reviewed differentiated family. Each used tier becomes an
+unrestricted source assignment named with the configured public tag. Tier placement is
+teacher-owned. The runtime applies final-grade/SIS safety, places only sources in the selected
+module, and creates/verifies the shared bridge and family link. The assistant must not
 infer placement or expose raw membership IDs. This is the same renderer-neutral family path
 used by differentiated QuizForge delivery. QuizForge does not author ESSAY or FILEUPLOAD
 items; author each writing portion as a separate 100-point AssignmentForge assignment.
