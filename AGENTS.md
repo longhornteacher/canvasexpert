@@ -115,6 +115,11 @@ Use only the row relevant to the active handoff.
 6. **Keep the agent boundary host-neutral.** Never make a core workflow depend on a
    ChatGPT/Claude-specific HTML surface, client extension, hosted model, or conversation
    behavior. The runtime must retain a useful structured/plain-text contract.
+7. **Run `api.*` code only under pytest.** The suite's autouse `conftest.py` fixture is
+   the only thing that isolates the real config, `%LOCALAPPDATA%`, credential, and
+   OneDrive workspace. An ad-hoc `py -c` or script that imports `api.*` reads and writes
+   the teacher's live stores. Debug with a temporary pytest test instead, and never start
+   the Web UI or MCP server against the real workspace to verify a change.
 
 ## Execution model: senior design, one executor
 
