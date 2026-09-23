@@ -640,6 +640,12 @@ def test_source_shape_matching_tolerates_a_sanitized_scaffolding_panel(monkeypat
         "cite two sources", "cite three sources")}
     assert not _source_shape_matches(changed, expected, published=False)
 
+    # CE sends normalize_student_text(description): Canvas holds " - " where
+    # the draft had an em dash, and that must still verify (Issue #11).
+    dash_normalized = {**sanitized, "description": sanitized["description"].replace(
+        " &#8212; ", " - ")}
+    assert _source_shape_matches(dash_normalized, expected, published=False)
+
 
 def test_whole_class_payload_has_no_bridge(monkeypatch):
     data = {"title": "Whole", "description": "body", "points": 10}

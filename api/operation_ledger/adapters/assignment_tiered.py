@@ -410,7 +410,10 @@ def _shape_mismatches(actual: dict, expected: dict, *, published: bool) -> list[
 
 def _shape_value_matches(key: str, actual: object, expected: object) -> bool:
     if key == "description":
-        return canonical_html(actual) == canonical_html(expected)
+        # The create sends normalize_student_text(description), so compare
+        # both sides after the same normalization (Issue #11: em dashes).
+        return (canonical_html(normalize_student_text(actual))
+                == canonical_html(normalize_student_text(expected)))
     if key == "submission_types":
         return sorted(actual or []) == sorted(expected or [])
     return actual == expected
