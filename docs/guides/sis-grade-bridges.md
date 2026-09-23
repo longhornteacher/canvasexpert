@@ -91,7 +91,9 @@ postconditions for the writes. Bridge operations do not repair or rearrange modu
 Grade projection is available only after the exact family link exists. Calling projection
 for an unlinked family returns typed guidance to run reconciliation. Missing local data is a
 hard stop; Canvas Live is not an alternate read source for preview. All approved writes use
-the Operation Ledger.
+the Operation Ledger. An ordinary single assignment with no saved link, no configured tier
+tag, and no bridge candidate is not a discovered family; it is omitted from the matrix and
+counted in `omitted_single_assignments` instead of inviting an agent to build it a bridge.
 
 The retained control console's Routines page also provides **Differentiated bridge grade sync**. It is a built-in Canvas
 write routine, disabled by default, with manual Run and the existing local interval schedule.

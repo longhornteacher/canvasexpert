@@ -188,7 +188,15 @@ def test_agent_proposed_grouping_recovers_the_real_messy_title_case(monkeypatch,
 
     matrix = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
 
-    assert len(matrix["matrix"]) == 3
+    # Two of the three messy rows carry a real configured tag ("- Blue",
+    # "- Silver") and are still reported as incomplete lone sources (AC2).
+    # The third ("...SCRs Red", no dash before the tag) has no structurally
+    # detected tag and is an ordinary-looking single assignment, so AC1
+    # omits it from the matrix and counts it instead -- agent-proposed
+    # grouping below still recovers it by exact id, unaffected by the
+    # reconciliation matrix.
+    assert len(matrix["matrix"]) == 2
+    assert matrix["omitted_single_assignments"] == 1
     assert all(row["status"] == "incomplete" for row in matrix["matrix"])
     result = _preview_proposed(monkeypatch, tmp_path, rows)
 
@@ -504,3 +512,100 @@ def test_reconciliation_rows_carry_the_preview_repair_plan_contract(monkeypatch)
     assert plan["source_assignment_ids"] == row["source_assignment_ids"]
     assert plan["bridge_assignment_id"] == row["bridge_assignment_id"]
     assert plan["action"] == row["action"]
+
+
+def _assert_lone_unsuffixed_assignment_is_omitted_and_counted(monkeypatch):
+    """AC1: an ordinary single assignment ("My Poem") is not a discovered
+    bridge family; it is counted, never listed."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
+    rows = [_tag_source("a1", "My Poem")]
+    result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+    assert result["matrix"] == []
+    assert result["omitted_single_assignments"] == 1
+
+
+def _assert_lone_tag_suffixed_assignment_is_kept(monkeypatch):
+    """AC2: a lone tag-suffixed source ("Quill Diagnostic - Silver") is a
+    suspicious partial family and is still reported."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
+    rows = [_tag_source("a1", "Quill Diagnostic - Blue")]
+    result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+    assert len(result["matrix"]) == 1
+    assert result["matrix"][0]["source_count"] == 1
+    assert result["omitted_single_assignments"] == 0
+
+
+def _assert_linked_single_is_kept(monkeypatch):
+    """AC2: a row with a saved registration (family_link) is always kept,
+    even with only one currently-discoverable source."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    registration = {
+        "family_key": "labeling-the-parts",
+        "family_title": "ECR Prep 1: Labeling the Parts",
+        "source_assignment_ids": ["a1", "a2"],
+        "source_titles": ["ECR Prep 1: Labeling the Parts - Blue", "ECR Prep 1: Labeling the Parts - Red"],
+        "bridge_assignment_id": "bridge-1",
+        "bridge_state_digest": "a" * 64,
+    }
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [registration])
+    rows = [_tag_source("a1", "ECR Prep 1: Labeling the Parts - Blue")]
+    result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+    assert len(result["matrix"]) == 1
+    assert result["matrix"][0]["identity_source"] == "family_link"
+    assert result["omitted_single_assignments"] == 0
+
+
+def _assert_unsuffixed_single_with_bridge_candidate_is_kept(monkeypatch):
+    """AC2: an unsuffixed single source with a real bridge candidate present
+    is still reported -- it is not an ordinary lone assignment."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
+    rows = [
+        _tag_source("a1", "Quiz Diagnostic"),
+        {
+            "id": "bridge-1", "name": "Quiz Diagnostic - Bridge",
+            "points_possible": 10, "assignment_group_id": "g",
+            "published": True, "grading_type": "points",
+            "only_visible_to_overrides": False,
+            "submission_types": ["none"],
+            "omit_from_final_grade": False, "post_to_sis": True,
+        },
+    ]
+    result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+    assert len(result["matrix"]) == 1
+    assert result["matrix"][0]["bridge_assignment_id"] == "bridge-1"
+    assert result["omitted_single_assignments"] == 0
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        _assert_lone_unsuffixed_assignment_is_omitted_and_counted,
+        _assert_lone_tag_suffixed_assignment_is_kept,
+        _assert_linked_single_is_kept,
+        _assert_unsuffixed_single_with_bridge_candidate_is_kept,
+    ],
+)
+def test_lone_assignment_discovery_law(monkeypatch, check):
+    """Law: a lone assignment is not a bridge family (AC1), and the specific
+    rows that must still be reported (AC2) are exercised once, directly, at
+    the reconciliation matrix boundary."""
+    check(monkeypatch)
+
+
+def test_preview_reconciliation_still_refuses_for_an_omitted_title(monkeypatch):
+    """AC4: preview_sis_grade_bridge_reconciliation for an omitted title's
+    exact family_title still refuses with the unchanged, unhelped message."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
+    rows = [_tag_source("a1", "My Poem")]
+    result = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "My Poem", assignments=rows
+    )
+    assert result == {
+        "ok": False,
+        "error": "differentiated family was not discovered",
+        "blocking": True,
+    }

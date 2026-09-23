@@ -56,6 +56,32 @@ def _title_word_signature(title: str) -> tuple[str, ...]:
     return tuple(sorted(re.findall(r"[\w']+", str(title or "").casefold())))
 
 
+def _is_omittable_single_assignment(row: dict, *, has_registration: bool) -> bool:
+    """AC1: an ordinary single assignment is not a discovered bridge family.
+
+    Omit a row only when every one of these holds: no saved registration
+    (title fallback only), every source is unsuffixed (no configured tier
+    tag proves a real tier), there is no bridge candidate, and the source
+    count is under two. A title-mismatch or ambiguous-bridge-candidates row
+    is always reported (AC2), never silently dropped.
+    """
+    if has_registration:
+        return False
+    if row.get("identity_source") != "title_fallback":
+        return False
+    if row.get("bridge_assignment_id") is not None:
+        return False
+    if (row.get("source_count") or 0) >= 2:
+        return False
+    tiers = row.get("source_tiers") or []
+    if not tiers or set(tiers) - {"unsuffixed"}:
+        return False
+    reasons = set(row.get("reasons") or [])
+    if "title_mismatch_suspected" in reasons or "bridge_candidates_ambiguous" in reasons:
+        return False
+    return True
+
+
 def _source_setting_repairs(source_rows: list[dict]) -> list[dict]:
     repairs = []
     for row in sorted(source_rows, key=lambda item: str(item.get("id") or "")):
@@ -252,6 +278,7 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
 
     matrix = []
     discovered_keys = set()
+    omitted_single_assignments = 0
     title_counts = {}
     for candidate in families:
         candidate_title = str(candidate.get("family_title") or "").casefold()
@@ -431,7 +458,7 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
             "overlap_count": None,
             "exact_source_member_coverage": None,
         }
-        matrix.append({
+        matrix_row = {
             "family_key": family["family_key"],
             "family_title": title,
             "status": status,
@@ -458,7 +485,14 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
                 "source_setting_repairs": _source_setting_repairs(source_rows),
                 "bridge_setting_repairs": _bridge_setting_repairs(bridge),
             },
-        })
+        }
+        # AC1: an ordinary single assignment (no registration, no real tag,
+        # no bridge candidate, under the two-source threshold) is not a
+        # discovered bridge family; it is counted, never listed (AC3).
+        if _is_omittable_single_assignment(matrix_row, has_registration=registration is not None):
+            omitted_single_assignments += 1
+            continue
+        matrix.append(matrix_row)
     # A saved registration is proof-bearing exact identity.  If discovery no
     # longer finds its sources, surface attention rather than silently dropping
     # the family from the teacher's matrix.
@@ -486,7 +520,12 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
                 "bridge_setting_repairs": [],
             },
         })
-    return {"ok": True, "course_id": course_key, "matrix": matrix}
+    return {
+        "ok": True,
+        "course_id": course_key,
+        "matrix": matrix,
+        "omitted_single_assignments": omitted_single_assignments,
+    }
 
 
 def preview_sis_grade_bridge(
