@@ -462,6 +462,52 @@ def test_resume_operation_on_a_recorded_tier_zero_id_continues_without_a_second_
     assert len(tier0_creates_after_resume) == 1, "resume must not create tier 0 a second time"
 
 
+def test_family_tail_completes_after_teacher_edits_and_saves_live_titles(monkeypatch):
+    """Law (Correction 3): after CE's own verified create, a teacher's
+    Canvas Live edits to an unrestricted source's title, due date, and
+    overrides are authoritative. Resume completes the tail and the saved
+    family link records each source's current live title, not the
+    originally pushed one."""
+    payload = _build(monkeypatch, module_id="501")
+    fake = FakeCanvas()
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
+    monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
+    baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
+    context = Context()
+
+    first = AssignmentAdapter().execute(
+        payload, {"course_id": "42", "steps": []}, baseline, {}, context)
+    assert first["state"] == "applied", first
+
+    sources = [row for row in fake.assignments.values()
+               if row["name"] not in {"Practice", "Practice - Bridge"}]
+    assert len(sources) == 2
+
+    # The teacher renames each source, clears its due date, and adds a
+    # per-class override in Canvas Live -- none of this is CE's business
+    # any more.
+    for row in sources:
+        row["name"] = f"ECR Prep 3: {row['name']}"
+        row["due_at"] = None
+        fake.overrides[row["id"]].append(
+            {"id": f"ov-{row['id']}", "due_at": "2026-10-01T23:59:00Z"})
+
+    sends_before = len(fake.sends)
+    retry = AssignmentAdapter().execute(
+        payload, {"course_id": "42", "steps": copy.deepcopy(context.steps)},
+        baseline, {}, context,
+    )
+    assert retry["state"] == "applied", retry
+    assert not any(
+        method == "POST" and path.endswith("/assignments")
+        for method, path, _body in fake.sends[sends_before:]
+    ), "resume must not recreate a renamed source"
+
+    saved = config.get_sis_grade_bridge("42", payload["base_title"])
+    assert sorted(saved["source_titles"]) == sorted(row["name"] for row in sources)
+
+
 def _matching_source_assignment(assignment_id: str, *, name: str = "Practice - Red") -> dict:
     """A live Canvas assignment matching exactly what tier 0 (Support ->
     Red) would have created, for AC3's ambiguous-create-lookup tests."""

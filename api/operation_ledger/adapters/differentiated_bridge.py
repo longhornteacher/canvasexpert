@@ -600,10 +600,14 @@ def execute_family_tail(
             error_code="bridge_overrides_unverified",
         )
     state = assignment_shape(assignment, [])
+    # Correction 3: record each source's current live title (a teacher may
+    # have renamed it after CE's verified create), not the originally
+    # pushed one. The frozen family/base title is untouched.
+    live_source_titles = [str(row.get("name") or "") for row in source_rows]
     registration = {
         "family_title": family["base_title"],
         "source_assignment_ids": list(source_ids),
-        "source_titles": list(source_titles),
+        "source_titles": live_source_titles,
         "bridge_assignment_id": str(bridge_id),
         "bridge_state_digest": structural_digest(state),
         "module_id": module_id,
@@ -651,11 +655,12 @@ def reconcile_family_tail(
     *, course_id: str, payload: dict, source_ids: list[str],
     source_titles: list[str], stored_steps: list[dict], projected: list[dict],
 ) -> dict:
-    family, _rows, error = _verified_family_sources(
+    family, rows, error = _verified_family_sources(
         course_id, payload, source_ids, source_titles
     )
     if error:
         return {"state": "sent_unknown", "steps": projected}
+    live_source_titles = [str(row.get("name") or "") for row in rows]
     by_key = {str(step.get("step_key") or ""): step for step in stored_steps}
     create_step = by_key.get("create_bridge") or {}
     bridge_id = str(create_step.get("returned_object_id") or "")
@@ -698,7 +703,7 @@ def reconcile_family_tail(
     expected_registration = {
         "family_title": payload["base_title"],
         "source_assignment_ids": list(source_ids),
-        "source_titles": list(source_titles),
+        "source_titles": live_source_titles,
         "bridge_assignment_id": bridge_id,
         "bridge_state_digest": structural_digest(assignment_shape(bridge, [])),
         "module_id": payload.get("module_id") or (source_module_steps[0].get("module_id") if source_module_steps else None),
@@ -793,27 +798,35 @@ def _verified_family_sources(
         assignment, error = adapter_support.get_assignment(course_id, str(source_id))
         if error or assignment is None:
             return {}, rows, "source_exact_id_unverified"
+        # Correction 3: after CE's own verified create, a teacher's edits in
+        # Canvas Live to an unrestricted source's title, due date, and
+        # overrides are authoritative -- recovery re-checks only the
+        # CE-owned invariants (exact id, published, grading_type,
+        # omit_from_final_grade, post_to_sis, and points/group consistency
+        # across sources, below). The restricted/group branch is unchanged.
         expected = {
-            "name": title,
             "published": True,
             "only_visible_to_overrides": not unrestricted,
             "omit_from_final_grade": True,
             "post_to_sis": False,
             "grading_type": "points",
-            "due_at": payload.get("due_at") or None,
         }
+        if not unrestricted:
+            expected["name"] = title
+            expected["due_at"] = payload.get("due_at") or None
         if not _fields_match(assignment, expected):
             return {}, rows, "source_final_shape_unverified"
-        overrides, override_error = canvas_client.canvas_get_all(
-            f"/api/v1/courses/{course_id}/assignments/{source_id}/overrides",
-            {"per_page": 100},
-        )
-        if override_error:
-            return {}, rows, "source_override_unverified"
-        if unrestricted:
-            if overrides:
-                return {}, rows, "source_overrides_present"
-        else:
+        if not unrestricted:
+            # Overrides remain a CE-owned invariant only for the
+            # restricted/group path: skip the fetch entirely for
+            # unrestricted tiers, where a teacher's own overrides are
+            # authoritative and never checked.
+            overrides, override_error = canvas_client.canvas_get_all(
+                f"/api/v1/courses/{course_id}/assignments/{source_id}/overrides",
+                {"per_page": 100},
+            )
+            if override_error:
+                return {}, rows, "source_override_unverified"
             if not overrides:
                 return {}, rows, "source_override_unverified"
             if safe_tiers and index < len(safe_tiers):

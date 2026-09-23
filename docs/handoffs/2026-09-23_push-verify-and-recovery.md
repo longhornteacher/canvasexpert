@@ -339,3 +339,29 @@ points, points and assignment group consistent across tiers, `omit_from_final_gr
 true, and `post_to_sis` false. Create and publish postconditions keep verifying CE's own
 writes as they happen. The saved family link records the sources' current live titles.
 Ids stay the authority.
+
+## Correction 3 execution result
+
+**GREEN.** In `differentiated_bridge._verified_family_sources`, the unrestricted-tier
+branch now drops `name`/`due_at` from `expected` and skips the override fetch entirely
+(the restricted/group branch is byte-for-byte unchanged); still enforces exact id,
+`published`, `grading_type: points`, `omit_from_final_grade: true`, `post_to_sis: false`,
+and cross-source points/assignment-group consistency. `execute_family_tail` and
+`reconcile_family_tail` both now read `source_titles` for the saved/expected registration
+from the verified rows' live `name` (not the originally pushed `source_titles`), so the
+two stay in sync and a renamed family doesn't self-mismatch on the next reconcile.
+
+**Tests:** `api/tests/test_differentiated_bridge.py` (new) -- Law: an unrestricted
+source's rename/cleared-due-date/added-overrides never blocks and overrides are never
+even fetched; Law (parametrized): `omit_from_final_grade=false` or `post_to_sis=true`
+still fails `source_final_shape_unverified`. `test_assignment_tier_operation.py` gained
+`test_family_tail_completes_after_teacher_edits_and_saves_live_titles` -- a full
+create-then-teacher-edits-then-resume through the real adapter, asserting the tail
+completes with no second create and the saved bridge registration's `source_titles`
+match the live (renamed) names. One line added to
+`docs/reference/operation-ledger-module-map.md` stating the rule.
+
+Named gate + `api/tests/platform_services/config/test_sis_grade_bridge.py` +
+`test_differentiated_bridge.py`: **304 passed, 0 failed.** Also reran
+`test_routines_builtin_sis_grade_bridge.py`, `test_sis_grade_bridge.py`,
+`mcp_server/test_sis_grade_bridge_tools.py` (11 passed): no regressions.

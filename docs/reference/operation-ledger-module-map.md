@@ -75,6 +75,11 @@ results.
 - Preserve facade monkeypatch seams when moving code. Existing tests still patch the
   facade modules rather than every leaf helper.
 - No live Canvas verification belongs here. Use mocked adapter tests only.
+- After CE's own verified write, teacher edits in Canvas Live to titles, dates, and
+  overrides are authoritative; recovery (resume, family tail, family link) re-checks only
+  CE-owned invariants (exact id, published, `grading_type`, `omit_from_final_grade`,
+  `post_to_sis`, and points/assignment-group consistency across sources) for an
+  unrestricted differentiated family.
 
 ## Test Routing
 
