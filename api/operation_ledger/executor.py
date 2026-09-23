@@ -253,10 +253,14 @@ def _execute_target(adapter, operation: dict, payload: dict, target: dict) -> di
     try:
         fresh_baseline = adapter.capture_baseline(payload, target)
         if adapter.check_drift(payload, target, stored_baseline):
+            drift_fields = _diff_field_names(stored_baseline, fresh_baseline)
+            next_step = _drift_next(target)
             _update_target_state(operation["operation_id"], target_key, "blocked",
-                                 error_code="drift_detected")
+                                 error_code="drift_detected",
+                                 drift_fields=drift_fields, next_step=next_step)
             return {"target_key": target_key, "state": "blocked",
-                    "error_code": "drift_detected"}
+                    "error_code": "drift_detected",
+                    "drift_fields": drift_fields, "next": next_step}
     except Exception as exc:
         _update_target_state(operation["operation_id"], target_key, "failed",
                              error_code="adapter_exception",
@@ -315,6 +319,7 @@ def _execute_target(adapter, operation: dict, payload: dict, target: dict) -> di
             "cleanup_required": result.get("cleanup_required"),
             "rollback_state": result.get("rollback_state"),
             "rollback_error_code": result.get("rollback_error_code"),
+            "canvas_message": result.get("canvas_message"),
         }
     finally:
         claims.release_claim(claim["claim_id"])
@@ -322,16 +327,62 @@ def _execute_target(adapter, operation: dict, payload: dict, target: dict) -> di
 
 def _update_target_state(operation_id: str, target_key: str, state: str,
                          error_code: str | None = None,
-                         private_diagnostic: str | None = None) -> None:
+                         private_diagnostic: str | None = None,
+                         drift_fields: list[str] | None = None,
+                         next_step: str | None = None) -> None:
     def mutate(target):
         target["state"] = state
         if error_code:
             target["error_code"] = error_code
         if private_diagnostic:
             target["private_diagnostic"] = private_diagnostic
+        if drift_fields is not None:
+            target["drift_fields"] = drift_fields
+        if next_step is not None:
+            target["next"] = next_step
         target["updated_at"] = models.now_iso()
         return target
     operations.update_target(operation_id, target_key, mutate)
+
+
+def _diff_field_names(old: dict, new: dict, prefix: str = "") -> list[str]:
+    """Field names (never values) that differ between two baseline dicts (AC4).
+
+    Generic and adapter-agnostic: it walks the same two dicts every
+    ``check_drift`` implementation already compares (the stored baseline and
+    a freshly captured one), so naming drifted fields needs no per-adapter
+    change.
+    """
+    names: set[str] = set()
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return []
+    for key in sorted(set(old) | set(new)):
+        old_value = old.get(key)
+        new_value = new.get(key)
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(old_value, dict) and isinstance(new_value, dict):
+            names |= set(_diff_field_names(old_value, new_value, path))
+        elif old_value != new_value:
+            names.add(path)
+    return sorted(names)
+
+
+def _drift_next(target: dict) -> str:
+    """AC4's named next step, and the fix for Issue #11's endless drift loop.
+
+    A target that already carries ``drift_detected`` from a previous attempt
+    is the exact loop the brief calls out (tier 0 created, then drift
+    forever): the second time around, the named next step is
+    ``abandon_operation`` instead of looping back through preview. Otherwise
+    a target with any recorded progress should be resumed, and a target with
+    none should simply be re-previewed.
+    """
+    if target.get("error_code") == "drift_detected":
+        return "abandon_operation"
+    has_progress = bool(target.get("returned_object_id")) or any(
+        step.get("returned_object_id") for step in target.get("steps", []) or []
+    )
+    return "resume_operation" if has_progress else "re-preview"
 
 
 def _update_target_claimed(operation_id: str, target_key: str, claim: dict,
@@ -373,6 +424,8 @@ def _update_target_result(operation_id: str, target_key: str, result: dict,
             target["returned_object_url"] = result["returned_object_url"]
         target["error_code"] = result.get("error_code")
         target["private_diagnostic"] = result.get("private_diagnostic")
+        if result.get("canvas_message") is not None:
+            target["canvas_message"] = result["canvas_message"]
         target["failed_items"] = copy.deepcopy(result.get("failed_items"))
         target["cleanup_required"] = result.get("cleanup_required")
         target["rollback_state"] = result.get("rollback_state")
@@ -385,18 +438,28 @@ def _update_target_result(operation_id: str, target_key: str, result: dict,
 
 
 def _receipt_targets(targets: list[dict]) -> list[dict]:
-    return [{
-        "target_key": t.get("target_key"),
-        "state": t.get("state"),
-        "returned_object_id": t.get("returned_object_id"),
-        "returned_object_url": t.get("returned_object_url"),
-        "error_code": t.get("error_code"),
-        "failed_items": copy.deepcopy(t.get("failed_items")),
-        "cleanup_required": t.get("cleanup_required"),
-        "rollback_state": t.get("rollback_state"),
-        "rollback_error_code": t.get("rollback_error_code"),
-        "steps": _safe_steps(t.get("steps", [])),
-    } for t in targets]
+    rows = []
+    for t in targets:
+        row = {
+            "target_key": t.get("target_key"),
+            "state": t.get("state"),
+            "returned_object_id": t.get("returned_object_id"),
+            "returned_object_url": t.get("returned_object_url"),
+            "error_code": t.get("error_code"),
+            "failed_items": copy.deepcopy(t.get("failed_items")),
+            "cleanup_required": t.get("cleanup_required"),
+            "rollback_state": t.get("rollback_state"),
+            "rollback_error_code": t.get("rollback_error_code"),
+            "steps": _safe_steps(t.get("steps", [])),
+        }
+        if t.get("drift_fields") is not None:
+            row["drift_fields"] = t["drift_fields"]
+        if t.get("next") is not None:
+            row["next"] = t["next"]
+        if t.get("canvas_message") is not None:
+            row["canvas_message"] = t["canvas_message"]
+        rows.append(row)
+    return rows
 
 
 def _receipt_status(operation_status: str) -> str:
@@ -409,18 +472,28 @@ def _receipt_status(operation_status: str) -> str:
 
 
 def _project_target_results(results: list[dict]) -> list[dict]:
-    return [{
-        "target_key": r.get("target_key"),
-        "state": r.get("state"),
-        "returned_object_id": r.get("returned_object_id"),
-        "returned_object_url": r.get("returned_object_url"),
-        "error_code": r.get("error_code"),
-        "failed_items": copy.deepcopy(r.get("failed_items")),
-        "cleanup_required": r.get("cleanup_required"),
-        "rollback_state": r.get("rollback_state"),
-        "rollback_error_code": r.get("rollback_error_code"),
-        "steps": _safe_steps(r.get("steps", [])),
-    } for r in results]
+    projected = []
+    for r in results:
+        row = {
+            "target_key": r.get("target_key"),
+            "state": r.get("state"),
+            "returned_object_id": r.get("returned_object_id"),
+            "returned_object_url": r.get("returned_object_url"),
+            "error_code": r.get("error_code"),
+            "failed_items": copy.deepcopy(r.get("failed_items")),
+            "cleanup_required": r.get("cleanup_required"),
+            "rollback_state": r.get("rollback_state"),
+            "rollback_error_code": r.get("rollback_error_code"),
+            "steps": _safe_steps(r.get("steps", [])),
+        }
+        if r.get("drift_fields") is not None:
+            row["drift_fields"] = r["drift_fields"]
+        if r.get("next") is not None:
+            row["next"] = r["next"]
+        if r.get("canvas_message") is not None:
+            row["canvas_message"] = r["canvas_message"]
+        projected.append(row)
+    return projected
 
 
 def _safe_steps(steps: list[dict]) -> list[dict]:
@@ -429,3 +502,55 @@ def _safe_steps(steps: list[dict]) -> list[dict]:
         "returned_object_url", "error_code",
     )
     return [{key: step.get(key) for key in allowed} for step in steps]
+
+
+def build_repair_plan(operation: dict) -> list[dict]:
+    """AC7: what a mid-family stop already created, from recorded steps alone.
+
+    Nothing here reads Canvas or deletes anything -- it is a projection of
+    the ledger's own checkpoints, so a teacher (or a senior) knows exactly
+    which objects exist and need manual attention.
+    """
+    plan: list[dict] = []
+    for target in operation.get("targets", []) or []:
+        found_step = False
+        for step in target.get("steps", []) or []:
+            if step.get("returned_object_id"):
+                found_step = True
+                plan.append({
+                    "step": step.get("step_key"),
+                    "created_id": step.get("returned_object_id"),
+                    "state": step.get("state"),
+                })
+        if not found_step and target.get("returned_object_id"):
+            plan.append({
+                "step": target.get("target_key"),
+                "created_id": target.get("returned_object_id"),
+                "state": target.get("state"),
+            })
+    return plan
+
+
+def abandon_operation(operation_id: str) -> dict:
+    """AC6: mark one existing, teacher-approved operation abandoned.
+
+    Makes no Canvas call and runs no adapter code -- it only flips the
+    operation's own status and returns what the ledger already knows was
+    created, so a later ``resume_operation`` or ``apply`` on this exact
+    operation is refused rather than continuing a family the teacher gave
+    up on.
+    """
+    op = operations.get_operation(operation_id)
+    if op is None:
+        raise ValueError(f"operation {operation_id} not found")
+    old_status = op.get("status", "attention")
+    if not models.validate_operation_status_transition(old_status, "abandoned"):
+        raise ValueError(f"operation is in status '{old_status}', cannot be abandoned")
+    operations.set_operation_status(operation_id, "abandoned")
+    updated = operations.get_operation(operation_id) or op
+    return {
+        "ok": True,
+        "operation_id": operation_id,
+        "status": "abandoned",
+        "repair_plan": build_repair_plan(updated),
+    }

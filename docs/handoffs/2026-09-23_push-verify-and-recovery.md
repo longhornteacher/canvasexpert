@@ -157,5 +157,84 @@ changing the executor's checkpoint or receipt format would break existing receip
 any change touches storage, vault, or SIS bridge logic.
 
 ## Execution result
-_(Executor fills in: traffic light, commit, files, gate baseline and final counts,
-deviations, open decisions.)_
+
+**GREEN**, with two disclosed scope-narrowing deviations flagged below for senior review.
+Commit: see `git log` on `dev` ("Add push verification and tiered-recovery tools").
+
+**Named gate:** baseline at `72d9b6f`/`504ec26` = 261 passed, 0 failed
+(`test_live_verify.py` did not exist). Final = **295 passed, 0 failed**.
+Full `api/tests` checkpoint (not the named gate; run once as an integration check since
+the change touches `executor.py`/`models.py`/`adapter_support.py`): baseline 71
+pre-existing failures / 1867 passed at `504ec26`; final = the **same 71** pre-existing
+failures (full-suite ordering/pollution artifacts unrelated to this brief, including the
+documented `test_quick_fix_contract_and_version`) / **1890 passed**. Two real regressions
+surfaced by that full run were fixed: a stale owner entry in
+`docs/contracts/canvas-transport-owners.json` (the tiered-create POST moved into a new
+helper function) and two hardcoded schema-version/tool-count assertions in
+`api/tests/test_beta075_mcp.py` (58/49 -> 59/52), outside the named gate but clearly
+caused by this change.
+
+**Changed files:** `api/live_verify.py` (new), `api/tests/test_live_verify.py` (new),
+`api/mcp_server/tool_schema_v59.json` (new), `api/mcp_server/{contract,server,tools}.py`,
+`api/operation_ledger/{executor,models}.py`,
+`api/operation_ledger/adapters/{adapter_support,assignment_tiered,differentiated_bridge}.py`,
+`api/content_push.py`, `api/sis_grade_bridge.py` (one additive `course_id` field),
+`docs/mcp-server.md`, `docs/contracts/canvas-transport-owners.json`,
+`api/tests/{test_operation_ledger,test_assignment_tier_operation,test_beta075_mcp}.py`,
+`api/tests/mcp_server/{test_contract,test_tools,test_content_push_tools}.py`.
+
+**AC-by-AC:**
+- AC1 `verify_live`: new `api/live_verify.py`, ≤2 Canvas calls (1 identity + 1 optional
+  module scan), writes nothing. Tested in `test_live_verify.py`.
+- AC2 `verify_hint`: added in `content_push._result_projection` (covers
+  `apply_content_push`/`apply_assignment_update`/`push_content_live`) and wrapped onto
+  `apply_sis_grade_bridge` at the `tools.py` boundary (required one additive `course_id`
+  field on `api/sis_grade_bridge.py`'s own result dict; no bridge logic changed).
+- AC3 ambiguous create lookup: implemented in `assignment_tiered.py` only (tiered
+  AssignmentForge path — the brief's Scope/named-gate file list). **Deviation:** the
+  brief's AC3 title also names "whole assignment"; `assignment_whole.py` has the same
+  no-id/outbound-started gap but is outside Scope and outside the named gate
+  (`test_assignment_operation.py` isn't in it), so it was left untouched to avoid shipping
+  an unverified change to that path. Open decision for the senior: a follow-up slice, or
+  confirm tiered-only satisfies the intent.
+- AC4 named drift: generic, adapter-agnostic field-name diff between the stored and a
+  freshly captured baseline (no per-adapter change, so SIS bridge logic is untouched);
+  `next` is `abandon_operation` when the same target already drifted once (breaks the
+  Issue #11 loop), else `resume_operation` with progress or `re-preview` with none.
+- AC5/AC6 `resume_operation`/`abandon_operation`: new MCP tools. `resume_operation` is a
+  thin wrapper over the existing `executor.retry_operation` (no new write capability) plus
+  refusals for `applied`/`abandoned`/claimed-and-unexpired ("held elsewhere", reusing that
+  exact code name). `abandon_operation` is a new `executor.abandon_operation` (new
+  `abandoned` operation status, additive to `models.OPERATION_TRANSITIONS`); makes no
+  Canvas call.
+- AC7 `repair_plan`: `executor.build_repair_plan` (pure projection of recorded steps);
+  surfaced in `abandon_operation` and in `content_push._result_projection` for a
+  differentiated family stuck `needs_repair`.
+- AC8: `sis_requires_due_at` preview refusal in `content_push.py` (both push-preview
+  entry points), before any Canvas read. `canvas_message` (Canvas's 4xx text, truncated to
+  500 chars, via a new `adapter_support.canvas_message_from_error`) is wired through the
+  tiered/differentiated AssignmentForge path (`assignment_tiered.py`,
+  `differentiated_bridge.py`) only. **Deviation:** not wired into
+  `assignment_whole.py`/`quiz.py`/`page.py`/`quick_assignment.py`/`sis_grade_bridge.py`
+  adapters, to avoid unverified changes to paths outside the named gate; those adapters
+  still return their existing `private_diagnostic`/`error_code` shape unchanged.
+- AC9: schema v58 -> v59 (49 -> 52 tools): `contract.TOOL_SCHEMA_VERSION`,
+  `tool_schema_v59.json`, `server.py` wrappers (plus a fix to
+  `_strip_generated_schema_titles` — it was deleting the entire `title` *property* schema
+  for any tool with a parameter literally named `title`, which `verify_live` is the first
+  to have), `tools._TOOL_GROUPS`, `docs/mcp-server.md`, and the generated inventory/contract
+  tests.
+
+**Non-goals honored:** no delete/update tools; no change to family step order, tier tags,
+or SIS bridge decision logic (only additive output fields); no fix to Issue #11's root
+cause (only a named exit from the drift loop); no storage/vault/freshness changes; no Web
+UI surface.
+
+**Open decisions for the senior:** (1) the two AC3/AC8 scope-narrowing deviations above;
+(2) whether "no change to SIS bridge logic" tolerates the one additive `course_id` output
+field I added to `api/sis_grade_bridge.py`'s `_result_projection` (needed for
+`apply_sis_grade_bridge`'s `verify_hint`; no behavior changed, confirmed by the unchanged
+`test_sis_grade_bridge.py`/`test_sis_grade_bridge_operation.py`/
+`mcp_server/test_sis_grade_bridge_tools.py` suites).
+
+**Live acceptance (T3.1/T3.2/T3.4):** not run — reserved for the senior/teacher per the brief.

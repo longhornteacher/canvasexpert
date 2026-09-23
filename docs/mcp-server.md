@@ -57,7 +57,10 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 58 (49 tools). Version 58 adds the shared work-item tools and defaults `get_course_pages` to include unpublished pages, with an `include_unpublished` argument for explicit filtering.
+Tool schema version 59 (52 tools). Version 59 adds `verify_live`, `resume_operation`, and
+`abandon_operation`, and adds a `verify_hint` field to every successful apply
+(`apply_content_push`, `push_content_live`, `apply_assignment_update`, `apply_sis_grade_bridge`)
+naming the object(s) it created or changed for a follow-up `verify_live` call.
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -101,6 +104,9 @@ Tool schema version 58 (49 tools). Version 58 adds the shared work-item tools an
 | `discover_scoring_work()` | Read every Current course locally and return student-free assignment, freshness, and attention tables; no refresh, preparation, or Canvas write | No |
 | `preview_workspace_reset()` | Dry-runs the explicitly authorized local cleanup and reports classified paths, counts, and refusals | No |
 | `apply_workspace_reset(preview_digest)` | Applies only an unchanged, non-refused workspace cleanup preview and returns a local receipt | No |
+| `verify_live(course_id, kind, id="", title="")` | The one Live Canvas read an agent makes after a push: confirms one `assignment`/`page`/`quiz` by exact id or exact title. One Canvas call, or two only when `module_ids` isn't already on the object; writes nothing | No |
+| `resume_operation(operation_id)` | Continues one existing, teacher-approved operation from its last recorded step through the same executor retry path; refuses an operation that already applied, was abandoned, or is held by another attempt | No |
+| `abandon_operation(operation_id)` | Marks one existing, teacher-approved operation abandoned with no Canvas call; blocks later `resume_operation`/apply and returns a `repair_plan` of what was already created from recorded steps | No |
 | `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input; a selected contract travels in page zero | No |
 | `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
 | `list_work_items()` | Shared work-item holders, sync progress, and orphan counts without private session contents | No |

@@ -137,6 +137,18 @@ def _collect_options(kind: str, options: dict) -> tuple[dict, str | None]:
     return named, None
 
 
+def _sis_requires_due_at(named: dict) -> dict | None:
+    """AC8: post_to_sis without due_at is refused before any Canvas read."""
+    if named.get("post_to_sis") and not named.get("due_at"):
+        return {
+            "ok": False,
+            "code": "sis_requires_due_at",
+            "error": ("post_to_sis requires due_at; Canvas SIS sync needs a due date "
+                      "before it will sync a grade."),
+        }
+    return None
+
+
 def _prepare_request(kind: str, path: str, named: dict) -> dict:
     """Build the adapter's prepare request from one resolved draft and options.
 
@@ -191,6 +203,9 @@ def preview_content_push(
     })
     if option_error:
         return {"ok": False, "error": option_error}
+    sis_error = _sis_requires_due_at(named)
+    if sis_error:
+        return sis_error
 
     path, resolve_error = _resolve_staged_draft(content_kind, label)
     if resolve_error:
@@ -296,6 +311,9 @@ def preview_differentiated_quiz_push(
     })
     if option_error:
         return {"ok": False, "error": option_error}
+    sis_error = _sis_requires_due_at(named)
+    if sis_error:
+        return sis_error
 
     resolved = []
     seen_labels = set()
@@ -649,6 +667,15 @@ def _content_kind(ledger_kind: str) -> str:
     return ledger_kind
 
 
+def _verify_hint_kind(ledger_kind: str, *, is_quiz_variant: bool = False) -> str:
+    """AC2: the ``kind`` vocabulary verify_live accepts, from a ledger kind."""
+    if is_quiz_variant or ledger_kind == QUIZ_KIND:
+        return "quiz"
+    if ledger_kind == PAGE_KIND:
+        return "page"
+    return "assignment"
+
+
 def _result_projection(operation: dict, result: dict) -> dict:
     """Course-only outcome: what landed, where, and what needs attention.
 
@@ -657,10 +684,13 @@ def _result_projection(operation: dict, result: dict) -> dict:
     from a push they asked for in chat.
     """
     targets = []
+    verify_hint = []
+    ledger_kind = operation.get("kind", "")
     normalized = operation.get("normalized_payload") or {}
     differentiated = (
         normalized.get("mode") == "differentiated" or bool(normalized.get("tiers"))
     )
+    is_quiz_variant = normalized.get("mode") == "differentiated"
     variants = normalized.get("variants") or normalized.get("tiers") or []
     for target_index, target in enumerate(result.get("target_results") or []):
         row = {"state": target.get("state")}
@@ -673,7 +703,16 @@ def _result_projection(operation: dict, result: dict) -> dict:
         for key in ("cleanup_required", "rollback_state", "rollback_error_code"):
             if target.get(key) is not None:
                 row[key] = target[key]
+        # AC4: named drift, and AC8: Canvas's own 4xx error text.
+        if target.get("error_code") == "drift_detected":
+            if target.get("drift_fields") is not None:
+                row["drift_fields"] = target["drift_fields"]
+            if target.get("next") is not None:
+                row["next"] = target["next"]
+        if target.get("canvas_message"):
+            row["canvas_message"] = target["canvas_message"]
         stored_target = (operation.get("targets") or [])[target_index] if target_index < len(operation.get("targets") or []) else {}
+        course_id = stored_target.get("course_id")
         step_source = target.get("steps") or (stored_target.get("steps") if differentiated else [])
         steps = [
             {"step": step.get("step_key"), "state": step.get("state"),
@@ -705,6 +744,13 @@ def _result_projection(operation: dict, result: dict) -> dict:
                     created.append(created_row)
             if created:
                 row["created"] = created
+                for created_row in created:
+                    if created_row.get("assignment_id"):
+                        verify_hint.append({
+                            "course_id": course_id,
+                            "kind": _verify_hint_kind(ledger_kind, is_quiz_variant=is_quiz_variant),
+                            "id": created_row["assignment_id"],
+                        })
             bridge_step = next((step for step in step_source
                                 if step.get("step_key") == "create_bridge"
                                 and step.get("returned_object_id")), None)
@@ -714,6 +760,10 @@ def _result_projection(operation: dict, result: dict) -> dict:
                     "assignment_id": bridge_step.get("returned_object_id"),
                     "url": bridge_step.get("returned_object_url"),
                 }
+                verify_hint.append({
+                    "course_id": course_id, "kind": "assignment",
+                    "id": bridge_step["returned_object_id"],
+                })
             module_step = next((step for step in step_source
                                if step.get("step_key", "").startswith("attach_source_module:")
                                and step.get("module_id")), None)
@@ -726,12 +776,30 @@ def _result_projection(operation: dict, result: dict) -> dict:
                 "state": "linked" if link_step and link_step.get("state") in ("applied", "skipped") else "needs_repair",
                 **({"error_code": link_step.get("error_code")} if link_step and link_step.get("error_code") else {}),
             }
+            # AC7: any unrecoverable mid-family stop returns what was already
+            # created, from the recorded steps alone -- nothing is deleted.
+            if row["family_link"]["state"] == "needs_repair" or row.get("state") not in ("applied", "skipped"):
+                repair_plan = [
+                    {"step": step.get("step_key"), "created_id": step.get("returned_object_id"),
+                     "state": step.get("state")}
+                    for step in step_source
+                    if step.get("returned_object_id")
+                ]
+                if repair_plan:
+                    row["repair_plan"] = repair_plan
+        elif row.get("state") in ("applied", "skipped") and target.get("returned_object_id"):
+            verify_hint.append({
+                "course_id": course_id,
+                "kind": _verify_hint_kind(ledger_kind),
+                "id": target["returned_object_id"],
+            })
         targets.append(row)
 
     return {
         "ok": bool(result.get("ok")),
         "kind": _content_kind(operation.get("kind", "")),
         "operation_id": result.get("operation_id"),
+        "verify_hint": verify_hint,
         "status": result.get("status"),
         "targets": targets,
     }

@@ -135,7 +135,7 @@
     },
     {
       "path": "api/operation_ledger/adapters/assignment_tiered.py",
-      "symbol": "execute",
+      "symbol": "_create_tier_source",
       "detector": "attr:_canvas_send",
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(\"POST\", path, request) [tiered assignment create]",

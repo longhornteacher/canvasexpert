@@ -844,6 +844,7 @@ def _result_projection(operation_key: str, result: dict, fallback: dict) -> dict
         "status": result.get("status"),
         "counts": counts,
         "warnings": copy.deepcopy(baseline.get("warnings") or []),
+        "course_id": target.get("course_id"),
         "bridge_assignment_id": target.get("returned_object_id"),
         "bridge_url": target.get("returned_object_url"),
         "steps": step_rows,

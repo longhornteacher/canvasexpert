@@ -2,9 +2,36 @@
 
 from __future__ import annotations
 
+import re
+
 from api.platform_services import canvas_client
 
 from .. import models
+
+_CANVAS_HTTP_ERROR_RE = re.compile(r"^HTTP (\d{3}): (.*)$", re.DOTALL)
+_TOKEN_HINT_MARKER = " (Token missing or expired on this machine"
+_CANVAS_MESSAGE_MAX_CHARS = 500
+
+
+def canvas_message_from_error(error: object) -> str | None:
+    """AC8: Canvas's own error text for a 4xx send, truncated to 500 chars.
+
+    ``canvas_client._canvas_send`` returns errors as
+    ``f"HTTP {status}: {body}{hint}"``. This extracts only Canvas's response
+    body -- never a 5xx/network error, never the locally-appended token
+    hint, never a request body, token, or URL query (none of those are in
+    this string to begin with).
+    """
+    match = _CANVAS_HTTP_ERROR_RE.match(str(error or ""))
+    if not match:
+        return None
+    status = int(match.group(1))
+    if not (400 <= status < 500):
+        return None
+    text = match.group(2)
+    if _TOKEN_HINT_MARKER in text:
+        text = text.split(_TOKEN_HINT_MARKER)[0]
+    return text[:_CANVAS_MESSAGE_MAX_CHARS]
 
 
 def ordered_steps(target: dict, order: tuple[str, ...]) -> list[dict]:
@@ -106,6 +133,7 @@ def build_result(
     cleanup_required: bool | None = None,
     rollback_state: str | None = None,
     rollback_error_code: str | None = None,
+    canvas_message: str | None = None,
 ) -> dict:
     result = {
         "state": state,
@@ -123,4 +151,6 @@ def build_result(
         result["rollback_state"] = rollback_state
     if rollback_error_code is not None:
         result["rollback_error_code"] = rollback_error_code
+    if canvas_message is not None:
+        result["canvas_message"] = canvas_message
     return result

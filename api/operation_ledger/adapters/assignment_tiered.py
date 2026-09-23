@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import html
 import re
+from datetime import datetime
 
 from .. import models
 from .adapter_support import (
     build_result,
+    canvas_message_from_error,
     ensure_step,
     find_step,
     is_uncertain as _is_uncertain,
@@ -16,6 +18,10 @@ from api.platform_services import canvas_client
 from api.student_text import normalize_student_text
 from .module_placement import attach_assignment_type_module_item
 from . import differentiated_bridge
+
+# AC3: how far back an exact-title match can be and still count as the
+# create this step attempted, when Canvas reports a creation time.
+_RECENT_CREATE_WINDOW_SECONDS = 600
 
 
 def execute(
@@ -73,69 +79,26 @@ def execute(
             assignment_step["state"] = "skipped"
             assignment_url = existing.get("html_url") or assignment_url
         elif assignment_step.get("outbound_started_at"):
-            return build_result("sent_unknown", steps=steps, error_code="assignment_creation_unresolved")
+            # AC3: the create's outcome is unknown and no id was recorded
+            # (typically a crash between the send and the response). Resolve
+            # it by exact title before ever sending a second create.
+            lookup = _ambiguous_create_lookup(
+                course_id=course_id, tier=tier, payload=payload, steps=steps,
+                context=context, assignment_key=assignment_key,
+                find_assignment_group=find_assignment_group,
+            )
+            if "assignment_id" not in lookup:
+                return lookup
+            assignment_id = lookup["assignment_id"]
+            assignment_url = lookup["assignment_url"]
         else:
-            assignment_data = _assignment_data(
-                payload, tier["title"], tier["description"], course_id,
-                find_assignment_group,
+            stop_result, assignment_id, assignment_url = _create_tier_source(
+                course_id=course_id, tier=tier, payload=payload, steps=steps,
+                context=context, assignment_key=assignment_key,
+                find_assignment_group=find_assignment_group,
             )
-            request = {"assignment": assignment_data}
-            path = f"/api/v1/courses/{course_id}/assignments"
-            marked = context.before_send(
-                assignment_key,
-                models.sha256_dict({"method": "POST", "path": path, "payload": request}),
-            )
-            _replace_local_step(steps, marked)
-
-            response, error = canvas_client._canvas_send("POST", path, request)
-            if error:
-                state = "sent_unknown" if _is_uncertain(error) else _tier_failure_state(steps)
-                marked["state"] = state if state == "sent_unknown" else "failed"
-                marked["error_code"] = "timeout_or_disconnect" if state == "sent_unknown" else "canvas_rejected"
-                marked["private_diagnostic"] = type(error).__name__
-                marked = context.checkpoint_step(marked)
-                _replace_local_step(steps, marked)
-                return build_result(state, steps=steps, error_code=marked["error_code"])
-            assignment_id = str(response.get("id")) if isinstance(response, dict) and response.get("id") is not None else None
-            assignment_url = response.get("html_url") if isinstance(response, dict) else None
-            if not assignment_id:
-                marked["state"] = "sent_unknown"
-                marked["error_code"] = "unparseable_response"
-                marked["private_diagnostic"] = "missing assignment id"
-                marked = context.checkpoint_step(marked)
-                _replace_local_step(steps, marked)
-                return build_result("sent_unknown", steps=steps, error_code="unparseable_response")
-            # A returned ID is not a postcondition. Re-read the exact
-            # assignment before the publication call.
-            verified, verify_error = canvas_client.canvas_get(
-                f"/api/v1/courses/{course_id}/assignments/{assignment_id}"
-            )
-            if verify_error or not verified or not _source_shape_matches(verified, assignment_data, published=False):
-                marked["state"] = "sent_unknown"
-                marked["error_code"] = "assignment_create_unverified"
-                marked["private_diagnostic"] = verify_error or _shape_mismatch_diagnostic(
-                    verified or {}, assignment_data, published=False,
-                )
-                marked = context.checkpoint_step(
-                    marked,
-                    returned_object_id=assignment_id,
-                    returned_object_url=assignment_url,
-                )
-                _replace_local_step(steps, marked)
-                return build_result(
-                    "sent_unknown", steps=steps,
-                    returned_object_id=assignment_id,
-                    returned_object_url=assignment_url,
-                    error_code=marked["error_code"],
-                    private_diagnostic=marked["private_diagnostic"],
-                )
-            marked["state"] = "applied"
-            marked = context.checkpoint_step(
-                marked,
-                returned_object_id=assignment_id,
-                returned_object_url=assignment_url,
-            )
-            _replace_local_step(steps, marked)
+            if stop_result is not None:
+                return stop_result
 
         result = _publish_assignment(
             course_id=course_id, assignment_id=str(assignment_id), payload=payload,
@@ -155,6 +118,176 @@ def execute(
         context=context,
         failure_state="partial",
     )
+
+
+def _create_tier_source(
+    *, course_id, tier, payload, steps, context, assignment_key, find_assignment_group,
+) -> tuple[dict | None, str | None, str | None]:
+    """POST and verify one tier source assignment.
+
+    Returns ``(stop_result, assignment_id, assignment_url)``. ``execute()``
+    must return ``stop_result`` immediately when it is not ``None``;
+    otherwise the create succeeded and the two ids are set.
+    """
+    assignment_data = _assignment_data(
+        payload, tier["title"], tier["description"], course_id, find_assignment_group,
+    )
+    request = {"assignment": assignment_data}
+    path = f"/api/v1/courses/{course_id}/assignments"
+    marked = context.before_send(
+        assignment_key,
+        models.sha256_dict({"method": "POST", "path": path, "payload": request}),
+    )
+    _replace_local_step(steps, marked)
+
+    response, error = canvas_client._canvas_send("POST", path, request)
+    if error:
+        state = "sent_unknown" if _is_uncertain(error) else _tier_failure_state(steps)
+        marked["state"] = state if state == "sent_unknown" else "failed"
+        marked["error_code"] = "timeout_or_disconnect" if state == "sent_unknown" else "canvas_rejected"
+        marked["private_diagnostic"] = type(error).__name__
+        marked = context.checkpoint_step(marked)
+        _replace_local_step(steps, marked)
+        return build_result(
+            state, steps=steps, error_code=marked["error_code"],
+            canvas_message=canvas_message_from_error(error),
+        ), None, None
+    assignment_id = str(response.get("id")) if isinstance(response, dict) and response.get("id") is not None else None
+    assignment_url = response.get("html_url") if isinstance(response, dict) else None
+    if not assignment_id:
+        marked["state"] = "sent_unknown"
+        marked["error_code"] = "unparseable_response"
+        marked["private_diagnostic"] = "missing assignment id"
+        marked = context.checkpoint_step(marked)
+        _replace_local_step(steps, marked)
+        return build_result("sent_unknown", steps=steps, error_code="unparseable_response"), None, None
+    # A returned ID is not a postcondition. Re-read the exact assignment
+    # before the publication call.
+    verified, verify_error = canvas_client.canvas_get(
+        f"/api/v1/courses/{course_id}/assignments/{assignment_id}"
+    )
+    if verify_error or not verified or not _source_shape_matches(verified, assignment_data, published=False):
+        marked["state"] = "sent_unknown"
+        marked["error_code"] = "assignment_create_unverified"
+        marked["private_diagnostic"] = verify_error or _shape_mismatch_diagnostic(
+            verified or {}, assignment_data, published=False,
+        )
+        marked = context.checkpoint_step(
+            marked, returned_object_id=assignment_id, returned_object_url=assignment_url,
+        )
+        _replace_local_step(steps, marked)
+        return build_result(
+            "sent_unknown", steps=steps,
+            returned_object_id=assignment_id, returned_object_url=assignment_url,
+            error_code=marked["error_code"], private_diagnostic=marked["private_diagnostic"],
+        ), None, None
+    marked["state"] = "applied"
+    marked = context.checkpoint_step(
+        marked, returned_object_id=assignment_id, returned_object_url=assignment_url,
+    )
+    _replace_local_step(steps, marked)
+    return None, assignment_id, assignment_url
+
+
+def _ambiguous_create_lookup(
+    *, course_id, tier, payload, steps, context, assignment_key, find_assignment_group,
+) -> dict:
+    """AC3: resolve a create whose outcome is unknown and carries no id.
+
+    Lists the course's assignments filtered by exact title, narrowed to
+    those created within the last ten minutes of this step's own outbound
+    marker when Canvas reports a creation time (falls back to the unfiltered
+    exact-title matches when it does not, since recency can't be proven
+    either way). Exactly one match is adopted as the create; none retries
+    the create exactly once (a persistent ``retry_attempted`` marker on the
+    step makes that retry idempotent under resume); more than one stops with
+    ``duplicate_suspected``.
+
+    Returns ``{"assignment_id": ..., "assignment_url": ...}`` when resolved,
+    otherwise a terminal ``build_result(...)`` dict ``execute()`` must return
+    as-is.
+    """
+    step = ensure_step(steps, assignment_key)
+    title = str(tier["title"])
+    matches, error = canvas_client.canvas_get_all(
+        f"/api/v1/courses/{course_id}/assignments",
+        {"per_page": 100, "search_term": title},
+    )
+    if error:
+        return build_result("sent_unknown", steps=steps, error_code="assignment_lookup_unverified")
+    exact = [row for row in (matches or []) if str(row.get("name") or "").strip() == title.strip()]
+    candidates = _recent_candidates(exact, step.get("outbound_started_at"))
+
+    if len(candidates) == 1:
+        found = candidates[0]
+        assignment_id = str(found.get("id"))
+        verified, verify_error = canvas_client.canvas_get(
+            f"/api/v1/courses/{course_id}/assignments/{assignment_id}"
+        )
+        if verify_error or not verified:
+            return build_result("sent_unknown", steps=steps, error_code="assignment_lookup_unverified")
+        marked = dict(step)
+        marked["state"] = "applied"
+        marked = context.checkpoint_step(
+            marked, returned_object_id=assignment_id,
+            returned_object_url=verified.get("html_url"),
+        )
+        _replace_local_step(steps, marked)
+        return {"assignment_id": assignment_id, "assignment_url": verified.get("html_url")}
+
+    if len(candidates) > 1:
+        ids = sorted(str(row.get("id")) for row in candidates)
+        marked = dict(step)
+        marked["state"] = "blocked"
+        marked["error_code"] = "duplicate_suspected"
+        marked["private_diagnostic"] = ",".join(ids)
+        marked = context.checkpoint_step(marked)
+        _replace_local_step(steps, marked)
+        return build_result(
+            "blocked", steps=steps, error_code="duplicate_suspected",
+            private_diagnostic=",".join(ids),
+        )
+
+    # None found. Retry the create exactly once per step -- a persistent
+    # marker (survives checkpointing/resume) prevents a second automatic
+    # retry from piling up duplicate creates across repeated resumes.
+    if step.get("retry_attempted"):
+        marked = dict(step)
+        marked["state"] = "failed"
+        marked["error_code"] = "assignment_create_retry_failed"
+        marked = context.checkpoint_step(marked)
+        _replace_local_step(steps, marked)
+        return build_result("failed", steps=steps, error_code="assignment_create_retry_failed")
+
+    marked = dict(step)
+    marked["retry_attempted"] = True
+    _replace_local_step(steps, marked)
+    stop_result, assignment_id, assignment_url = _create_tier_source(
+        course_id=course_id, tier=tier, payload=payload, steps=steps, context=context,
+        assignment_key=assignment_key, find_assignment_group=find_assignment_group,
+    )
+    if stop_result is not None:
+        return stop_result
+    return {"assignment_id": assignment_id, "assignment_url": assignment_url}
+
+
+def _recent_candidates(rows: list[dict], outbound_started_at: str | None) -> list[dict]:
+    timed = [row for row in rows if row.get("created_at")]
+    if not timed or not outbound_started_at:
+        return rows
+    try:
+        started = datetime.fromisoformat(str(outbound_started_at).replace("Z", "+00:00"))
+    except ValueError:
+        return rows
+    recent = []
+    for row in timed:
+        try:
+            created = datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if abs((created - started).total_seconds()) <= _RECENT_CREATE_WINDOW_SECONDS:
+            recent.append(row)
+    return recent
 
 
 def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
@@ -321,7 +454,11 @@ def _put_and_verify(*, course_id, assignment_id, request, steps, context, step_k
         marked["error_code"] = "timeout_or_disconnect" if state == "sent_unknown" else f"{error_prefix}_rejected"
         marked["private_diagnostic"] = type(error).__name__
         _replace_local_step(steps, context.checkpoint_step(marked))
-        return build_result(state, steps=steps, returned_object_id=assignment_id, error_code=marked["error_code"])
+        return build_result(
+            state, steps=steps, returned_object_id=assignment_id,
+            error_code=marked["error_code"],
+            canvas_message=canvas_message_from_error(error),
+        )
     current, verify_error = canvas_client.canvas_get(path)
     expected = request["assignment"]
     if verify_error or not current or any(current.get(key) != value for key, value in expected.items()):

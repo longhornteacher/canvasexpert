@@ -38,7 +38,10 @@ import re
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
-from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, gradebook_queries, learning_objectives, operational_log, roster_context, roster_service, sis_grade_bridge
+from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, gradebook_queries, learning_objectives, live_verify, operational_log, roster_context, roster_service, sis_grade_bridge
+from api.operation_ledger import claims as operation_claims
+from api.operation_ledger import executor as operation_executor
+from api.operation_ledger import operations as operation_operations
 from api.powergrader import scoring_discovery, scoring_local
 from api.mirror import read_service
 from api.mirror import store as mirror_store
@@ -283,9 +286,88 @@ def apply_sis_grade_bridge(
     operation_id: str, batch_id: str, review_digest: str
 ) -> dict:
     """Apply only the opaque, digest-protected SIS bridge review."""
-    return sis_grade_bridge.apply_sis_grade_bridge(
+    result = sis_grade_bridge.apply_sis_grade_bridge(
         operation_id, batch_id, review_digest
     )
+    if result.get("bridge_assignment_id") and result.get("course_id"):
+        result = {
+            **result,
+            "verify_hint": [{
+                "course_id": result["course_id"],
+                "kind": "assignment",
+                "id": result["bridge_assignment_id"],
+            }],
+        }
+    return result
+
+
+def verify_live(course_id: str, kind: str, id: str = "", title: str = "") -> dict:
+    """The one cheap Live check an agent makes after a push (R4): confirm one
+    Canvas object by exact id or exact title. One Canvas call, or two only
+    when module_ids isn't already on the object; writes nothing -- no
+    catalog, mirror, or pending-writes change."""
+    return live_verify.verify_live(course_id, kind, id=id, title=title)
+
+
+def _operation_held_elsewhere(operation: dict) -> bool:
+    """AC5: an unexpired claim on any target means another attempt is
+    actively mid-flight; resuming underneath it would race that attempt."""
+    for target in operation.get("targets", []) or []:
+        if target.get("state") != "claimed":
+            continue
+        expires = target.get("claim_lease_expires_at")
+        if expires and not operation_claims._is_claim_expired({"lease_expires_at": expires}):
+            return True
+    return False
+
+
+def resume_operation(operation_id: str) -> dict:
+    """Continue one existing, teacher-approved operation from its last
+    recorded step. This is not a new write capability -- it can only perform
+    steps of that same reviewed operation, and refuses one that already
+    applied, was abandoned, or is actively held by another attempt."""
+    operation_key = str(operation_id or "").strip()
+    if not operation_key:
+        return {"ok": False, "error": "operation_id is required"}
+    op = operation_operations.get_operation(operation_key)
+    if op is None:
+        return {"ok": False, "error": "operation was not found"}
+    if op.get("status") == "applied":
+        return {"ok": False, "code": "operation_already_applied",
+                "error": "this operation already applied; there is nothing to resume"}
+    if op.get("status") == "abandoned":
+        return {"ok": False, "code": "operation_abandoned",
+                "error": "this operation was abandoned; it cannot be resumed"}
+    if _operation_held_elsewhere(op):
+        return {"ok": False, "code": "work_item_held_elsewhere",
+                "error": "another attempt is actively working this operation; try again shortly"}
+    try:
+        result = operation_executor.retry_operation(operation_key)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception:
+        return {"ok": False, "error": "the operation could not be resumed"}
+    latest = operation_operations.get_operation(operation_key) or op
+    if latest.get("kind") in content_push._LEDGER_KINDS.values() or latest.get("kind") == content_push.ASSIGNMENT_UPDATE_KIND:
+        return content_push._result_projection(latest, result)
+    return {"ok": bool(result.get("ok")), "operation_id": result.get("operation_id"),
+            "status": result.get("status")}
+
+
+def abandon_operation(operation_id: str) -> dict:
+    """Mark one existing, teacher-approved operation abandoned. Makes no
+    Canvas call; blocks any later resume_operation or apply for that exact
+    operation and returns what it already created, from recorded steps
+    alone, so nothing built so far is lost track of."""
+    operation_key = str(operation_id or "").strip()
+    if not operation_key:
+        return {"ok": False, "error": "operation_id is required"}
+    if operation_operations.get_operation(operation_key) is None:
+        return {"ok": False, "error": "operation was not found"}
+    try:
+        return operation_executor.abandon_operation(operation_key)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def _workspace_reset_digest(report: dict) -> str:
@@ -1263,6 +1345,13 @@ _TOOL_GROUPS = {
         "apply_assignment_update",
         "preview_workspace_reset",
         "apply_workspace_reset",
+    ),
+    "Push verification and recovery": (
+        # AC1/AC2/AC5/AC6: the one Live read after a push, and the tools that
+        # continue or abandon an already-approved, incomplete operation.
+        "verify_live",
+        "resume_operation",
+        "abandon_operation",
     ),
     "Scoring Sessions": (
         "list_feedback_contracts",

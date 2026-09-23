@@ -400,6 +400,127 @@ def test_created_tier_id_survives_create_verification_mismatch_and_resumes(monke
     assert any(path.endswith("/assignments/101") and method == "PUT" for method, path, _body in fake.sends)
 
 
+def _matching_source_assignment(assignment_id: str, *, name: str = "Practice - Red") -> dict:
+    """A live Canvas assignment matching exactly what tier 0 (Support ->
+    Red) would have created, for AC3's ambiguous-create-lookup tests."""
+    return {
+        "id": assignment_id, "name": name, "course_id": "42",
+        "assignment_group_id": "77", "html_url": f"https://canvas.invalid/a/{assignment_id}",
+        "published": False, "description": "support body",
+        "submission_types": ["online_text_entry"], "grading_type": "points",
+        "only_visible_to_overrides": False, "omit_from_final_grade": True,
+        "post_to_sis": False, "points_possible": 10.0,
+    }
+
+
+def _crashed_create_step(*, retry_attempted: bool = False) -> dict:
+    """A tier-0 create step whose Canvas POST was sent, but whose response
+    was never recorded (the exact Issue #11-shaped crash AC3 resolves)."""
+    step = {
+        "step_key": "create_tier_assignment:0", "state": "claimed",
+        "attempt_id": None, "returned_object_id": None, "error_code": None,
+        "private_diagnostic": None, "outbound_started_at": "2026-09-14T12:00:00+00:00",
+        "updated_at": "2026-09-14T12:00:00+00:00",
+    }
+    if retry_attempted:
+        step["retry_attempted"] = True
+    return step
+
+
+def test_ambiguous_create_with_no_recorded_id_adopts_the_single_exact_match(monkeypatch):
+    """AC3: exactly one exact-title match -> adopt its id, re-read it, and
+    continue the family instead of sending a second create."""
+    payload = _build(monkeypatch, module_id="501")
+    fake = FakeCanvas()
+    fake.assignments["101"] = _matching_source_assignment("101")
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
+    monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
+    baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
+    context = Context()
+
+    result = AssignmentAdapter().execute(
+        payload, {"course_id": "42", "steps": [_crashed_create_step()]}, baseline, {}, context,
+    )
+
+    create_step = next(row for row in result["steps"] if row["step_key"] == "create_tier_assignment:0")
+    assert create_step["returned_object_id"] == "101"
+    assert create_step["state"] in ("applied", "skipped")
+    assert not any(
+        method == "POST" and path.endswith("/assignments")
+        and body.get("assignment", {}).get("name") == "Practice - Red"
+        for method, path, body in fake.sends
+    )
+
+
+def test_ambiguous_create_with_no_recorded_id_and_no_match_retries_the_create_once(monkeypatch):
+    """AC3: no exact-title match -> retry the create exactly once."""
+    payload = _build(monkeypatch, module_id="501")
+    fake = FakeCanvas()
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
+    monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
+    baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
+    context = Context()
+
+    result = AssignmentAdapter().execute(
+        payload, {"course_id": "42", "steps": [_crashed_create_step()]}, baseline, {}, context,
+    )
+
+    assert result["state"] == "applied", result
+    creates = [
+        body for _method, path, body in fake.sends
+        if path.endswith("/assignments")
+        and body.get("assignment", {}).get("name") == "Practice - Red"
+    ]
+    assert len(creates) == 1
+
+
+def test_ambiguous_create_with_no_recorded_id_and_two_matches_stops_as_duplicate_suspected(monkeypatch):
+    """AC3: more than one exact-title match -> stop with duplicate_suspected,
+    never guess which one this attempt created."""
+    payload = _build(monkeypatch, module_id="501")
+    fake = FakeCanvas()
+    fake.assignments["101"] = _matching_source_assignment("101")
+    fake.assignments["103"] = _matching_source_assignment("103")
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
+    monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
+    baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
+    context = Context()
+
+    result = AssignmentAdapter().execute(
+        payload, {"course_id": "42", "steps": [_crashed_create_step()]}, baseline, {}, context,
+    )
+
+    assert result["state"] == "blocked"
+    assert result["error_code"] == "duplicate_suspected"
+    assert not any(method == "POST" and path.endswith("/assignments") for method, path, _body in fake.sends)
+
+
+def test_ambiguous_create_retry_marker_is_idempotent_under_resume(monkeypatch):
+    """AC3 law: a step already marked retry_attempted never retries the
+    create a second time, so a repeated resume cannot pile up duplicates."""
+    payload = _build(monkeypatch, module_id="501")
+    fake = FakeCanvas()
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
+    monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
+    baseline = AssignmentAdapter().capture_baseline(payload, {"course_id": "42", "steps": []})
+    context = Context()
+
+    result = AssignmentAdapter().execute(
+        payload,
+        {"course_id": "42", "steps": [_crashed_create_step(retry_attempted=True)]},
+        baseline, {}, context,
+    )
+
+    assert result["state"] == "failed"
+    create_step = next(row for row in result["steps"] if row["step_key"] == "create_tier_assignment:0")
+    assert create_step["error_code"] == "assignment_create_retry_failed"
+    assert not fake.sends
+
+
 def test_source_shape_matching_tolerates_canvas_html_normalization():
     from api.operation_ledger.adapters.assignment_tiered import _source_shape_matches
 

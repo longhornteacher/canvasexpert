@@ -14,7 +14,7 @@ VERSION = 1
 
 OPERATION_STATUSES = (
     "working", "prepared", "reviewed", "applying",
-    "applied", "partial", "failed", "attention",
+    "applied", "partial", "failed", "attention", "abandoned",
 )
 
 TARGET_STATES = (
@@ -39,14 +39,15 @@ TARGET_TRANSITIONS = {
 }
 
 OPERATION_TRANSITIONS = {
-    "working":   {"prepared"},
-    "prepared":  {"reviewed"},
-    "reviewed":  {"applying"},
+    "working":   {"prepared", "abandoned"},
+    "prepared":  {"reviewed", "abandoned"},
+    "reviewed":  {"applying", "abandoned"},
     "applying":  {"applied", "partial", "failed", "attention"},
-    "attention": {"applying"},  # retry
+    "attention": {"applying", "abandoned"},  # retry, or a teacher gives up (AC6)
     "applied":   set(),
-    "partial":   {"applying"},  # retry unresolved
-    "failed":    set(),
+    "partial":   {"applying", "abandoned"},  # retry unresolved, or abandon
+    "failed":    {"abandoned"},
+    "abandoned": set(),  # terminal; blocks later resume/apply (AC6)
 }
 
 LEASE_SECONDS = 300  # 5 minutes

@@ -815,3 +815,172 @@ def test_page_apply_actually_marks_a_real_catalog_document_stale(tmp_path):
     assert stored["pages"]["records"] == document["pages"]["records"]
     for other in ("assignments", "modules", "assignment_groups"):
         assert stored[other] == document[other]
+
+
+# ── Named drift, repair plans, and abandon (push-verify-and-recovery brief) ──
+
+def test_drift_detected_names_fields_and_the_next_step(tmp_path, monkeypatch):
+    """AC4: a drift_detected target carries drift_fields (names only, never
+    values) and a next step. A target's first drift names the fields and
+    suggests resume_operation once real progress exists; a second drift on
+    the same target (the exact Issue #11 loop: tier 0 created, drift, drift
+    again) names abandon_operation instead of looping forever."""
+    _root(tmp_path, monkeypatch)
+
+    class DriftingAdapter:
+        kind = "content.assignment"
+
+        def capture_baseline(self, payload, target):
+            return {"existing_assignments": [{"id": "9", "name": "New Name"}]}
+
+        def check_drift(self, payload, target, baseline):
+            return True
+
+        def execute(self, payload, target, baseline, claim, context):
+            raise AssertionError("execute must not run once drift is detected")
+
+    monkeypatch.setattr(registry, "get_adapter", lambda kind: DriftingAdapter())
+
+    target = models.new_target(target_key="tk-drift", idempotency_key="ik-drift", course_id="101")
+    target["baseline"] = {"existing_assignments": [{"id": "9", "name": "Old Name"}]}
+    target["steps"] = [{"step_key": "create_tier_assignment:0", "state": "applied",
+                        "returned_object_id": "9"}]
+    op = _make_operation("op-drift", targets=[target])
+    op["kind"] = "content.assignment"
+    operations.create_operation(op)
+    batch = batches.freeze_batch(["op-drift"], {"op-drift": [{}]})
+    operations.set_operation_review("op-drift", batch)
+
+    first = executor.apply_operation("op-drift", batch["batch_id"], batch["review_digest"])
+    first_target = first["target_results"][0]
+    assert first_target["error_code"] == "drift_detected"
+    assert first_target["drift_fields"] == ["existing_assignments"]
+    assert first_target["next"] == "resume_operation"
+
+    # Retrying while the adapter still reports drift is the Issue #11 loop:
+    # the target already carries drift_detected, so this time next names
+    # abandon_operation instead of resume_operation.
+    operations.set_operation_status("op-drift", "attention")
+    second = executor.apply_operation("op-drift", batch["batch_id"], batch["review_digest"])
+    second_target = second["target_results"][0]
+    assert second_target["error_code"] == "drift_detected"
+    assert second_target["next"] == "abandon_operation"
+
+
+def test_build_repair_plan_projects_only_steps_with_a_created_id():
+    """AC7: repair_plan is a pure projection of recorded steps -- nothing is
+    read from Canvas and nothing is deleted."""
+    operation = {
+        "targets": [{
+            "steps": [
+                {"step_key": "create_tier_assignment:0", "state": "applied",
+                 "returned_object_id": "101"},
+                {"step_key": "create_tier_assignment:1", "state": "pending",
+                 "returned_object_id": None},
+                {"step_key": "create_bridge", "state": "sent_unknown",
+                 "returned_object_id": "205"},
+            ],
+        }],
+    }
+
+    plan = executor.build_repair_plan(operation)
+
+    assert plan == [
+        {"step": "create_tier_assignment:0", "created_id": "101", "state": "applied"},
+        {"step": "create_bridge", "created_id": "205", "state": "sent_unknown"},
+    ]
+
+
+def test_abandon_operation_blocks_later_resume_and_apply(tmp_path, monkeypatch):
+    """Law (AC6): abandon_operation makes no Canvas call, and neither
+    retry_operation (resume) nor apply_operation may proceed afterward."""
+    _root(tmp_path, monkeypatch)
+
+    class NeverCalledAdapter:
+        kind = "content.assignment"
+
+        def capture_baseline(self, payload, target):
+            raise AssertionError("abandon_operation must make no Canvas call")
+
+        def check_drift(self, payload, target, baseline):
+            raise AssertionError("abandon_operation must make no Canvas call")
+
+        def execute(self, payload, target, baseline, claim, context):
+            raise AssertionError("abandon_operation must make no Canvas call")
+
+        def retry_selector(self, operation):
+            raise AssertionError("abandon_operation must make no Canvas call")
+
+    monkeypatch.setattr(registry, "get_adapter", lambda kind: NeverCalledAdapter())
+
+    target = models.new_target(target_key="tk-abandon", idempotency_key="ik-abandon", course_id="101")
+    target["state"] = "attention"
+    target["steps"] = [{"step_key": "create_tier_assignment:0", "state": "applied",
+                        "returned_object_id": "101"}]
+    op = _make_operation("op-abandon", targets=[target])
+    op["kind"] = "content.assignment"
+    op["status"] = "attention"
+    operations.create_operation(op)
+    batch = batches.freeze_batch(["op-abandon"], {"op-abandon": [{}]})
+    operations.set_operation_review("op-abandon", batch)
+    operations.set_operation_status("op-abandon", "attention")
+
+    result = executor.abandon_operation("op-abandon")
+
+    assert result["ok"] is True
+    assert result["status"] == "abandoned"
+    assert result["repair_plan"] == [
+        {"step": "create_tier_assignment:0", "created_id": "101", "state": "applied"},
+    ]
+    assert operations.get_operation("op-abandon")["status"] == "abandoned"
+
+    with pytest.raises(ValueError, match="abandoned"):
+        executor.retry_operation("op-abandon")
+    with pytest.raises(ValueError, match="abandoned"):
+        executor.apply_operation("op-abandon", batch["batch_id"], batch["review_digest"])
+
+    # A second abandon on an already-abandoned operation is also refused.
+    with pytest.raises(ValueError):
+        executor.abandon_operation("op-abandon")
+
+
+def test_resume_operation_continues_from_the_last_recorded_step(tmp_path, monkeypatch):
+    """Example: an interrupted operation resumes and completes through the
+    same retry_operation path resume_operation reuses."""
+    _root(tmp_path, monkeypatch)
+
+    class ResumableAdapter:
+        kind = "content.assignment"
+
+        def capture_baseline(self, payload, target):
+            return {}
+
+        def check_drift(self, payload, target, baseline):
+            return False
+
+        def execute(self, payload, target, baseline, claim, context):
+            return {"state": "applied", "returned_object_id": "9001",
+                    "returned_object_url": "https://canvas.invalid/a/9001"}
+
+        def retry_selector(self, operation):
+            return [t for t in operation.get("targets", [])
+                    if t.get("state") != "applied"]
+
+    monkeypatch.setattr(registry, "get_adapter", lambda kind: ResumableAdapter())
+
+    target = models.new_target(target_key="tk-resume", idempotency_key="ik-resume", course_id="101")
+    target["state"] = "sent_unknown"
+    op = _make_operation("op-resume", targets=[target])
+    op["kind"] = "content.assignment"
+    op["status"] = "attention"
+    operations.create_operation(op)
+    batch = batches.freeze_batch(["op-resume"], {"op-resume": [{}]})
+    operations.set_operation_review("op-resume", batch)
+    operations.set_operation_status("op-resume", "attention")
+
+    result = executor.retry_operation("op-resume")
+
+    assert result["ok"] is True
+    assert result["status"] == "applied"
+    assert result["target_results"][0]["returned_object_id"] == "9001"
+    assert operations.get_operation("op-resume")["status"] == "applied"

@@ -915,6 +915,7 @@ def _stop(
     return adapter_support.build_result(
         state, steps=steps, returned_object_id=returned_object_id,
         error_code=step.get("error_code"), private_diagnostic=str(error),
+        canvas_message=adapter_support.canvas_message_from_error(error),
     )
 
 

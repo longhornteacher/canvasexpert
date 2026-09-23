@@ -672,7 +672,8 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     contract_names = {item["name"] for item in contract.load_contract()["tools"]}
     grouped = [name for names in tools._TOOL_GROUPS.values() for name in names]
     expected_groups = {
-        "Course discovery and catalog", "Shared work items", "Create and Forge", "Scoring Sessions", "Gradebook",
+        "Course discovery and catalog", "Shared work items", "Create and Forge",
+        "Push verification and recovery", "Scoring Sessions", "Gradebook",
         "SIS Grade Bridges", "Learning Objectives",
         "Writing Timeline", "Writing Record", "Students",
     }
@@ -682,7 +683,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 49
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 52
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -1740,6 +1741,7 @@ def test_server_registers_the_expected_tool_set():
         "preview_sis_grade_bridge", "preview_sis_grade_bridge_reconciliation",
         "apply_sis_grade_bridge",
         "preview_workspace_reset", "apply_workspace_reset",
+        "verify_live", "resume_operation", "abandon_operation",
         "get_course_pages", "list_learning_objectives", "preview_learning_objective",
             "apply_learning_objective", "delete_learning_objective",
             "get_roster_student_settings", "preview_roster_student_change",

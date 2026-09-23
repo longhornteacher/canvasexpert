@@ -503,6 +503,28 @@ def push_content_live(
 
 
 @mcp.tool(structured_output=False)
+def verify_live(course_id: str, kind: str, id: str = "", title: str = "") -> str:
+    """The one cheap Live check an agent makes after a push, by exact id or exact title.
+    One Canvas call (two only when module_ids isn't already on the object); writes nothing."""
+    return _compact(tools.verify_live(course_id, kind, id=id, title=title))
+
+
+@mcp.tool(structured_output=False)
+def resume_operation(operation_id: str) -> str:
+    """Continue one existing, teacher-approved operation from its last recorded step.
+    Not a new write capability -- refuses an operation that already applied, was
+    abandoned, or is held by another attempt."""
+    return _compact(tools.resume_operation(operation_id))
+
+
+@mcp.tool(structured_output=False)
+def abandon_operation(operation_id: str) -> str:
+    """Mark one existing, teacher-approved operation abandoned; makes no Canvas call.
+    Blocks later resume_operation or apply and returns a repair_plan of what it already created."""
+    return _compact(tools.abandon_operation(operation_id))
+
+
+@mcp.tool(structured_output=False)
 def refresh_mirror(course_id: str) -> str:
     """Refresh a saved course's local CanvasMirror only after a read refuses as stale.
     It reports sync status, never data; after a successful sync, retry the refused read."""
@@ -630,8 +652,16 @@ def _strip_generated_schema_titles(mcp_server) -> int:
         if isinstance(node, dict):
             if node.pop("title", None) is not None:
                 stripped += 1
-            for value in node.values():
-                stripped += _strip(value)
+            for key, value in node.items():
+                if key == "properties" and isinstance(value, dict):
+                    # This dict's own keys are parameter names -- one may be
+                    # literally "title" (e.g. verify_live) -- not generated
+                    # title metadata, so only recurse into each property's
+                    # own schema rather than popping this dict's keys.
+                    for prop_schema in value.values():
+                        stripped += _strip(prop_schema)
+                else:
+                    stripped += _strip(value)
         elif isinstance(node, list):
             for value in node:
                 stripped += _strip(value)

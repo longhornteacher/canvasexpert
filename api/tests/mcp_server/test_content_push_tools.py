@@ -370,6 +370,7 @@ def test_apply_requires_all_three_coordinates():
 def test_apply_reports_what_landed_without_ledger_internals(monkeypatch):
     monkeypatch.setattr(content_push.operations, "get_operation", lambda _id: {
         "operation_id": "op-1", "kind": "content.page",
+        "targets": [{"course_id": "course-1"}],
     })
     monkeypatch.setattr(content_push.executor, "apply_operation", lambda *_a: {
         "ok": True,
@@ -393,6 +394,7 @@ def test_apply_reports_what_landed_without_ledger_internals(monkeypatch):
         "kind": "page",
         "operation_id": "op-1",
         "status": "applied",
+        "verify_hint": [{"course_id": "course-1", "kind": "page", "id": "9001"}],
         "targets": [{
             "state": "applied",
             "url": "https://canvas.invalid/courses/1/pages/welcome",
@@ -448,6 +450,89 @@ def test_assignment_tier_result_projection_is_family_safe_and_actionable():
         return set()
 
     assert not keys(target) & {"student_ids", "member_ids"}
+
+
+def test_assignment_tier_result_projection_reports_verify_hint_and_repair_plan():
+    """AC2 + AC7: a differentiated family's created sources and bridge each
+    get a verify_hint entry, and a family stuck on a needs_repair link
+    carries a repair_plan built only from steps that recorded a created id."""
+    operation = {
+        "kind": "content.assignment",
+        "normalized_payload": {
+            "tiers": [
+                {"label": "Support", "tag": "Red", "title": "Practice - Red"},
+                {"label": "Core", "tag": "Blue", "title": "Practice - Blue"},
+            ],
+        },
+        "targets": [{"course_id": "course-x", "steps": []}],
+    }
+    result = {
+        "ok": False,
+        "operation_id": "op-1",
+        "status": "attention",
+        "target_results": [{
+            "state": "blocked",
+            "steps": [
+                {"step_key": "create_tier_assignment:0", "state": "applied",
+                 "returned_object_id": "101", "returned_object_url": "https://canvas.invalid/a/101"},
+                {"step_key": "create_tier_assignment:1", "state": "applied",
+                 "returned_object_id": "102", "returned_object_url": "https://canvas.invalid/a/102"},
+                {"step_key": "create_bridge", "state": "sent_unknown",
+                 "error_code": "bridge_create_unverified"},
+            ],
+        }],
+    }
+
+    projected = content_push._result_projection(operation, result)
+    target = projected["targets"][0]
+
+    assert projected["verify_hint"] == [
+        {"course_id": "course-x", "kind": "assignment", "id": "101"},
+        {"course_id": "course-x", "kind": "assignment", "id": "102"},
+    ]
+    assert target["family_link"] == {"state": "needs_repair"}
+    assert target["repair_plan"] == [
+        {"step": "create_tier_assignment:0", "created_id": "101", "state": "applied"},
+        {"step": "create_tier_assignment:1", "created_id": "102", "state": "applied"},
+    ]
+
+
+def test_result_projection_reports_drift_fields_and_next_and_canvas_message():
+    """AC4 + AC8: a drift_detected target carries named field diffs and a
+    next step; a Canvas 4xx during apply carries Canvas's own message text."""
+    operation = {"kind": "content.page", "targets": [{"course_id": "course-x"}]}
+    result = {
+        "ok": False, "operation_id": "op-1", "status": "attention",
+        "target_results": [{
+            "state": "blocked", "error_code": "drift_detected",
+            "drift_fields": ["existing_page.title"], "next": "resume_operation",
+            "canvas_message": 'the assignment name "Essay" is already in use',
+        }],
+    }
+
+    projected = content_push._result_projection(operation, result)
+    target = projected["targets"][0]
+
+    assert target["drift_fields"] == ["existing_page.title"]
+    assert target["next"] == "resume_operation"
+    assert target["canvas_message"] == 'the assignment name "Essay" is already in use'
+    # A blocked, non-created target contributes no verify_hint entry.
+    assert projected["verify_hint"] == []
+
+
+def test_preview_content_push_refuses_post_to_sis_without_due_at(monkeypatch):
+    """AC8: post_to_sis:true with no due_at is refused before any Canvas read."""
+    _stage("assignment", "essay-2")
+
+    result = content_push.preview_content_push(
+        "course-x", "assignment", "essay-2", post_to_sis=True)
+
+    assert result == {
+        "ok": False,
+        "code": "sis_requires_due_at",
+        "error": ("post_to_sis requires due_at; Canvas SIS sync needs a due date "
+                  "before it will sync a grade."),
+    }
 
 
 def test_apply_surfaces_the_unfinished_step_when_a_push_needs_attention(monkeypatch):
@@ -952,3 +1037,137 @@ def test_live_push_tools_delegate_to_the_shared_use_case(monkeypatch):
     assert seen["stage"][0] == ("page", "l", "body")
     assert seen["live"][0] == ("course-x", "quiz", "l", "body")
     assert seen["live"][1]["published"] is True
+
+
+# --- verify_live / resume_operation / abandon_operation (AC1, AC5, AC6) --------
+
+def test_tools_verify_live_delegates_to_live_verify(monkeypatch):
+    seen = {}
+
+    def _fake_verify_live(course_id, kind, id="", title=""):
+        seen["call"] = (course_id, kind, id, title)
+        return {"ok": True, "found": True}
+
+    monkeypatch.setattr(tools.live_verify, "verify_live", _fake_verify_live)
+    result = tools.verify_live("course-x", "assignment", id="101")
+    assert result == {"ok": True, "found": True}
+    assert seen["call"] == ("course-x", "assignment", "101", "")
+
+
+def test_resume_operation_refuses_an_already_applied_operation(monkeypatch):
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {
+        "operation_id": "op-1", "status": "applied", "targets": [],
+    })
+    result = tools.resume_operation("op-1")
+    assert result == {
+        "ok": False, "code": "operation_already_applied",
+        "error": "this operation already applied; there is nothing to resume",
+    }
+
+
+def test_resume_operation_refuses_an_abandoned_operation(monkeypatch):
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {
+        "operation_id": "op-1", "status": "abandoned", "targets": [],
+    })
+    result = tools.resume_operation("op-1")
+    assert result["ok"] is False
+    assert result["code"] == "operation_abandoned"
+
+
+def test_resume_operation_refuses_an_unknown_operation(monkeypatch):
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: None)
+    result = tools.resume_operation("op-missing")
+    assert result == {"ok": False, "error": "operation was not found"}
+
+
+def test_resume_operation_refuses_a_target_held_by_another_attempt(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    future = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {
+        "operation_id": "op-1", "status": "attention",
+        "targets": [{"state": "claimed", "claim_lease_expires_at": future}],
+    })
+    result = tools.resume_operation("op-1")
+    assert result == {
+        "ok": False, "code": "work_item_held_elsewhere",
+        "error": "another attempt is actively working this operation; try again shortly",
+    }
+
+
+def test_resume_operation_projects_a_content_push_result(monkeypatch):
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {
+        "operation_id": "op-1", "status": "attention", "kind": "content.page",
+        "targets": [{"course_id": "course-x"}],
+    })
+    monkeypatch.setattr(tools.operation_executor, "retry_operation", lambda _id: {
+        "ok": True, "operation_id": "op-1", "status": "applied",
+        "target_results": [{"state": "applied", "returned_object_id": "9001",
+                            "returned_object_url": "https://canvas.invalid/p/9001"}],
+    })
+    result = tools.resume_operation("op-1")
+    assert result["ok"] is True
+    assert result["kind"] == "page"
+    assert result["verify_hint"] == [{"course_id": "course-x", "kind": "page", "id": "9001"}]
+
+
+def test_abandon_operation_refuses_an_unknown_operation(monkeypatch):
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: None)
+    result = tools.abandon_operation("op-missing")
+    assert result == {"ok": False, "error": "operation was not found"}
+
+
+def test_abandon_operation_delegates_and_refuses_when_the_status_is_wrong(monkeypatch):
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {"operation_id": "op-1"})
+
+    def _raise(_id):
+        raise ValueError("operation is in status 'applied', cannot be abandoned")
+    monkeypatch.setattr(tools.operation_executor, "abandon_operation", _raise)
+
+    result = tools.abandon_operation("op-1")
+    assert result["ok"] is False
+    assert "cannot be abandoned" in result["error"]
+
+
+# --- verify_hint contract (AC2) ------------------------------------------------
+
+@pytest.mark.parametrize("call", [
+    lambda monkeypatch: (
+        monkeypatch.setattr(tools.content_push, "apply_content_push", lambda *_a: {
+            "ok": True, "operation_id": "op-1", "status": "applied",
+            "targets": [{"state": "applied"}],
+            "verify_hint": [{"course_id": "course-x", "kind": "page", "id": "9001"}],
+        }),
+        tools.apply_content_push("op-1", "batch-1", "digest-1"),
+    )[-1],
+    lambda monkeypatch: (
+        monkeypatch.setattr(tools.content_push, "apply_assignment_update", lambda *_a: {
+            "ok": True, "operation_id": "op-1", "status": "applied", "kind": "assignment_update",
+            "targets": [{"state": "applied"}],
+            "verify_hint": [{"course_id": "course-x", "kind": "assignment", "id": "9001"}],
+        }),
+        tools.apply_assignment_update("op-1", "batch-1", "digest-1"),
+    )[-1],
+    lambda monkeypatch: (
+        monkeypatch.setattr(tools.content_push, "push_content_live", lambda *_a, **_k: {
+            "ok": True, "operation_id": "op-1", "status": "applied",
+            "targets": [{"state": "applied"}],
+            "verify_hint": [{"course_id": "course-x", "kind": "page", "id": "9001"}],
+        }),
+        tools.push_content_live("course-x", "page", "l", "body"),
+    )[-1],
+    lambda monkeypatch: (
+        monkeypatch.setattr(tools.sis_grade_bridge, "apply_sis_grade_bridge", lambda *_a: {
+            "ok": True, "operation_id": "op-1", "status": "applied",
+            "course_id": "course-x", "bridge_assignment_id": "9001",
+        }),
+        tools.apply_sis_grade_bridge("op-1", "batch-1", "digest-1"),
+    )[-1],
+], ids=["apply_content_push", "apply_assignment_update", "push_content_live", "apply_sis_grade_bridge"])
+def test_every_apply_tool_carries_verify_hint_on_success(monkeypatch, call):
+    result = call(monkeypatch)
+    assert result["ok"] is True
+    assert isinstance(result["verify_hint"], list) and len(result["verify_hint"]) == 1
+    hint = result["verify_hint"][0]
+    assert hint["course_id"] == "course-x"
+    assert hint["id"] == "9001"
+    assert hint["kind"] in ("assignment", "page", "quiz")
