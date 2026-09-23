@@ -119,6 +119,9 @@ def pseudonymize(parsed: dict, vault: Vault, quiz_title: str) -> dict:
         written = constructed_responses(s)
         if not written:
             continue
+        require_stable = getattr(vault, "require_stable", None)
+        if require_stable is not None:
+            require_stable(s.get("canvas_id"))
         pseudo = vault.get_or_assign(s.get("canvas_id"), s.get("name", ""), s.get("sis_id", ""))
         students.append({
             "pseudonym": pseudo,
@@ -285,6 +288,9 @@ def pseudonymize_submissions(submissions: list, vault: Vault,
             # New Quiz student whose only items were excluded from the AI lane
             # (e.g. image/PDF uploads): keep them out of the packet entirely.
             continue
+        require_stable = getattr(vault, "require_stable", None)
+        if require_stable is not None:
+            require_stable(uid)
         pseudo = vault.get_or_assign(uid, entry["real_name"], entry["sis_id"],
                                      roster_names=roster_tokens)
         responses = entry.get("responses") or [{

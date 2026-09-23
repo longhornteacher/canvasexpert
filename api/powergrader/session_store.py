@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from api.storage_support import atomic_write_json, interprocess_lock
+from api.shared_work import SharedWorkStore, WorkItemError, WorkItemNotFound
+from api import runtime_paths
 
 from api import gradebook_snapshot
 from api.platform_services import workspace
@@ -92,11 +94,12 @@ def session_staleness(session: dict, *, mirror_revision=None,
                       submission_snapshot=None) -> dict:
     """Compare a session's frozen inputs with a newly usable local snapshot."""
     expected_revision = session.get("mirror_revision")
-    if mirror_revision is not None and expected_revision not in (None, ""):
+    self_contained = session.get("storage_model") == "shared_work.v1"
+    if not self_contained and mirror_revision is not None and expected_revision not in (None, ""):
         if str(mirror_revision) != str(expected_revision):
             return {"stale": True, "code": "session_stale", "reason": "mirror_revision_changed"}
     expected_snapshot = session.get("submission_snapshot")
-    if submission_snapshot is not None and expected_snapshot not in (None, ""):
+    if not self_contained and submission_snapshot is not None and expected_snapshot not in (None, ""):
         actual = (submission_snapshot if isinstance(submission_snapshot, str)
                   else eligible_submission_snapshot_digest(submission_snapshot))
         if str(actual) != str(expected_snapshot):
@@ -198,10 +201,9 @@ class _SessionLock:
 
     def __enter__(self):
         self._local_lock.acquire()
-        path = session_path(self._session_id)
-        if path:
-            self._interprocess = interprocess_lock(Path(path + ".lock"))
-            self._interprocess.__enter__()
+        key = hashlib.sha256(str(self._session_id).encode("utf-8")).hexdigest()[:24]
+        self._interprocess = interprocess_lock(runtime_paths.local_app_dir() / "locks" / f"pg-session-{key}.lock")
+        self._interprocess.__enter__()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -210,7 +212,7 @@ class _SessionLock:
                 self._interprocess.__exit__(exc_type, exc_value, traceback)
         finally:
             self._interprocess = None
-            self._local_lock.release()
+        self._local_lock.release()
         return False
 
 
@@ -249,7 +251,8 @@ class _ScopeLock:
         self._local_lock.acquire()
         d = pg_dir()
         if d:
-            self._interprocess = interprocess_lock(Path(d) / f"scope-{self._key}.lock")
+            self._interprocess = interprocess_lock(
+                runtime_paths.local_app_dir() / "locks" / f"pg-scope-{self._key}.lock")
             self._interprocess.__enter__()
         return self
 
@@ -311,6 +314,16 @@ def _load_session_unlocked(session_id: str) -> dict | None:
     path = session_path(session_id)
     if path and os.path.isfile(path):
         return _read_json(path)
+    try:
+        session = SharedWorkStore().load_snapshot(session_id)
+    except WorkItemNotFound:
+        return None
+    except WorkItemError as exc:
+        if str(exc) == "workspace_not_configured":
+            return None
+        raise
+    if session and session.get("storage_model") == "shared_work.v1":
+        return session
     return None
 
 
@@ -318,9 +331,43 @@ def save_session(session: dict):
     session_id = session["session_id"]
     with session_lock(session_id):
         path = session_path(session_id)
-        if not path:
+        if session.get("storage_model") == "shared_work.v1":
+            store = SharedWorkStore()
+            store.save_snapshot(
+                session_id, session, kind="scoring_session",
+                course_id=session.get("course_id", ""),
+                assignment_id=session.get("assignment_id", ""),
+                label=session.get("assignment_name", ""),
+            )
             return
-        atomic_write_json(Path(path), session)
+        if path:
+            atomic_write_json(Path(path), session)
+
+
+def list_work_items() -> list[dict]:
+    """List current Scoring Session work items without their private state."""
+    return SharedWorkStore().list_items(kind="scoring_session")
+
+
+def get_work_item(work_id: str) -> dict:
+    """Return holder/sync metadata, never the saved private session body."""
+    return SharedWorkStore().summary(work_id)
+
+
+def take_over_work_item(work_id: str, *, confirm_stale=False) -> dict:
+    return SharedWorkStore().acquire(work_id, confirm_stale=confirm_stale)
+
+
+def handoff_work_item(work_id: str) -> dict:
+    return SharedWorkStore().release(work_id)
+
+
+def assert_work_item_writable(work_id: str) -> dict | None:
+    """Fail before any side effect when another machine owns shared work."""
+    session = load_session(work_id)
+    if not session or session.get("storage_model") != "shared_work.v1":
+        return None
+    return SharedWorkStore().require_owner(work_id)
 
 
 def list_session_summaries() -> list[dict]:
@@ -336,6 +383,26 @@ def list_session_summaries() -> list[dict]:
             continue
         seen_ids.add(sid)
         sessions.append(_summary(s))
+    try:
+        shared = SharedWorkStore()
+        for item in shared.list_items(kind="scoring_session"):
+            sid = str(item.get("work_id") or "")
+            if sid in seen_ids:
+                continue
+            s = shared.load_snapshot(sid)
+            if not isinstance(s, dict) or s.get("storage_model") != "shared_work.v1":
+                continue
+            seen_ids.add(sid)
+            summary = _summary(s)
+            summary["work_item"] = {
+                "holder": item.get("holder"), "heartbeat_at": item.get("heartbeat_at"),
+                "lease_state": item.get("lease_state"), "event_count": item.get("event_count"),
+                "sync_progress": item.get("sync_progress"),
+                "orphan_event_count": item.get("orphan_event_count"),
+            }
+            sessions.append(summary)
+    except WorkItemError:
+        pass
     sessions.sort(key=lambda x: x.get("created") or "", reverse=True)
     return sessions
 

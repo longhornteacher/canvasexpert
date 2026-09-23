@@ -83,9 +83,10 @@ def test_config_split_writes_workspace_settings_when_available(tmp_path, monkeyp
     config.bookmark_course("123", "Algebra", "Algebra 1")
 
     machine_state = json.loads(machine_config.read_text(encoding="utf-8"))
-    workspace_state = json.loads((workspace_root / "settings.json").read_text(encoding="utf-8"))
+    from api.shared_kv import SharedKVStore
+    workspace_state = SharedKVStore("settings", root=workspace_root).read()
 
-    assert machine_state["saved_courses"] == []
+    assert "saved_courses" not in machine_state
     assert workspace_state["saved_courses"][0]["id"] == "123"
     assert workspace_state["saved_courses"][0]["nickname"] == "Algebra 1"
 
@@ -201,8 +202,9 @@ def test_workspace_migration_is_idempotent(tmp_path, monkeypatch):
     )
 
     first = config.saved_courses()
-    settings_path = workspace_root / "settings.json"
-    assert settings_path.exists()
+    from api.shared_kv import SharedKVStore
+    settings_store = SharedKVStore("settings", root=workspace_root)
+    assert (workspace_root / "_Shared" / "kv" / "settings" / "snapshot.initial.json").exists()
     assert first[0]["nickname"] == "Hist"
 
     _write_json(
@@ -217,11 +219,31 @@ def test_workspace_migration_is_idempotent(tmp_path, monkeypatch):
     )
 
     second = config.saved_courses()
-    workspace_state = json.loads(settings_path.read_text(encoding="utf-8"))
+    workspace_state = settings_store.read()
 
     assert second[0]["id"] == "1"
     assert workspace_state["saved_courses"][0]["id"] == "1"
     assert workspace_state["extra_time"]["1"][0]["name"] == "Ada"
+
+
+def test_legacy_canvas_caches_are_marked_but_preserved(tmp_path, monkeypatch):
+    root = tmp_path / "workspace"
+    old_cache = root / "_System" / "Canvas Catalog"
+    old_cache.mkdir(parents=True)
+    canonical = old_cache / "catalog.v3.json"
+    conflict = old_cache / "catalog-LAPTOP-TEST.json"
+    canonical.write_text("canonical cache", encoding="utf-8")
+    conflict.write_text("retained conflict evidence", encoding="utf-8")
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(workspace.runtime_paths, "local_cache_dir", lambda: tmp_path / "local-cache")
+    workspace._legacy_cache_retirement_checked.clear()
+
+    local_root = workspace.canvas_catalog_root()
+
+    assert local_root == str(tmp_path / "local-cache" / "Canvas Catalog")
+    assert "no longer reads" in (old_cache / "README-MIGRATED.txt").read_text(encoding="utf-8")
+    assert canonical.read_text(encoding="utf-8") == "canonical cache"
+    assert conflict.read_text(encoding="utf-8") == "retained conflict evidence"
 
 
 def test_canonical_course_first_paths_keep_ids_and_bound_long_names(tmp_path, monkeypatch):

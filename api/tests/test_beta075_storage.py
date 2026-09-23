@@ -83,19 +83,20 @@ def test_settings_transactions_preserve_interleaved_nested_updates(tmp_path, mon
             "https://canvas-1.invalid", "https://canvas-2.invalid"
         }
         assert {machine.get("download_root")} <= {"download-1", "download-2"}
-        assert {course["id"] for course in machine["saved_courses"]} >= {
-            "course-1", "course-2"
-        }
         if root:
-            synced_path = Path(root) / "settings.json"
-            synced = json.loads(synced_path.read_text(encoding="utf-8"))
+            from api.shared_kv import SharedKVStore
+            synced = SharedKVStore("settings", root=root).read()
             assert {course["id"] for course in synced["saved_courses"]} >= {
                 "course-1", "course-2"
             }
             assert set(synced["roster_student_settings"]) >= {
                 "roster-course-1", "roster-course-2"
             }
+            assert "saved_courses" not in machine
         else:
+            assert {course["id"] for course in machine["saved_courses"]} >= {
+                "course-1", "course-2"
+            }
             assert set(machine["roster_student_settings"]) >= {
                 "roster-course-1", "roster-course-2"
             }

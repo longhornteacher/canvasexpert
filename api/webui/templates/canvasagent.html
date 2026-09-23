@@ -64,6 +64,11 @@
   <section class="ce-panel ce-agent-component ce-agent-privacy" id="local-privacy" data-state="loading">
     <div class="ce-agent-heading"><h2>Local workspace &amp; privacy</h2><span class="ce-agent-status" data-privacy-status>Checking</span></div>
     <p class="ce-agent-status-copy" data-privacy-detail>Checking local workspace and privacy protections…</p>
+    <div data-privacy-conflict-panel hidden>
+      <p class="ce-hint">Shared-store writes are paused until each conflict is resolved. Compare removes a copy only when its bytes match the original. Quarantine keeps a differing copy for teacher review.</p>
+      <ul data-privacy-conflict-list class="ce-agent-conflict-list"></ul>
+      <p data-privacy-conflict-result class="ce-agent-result" role="status" aria-live="polite"></p>
+    </div>
     <a class="ce-btn" href="/settings#workspace-card">Review local settings</a>
   </section>
 

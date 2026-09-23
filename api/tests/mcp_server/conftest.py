@@ -8,6 +8,7 @@ from api.feedback_vault import Vault
 from api.mcp_server import server, tools
 from api.mirror import store as mirror_store
 from api.platform_services import workspace
+from api import pseudonym_secret, runtime_paths
 
 
 @pytest.fixture
@@ -94,12 +95,13 @@ def _set_previous_course(_set_active_courses, monkeypatch):
 @pytest.fixture
 def _catalog_document():
     def catalog_document(assignment_records, module_records):
-        scope = {"state": "current", "last_success_at": "2026-07-01T00:00:00Z",
-                 "last_attempt_at": "2026-07-01T00:00:00Z", "error_code": ""}
+        stamp = mirror_store.now_iso()
+        scope = {"state": "current", "last_success_at": stamp,
+                 "last_attempt_at": stamp, "error_code": ""}
         return {
             "course_id": "111",
             "course_name": "Test Course",
-            "updated_at": "2026-07-01T00:00:00Z",
+            "updated_at": stamp,
             "assignments": {**scope, "records": assignment_records},
             "modules": {**scope, "records": module_records},
         }
@@ -110,14 +112,15 @@ def _catalog_document():
 @pytest.fixture
 def _module_catalog_document():
     def module_catalog_document(module_records, *, state="current"):
-        module_scope = {"state": state, "last_success_at": "2026-07-01T00:00:00Z",
-                        "last_attempt_at": "2026-07-01T00:00:00Z", "error_code": ""}
-        assignment_scope = {"state": "current", "last_success_at": "2026-07-01T00:00:00Z",
-                            "last_attempt_at": "2026-07-01T00:00:00Z", "error_code": ""}
+        stamp = mirror_store.now_iso()
+        module_scope = {"state": state, "last_success_at": stamp,
+                        "last_attempt_at": stamp, "error_code": ""}
+        assignment_scope = {"state": "current", "last_success_at": stamp,
+                            "last_attempt_at": stamp, "error_code": ""}
         return {
             "course_id": "111",
             "course_name": "Test Course",
-            "updated_at": "2026-07-01T00:00:00Z",
+            "updated_at": stamp,
             "assignments": {**assignment_scope, "records": {}},
             "modules": {**module_scope, "records": module_records},
         }
@@ -129,6 +132,15 @@ def _module_catalog_document():
 def _mount_mirror(monkeypatch, tmp_path):
     def mount_mirror():
         monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
+        # Mirror/catalog reads now resolve under the per-machine cache. Point
+        # that root at the same synthetic _System tree used by root= fixtures.
+        monkeypatch.setattr(runtime_paths, "local_cache_dir",
+                            lambda: tmp_path / "_System")
+        # Keep the mirror and MCP facade on one isolated identity map, as they
+        # are in production; never consult the developer's Credential Manager.
+        from api import identity_vault_service
+        monkeypatch.setattr(identity_vault_service, "open_vault",
+                            lambda root=None: Vault(str(tmp_path / "vault.json")))
 
     return mount_mirror
 

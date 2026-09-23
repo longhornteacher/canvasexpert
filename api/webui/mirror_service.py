@@ -13,6 +13,7 @@ reconcile), otherwise a delta every tick plus a daily roster refresh.
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 
@@ -163,7 +164,14 @@ def _run_structure_refresh(course_id: str):
             canvas_get_all=canvas_get_all,
             canvas_get_all_complete=canvas_get_all_complete,
         )
-        return {"ok": True, "state": "current", "source": result.get("source")}
+        return {
+            "ok": True,
+            "state": result.get("result", "partial"),
+            "source": result.get("source"),
+            "sections": result.get("sections", {}),
+            "oldest_section": result.get("oldest_section", ""),
+            "oldest_last_success_at": result.get("oldest_last_success_at", ""),
+        }
 
 
 def _run_scoring_course_refresh(course_id: str):
@@ -251,12 +259,17 @@ def refresh_course_structure(course_id: str, *, timeout_seconds: float = 30.0) -
     plan = wait_for_plan(plan_id, timeout_seconds=timeout_seconds)
     catalog = course_catalog.read_catalog(str(course_id)).get("catalog") or {}
     module_scope = catalog.get("modules") if isinstance(catalog, dict) else {}
+    summary = course_catalog.catalog_status_summary(catalog)
     return {
         "ok": plan.get("state") == "succeeded",
         "status": plan.get("status") or plan.get("state"),
         "operation_id": plan_id,
         "revision": str((module_scope or {}).get("last_success_at") or ""),
         "state": (module_scope or {}).get("state", "unavailable"),
+        "result": summary["result"],
+        "sections": summary["sections"],
+        "oldest_section": summary["oldest_section"],
+        "oldest_last_success_at": summary["oldest_last_success_at"],
         "error_code": next((job.get("error_code") for job in plan.get("jobs", []) if job.get("error_code")), ""),
     }
 
@@ -509,12 +522,15 @@ def status(plan_id: str | None = None) -> dict:
 
 
 def _vault_conflict_files() -> list[str]:
-    """Basenames of any OneDrive vault conflict-copy artifacts, or [] when
-    there's no workspace configured / no conflict / the vault can't be read.
-    Never raises — a missing workspace must not break /api/mirror/status."""
+    """Basenames of conflict copies anywhere in _Shared.
+
+    This status path must work even when the Identity Vault seed itself cannot
+    be opened, so it scans filenames without constructing the vault or reading
+    any file content.
+    """
     try:
-        vault = _identity_vault()
-        return vault.conflicts()
+        from api.shared_storage import scan_conflicts
+        return [os.path.basename(item["path"]) for item in scan_conflicts()]
     except Exception:
         return []
 

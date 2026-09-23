@@ -1,11 +1,12 @@
-"""FastMCP wiring for the CanvasExpert MCP server.
+"""FastMCP wiring and single-process MCP attachment for Canvas Expert.
 
 Thin ``@mcp.tool()`` wrappers delegate to the plain functions in
 ``tools.py`` so the tool layer stays testable without an MCP client. The
 authoritative count and shape live in ``contract.TOOL_SCHEMA_VERSION`` and its
 snapshot, not in prose here, so this docstring cannot drift. Run via
-``api/mcp_server/__main__.py`` over stdio — this module never binds a network
-port and is never mounted inside the FastAPI web UI (``api.webui.server``).
+``api/mcp_server/__main__.py`` over stdio. The Web UI process mounts the same
+FastMCP instance on loopback so a second stdio entry point can attach without
+opening the stores a second time.
 
 Token discipline: the shared privacy rules live ONCE in the server
 instructions (not per tool), tool descriptions stay to a functional line or
@@ -17,6 +18,9 @@ Wire character counts are a transport measure, not a per-turn token promise.
 from __future__ import annotations
 
 import json
+import sys
+import threading
+import time
 from typing import NotRequired, TypedDict
 
 from mcp.server.fastmcp import FastMCP
@@ -26,15 +30,19 @@ from . import tools
 _SERVER_INSTRUCTIONS = (
     "CanvasExpert is a local teacher-controlled runtime. It reads bounded Canvas "
     "projections; real names, Canvas/SIS ids, credentials, and private paths stay "
-    "local. Student rows use stable stand-ins. Stale roster, submission, and "
-    "gradebook reads refuse; use refresh_mirror once, then retry. "
+    "local. Student rows use stable pseudonyms. Agent-facing catalog and mirror "
+    "reads carry a freshness envelope; use its projection for a decision only when "
+    "within_policy is true. If it is false, ask the teacher whether relevant Canvas "
+    "work changed. Never refresh automatically; refresh_mirror or "
+    "refresh_course_structure requires an explicit teacher request. "
     "For broad grading, call discover_scoring_work first. It reads every Current "
     "course's local mirror and returns the complete "
     "assignment and attention set without preparation or writes. Report all rows, "
     "wait for teacher direction, then use selected exact course_id/assignment_id "
     "rows. "
-    "If discovery reports an unavailable projection, ask the teacher to refresh the "
-    "Current course mirror, then retry. Call prepare_scoring_session once for one "
+    "If discovery reports an unavailable projection, ask the teacher whether to "
+    "refresh the Current course mirror, then retry only after the teacher requests it. "
+    "Call prepare_scoring_session once for one "
     "exact assignment; it reads only the local projection. If the snapshot is over "
     "the local threshold, ask whether Canvas work changed; refresh only after "
     "an explicit teacher request, or retry with use_existing_mirror=true when the "
@@ -48,7 +56,8 @@ _SERVER_INSTRUCTIONS = (
     "Summarize the stage and wait for a direct teacher instruction before calling apply_staged_scoring_results. Canvas applies gradebook adjustments; "
     "never read back grades. For needs_teacher_input, ask only its questions and "
     "resubmit the same results to stage_scoring_results with the review digest and answers. "
-    "Canvas Live is the review surface; list_scoring_sessions resumes work. For content/product, call get_authoring_contract "
+    "Canvas Live is the review surface; list_scoring_sessions resumes work. Shared sessions move between devices: use list_work_items and get_work_item to inspect ownership/sync progress, call handoff_work_item before changing devices, then take_over_work_item after events sync. Confirm stale takeover only after the prior device has stopped working. "
+    "Never read the Identity Vault or teacher-only Web UI routes directly; agent-facing student records must use pseudonyms returned by MCP tools. For content/product, call get_authoring_contract "
     "or get_product_guide."
 )
 
@@ -67,6 +76,101 @@ class ScoringResult(TypedDict):
 
 def run_stdio() -> None:
     mcp.run(transport="stdio")
+
+
+def _wait_for_runtime(timeout_seconds: float = 10.0) -> str | None:
+    from api.local_runtime import running_runtime
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        endpoint = running_runtime(timeout=0.2)
+        if endpoint:
+            return endpoint
+        time.sleep(0.1)
+    return None
+
+
+def _run_stdio_proxy(endpoint: str) -> None:
+    """Serve stdio MCP while forwarding requests to the lock-owning runtime."""
+    import anyio
+    from mcp.client.session import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.server.lowlevel import Server
+    from mcp.server.stdio import stdio_server
+
+    proxy = Server("canvas-expert", instructions=_SERVER_INSTRUCTIONS)
+
+    async def run_proxy() -> None:
+        async with streamablehttp_client(endpoint + "/mcp") as (read_stream, write_stream, _):
+            async with ClientSession(read_stream, write_stream) as upstream:
+                await upstream.initialize()
+
+                @proxy.list_tools()
+                async def list_tools():
+                    result = await upstream.list_tools()
+                    return result.tools
+
+                @proxy.call_tool()
+                async def call_tool(name: str, arguments: dict):
+                    return await upstream.call_tool(name, arguments or {})
+
+                async with stdio_server() as (stdio_read, stdio_write):
+                    await proxy.run(
+                        stdio_read,
+                        stdio_write,
+                        proxy.create_initialization_options(),
+                    )
+
+    try:
+        anyio.run(run_proxy)
+    except Exception as exc:
+        # MCP stdout is reserved for protocol frames. Keep startup diagnostics
+        # local and avoid printing tool arguments, paths, or student data.
+        print(f"Canvas Expert could not attach to the running local runtime ({type(exc).__name__}).",
+              file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
+def run_managed_stdio(lock=None, *, owns_lock: bool | None = None) -> None:
+    """Acquire the machine lock or attach to the existing local runtime."""
+    from api.local_runtime import ProcessLock, clear_runtime, publish_runtime
+
+    lock = lock or ProcessLock()
+    if owns_lock is None:
+        owns_lock = lock.acquire()
+    if not owns_lock:
+        endpoint = _wait_for_runtime()
+        if not endpoint:
+            print("Canvas Expert is already running, but its local endpoint did not answer.",
+                  file=sys.stderr)
+            raise SystemExit(1)
+        _run_stdio_proxy(endpoint)
+        return
+
+    # When MCP is the first entry point, run the normal local control console
+    # in this same process. The MCP client and browser then share one owner.
+    port = 8765
+    publish_runtime(port)
+    server = None
+    server_thread = None
+    try:
+        import uvicorn
+        from api.webui.server import app
+
+        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+        server = uvicorn.Server(config)
+        server_thread = threading.Thread(target=server.run, name="ce-local-webui", daemon=True)
+        server_thread.start()
+        if not _wait_for_runtime():
+            raise RuntimeError("local_runtime_start_failed")
+        run_stdio()
+    finally:
+        if server is not None:
+            server.should_exit = True
+        if server_thread is not None:
+            server_thread.join(timeout=5.0)
+        clear_runtime()
+        lock.release()
 
 
 def _compact(payload: dict) -> str:
@@ -167,10 +271,11 @@ def get_modules(course_id: str, include_items: bool = False) -> str:
 
 
 @mcp.tool(structured_output=False)
-def get_course_pages(course_id: str, full_text: bool = False) -> str:
-    """Read published pages from a Current course's local v3 catalog.
-    Set full_text=true for complete normalized bodies."""
-    return _compact(tools.get_course_pages(course_id, full_text))
+def get_course_pages(course_id: str, full_text: bool = False,
+                     include_unpublished: bool = True) -> str:
+    """Read course pages from the local v3 catalog, including unpublished by default.
+    Set full_text=true for complete normalized bodies or include_unpublished=false to omit drafts."""
+    return _compact(tools.get_course_pages(course_id, full_text, include_unpublished))
 
 
 @mcp.tool(structured_output=False)
@@ -438,6 +543,30 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
 def list_scoring_sessions() -> str:
     """List identity-free Scoring Session summaries."""
     return _compact(tools.list_scoring_sessions())
+
+
+@mcp.tool(structured_output=False)
+def list_work_items() -> str:
+    """List shared in-flight work, current holder, sync progress, and orphan count."""
+    return _compact(tools.list_work_items())
+
+
+@mcp.tool(structured_output=False)
+def get_work_item(work_id: str) -> str:
+    """Get one work item's holder and event-sync status without its contents."""
+    return _compact(tools.get_work_item(work_id))
+
+
+@mcp.tool(structured_output=False)
+def take_over_work_item(work_id: str, confirm_stale: bool = False) -> str:
+    """Take a released work item, or confirm takeover after its old lease goes stale."""
+    return _compact(tools.take_over_work_item(work_id, confirm_stale=confirm_stale))
+
+
+@mcp.tool(structured_output=False)
+def handoff_work_item(work_id: str) -> str:
+    """Release this device's work lease before continuing on another device."""
+    return _compact(tools.handoff_work_item(work_id))
 
 
 @mcp.tool(structured_output=False)

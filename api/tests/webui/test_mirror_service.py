@@ -533,10 +533,14 @@ def test_structure_refresh_is_current_only_and_returns_lifecycle_identity(monkey
         lambda course_id: {"catalog": {"modules": {"state": "current", "last_success_at": "rev-1", "records": [{"id": "private"}]}}},
     )
     result = mirror_service.refresh_course_structure("111")
-    assert result == {
-        "ok": True, "status": "succeeded", "operation_id": "plan-1",
-        "revision": "rev-1", "state": "current", "error_code": "",
-    }
+    assert result["ok"] is True
+    assert result["status"] == "succeeded"
+    assert result["operation_id"] == "plan-1"
+    assert result["revision"] == "rev-1"
+    assert result["state"] == "current"
+    assert result["result"] == "partial"
+    assert result["sections"]["modules"]["record_count"] == 1
+    assert result["oldest_section"] == "modules"
     with pytest.raises(ValueError, match="Current"):
         mirror_service.refresh_course_structure("222")
 

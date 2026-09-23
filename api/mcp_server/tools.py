@@ -38,9 +38,8 @@ import re
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
-from api import content_push, course_scope, feedback_scrub, gradebook_queries, gradebook_snapshot, learning_objectives, operational_log, roster_context, roster_service, sis_grade_bridge
+from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, gradebook_queries, learning_objectives, operational_log, roster_context, roster_service, sis_grade_bridge
 from api.powergrader import scoring_discovery, scoring_local
-from api.mirror import queries as mirror_queries
 from api.mirror import read_service
 from api.mirror import store as mirror_store
 from api.platform_services import config, workspace
@@ -50,6 +49,7 @@ from api.webui import deps
 from api import feedback_safety, feedback_vault
 from api.course_catalog import read_catalog
 from api import runtime_paths
+from api.mirror import queries as mirror_queries  # compatibility test seam
 from api.dailywriting import projection as dailywriting_projection
 from api.dailywriting.store.identity import IdentityError
 from api.dailywriting.store.repo import Repository as DailyWritingRepository
@@ -190,6 +190,24 @@ def _with_next(tool_name: str, result: dict) -> dict:
 def _tabulate(rows: list[dict], columns: tuple[str, ...]) -> dict:
     return {"columns": list(columns),
             "rows": [[row.get(col) for col in columns] for row in rows]}
+
+
+def _freshness(source: str, section: str, state: str, synced_at: str) -> dict:
+    return freshness_policy.freshness_envelope(source, section, state, synced_at)
+
+
+def _freshness_attention(envelope: dict) -> dict | None:
+    # A failed recent refresh may label its last-good projection stale. R3 is
+    # age based: use it silently inside policy, while still prompting when the
+    # timestamp has aged out or the projection is unavailable/malformed.
+    if (envelope.get("state") in {"current", "stale"}
+            and envelope.get("within_policy")):
+        return None
+    return {
+        "action": "ask_teacher_confirmation",
+        "reason": ("This local Canvas snapshot is outside the configured freshness window. "
+                   "Ask the teacher before relying on it; do not refresh automatically."),
+    }
 
 
 _STUDENT_RESULT_KEYS = {
@@ -349,42 +367,35 @@ def _cache_safe() -> bool:
 # ---------------------------------------------------------------------------
 
 def _mirror_roster_doc(course_id: str):
-    """The typed roster scope (students + sections) when current and
-    unseamed, else None. Sections have no dedicated typed scope, so the
-    raw roster document is read once more, only after the typed freshness
-    check passes, purely to recover the section id -> name map."""
+    """The typed roster scope and section labels, without a serve-age cutoff."""
     if not _cache_safe():
         return None
     roster = read_service.private_roster(
-        course_id, max_age_hours=mirror_queries._serve_max_age_hours())
-    if roster["state"] != "current":
+        course_id, max_age_hours=None)
+    if roster["state"] not in {"current", "stale"}:
         return None
     document = mirror_store.read_roster(course_id)
     if document is None:
         return None
     return {"students": roster["records"], "sections": document["sections"],
+            "state": roster["state"],
             "last_success_at": roster["last_success_at"]}
 
 
 def _mirror_submission_bundle(course_id: str, assignment_id: str):
-    """``({assignment, rows, roster, synced_at}, None)`` from typed local
-    scopes when roster, assignments, and submissions are ALL current and
-    ``assignment_id`` is one of them. ``(None, None)`` means the mirror
-    itself isn't fresh enough to serve (missing or stale any one piece,
-    including the seam-guard case); ``(None, message)`` means the mirror IS
-    fresh but no such assignment exists in this course — a distinct,
-    non-staleness error worth reporting verbatim."""
+    """Read one assignment from typed local scopes and return its shared age."""
     if not _cache_safe():
         return None, None
     if (_assignment is not _ORIGINAL_ASSIGNMENT
             or _assignment_submissions is not _ORIGINAL_ASSIGNMENT_SUBMISSIONS):
         return None, None
-    max_age_hours = mirror_queries._serve_max_age_hours()
-    roster = read_service.private_roster(course_id, max_age_hours=max_age_hours)
-    assignments = read_service.private_assignments(course_id, max_age_hours=max_age_hours)
-    submissions = read_service.private_submissions(course_id, max_age_hours=max_age_hours)
-    if not (roster["state"] == "current" and assignments["state"] == "current"
-            and submissions["state"] == "current"):
+    roster = read_service.private_roster(course_id, max_age_hours=None)
+    assignments = read_service.private_assignments(course_id, max_age_hours=None)
+    submissions = read_service.private_submissions(course_id, max_age_hours=None)
+    scopes = (roster, assignments, submissions)
+    if not all(scope.get("state") in {"current", "stale"}
+               and isinstance(scope.get("records"), list)
+               and str(scope.get("last_success_at") or "") for scope in scopes):
         return None, None
     assignment_row = next(
         (row for row in assignments["records"] if str(row.get("id")) == str(assignment_id)),
@@ -395,24 +406,21 @@ def _mirror_submission_bundle(course_id: str, assignment_id: str):
             if str(row.get("assignment_id")) == str(assignment_id)]
     synced_at = min(roster["last_success_at"], assignments["last_success_at"],
                     submissions["last_success_at"])
+    state = "stale" if any(scope.get("state") == "stale" for scope in scopes) else "current"
     return {"assignment": assignment_row, "rows": rows,
-            "roster": roster["records"], "synced_at": synced_at}, None
+            "roster": roster["records"], "synced_at": synced_at,
+            "state": state}, None
 
 
 def _load_snapshot(course_id: str):
-    """``(snapshot, None)`` from the CanvasMirror ONLY when it's fresh enough
-    to serve the whole gradebook (roster + assignments + submissions), else
-    ``(None, error)``. Never falls back to live Canvas — unlike the shared
-    ``gradebook_snapshot.load_snapshot`` the web UI's own gradebook route
-    uses, which keeps that live fallback for its own grading flows."""
-    namespace, synced_at = mirror_queries.snapshot_queries(course_id)
-    if namespace is None:
+    """Load the local gradebook projection and its age without any Canvas call."""
+    loaded = scoring_local.load_scoring_snapshot(
+        course_id, course_name=config.course_display_name(course_id),
+    )
+    if loaded.get("error") or not isinstance(loaded.get("snapshot"), dict):
         return None, _MIRROR_UNAVAILABLE_SNAPSHOT_ERROR
-    snapshot, error = gradebook_snapshot.load_snapshot(course_id, queries=namespace)
-    if error:
-        return None, error
-    snapshot["source"] = "mirror"
-    snapshot["synced_at"] = synced_at
+    snapshot = loaded["snapshot"]
+    snapshot["_freshness"] = loaded.get("freshness") or {}
     return snapshot, None
 
 
@@ -444,7 +452,8 @@ def _default_vault() -> feedback_vault.Vault:
     root = workspace.identity_vault_dir()
     if not root:
         raise _VaultUnavailable(_VAULT_UNAVAILABLE_ERROR)
-    return feedback_vault.Vault(os.path.join(root, "vault.json"))
+    from api.identity_vault_service import open_vault
+    return open_vault()
 
 
 # Bound to a module-level name so tests can point it at a tmp_path vault.
@@ -707,8 +716,8 @@ def clear_roster_student_field(course_id: str, pseudonym: str, field: str,
 
 
 _VAULT_CONFLICT_ERROR = (
-    "identity vault conflict detected — open the Students page in Canvas Expert "
-    "to review it before pseudonymized reads continue"
+    "shared workspace conflict detected — open Local workspace & privacy in "
+    "Canvas Expert to review it before student data is used"
 )
 
 
@@ -735,6 +744,19 @@ def _open_vault():
         vault = _vault_factory()
     except _VaultUnavailable as error:
         return None, str(error)
+    except Exception as error:
+        from api.identity_ledger import SeedMismatchError
+        from api.shared_storage import SharedStoreConflictError
+        from api.shared_vault import PseudonymSecretRequired
+        if isinstance(error, SeedMismatchError):
+            return None, ("identity_seed_mismatch: local fingerprint "
+                          f"{error.local_fingerprint}, shared fingerprint "
+                          f"{error.shared_fingerprint}; resolve this device in Settings")
+        if isinstance(error, SharedStoreConflictError):
+            return None, _VAULT_CONFLICT_ERROR
+        if isinstance(error, PseudonymSecretRequired):
+            return None, "pseudonym_secret_missing: configure the shared key for this device in Settings"
+        return None, "The private Identity Vault could not be opened safely. Review Local workspace & privacy in Canvas Expert."
     return vault, _vault_conflict_check(vault)
 
 
@@ -773,6 +795,7 @@ def list_sections(course_id: str) -> dict:
         return {
             "ok": False,
             "error": _MIRROR_UNAVAILABLE_ROSTER_ERROR,
+            "freshness": _freshness("mirror", "roster", "unavailable", ""),
         }
 
     sections = document.get("sections", {})
@@ -780,11 +803,17 @@ def list_sections(course_id: str) -> dict:
         {"section_id": str(sid), "section_name": str(name)}
         for sid, name in sections.items()
     ]
-    return {
+    result = {
         "ok": True,
         "course_id": course_id,
         "sections": _tabulate(rows, _SECTION_COLUMNS),
+        "freshness": _freshness("mirror", "roster", document.get("state", "unavailable"),
+                                 document.get("last_success_at", "")),
     }
+    attention = _freshness_attention(result["freshness"])
+    if attention:
+        result["attention"] = attention
+    return result
 
 
 def list_groups(course_id: str) -> dict:
@@ -798,16 +827,20 @@ def list_groups(course_id: str) -> dict:
         return {"ok": False, "error": error}
     try:
         scope = read_service.private_groups(
-            course_id, max_age_hours=read_service.GROUPS_MAX_AGE_HOURS,
+            course_id, max_age_hours=None,
         )
     except Exception:
         scope = {"state": "malformed", "records": None}
-    if scope.get("state") != "current":
+    if (scope.get("state") not in {"current", "stale"}
+            or (scope.get("state") == "stale"
+                and not str(scope.get("last_success_at") or "").strip())):
         state = scope.get("state") or "unavailable"
         return {
             "ok": False,
             "error": "A fresh local Canvas group mirror is required for group discovery.",
             "state": state,
+            "freshness": _freshness("mirror", "groups", state,
+                                     str(scope.get("last_success_at") or "")),
             "attention": {
                 "action": "refresh_mirror",
                 "reason": "Refresh the current course mirror, then retry list_groups.",
@@ -819,11 +852,20 @@ def list_groups(course_id: str) -> dict:
             "ok": False,
             "error": "The local Canvas group mirror is malformed.",
             "state": "malformed",
+            "freshness": _freshness("mirror", "groups", "malformed",
+                                     str(scope.get("last_success_at") or "")),
             "attention": {
                 "action": "refresh_mirror",
                 "reason": "Refresh the current course mirror, then retry list_groups.",
             },
         }
+    freshness = _freshness("mirror", "groups", scope.get("state", "unavailable"),
+                           str(scope.get("last_success_at") or ""))
+    attention = _freshness_attention(freshness)
+    if attention:
+        return {"ok": False, "error": attention["reason"],
+                "state": freshness["state"], "freshness": freshness,
+                "attention": attention}
     group_sets = []
     selected_id = str(
         (config.get_roster_group_scheme(course_id) or {}).get(
@@ -835,8 +877,10 @@ def list_groups(course_id: str) -> dict:
         if not isinstance(category, dict):
             return {
                 "ok": False,
-                "error": "The local Canvas group mirror is malformed.",
-                "state": "malformed",
+            "error": "The local Canvas group mirror is malformed.",
+            "state": "malformed",
+            "freshness": _freshness("mirror", "groups", "malformed",
+                                     str(scope.get("last_success_at") or "")),
                 "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry list_groups."},
             }
         category_name = str(category.get("category_name") or "").strip()
@@ -847,6 +891,8 @@ def list_groups(course_id: str) -> dict:
                 "ok": False,
                 "error": "The local Canvas group mirror is malformed.",
                 "state": "malformed",
+                "freshness": _freshness("mirror", "groups", "malformed",
+                                         str(scope.get("last_success_at") or "")),
                 "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry list_groups."},
             }
         if selected_id and category_id == selected_id:
@@ -863,8 +909,9 @@ def list_groups(course_id: str) -> dict:
             safe_groups.append({"name": str(group["name"]).strip()})
         group_sets.append({"name": category_name, "groups": safe_groups})
     result = {"ok": True, "course_id": str(course_id), "group_sets": group_sets,
-              "selected_group_set": selected_name}
-    if selected_name is None:
+              "selected_group_set": selected_name,
+              "freshness": freshness}
+    if selected_name is None and not attention:
         result["attention"] = {
             "action": "select_group_set",
             "reason": "Select the group set to use for Roster in the Roster page before differentiated delivery.",
@@ -890,6 +937,7 @@ def get_course_assignments(course_id: str, full_descriptions: bool = False) -> d
             "ok": False,
             "error": ("No local course catalog found for this course. Refresh "
                       "the catalog with refresh_course_structure, then try again."),
+            "freshness": _freshness("catalog", "assignments", "unavailable", ""),
         }
 
     description_chars = 0 if full_descriptions else _DESCRIPTION_PREVIEW_CHARS
@@ -905,12 +953,24 @@ def get_course_assignments(course_id: str, full_descriptions: bool = False) -> d
         }
         for a in scope["records"]
     ]
-    return {
+    freshness = _freshness("catalog", "assignments", scope.get("state", "unavailable"),
+                           str(scope.get("last_success_at") or ""))
+    result = {
         "ok": True,
         "course_id": str((read_result.get("catalog") or {}).get("course_id") or course_id),
         "course_name": str((read_result.get("catalog") or {}).get("course_name") or ""),
         "assignments": _tabulate(assignments, _ASSIGNMENT_COLUMNS),
+        "source": scope["source"],
+        "synced_at": str(scope.get("last_success_at") or ""),
+        "state": freshness["state"],
+        "freshness": freshness,
+        "pending_unconfirmed": course_catalog.pending_unconfirmed(
+            course_id, kinds={"assignment", "quiz"}),
     }
+    attention = _freshness_attention(freshness)
+    if attention:
+        result["attention"] = attention
+    return result
 
 
 def get_modules(course_id: str, include_items: bool = False) -> dict:
@@ -927,17 +987,14 @@ def get_modules(course_id: str, include_items: bool = False) -> dict:
     if identity_error:
         return {"ok": False, "error": identity_error}
     read_result = read_catalog(course_id)
-    # Age-gate the stored catalog against the same mirror serve-age window
-    # used elsewhere, so "current" means fresh, not just last-refreshed-ever;
-    # a stale catalog is still returned in full, only relabeled "stale".
     scope = read_service.catalog_modules(
-        course_id, catalog_reader=lambda _course_id: read_result,
-        max_age_hours=mirror_queries._serve_max_age_hours())
+        course_id, catalog_reader=lambda _course_id: read_result)
     if scope["source"] == "none":
         return {
             "ok": False,
             "error": ("No local course catalog found for this course. Refresh "
                       "the catalog from the CanvasExpert web UI, then try again."),
+            "freshness": _freshness("catalog", "modules", "unavailable", ""),
         }
 
     records = scope["records"]
@@ -975,27 +1032,43 @@ def get_modules(course_id: str, include_items: bool = False) -> dict:
             row["items"] = _tabulate(items, _MODULE_ITEM_COLUMNS)
         modules.append(row)
 
+    freshness = _freshness("catalog", "modules", scope.get("state", "unavailable"),
+                           str(scope.get("last_success_at") or ""))
+    known_pending_write = str(scope.get("error_code") or "") == "invalidated"
+    if known_pending_write:
+        # The matching local push already explains this incomplete projection;
+        # module selection may proceed without treating the old timestamp as
+        # an unknown Canvas change.
+        freshness["within_policy"] = True
+        freshness["state"] = "current"
     result = {
         "ok": True,
         "course_id": str((read_result.get("catalog") or {}).get("course_id") or course_id),
         "course_name": str((read_result.get("catalog") or {}).get("course_name") or ""),
         "modules": _tabulate(modules, columns),
         "source": scope["source"],
-        "synced_at": scope["last_success_at"],
-        "state": scope["state"],
+        "synced_at": str(scope.get("last_success_at") or ""),
+        "state": freshness["state"],
         "modules_state_detail": modules_state_detail,
+        "freshness": freshness,
+        "pending_unconfirmed": course_catalog.pending_unconfirmed(course_id),
     }
-    if scope["state"] == "stale":
+    if known_pending_write:
+        result["known_pending_write"] = True
+    attention = _freshness_attention(freshness)
+    if attention:
+        result["attention"] = attention
+    if attention and not known_pending_write:
         result["stale_note"] = (
-            "Course Catalog module scope is stale and is not write-authoritative. Call "
-            "refresh_course_structure (refresh_mirror does not update modules), then "
-            "re-read get_modules before selecting a module."
+            "Course Catalog module data is outside the configured freshness window. "
+            "Ask the teacher before selecting a module; do not refresh automatically."
         )
     return result
 
 
-def get_course_pages(course_id: str, full_text: bool = False) -> dict:
-    """Published page projection from the local v3 Catalog for the Current course.
+def get_course_pages(course_id: str, full_text: bool = False,
+                     include_unpublished: bool = True) -> dict:
+    """Page projection from the local v3 Catalog for the Current course.
 
     The refresh route is the only Canvas acquisition path. This read never
     refreshes, falls back to Canvas, or exposes the workspace path.
@@ -1015,6 +1088,7 @@ def get_course_pages(course_id: str, full_text: bool = False) -> dict:
             "ok": False,
             "error": ("No local course catalog found for this course. Refresh "
                       "the catalog from the CanvasExpert web UI, then try again."),
+            "freshness": _freshness("catalog", "pages", "unavailable", ""),
         }
     body_chars = 0 if full_text else _DESCRIPTION_PREVIEW_CHARS
     pages = [{
@@ -1024,20 +1098,28 @@ def get_course_pages(course_id: str, full_text: bool = False) -> dict:
         "published": page.get("published") is True,
         "front_page": page.get("front_page") is True,
         "updated_at": page.get("updated_at", ""),
-    } for page in scope["records"] if page.get("published") is True]
+    } for page in scope["records"]
+        if include_unpublished or page.get("published") is True]
+    freshness = _freshness("catalog", "pages", scope.get("state", "unavailable"),
+                           str(scope.get("last_success_at") or ""))
     result = {
         "ok": True,
         "course_id": str((read_result.get("catalog") or {}).get("course_id") or course_id),
         "course_name": str((read_result.get("catalog") or {}).get("course_name") or ""),
         "pages": _tabulate(pages, _PAGE_COLUMNS),
         "source": scope["source"],
-        "synced_at": scope["last_success_at"],
-        "state": scope["state"],
+        "synced_at": str(scope.get("last_success_at") or ""),
+        "state": freshness["state"],
+        "freshness": freshness,
+        "pending_unconfirmed": course_catalog.pending_unconfirmed(
+            course_id, kinds={"page"}),
     }
-    if scope["state"] == "stale":
+    attention = _freshness_attention(freshness)
+    if attention:
+        result["attention"] = attention
         result["stale_note"] = (
-            "Refresh this course's Course Catalog from the CanvasExpert web UI. "
-            "refresh_mirror only refreshes CanvasMirror roster, assignments, and submissions."
+            "Course Catalog page data is outside the configured freshness window. "
+            "Ask the teacher before relying on it; do not refresh automatically."
         )
     return result
 
@@ -1156,6 +1238,12 @@ _TOOL_GROUPS = {
         "list_groups",
         "refresh_mirror",
         "refresh_course_structure",
+    ),
+    "Shared work items": (
+        "list_work_items",
+        "get_work_item",
+        "handoff_work_item",
+        "take_over_work_item",
     ),
     "Create and Forge": (
         # The product guide selects the workflow; the contract and staged list
@@ -1652,7 +1740,15 @@ def get_roster(course_id: str) -> dict:
 
     mirror_doc = _mirror_roster_doc(course_id)
     if mirror_doc is None:
-        return {"ok": False, "error": _MIRROR_UNAVAILABLE_ROSTER_ERROR}
+        return {"ok": False, "error": _MIRROR_UNAVAILABLE_ROSTER_ERROR,
+                "freshness": _freshness("mirror", "roster", "unavailable", "")}
+
+    freshness = _freshness("mirror", "roster", mirror_doc.get("state", "unavailable"),
+                           mirror_doc.get("last_success_at", ""))
+    attention = _freshness_attention(freshness)
+    if attention:
+        return {"ok": False, "error": attention["reason"],
+                "freshness": freshness, "attention": attention}
 
     with _vault_transaction(vault):
         users = mirror_doc["students"]
@@ -1660,7 +1756,8 @@ def get_roster(course_id: str) -> dict:
         roster = pseudonym.pseudonymize_roster(vault, users, mirror_doc["sections"])
         result = pseudonym.gate(
             {"roster": roster, "source": "mirror",
-             "synced_at": mirror_doc["last_success_at"]}, vault)
+             "synced_at": mirror_doc["last_success_at"],
+             "freshness": freshness}, vault)
     if result.get("ok"):
         result["roster"] = _tabulate(result["roster"], _ROSTER_COLUMNS)
     return result
@@ -1690,9 +1787,18 @@ def get_submissions(course_id: str, assignment_id: str,
 
     bundle, bundle_err = _mirror_submission_bundle(course_id, assignment_id)
     if bundle_err:
-        return {"ok": False, "error": bundle_err}
+        return {"ok": False, "error": bundle_err,
+                "freshness": _freshness("mirror", "submissions", "unavailable", "")}
     if bundle is None:
-        return {"ok": False, "error": _MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR}
+        return {"ok": False, "error": _MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR,
+                "freshness": _freshness("mirror", "submissions", "unavailable", "")}
+
+    freshness = _freshness("mirror", "submissions", bundle.get("state", "unavailable"),
+                           bundle.get("synced_at", ""))
+    attention = _freshness_attention(freshness)
+    if attention:
+        return {"ok": False, "error": attention["reason"],
+                "freshness": freshness, "attention": attention}
 
     # Sync the full roster first so the scrub map covers every enrolled
     # student, not just the ones who submitted this assignment.
@@ -1728,6 +1834,7 @@ def get_submissions(course_id: str, assignment_id: str,
             "submissions": rows,
             "source": "mirror",
             "synced_at": bundle["synced_at"],
+            "freshness": freshness,
         }
         result = pseudonym.gate(payload, vault)
     if result.get("ok"):
@@ -1831,13 +1938,26 @@ def get_gradebook_snapshot(course_id: str) -> dict:
     if err:
         return {"ok": False, "error": err}
 
+    # Resolve the PII boundary before reading the private mirror projection.
+    # This also gives a clear workspace error if the protected vault location
+    # cannot be resolved, instead of a misleading cache-missing response.
     vault, vault_err = _open_vault()
     if vault_err:
         return {"ok": False, "error": vault_err}
 
     snapshot, snapshot_error = _load_snapshot(course_id)
     if snapshot_error:
-        return {"ok": False, "error": snapshot_error}
+        return {"ok": False, "error": snapshot_error,
+                "freshness": _freshness("mirror", "gradebook_snapshot", "unavailable", "")}
+    freshness = snapshot.pop("_freshness", None)
+    if not isinstance(freshness, dict):
+        freshness = _freshness("mirror", "gradebook_snapshot", "current",
+                               str(snapshot.get("synced_at") or ""))
+    attention = _freshness_attention(freshness)
+    if attention:
+        return {"ok": False, "error": attention["reason"],
+                "freshness": freshness, "attention": attention}
+
     students = snapshot.get("students") or []
 
     assignment_rows = []
@@ -1855,6 +1975,7 @@ def get_gradebook_snapshot(course_id: str) -> dict:
         "total_ungraded": snapshot["total_ungraded"],
         "source": snapshot.get("source", "canvas"),
         "synced_at": snapshot.get("synced_at", ""),
+        "freshness": freshness,
         "assignments": assignment_rows,
         "students": [],
     }
@@ -2011,12 +2132,20 @@ def refresh_course_structure(course_id: str) -> dict:
             "status": result.get("status", "synced"),
             "operation_id": result.get("operation_id"),
             "revision": result.get("revision", ""),
+            "result": result.get("result", "partial"),
+            "sections": result.get("sections", {}),
+            "oldest_section": result.get("oldest_section", ""),
+            "oldest_last_success_at": result.get("oldest_last_success_at", ""),
         }
     return {
         "ok": False,
         "status": result.get("status", "failed"),
         "operation_id": result.get("operation_id"),
         "revision": result.get("revision", ""),
+        "result": result.get("result", "partial"),
+        "sections": result.get("sections", {}),
+        "oldest_section": result.get("oldest_section", ""),
+        "oldest_last_success_at": result.get("oldest_last_success_at", ""),
         "error": "Course structure refresh failed; retry or inspect the local diagnostics.",
     }
 
@@ -2287,6 +2416,83 @@ def list_scoring_sessions() -> dict:
     }}
 
 
+def _work_item_error(error) -> dict:
+    from api.shared_storage import SharedStoreConflictError
+    from api.shared_work import (
+        WorkItemError, WorkItemHeldElsewhere, WorkItemStaleLease, WorkItemSyncPending,
+    )
+
+    if isinstance(error, SharedStoreConflictError):
+        return {"ok": False, "code": "shared_workspace_conflict",
+                "error": "A shared work-item conflict needs review in Local workspace & privacy."}
+    if isinstance(error, WorkItemHeldElsewhere):
+        return {"ok": False, "code": error.code,
+                "holder": error.holder, "heartbeat_at": error.heartbeat_at,
+                "error": "This work item is open on another device. Hand it off there before continuing here."}
+    if isinstance(error, WorkItemStaleLease):
+        return {"ok": False, "code": error.code,
+                "holder": error.holder, "heartbeat_at": error.heartbeat_at,
+                "error": "The other device's lease is stale. Confirm takeover only if that device is no longer working on this item."}
+    if isinstance(error, WorkItemSyncPending):
+        return {"ok": False, "code": error.code,
+                "sync_progress": {"present": error.present, "expected": error.expected},
+                "error": "Work item events are still syncing. Retry after OneDrive finishes."}
+    if isinstance(error, WorkItemError):
+        if error.code == "work_item_takeover_required":
+            return {"ok": False, "code": error.code,
+                    "error": "This work item was released by another device. Check sync progress, then call take_over_work_item."}
+        return {"ok": False, "code": error.code,
+                "error": "The shared work item is unavailable. Review Local workspace & privacy."}
+    return {"ok": False, "code": "work_item_unavailable",
+            "error": "The shared work item is unavailable. Review Local workspace & privacy."}
+
+
+def list_work_items() -> dict:
+    """List shared work holders and sync state without session contents."""
+    from api.powergrader import session_store
+    try:
+        return {"ok": True, "work_items": session_store.list_work_items()}
+    except Exception as error:
+        return _work_item_error(error)
+
+
+def get_work_item(work_id: str) -> dict:
+    """Read one shared work item's holder, lease, and sync progress."""
+    from api.powergrader import session_store
+    try:
+        return {"ok": True, "work_item": session_store.get_work_item(work_id)}
+    except Exception as error:
+        return _work_item_error(error)
+
+
+def take_over_work_item(work_id: str, confirm_stale: bool = False) -> dict:
+    """Acquire a released item or explicitly confirm a stale-device takeover."""
+    from api.powergrader import session_store
+    try:
+        return {"ok": True, "work_item": session_store.take_over_work_item(
+            work_id, confirm_stale=confirm_stale)}
+    except Exception as error:
+        return _work_item_error(error)
+
+
+def handoff_work_item(work_id: str) -> dict:
+    """Release this device's work lease before continuing on another device."""
+    from api.powergrader import session_store
+    try:
+        return {"ok": True, "work_item": session_store.handoff_work_item(work_id)}
+    except Exception as error:
+        return _work_item_error(error)
+
+
+def _scoring_work_lease_refusal(scoring_session_id: str) -> dict | None:
+    from api.powergrader import session_store
+    try:
+        session_store.assert_work_item_writable(scoring_session_id)
+    except Exception as error:
+        return _work_item_error(error)
+    return None
+
+
 def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10,
                        include_context: bool = True) -> dict:
     """Retrieve one page of student responses from a Scoring Session's SAFE bundle.
@@ -2463,6 +2669,10 @@ def stage_scoring_results(scoring_session_id: str, results: list,
     with answers filled in. A successful call stores the private write plan for
     a later explicit apply."""
     from api.powergrader import session_store
+
+    lease_error = _scoring_work_lease_refusal(scoring_session_id)
+    if lease_error:
+        return lease_error
 
     session = _load_scoring_assignment_session(scoring_session_id)
     if not session:
@@ -2667,6 +2877,10 @@ def apply_staged_scoring_results(scoring_session_id: str,
     """Apply only the unchanged private stage after direct teacher instruction."""
     from api.powergrader import session_store
 
+    lease_error = _scoring_work_lease_refusal(scoring_session_id)
+    if lease_error:
+        return lease_error
+
     session = _load_scoring_assignment_session(scoring_session_id)
     if not session:
         return {"ok": False, "code": "session_not_found",
@@ -2833,6 +3047,10 @@ def _review_changed_response(plan: dict, names: dict, session: dict) -> dict:
 def reset_scoring_review(scoring_session_id: str) -> dict:
     """Reopen the current local review without changing its packet or history."""
     from api.powergrader import session_store
+
+    lease_error = _scoring_work_lease_refusal(scoring_session_id)
+    if lease_error:
+        return lease_error
 
     session = _load_scoring_assignment_session(scoring_session_id)
     if not session:

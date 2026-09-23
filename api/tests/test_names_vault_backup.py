@@ -21,4 +21,4 @@ def test_backup_vault_filename_matches_run_stamp_format(tmp_path, monkeypatch):
 
     assert body["ok"] is True
     backup_name = os.path.basename(body["path"])
-    assert re.fullmatch(r"vault-\d{8}-\d{6}-\d{6}\.json", backup_name)
+    assert re.fullmatch(r"vault-\d{8}T\d{6}\d{6}Z\.json", backup_name)

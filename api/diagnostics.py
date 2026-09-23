@@ -10,7 +10,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from api import __version__, operational_log, runtime_paths
+from api import __version__, feedback_vault, operational_log, runtime_paths
 from api.mcp_server.contract import TOOL_SCHEMA_VERSION
 from api.platform_services import config, workspace
 
@@ -111,7 +111,7 @@ def _pseudonym_registry_status() -> dict:
     matching every other helper in this module.
     """
     try:
-        from api import feedback_vault
+        from api.identity_vault_service import open_vault
     except Exception:
         return {
             "configured": False, "words_total": 0, "words_assigned": 0,
@@ -124,7 +124,7 @@ def _pseudonym_registry_status() -> dict:
     if not root:
         return {"configured": False, **feedback_vault.registry_runway(0)}
     try:
-        vault = feedback_vault.Vault(os.path.join(root, "vault.json"))
+        vault = open_vault()
         runway = vault.registry_runway()
     except Exception:
         return {"configured": False, **feedback_vault.registry_runway(0)}

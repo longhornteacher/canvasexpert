@@ -1,22 +1,11 @@
 """Context helpers for PowerGrader — vault, source materials, and shared context."""
 
-import os
-
-from api import feedback_vault
-
-from api.platform_services import workspace
+from api.identity_vault_service import open_vault
 from api.webui import source_materials
 
 
 def vault():
-    vpath = workspace.identity_vault_dir()
-    if vpath:
-        os.makedirs(vpath, exist_ok=True)
-        return feedback_vault.Vault(os.path.join(vpath, "vault.json"))
-    root = workspace.workspace_root()
-    fallback = os.path.join(root or ".", "_System", "Identity Vault")
-    os.makedirs(fallback, exist_ok=True)
-    return feedback_vault.Vault(os.path.join(fallback, "vault.json"))
+    return open_vault()
 
 
 def folder_file_names(source_files_json: str) -> list[str]:

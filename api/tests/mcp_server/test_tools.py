@@ -225,6 +225,28 @@ def test_get_course_assignments_happy(monkeypatch, _rows, _set_active_courses, _
     }]
 
 
+def test_get_course_assignments_reports_unconfirmed_created_objects(
+    monkeypatch, _set_active_courses, _catalog_document,
+):
+    _set_active_courses(["111"])
+    document = _catalog_document({}, [])
+    monkeypatch.setattr(tools, "read_catalog",
+                        lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
+    pending = [{"id": "700099", "kind": "assignment",
+                "state": "pending_unconfirmed", "age_hours": 26}]
+
+    def read_pending(course_id, *, kinds):
+        assert course_id == "111"
+        assert kinds == {"assignment", "quiz"}
+        return pending
+
+    monkeypatch.setattr(tools.course_catalog, "pending_unconfirmed", read_pending)
+
+    result = tools.get_course_assignments("111")
+
+    assert result["pending_unconfirmed"] == pending
+
+
 def test_get_course_assignments_uses_catalog_read_scope(monkeypatch, _set_active_courses, _catalog_document):
     _set_active_courses(["111"])
     document = _catalog_document(
@@ -323,17 +345,12 @@ def test_get_modules_happy_returns_table(monkeypatch, _rows, _set_active_courses
     document = _module_catalog_document(MODULE_FIXTURE)
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    # Fixture's last_success_at is weeks before "now" -- widen the serve-age
-    # window so this test's real focus (module row content) isn't coupled to
-    # the freshness threshold, which is covered separately below.
-    monkeypatch.setattr(tools.mirror_queries, "_serve_max_age_hours", lambda: 10**9)
-
     result = tools.get_modules("111")
     assert result["ok"] is True
     assert result["course_id"] == "111"
     assert result["course_name"] == "Test Course"
     assert result["source"] == "catalog"
-    assert result["synced_at"] == "2026-07-01T00:00:00Z"
+    assert result["synced_at"] == document["modules"]["last_success_at"]
     assert result["state"] == "current"
     assert result["modules_state_detail"] == "cataloged"
     assert result["modules"]["columns"] == ["id", "name", "position", "item_count"]
@@ -377,7 +394,6 @@ def test_get_modules_accepts_previous_course(monkeypatch, _set_previous_course, 
     document = _module_catalog_document([])
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    monkeypatch.setattr(tools.mirror_queries, "_serve_max_age_hours", lambda: 10**9)
     result = tools.get_modules("111")
     assert result["ok"] is True
 
@@ -402,8 +418,8 @@ def test_get_modules_stale_returns_labeled_records_not_refusal(monkeypatch, _row
     assert result["ok"] is True
     assert result["state"] == "stale"
     assert result["source"] == "catalog"
-    assert "Course Catalog" in result["stale_note"]
-    assert "refresh_mirror" in result["stale_note"]
+    assert result["freshness"]["within_policy"] is True
+    assert "attention" not in result
     assert len(_rows(result["modules"])) == 2
 
 
@@ -426,17 +442,39 @@ def test_get_course_pages_stale_names_catalog_refresh(monkeypatch, _set_active_c
     result = tools.get_course_pages("111")
     assert result["ok"] is True
     assert result["state"] == "stale"
-    assert "Course Catalog" in result["stale_note"]
-    assert "refresh_mirror" in result["stale_note"]
+    assert result["freshness"]["within_policy"] is False
+    assert result["attention"]["action"] == "ask_teacher_confirmation"
+
+
+def test_get_course_pages_includes_unpublished_pages_by_default(
+    monkeypatch, _set_active_courses, _module_catalog_document,
+):
+    _set_active_courses(["111"])
+    document = _module_catalog_document([])
+    stamp = document["modules"]["last_success_at"]
+    document["pages"] = {
+        "state": "current", "last_success_at": stamp,
+        "last_attempt_at": stamp, "error_code": "",
+        "records": [{"id": "page-unpublished", "title": "Fictional page",
+                     "body_text": "", "published": False, "front_page": False,
+                     "updated_at": stamp}],
+    }
+    monkeypatch.setattr(tools, "read_catalog",
+                        lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
+    monkeypatch.setattr(tools.course_catalog, "pending_unconfirmed",
+                        lambda course_id, *, kinds: [])
+
+    result = tools.get_course_pages("111")
+
+    assert result["pages"]["rows"][0][result["pages"]["columns"].index("published")] is False
 
 
 def test_get_modules_marks_state_stale_past_serve_window(monkeypatch, _rows, _set_active_courses, _module_catalog_document):
     _set_active_courses(["111"])
-    document = _module_catalog_document(MODULE_FIXTURE)  # state="current", synced weeks ago
+    document = _module_catalog_document(MODULE_FIXTURE)
+    document["modules"]["last_success_at"] = _STALE_STAMP
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    monkeypatch.setattr(tools.mirror_queries, "_serve_max_age_hours", lambda: 6.0)
-
     result = tools.get_modules("111")
     assert result["ok"] is True
     assert result["state"] == "stale"
@@ -445,11 +483,9 @@ def test_get_modules_marks_state_stale_past_serve_window(monkeypatch, _rows, _se
 
 def test_get_modules_state_current_when_within_serve_window(monkeypatch, _set_active_courses, _module_catalog_document):
     _set_active_courses(["111"])
-    document = _module_catalog_document(MODULE_FIXTURE)  # state="current", synced weeks ago
+    document = _module_catalog_document(MODULE_FIXTURE)
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    monkeypatch.setattr(tools.mirror_queries, "_serve_max_age_hours", lambda: 10**9)
-
     result = tools.get_modules("111")
     assert result["ok"] is True
     assert result["state"] == "current"
@@ -636,7 +672,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     contract_names = {item["name"] for item in contract.load_contract()["tools"]}
     grouped = [name for names in tools._TOOL_GROUPS.values() for name in names]
     expected_groups = {
-        "Course discovery and catalog", "Create and Forge", "Scoring Sessions", "Gradebook",
+        "Course discovery and catalog", "Shared work items", "Create and Forge", "Scoring Sessions", "Gradebook",
         "SIS Grade Bridges", "Learning Objectives",
         "Writing Timeline", "Writing Record", "Students",
     }
@@ -646,7 +682,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 45
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 49
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -918,7 +954,10 @@ def test_get_roster_failure(monkeypatch, tmp_path, _use_vault, _set_active_cours
     _set_active_courses(["111"])
     # No mirror seeded at all: refused rather than fetched live.
 
-    assert tools.get_roster("111") == {"ok": False, "error": tools._MIRROR_UNAVAILABLE_ROSTER_ERROR}
+    result = tools.get_roster("111")
+    assert result["ok"] is False
+    assert result["error"] == tools._MIRROR_UNAVAILABLE_ROSTER_ERROR
+    assert result["freshness"]["state"] == "unavailable"
 
 
 # --- get_submissions ----------------------------------------------------------
@@ -1044,8 +1083,10 @@ def test_get_submissions_failure(monkeypatch, tmp_path, _use_vault, _set_active_
     ], root=root)
     mirror_store.record_pass("111", "full", ok=True, root=root)
 
-    assert tools.get_submissions("111", "700010") == {
-        "ok": False, "error": "No such assignment in this course's local catalog."}
+    result = tools.get_submissions("111", "700010")
+    assert result["ok"] is False
+    assert result["error"] == "No such assignment in this course's local catalog."
+    assert result["freshness"]["state"] == "unavailable"
 
 
 def test_get_submissions_rejects_non_current_course(
@@ -1324,7 +1365,9 @@ def test_get_submissions_refuses_when_roster_stale(monkeypatch, tmp_path, _use_v
 
     assert tools._mirror_submission_bundle(MIRROR_COURSE, "700010") == (None, None)
     result = tools.get_submissions(MIRROR_COURSE, "700010")
-    assert result == {"ok": False, "error": tools._MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR}
+    assert result["ok"] is False
+    assert result["error"] == tools._MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR
+    assert result["freshness"]["state"] == "unavailable"
 
 
 def test_get_submissions_refuses_when_assignments_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
@@ -1337,7 +1380,9 @@ def test_get_submissions_refuses_when_assignments_stale(monkeypatch, tmp_path, _
 
     assert tools._mirror_submission_bundle(MIRROR_COURSE, "700010") == (None, None)
     result = tools.get_submissions(MIRROR_COURSE, "700010")
-    assert result == {"ok": False, "error": tools._MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR}
+    assert result["ok"] is False
+    assert result["error"] == tools._MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR
+    assert result["freshness"]["state"] == "unavailable"
 
 
 def test_get_submissions_refuses_when_submissions_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
@@ -1350,7 +1395,9 @@ def test_get_submissions_refuses_when_submissions_stale(monkeypatch, tmp_path, _
 
     assert tools._mirror_submission_bundle(MIRROR_COURSE, "700010") == (None, None)
     result = tools.get_submissions(MIRROR_COURSE, "700010")
-    assert result == {"ok": False, "error": tools._MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR}
+    assert result["ok"] is False
+    assert result["error"] == tools._MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR
+    assert result["freshness"]["state"] == "unavailable"
 
 
 # --- get_gradebook_snapshot ---------------------------------------------------
@@ -1404,8 +1451,10 @@ def test_get_gradebook_snapshot_failure(monkeypatch, tmp_path, _use_vault, _set_
     _set_active_courses(["111"])
     # No mirror seeded at all: a whole-course snapshot is refused, never live.
 
-    assert tools.get_gradebook_snapshot("111") == {
-        "ok": False, "error": tools._MIRROR_UNAVAILABLE_SNAPSHOT_ERROR}
+    result = tools.get_gradebook_snapshot("111")
+    assert result["ok"] is False
+    assert result["error"] == tools._MIRROR_UNAVAILABLE_SNAPSHOT_ERROR
+    assert result["freshness"]["state"] == "unavailable"
 
 
 def test_get_gradebook_snapshot_rejects_non_current_course(
@@ -1560,7 +1609,7 @@ def test_refresh_mirror_accepts_previous_course(monkeypatch, _set_previous_cours
 def test_list_groups_projects_names_and_selected_set_without_private_ids(monkeypatch, _set_active_courses):
     _set_active_courses(["111"])
     monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: {
-        "state": "current", "records": [{
+        "state": "current", "last_success_at": mirror_store.now_iso(), "records": [{
             "category_id": "category-secret", "category_name": "Teams",
             "groups": [{"id": "group-secret", "name": "Blue",
                          "student_ids": ["user-secret"],
@@ -1570,9 +1619,12 @@ def test_list_groups_projects_names_and_selected_set_without_private_ids(monkeyp
     monkeypatch.setattr(tools.config, "get_roster_group_scheme",
                         lambda _course: {"selected_group_category_id": "category-secret"})
     result = tools.list_groups("111")
-    assert result == {"ok": True, "course_id": "111",
-                      "group_sets": [{"name": "Teams", "groups": [{"name": "Blue"}]}],
-                      "selected_group_set": "Teams"}
+    assert result["ok"] is True
+    assert result["course_id"] == "111"
+    assert result["group_sets"] == [{"name": "Teams", "groups": [{"name": "Blue"}]}]
+    assert result["selected_group_set"] == "Teams"
+    assert result["freshness"]["section"] == "groups"
+    assert "attention" not in result
     dumped = json.dumps(result)
     for value in ("category-secret", "group-secret", "user-secret", "memberships", "student_ids"):
         assert value not in dumped
@@ -1581,6 +1633,7 @@ def test_list_groups_projects_names_and_selected_set_without_private_ids(monkeyp
 @pytest.mark.parametrize("scope", [
     {"state": "missing", "records": []},
     {"state": "stale", "records": []},
+    {"state": "stale", "last_success_at": _STALE_STAMP, "records": []},
     {"state": "current", "records": "bad"},
 ])
 def test_list_groups_refuses_unusable_mirror_with_refresh_attention(monkeypatch, _set_active_courses, scope):
@@ -1588,13 +1641,16 @@ def test_list_groups_refuses_unusable_mirror_with_refresh_attention(monkeypatch,
     monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: scope)
     result = tools.list_groups("111")
     assert result["ok"] is False
-    assert result["attention"]["action"] == "refresh_mirror"
+    assert result["attention"]["action"] == (
+        "ask_teacher_confirmation" if scope.get("last_success_at") else "refresh_mirror"
+    )
 
 
 def test_list_groups_without_roster_selection_still_lists_names(monkeypatch, _set_active_courses):
     _set_active_courses(["111"])
     monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: {
-        "state": "current", "records": [{"category_id": "cat", "category_name": "Teams",
+        "state": "current", "last_success_at": mirror_store.now_iso(),
+        "records": [{"category_id": "cat", "category_name": "Teams",
                                              "groups": [{"name": "Blue"}]}]})
     monkeypatch.setattr(tools.config, "get_roster_group_scheme", lambda _course: {})
     result = tools.list_groups("111")
@@ -1690,8 +1746,9 @@ def test_server_registers_the_expected_tool_set():
                     "apply_roster_student_change", "clear_roster_student_field",
                     "list_feedback_contracts", "prepare_scoring_session", "list_scoring_sessions", "get_scoring_packet",
                 "stage_scoring_results", "apply_staged_scoring_results",
-                "reset_scoring_review",
+        "reset_scoring_review",
                 "discover_scoring_work",
+                "list_work_items", "get_work_item", "handoff_work_item", "take_over_work_item",
         }
 
 

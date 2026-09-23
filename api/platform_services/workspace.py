@@ -10,6 +10,7 @@ state outside ``_System/``.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import glob
 import json
 import os
@@ -71,6 +72,7 @@ GRADING_KEYS_NAME = "Grading Keys"
 FOR_AI_NAME = "For AI"
 
 SYSTEM_NAME = "_System"
+SHARED_NAME = "_Shared"
 SYSTEM_SUBFOLDERS = ("Identity Vault", "PowerGrader", "Audits", "Archive",
                      "Canvas Catalog", "Canvas Mirror")
 CANVAS_CATALOG_NAME = "Canvas Catalog"
@@ -446,6 +448,11 @@ def system_root(root=None):
     return _join_root(SYSTEM_NAME, root)
 
 
+def shared_root(root=None):
+    """Private OneDrive-synced storage for teacher-controlled shared state."""
+    return _join_root(SHARED_NAME, root)
+
+
 def system_folder(name: str | None = None, root=None):
     base = system_root(root)
     if not base:
@@ -454,6 +461,18 @@ def system_folder(name: str | None = None, root=None):
 
 
 def identity_vault_dir(root=None):
+    base = shared_root(root)
+    return os.path.join(base, "vault") if base else None
+
+
+def shared_work_root(root=None):
+    """Shared, private in-flight work items whose events sync append-only."""
+    base = shared_root(root)
+    return os.path.join(base, "work") if base else None
+
+
+def legacy_identity_vault_dir(root=None):
+    """Pre-split Identity Vault location used only by the one-time importer."""
     return system_folder("Identity Vault", root)
 
 
@@ -480,8 +499,11 @@ def archive_dir(root=None):
 
 
 def canvas_catalog_root(root=None):
-    """Return the durable, student-data-free Canvas Catalog root."""
-    return system_folder(CANVAS_CATALOG_NAME, root)
+    """Return this machine's disposable Canvas Catalog cache root."""
+    if root is not None:
+        return system_folder(CANVAS_CATALOG_NAME, root)
+    _retire_legacy_canvas_caches()
+    return str(runtime_paths.local_cache_dir() / CANVAS_CATALOG_NAME)
 
 
 def course_catalog_dir(course_id, root=None):
@@ -507,9 +529,79 @@ def learning_objectives_path(root=None):
 
 
 def canvas_mirror_root(root=None):
-    """Return the CanvasMirror root — the disposable local mirror of Canvas
-    course facts. Everything under it is rebuildable by re-sync."""
-    return system_folder(CANVAS_MIRROR_NAME, root)
+    """Return this machine's disposable CanvasMirror cache root."""
+    if root is not None:
+        return system_folder(CANVAS_MIRROR_NAME, root)
+    _retire_legacy_canvas_caches()
+    return str(runtime_paths.local_cache_dir() / CANVAS_MIRROR_NAME)
+
+
+_legacy_cache_retirement_checked: set[str] = set()
+
+
+def _retire_legacy_canvas_caches() -> None:
+    """Mark synced cache trees as retired without reading or deleting them."""
+    root = workspace_root()
+    if not root:
+        return
+    identity = hashlib.sha256(os.path.abspath(root).casefold().encode("utf-8")).hexdigest()[:16]
+    if identity in _legacy_cache_retirement_checked:
+        return
+    old_roots = [system_folder(CANVAS_CATALOG_NAME, root),
+                 system_folder(CANVAS_MIRROR_NAME, root)]
+    for old_root in old_roots:
+        if not old_root or not os.path.isdir(extended_path(old_root)):
+            continue
+        # The nine teacher-retained OneDrive conflict copies stay in place as
+        # evidence. Record only a count; never read their contents or log paths.
+        conflict_count = 0
+        try:
+            for directory, _, names in os.walk(extended_path(old_root)):
+                for name in names:
+                    stem, extension = os.path.splitext(name)
+                    split_at = stem.find("-")
+                    while extension and split_at >= 0:
+                        canonical = os.path.join(directory, stem[:split_at] + extension)
+                        if os.path.isfile(extended_path(canonical)):
+                            conflict_count += 1
+                            break
+                        split_at = stem.find("-", split_at + 1)
+        except OSError:
+            conflict_count = 0
+        marker = os.path.join(old_root, "README-MIGRATED.txt")
+        if not os.path.exists(extended_path(marker)):
+            message = (
+                "Canvas Expert no longer reads this OneDrive-synced cache.\n"
+                "Caches now live per machine under %LOCALAPPDATA%\\CanvasExpert\\cache.\n"
+                "This old cache is retained read-only for 30 days from migration.\n"
+                "Do not delete conflict copies; they are preserved as recovery evidence.\n"
+            )
+            fd, temporary_name = tempfile.mkstemp(
+                prefix="README-MIGRATED.tmp.", dir=extended_path(old_root)
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(message)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                try:
+                    os.link(extended_path(temporary_name), extended_path(marker))
+                except FileExistsError:
+                    pass
+                except OSError:
+                    from api import operational_log
+                    operational_log.emit("workspace.cache_migration_marker", "failed",
+                                         scope="legacy_cache")
+            finally:
+                try:
+                    os.remove(extended_path(temporary_name))
+                except FileNotFoundError:
+                    pass
+        if conflict_count:
+            from api import operational_log
+            operational_log.emit("workspace.legacy_cache_conflict", "ok",
+                                 scope="legacy_cache", count=conflict_count)
+    _legacy_cache_retirement_checked.add(identity)
 
 
 def course_mirror_dir(course_id, root=None):

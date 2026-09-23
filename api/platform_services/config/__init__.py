@@ -106,6 +106,9 @@ from .sis_grade_bridge import (
 # --- private I/O helpers (needed by sibling sub-modules and test monkeypatches) ---
 from . import _io
 
+# --- routine schedule policy ---
+from .routines import get_late_sweep_holidays, get_routine_states, set_routine_state
+
 # Re-export public constants from _io so consumers can still access config.SERVICE etc.
 CANVAS_BASE_DEFAULT = _io.CANVAS_BASE_DEFAULT
 DOWNLOAD_ROOT_DEFAULT = _io.DOWNLOAD_ROOT_DEFAULT

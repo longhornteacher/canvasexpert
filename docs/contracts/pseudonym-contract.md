@@ -91,3 +91,10 @@ This is a pre-launch clean break:
 Pseudonyms, mappings, roster tokens, and private-vault contents are student data. Tests use
 fictional registry words and IDs only. Generic logs and execution reports may contain counts
 and error classes, never mappings or actual pseudonym values from the configured vault.
+
+The teacher may store the Identity Vault and other private student records in the private
+M365 OneDrive workspace so they sync across the teacher's devices. Storage in that tenant
+does not change the agent boundary: local services may re-identify records for teacher
+workflows, while agent-facing MCP results remain pseudonymized and safety-scanned. MCP
+responses and operational logs never return real names, Canvas/SIS IDs, vault contents, or
+private filesystem paths.

@@ -106,7 +106,16 @@ async def _lifespan(app):
     _load_custom_routines()
     threading.Thread(target=_routines_heartbeat, daemon=True).start()
     threading.Thread(target=_mirror_heartbeat, daemon=True).start()
-    yield
+    # FastMCP's mounted Streamable HTTP endpoint is hosted by this same
+    # process. The stdio entry point proxies here when another CE process
+    # already owns the machine-local process lock.
+    from api.mcp_server.server import mcp as _mcp_server
+    async with _mcp_server.session_manager.run():
+        try:
+            yield
+        finally:
+            from api.shared_work import heartbeat_service
+            heartbeat_service().release_all()
 
 
 app = FastAPI(title="Canvas Expert", lifespan=_lifespan)
@@ -185,3 +194,16 @@ app.include_router(_work_router)
 app.include_router(_operations_router)
 app.include_router(_mirror_router)
 app.include_router(_updates_router)
+
+
+@app.get("/api/runtime/ping")
+def runtime_ping():
+    """Loopback-only rendezvous endpoint used by sibling CE entry points."""
+    return {"ok": True, "service": "canvas-expert"}
+
+
+# Keep the child MCP app last so every existing Web UI route retains its
+# normal owner and route ordering. FastMCP serves its /mcp endpoint from this
+# same local-only process.
+from api.mcp_server.server import mcp as _mcp_server
+app.mount("/", _mcp_server.streamable_http_app())

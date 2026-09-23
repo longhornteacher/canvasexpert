@@ -153,6 +153,7 @@ def _apply_recovered(operation_id: str, target_key: str, result: dict,
                     ):
                         if key in recovered_step:
                             existing[key] = recovered_step.get(key)
+                reconcile_context["target"] = dict(t)
                 t["claim_owner"] = None
                 t["claim_acquired_at"] = None
                 t["claim_lease_expires_at"] = None
@@ -164,6 +165,8 @@ def _apply_recovered(operation_id: str, target_key: str, result: dict,
         reconcile_catalog_after_apply(
             reconcile_context["kind"], reconcile_context["course_id"],
             payload=reconcile_context.get("payload"),
+            result=result, target=reconcile_context.get("target"),
+            operation_id=operation_id,
         )
 
 

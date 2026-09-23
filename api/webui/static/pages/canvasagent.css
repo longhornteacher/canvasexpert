@@ -31,6 +31,12 @@
 .ce-agent-privacy { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--ce-space-2) var(--ce-space-4); }
 .ce-agent-privacy .ce-agent-heading { grid-column: 1 / -1; }
 .ce-agent-privacy .ce-agent-status-copy { margin: 0; }
+.ce-agent-privacy [data-privacy-conflict-panel] { grid-column: 1 / -1; width: 100%; }
+.ce-agent-conflict-list { display: grid; gap: var(--ce-space-2); margin: 0; padding: 0; list-style: none; }
+.ce-agent-conflict-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ce-space-2); padding: var(--ce-space-2); border: 1px solid var(--ce-rule); overflow-wrap: anywhere; }
+.ce-agent-conflict-list li span { flex: 1 1 260px; color: var(--ce-ink); font-size: 12px; }
+.ce-agent-conflict-action { min-height: 30px; padding: 4px 8px; }
+.ce-agent-privacy[data-state="unavailable"] { border-color: var(--ce-danger); }
 .ce-agent-advanced > summary { cursor: pointer; font-weight: 700; }
 .ce-agent-instructions, .ce-agent-stdio { margin-top: var(--ce-space-4); padding-top: var(--ce-space-4); border-top: 1px solid var(--ce-rule); }
 .ce-agent-instructions h2, .ce-agent-stdio h2 { margin: 0; font-size: var(--ce-text-sub); }

@@ -29,6 +29,26 @@ def local_app_dir() -> Path:
     return Path(base) / "CanvasExpert"
 
 
+def local_cache_dir() -> Path:
+    """Disposable Canvas projections, isolated to this Windows profile."""
+    return local_app_dir() / "cache"
+
+
+def machine_identity_path() -> Path:
+    """Stable local identity used to name this machine's append-only files."""
+    return local_app_dir() / "machine.json"
+
+
+def process_lock_path() -> Path:
+    """OS-level lock shared by every Canvas Expert entry point on this machine."""
+    return local_app_dir() / "ce.lock"
+
+
+def runtime_instance_path() -> Path:
+    """Local rendezvous metadata for a process that already owns ce.lock."""
+    return local_app_dir() / "runtime.json"
+
+
 def migrate_legacy_file(legacy_path, new_path) -> None:
     """One-time copy of a legacy in-app-folder file to its new machine-local
     home, the first time the new path is read and found missing.

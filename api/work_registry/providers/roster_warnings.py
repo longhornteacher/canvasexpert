@@ -7,10 +7,10 @@ import os
 
 from api import feedback_scrub
 from api import roster_context
+from api.identity_vault_service import open_vault
 from api.mirror import store as mirror_store
 from api.platform_services import config
 from api.platform_services import workspace
-from api import feedback_vault
 from api.webui.routes.roster_helpers import _compute_warnings, _enrollment_section_ids
 
 from . import WorkCourseReads, check_deadline, finding, text
@@ -138,7 +138,7 @@ def _group_map(categories: list[dict]) -> dict[str, list[dict]]:
 def _vault_context() -> tuple[dict, set[str], dict]:
     try:
         private_root = workspace.identity_vault_dir()
-        vault_entries = feedback_vault.Vault(os.path.join(private_root, "vault.json")).entries() if private_root else []
+        vault_entries = open_vault().entries() if private_root else []
     except Exception:
         vault_entries = []
     by_id = {text(item.get("canvas_id")): item for item in vault_entries if isinstance(item, dict)}

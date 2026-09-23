@@ -708,6 +708,28 @@ def test_catalog_reconcile_kind_mapping_respects_page_and_rubric_boundaries(
     assert set(calls) == {("303", scope) for scope in expected_scopes}
 
 
+def test_quick_assignment_apply_records_its_new_object_as_pending(monkeypatch):
+    _spy_invalidate_scope(monkeypatch)
+    recorded = []
+    monkeypatch.setattr(
+        course_catalog, "record_pending_write",
+        lambda course_id, kind, object_id, title, operation_id, **kwargs:
+            recorded.append((course_id, kind, object_id, title, operation_id)),
+    )
+
+    reconcile_catalog_after_apply(
+        "content.quick_assignment", "course-quick",
+        payload={"name": "Fictional Quick Assignment"},
+        result={"state": "applied", "returned_object_id": "assignment-quick"},
+        operation_id="op-quick",
+    )
+
+    assert recorded == [(
+        "course-quick", "assignment", "assignment-quick",
+        "Fictional Quick Assignment", "op-quick",
+    )]
+
+
 def test_page_apply_invalidates_the_pages_catalog_scope(tmp_path, monkeypatch):
     """The regression this guards: a page created in Canvas left the local
     `pages` catalog scope fresh, so `get_course_pages` kept reporting the old

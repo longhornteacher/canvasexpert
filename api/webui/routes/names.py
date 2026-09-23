@@ -1,8 +1,8 @@
 """Name Manager API — the vault-editor surface behind the Name Manager screen.
 
 Protected (literary) names, live scrub-test, and who-is-who / vault-backup
-export. All local; these endpoints touch the vault (PII), which lives
-synced-private and never leaves the machine. Split out of routes/feedback.py
+export. These teacher-only endpoints touch the PII vault in the private
+M365-synced workspace. Split out of routes/feedback.py
 — distinct surface, its own `names_router`.
 
 Roster sync, nicknames, pseudonym set/regenerate, and collision detection are
@@ -14,22 +14,28 @@ rather than ported to the schema-v3 one-word pseudonym contract.
 import csv
 import json
 import os
-import shutil
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Form
 from fastapi.responses import JSONResponse
 
-from api import feedback_scrub, feedback_vault
+from api import feedback_scrub
+from api.identity_vault_service import open_vault
 from api import roster_service
 from api.platform_services import config, workspace
+from api.shared_storage import (
+    LegacyStorageReappearedError, SharedStoreConflictError,
+    assert_store_writable, compare_and_remove, quarantine_conflict,
+    reappeared_legacy_storage, scan_conflicts,
+)
+from api.storage_support import atomic_write_json
 
 names_router = APIRouter(prefix="/api/names", tags=["names"])
 
 
 def _vault():
-    root = workspace.identity_vault_dir()
-    return feedback_vault.Vault(os.path.join(root or ".", "vault.json"))
+    return open_vault()
 
 
 # Re-exported for `api/tests/test_feedback_pipeline.py`, which exercises
@@ -101,35 +107,63 @@ def export_who_is_who(course_id: str = Form("")):
 
 @names_router.get("/vault-conflict")
 def vault_conflict():
-    """List any OneDrive-forked vault*.json copies beside the canonical vault,
-    with enough to help the teacher judge which is current. Never reads their
-    contents (student identity), only filesystem metadata."""
-    vault = _vault()
-    folder = os.path.dirname(vault.path) or "."
+    """List conflict siblings throughout the shared workspace without reading
+    their contents. The response contains only names and filesystem metadata."""
+    root = workspace.shared_root()
+    if not root:
+        return JSONResponse({"ok": False, "error": "workspace_not_configured"})
+    base = Path(root)
     files = []
-    for name in vault.conflicts():
-        path = os.path.join(folder, name)
+    for conflict in scan_conflicts():
+        path = conflict["path"]
         try:
             stat = os.stat(path)
         except OSError:
             continue
         files.append({
-            "name": name,
+            "name": os.path.basename(path),
+            "path": path,
             "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(timespec="seconds"),
             "size_bytes": stat.st_size,
         })
-    return JSONResponse({"ok": True, "folder": folder, "files": files})
+    try:
+        reappeared = reappeared_legacy_storage()
+    except LegacyStorageReappearedError:
+        reappeared = ["legacy storage"]
+    return JSONResponse({"ok": True, "folder": root, "files": files,
+                         "safety_blocked": bool(reappeared),
+                         "safety_reasons": reappeared})
+
+
+@names_router.post("/vault-conflict/compare")
+def compare_vault_conflict(path: str = Form("")):
+    """Compare a listed conflict copy; remove it only when hashes match."""
+    result = compare_and_remove(Path(path), root=workspace.workspace_root())
+    return JSONResponse(result)
+
+
+@names_router.post("/vault-conflict/quarantine")
+def quarantine_vault_conflict(path: str = Form("")):
+    """Move a listed conflict copy into the teacher-visible shared quarantine."""
+    result = quarantine_conflict(Path(path), root=workspace.workspace_root())
+    return JSONResponse(result)
 
 
 @names_router.post("/backup-vault")
 def backup_vault():
-    """Back up vault.json to _system/vault/backups/."""
+    """Write a new immutable snapshot of the merged Identity Vault."""
     vault = _vault()
-    vault_path = vault.path
-    if not os.path.isfile(vault_path):
-        return JSONResponse({"ok": False, "error": "No vault file found."})
-    backup_dir = os.path.join(os.path.dirname(vault_path), "backups")
+    backup_dir = vault.directory / "backups"
+    try:
+        assert_store_writable(vault.directory, root=workspace.workspace_root())
+    except SharedStoreConflictError:
+        return JSONResponse({"ok": False, "error": "shared_workspace_conflict"})
     os.makedirs(backup_dir, exist_ok=True)
-    backup_path = os.path.join(backup_dir, f"vault-{workspace.run_stamp()}.json")
-    shutil.copy2(vault_path, backup_path)
-    return JSONResponse({"ok": True, "path": backup_path, "entries": len(vault)})
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    backup_path = backup_dir / f"vault-{stamp}.json"
+    atomic_write_json(backup_path, {
+        "version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "entries": vault._by_id,
+    })
+    return JSONResponse({"ok": True, "path": str(backup_path), "entries": len(vault)})

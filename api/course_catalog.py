@@ -25,11 +25,15 @@ from api.assignment_collection import (
     AssignmentCollectionReceipt,
     acquire_assignment_collection,
 )
-from api.storage_support import quarantine_corrupt_file
+from api.storage_support import atomic_write_json, quarantine_corrupt_file
 from api.platform_services import workspace
 
 
 CATALOG_VERSION = 3
+PENDING_WRITES_VERSION = 1
+PENDING_WRITES_FILENAME = "pending_writes.v1.json"
+PENDING_WRITE_CONFIRMATION_HOURS = 24
+PENDING_WRITE_KINDS = frozenset({"assignment", "quiz", "page"})
 CATALOG_STATES = {"current", "stale", "incomplete", "unavailable"}
 ROOT_KEYS = {"version", "course_id", "course_name", "updated_at", "assignments", "modules", "assignment_groups", "pages"}
 SCOPE_KEYS = {"state", "last_success_at", "last_attempt_at", "error_code", "records"}
@@ -871,6 +875,167 @@ def read_catalog(course_id: str, *, root=None) -> dict:
     return {"catalog": None, "source": "none", "warnings": warnings}
 
 
+def _pending_writes_path(course_id: str, root=None) -> Path | None:
+    directory = workspace.course_catalog_dir(course_id, root)
+    return Path(directory) / PENDING_WRITES_FILENAME if directory else None
+
+
+def _empty_pending_writes(course_id: str) -> dict:
+    return {"version": PENDING_WRITES_VERSION, "course_id": str(course_id),
+            "updated_at": _now(), "records": []}
+
+
+def _read_pending_writes(course_id: str, *, root=None) -> dict:
+    path = _pending_writes_path(course_id, root)
+    if path is None or not os.path.isfile(workspace.extended_path(str(path))):
+        return _empty_pending_writes(course_id)
+    try:
+        with open(workspace.extended_path(str(path)), encoding="utf-8") as handle:
+            document = json.load(handle)
+        if (not isinstance(document, dict)
+                or document.get("version") != PENDING_WRITES_VERSION
+                or str(document.get("course_id") or "") != str(course_id)
+                or not isinstance(document.get("records"), list)):
+            raise ValueError("pending writes document is invalid")
+        records = []
+        for row in document["records"]:
+            if (not isinstance(row, dict)
+                    or not str(row.get("id") or "").strip()
+                    or row.get("kind") not in PENDING_WRITE_KINDS
+                    or not str(row.get("created_at") or "").strip()):
+                raise ValueError("pending write record is invalid")
+            records.append({
+                "id": str(row["id"]),
+                "kind": row["kind"],
+                "title": _normalize_text(row.get("title")) or str(row["id"]),
+                "created_by_op": str(row.get("created_by_op") or ""),
+                "created_at": str(row["created_at"]),
+                "confirmed": False,
+            })
+        return {"version": PENDING_WRITES_VERSION, "course_id": str(course_id),
+                "updated_at": str(document.get("updated_at") or ""),
+                "records": records}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        quarantine_corrupt_file(path, path.parent / "quarantine")
+        return _empty_pending_writes(course_id)
+
+
+def _write_pending_writes(course_id: str, records: list[dict], *, root=None) -> None:
+    path = _pending_writes_path(course_id, root)
+    if path is None:
+        raise ValueError("workspace_not_configured")
+    document = {"version": PENDING_WRITES_VERSION, "course_id": str(course_id),
+                "updated_at": _now(), "records": records}
+    atomic_write_json(path, document)
+
+
+def record_pending_write(course_id: str, kind: str, object_id: str, title: str,
+                         operation_id: str, *, created_at: str | None = None,
+                         root=None) -> dict:
+    """Record a Canvas object created by CE without inserting it into catalog records."""
+    course_key = str(course_id or "").strip()
+    object_key = str(object_id or "").strip()
+    kind_key = str(kind or "").strip()
+    if not course_key or not object_key or kind_key not in PENDING_WRITE_KINDS:
+        raise ValueError("pending_write_identity_invalid")
+    stamp = str(created_at or _now())
+    record = {
+        "id": object_key,
+        "kind": kind_key,
+        "title": _normalize_text(title) or object_key,
+        "created_by_op": str(operation_id or ""),
+        "created_at": stamp,
+        "confirmed": False,
+    }
+    with _course_lock(course_key):
+        document = _read_pending_writes(course_key, root=root)
+        dedupe_key = (record["kind"], record["id"], record["created_by_op"])
+        existing = {(row["kind"], row["id"], row["created_by_op"])
+                    for row in document["records"]}
+        if dedupe_key not in existing:
+            document["records"].append(record)
+            _write_pending_writes(course_key, document["records"], root=root)
+    return record
+
+
+def pending_unconfirmed(course_id: str, *, kinds=None, now: datetime | None = None,
+                        root=None) -> list[dict]:
+    """Return pending entries unseen by Canvas after the 24-hour confirmation window."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    wanted = set(kinds) if kinds is not None else None
+    result = []
+    for row in _read_pending_writes(str(course_id), root=root)["records"]:
+        if wanted is not None and row["kind"] not in wanted:
+            continue
+        try:
+            created = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        age_hours = max(0.0, (now - created.astimezone(timezone.utc)).total_seconds() / 3600)
+        if age_hours >= PENDING_WRITE_CONFIRMATION_HOURS:
+            result.append({**row, "age_hours": int(age_hours),
+                           "state": "pending_unconfirmed"})
+    return result
+
+
+def _confirm_pending_writes(course_id: str, document: dict, *, root=None) -> None:
+    pending = _read_pending_writes(course_id, root=root)["records"]
+    assignments = document.get("assignments") or {}
+    modules = document.get("modules") or {}
+    pages = document.get("pages") or {}
+    assignment_records = assignments.get("records") or {}
+    if isinstance(assignment_records, dict):
+        assignment_rows = list(assignment_records.values())
+    else:
+        assignment_rows = list(assignment_records) if isinstance(assignment_records, list) else []
+    assignment_ids = {str(row.get("id") or "") for row in assignment_rows
+                      if isinstance(row, dict)}
+    assignment_quiz_ids = {str(row.get("quiz_id") or "") for row in assignment_rows
+                           if isinstance(row, dict)}
+    module_items = [
+        item
+        for module in (modules.get("records") or [])
+        if isinstance(module, dict)
+        for item in (module.get("items") or [])
+        if isinstance(item, dict)
+    ]
+    module_quiz_ids = {
+        str(item.get("content_id") or "")
+        for item in module_items
+        if str(item.get("type") or "").casefold() == "quiz"
+    }
+    page_ids = {str(row.get("id") or "") for row in (pages.get("records") or [])
+                if isinstance(row, dict)}
+    keep = []
+    for row in pending:
+        if row["kind"] == "assignment":
+            scope = assignments
+            found = row["id"] in assignment_ids
+        elif row["kind"] == "quiz":
+            # Course Catalog refreshes module item membership, not the New
+            # Quizzes API itself. A matching Canvas module item is the
+            # available proof that a pushed quiz is present.
+            found = (
+                (assignments.get("state") == "current"
+                 and row["id"] in assignment_quiz_ids)
+                or (modules.get("state") == "current"
+                    and row["id"] in module_quiz_ids)
+            )
+            scope = modules
+        else:
+            scope = pages
+            found = row["id"] in page_ids
+        if scope.get("state") == "current" and found:
+            continue
+        keep.append(row)
+    if len(keep) != len(pending):
+        _write_pending_writes(course_id, keep, root=root)
+
+
 def _atomic_write(path: Path, document: dict) -> None:
     validate_catalog(document)
     # os-level via extended_path; mkstemp(dir=extended) yields an already-prefixed
@@ -1018,8 +1183,34 @@ def refresh_catalog(
         }
         validate_catalog(document)
         written = write_catalog(document, root=root)
+        _confirm_pending_writes(course_id, written["catalog"], root=root)
         warnings = sorted(set(previous_read.get("warnings", []) + written.get("warnings", [])))
-        return {"catalog": written["catalog"], "source": "canonical", "warnings": warnings}
+        summary = catalog_status_summary(written["catalog"])
+        previous_scopes = previous if isinstance(previous, dict) else {}
+        section_receipts = {}
+        for name in ("assignments", "modules", "assignment_groups", "pages"):
+            before = _scope_record_ids(previous_scopes.get(name))
+            after = _scope_record_ids(written["catalog"].get(name))
+            scope = written["catalog"][name]
+            proved = scope.get("state") == "current"
+            section_receipts[name] = {
+                **summary["sections"][name],
+                "fetched_from_canvas": proved,
+                "records_before": len(before),
+                "records_after": len(after),
+                "added_ids": sorted(after - before) if proved else [],
+                "deleted_ids": sorted(before - after) if proved else [],
+                "finished_at": str(scope.get("last_success_at") or scope.get("last_attempt_at") or ""),
+                # The existing Canvas collection API only returns rows, an
+                # error code, and a completeness flag. Do not invent transport
+                # status or pagination counts for this receipt.
+                "http_status": None,
+                "pages_fetched": None,
+            }
+        return {
+            "catalog": written["catalog"], "source": "canonical", "warnings": warnings,
+            **summary, "sections": section_receipts,
+        }
 
 
 def refresh_catalog_assignments_only(
@@ -1085,8 +1276,42 @@ def refresh_catalog_assignments_only(
         }
         validate_catalog(document)
         written = write_catalog(document, root=root)
+        _confirm_pending_writes(course_id, written["catalog"], root=root)
         warnings = sorted(set(previous_read.get("warnings", []) + written.get("warnings", [])))
         return {"catalog": written["catalog"], "source": "canonical", "warnings": warnings}
+
+
+def _scope_record_ids(scope: dict | None) -> set[str]:
+    records = scope.get("records") if isinstance(scope, dict) else None
+    if isinstance(records, dict):
+        return {str(key) for key in records}
+    if isinstance(records, list):
+        return {str(row.get("id")) for row in records
+                if isinstance(row, dict) and row.get("id") not in (None, "")}
+    return set()
+
+
+def catalog_status_summary(document: dict | None) -> dict:
+    """Student-free status for all four catalog sections and the oldest one."""
+    document = document if isinstance(document, dict) else {}
+    sections = {}
+    for name in ("assignments", "modules", "assignment_groups", "pages"):
+        scope = document.get(name) if isinstance(document.get(name), dict) else {}
+        sections[name] = {
+            key: str(scope.get(key) or "")
+            for key in ("state", "last_success_at", "last_attempt_at", "error_code")
+        }
+        sections[name]["record_count"] = len(_scope_record_ids(scope))
+    successful = [(row["last_success_at"], name) for name, row in sections.items()
+                  if row["last_success_at"]]
+    oldest_at, oldest_name = min(successful) if successful else ("", "")
+    complete = bool(sections) and all(row["state"] == "current" for row in sections.values())
+    return {
+        "result": "complete" if complete else "partial",
+        "oldest_section": oldest_name,
+        "oldest_last_success_at": oldest_at,
+        "sections": sections,
+    }
 
 
 def public_projection(read_result: dict, *, course_id: str) -> dict:
@@ -1126,7 +1351,8 @@ def public_projection(read_result: dict, *, course_id: str) -> dict:
         name: {key: document[name][key] for key in ("state", "last_success_at", "last_attempt_at", "error_code")}
         for name in ("assignments", "modules", "assignment_groups", "pages")
     }
-    return {
+    summary = catalog_status_summary(document)
+    result = {
         "ok": True,
         "available": bool(assignments or modules or assignment_groups or pages),
         "course_id": document["course_id"],
@@ -1139,4 +1365,12 @@ def public_projection(read_result: dict, *, course_id: str) -> dict:
         "modules": modules,
         "assignment_groups": assignment_groups,
         "pages": pages,
+        "result": summary["result"],
+        "oldest_section": summary["oldest_section"],
+        "oldest_last_success_at": summary["oldest_last_success_at"],
+        "sections": summary["sections"],
     }
+    receipt = read_result.get("sections") if isinstance(read_result, dict) else None
+    if isinstance(receipt, dict):
+        result["refresh_receipt"] = receipt
+    return result

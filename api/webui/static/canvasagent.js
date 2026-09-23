@@ -6,10 +6,15 @@
   var overall = document.getElementById("canvasagent-overall");
   var refreshButton = document.getElementById("canvasagent-refresh");
   var mirrorResult = document.querySelector("[data-mirror-result]");
+  var privacyConflictPanel = document.querySelector("[data-privacy-conflict-panel]");
+  var privacyConflictList = document.querySelector("[data-privacy-conflict-list]");
+  var privacyConflictResult = document.querySelector("[data-privacy-conflict-result]");
   var currentClients = {};
   var currentHealth = null;
   var currentReadiness = null;
   var currentMirror = null;
+  var currentConflicts = [];
+  var currentSafetyBlocked = false;
   document.querySelectorAll("[data-client-card]").forEach(function (card) {
     currentClients[card.getAttribute("data-client")] = {
       client: card.getAttribute("data-client"),
@@ -166,8 +171,9 @@
     var state = componentState(privacy);
     var workspace = health && health.workspace;
     var registry = health && health.pseudonym_registry;
-    var conflicts = mirror && Array.isArray(mirror.vault_conflict) ? mirror.vault_conflict.length : 0;
-    if (conflicts) return { state: "attention", label: "Review privacy files", detail: "Conflicting identity-vault copies were found. Review local privacy settings before using student data." };
+    var conflicts = currentConflicts.length || (mirror && Array.isArray(mirror.vault_conflict) ? mirror.vault_conflict.length : 0);
+    if (currentSafetyBlocked) return { state: "unavailable", label: "Legacy storage reappeared", detail: "Shared writes are paused because a retired private file returned. Do not use student data until Local workspace & privacy is reviewed." };
+    if (conflicts) return { state: "unavailable", label: "Shared-store conflict", detail: conflicts + " conflict " + (conflicts === 1 ? "copy locks its store" : "copies lock their stores") + ". Compare or quarantine each copy below before relying on shared data." };
     if (state === "ready" && workspace && workspace.configured && workspace.writable && registry && registry.configured && !registry.low_runway) {
       return { state: "ready", label: "Ready", detail: "Workspace is writable and local privacy protections are available." };
     }
@@ -186,6 +192,32 @@
     say(card && card.querySelector("[data-privacy-status]"), result.label);
     say(card && card.querySelector("[data-privacy-detail]"), result.detail);
     return result.state;
+  }
+  function renderPrivacyConflicts(data) {
+    if (!privacyConflictPanel || !privacyConflictList) return;
+    var files = data && Array.isArray(data.files) ? data.files : [];
+    currentConflicts = files;
+    privacyConflictList.replaceChildren();
+    files.forEach(function (file) {
+      var item = document.createElement("li");
+      var label = document.createElement("span");
+      label.textContent = file.name + " — " + (file.modified_at || "time unavailable");
+      item.appendChild(label);
+      [
+        ["compare", "Compare"],
+        ["quarantine", "Quarantine"],
+      ].forEach(function (action) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "ce-btn ce-agent-conflict-action";
+        button.dataset.conflictAction = action[0];
+        button.dataset.conflictPath = file.path || "";
+        button.textContent = action[1];
+        item.appendChild(button);
+      });
+      privacyConflictList.appendChild(item);
+    });
+    privacyConflictPanel.hidden = files.length === 0;
   }
   function renderOverall(states) {
     var state = states.indexOf("unavailable") !== -1 ? "unavailable"
@@ -207,22 +239,29 @@
     var readiness = currentReadiness;
     var health = currentHealth;
     var mirror = currentMirror;
+    renderPrivacyConflicts({ files: currentConflicts });
     var states = [renderMcp(currentClients, health), renderCanvas(readiness && readiness.components && readiness.components.canvas), renderMirror(mirror), renderPrivacy(readiness, health, mirror)];
     renderOverall(states);
   }
-  function update(readiness, health, mirror) {
+  function update(readiness, health, mirror, conflicts) {
     currentHealth = health;
     currentReadiness = readiness;
     currentMirror = mirror;
+    currentConflicts = conflicts && Array.isArray(conflicts.files) ? conflicts.files : [];
+    currentSafetyBlocked = !!(conflicts && conflicts.safety_blocked);
+    renderPrivacyConflicts(conflicts);
     rerenderCurrent();
   }
   function loadHealthAndMirror() {
     return Promise.all([
       fetch("/api/connections/health", { headers: { Accept: "application/json" } }).then(responseJson),
       fetch("/api/mirror/status", { headers: { Accept: "application/json" } }).then(responseJson),
+      fetch("/api/names/vault-conflict", { headers: { Accept: "application/json" } }).then(responseJson),
     ]).then(function (results) {
       if (!results[0].response.ok || !results[1].response.ok) throw new Error("status_unavailable");
-      return { health: results[0].body, mirror: results[1].body };
+      return { health: results[0].body, mirror: results[1].body,
+        conflicts: results[2].response.ok && results[2].body.ok !== false
+          ? results[2].body : { files: [], safety_blocked: true } };
     });
   }
   function refreshAll() {
@@ -231,12 +270,13 @@
       fetch("/api/readiness/probe?force=true", { method: "POST", headers: { Accept: "application/json" } }).then(responseJson),
     ]).then(function (results) {
       if (!results[1].response.ok || results[1].body.ok === false) throw new Error("readiness_unavailable");
-      update(results[1].body, results[0].health, results[0].mirror);
+      update(results[1].body, results[0].health, results[0].mirror, results[0].conflicts);
     }).catch(function () {
       renderOverall(["unavailable"]);
       setComponent("canvas-account", "unavailable", "Check unavailable", "Canvas or local readiness could not be checked. Try again or review Settings.");
       setComponent("canvas-data", "unavailable", "Status unavailable", "CanvasMirror status could not be checked.");
       setComponent("local-privacy", "unavailable", "Safety check unavailable", "Local privacy health could not be confirmed. Review Settings before working with student data.");
+      renderPrivacyConflicts({ files: [] });
       var mcp = document.getElementById("mcp-connections");
       setState(mcp, "unavailable");
       say(mcp && mcp.querySelector("[data-mcp-status]"), "Status unavailable");
@@ -272,6 +312,39 @@
       }).catch(function (error) {
         setResult(resultNode, error.message || "Could not reach Canvas Expert. Is it still running?", true);
       }).finally(function () { card.querySelectorAll("button").forEach(function (item) { item.disabled = false; }); });
+  });
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest && event.target.closest("[data-conflict-action]");
+    if (!button || !button.dataset.conflictPath) return;
+    var action = button.dataset.conflictAction;
+    var body = new URLSearchParams();
+    body.set("path", button.dataset.conflictPath);
+    privacyConflictList.querySelectorAll("button").forEach(function (item) { item.disabled = true; });
+    say(privacyConflictResult, action === "compare" ? "Comparing file hashes…" : "Moving the copy to quarantine…");
+    fetch("/api/names/vault-conflict/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: body.toString(),
+    }).then(responseJson).then(function (result) {
+      var message = result.body || {};
+      if (!result.response.ok || !message.ok) throw new Error(message.error || "Conflict action failed.");
+      if (action === "compare" && !message.identical) {
+        say(privacyConflictResult, "The files differ. Quarantine the copy to keep it for review.");
+      } else {
+        say(privacyConflictResult, action === "compare" ? "Identical copy removed safely." : "Copy moved to shared quarantine.");
+        return fetch("/api/names/vault-conflict", { headers: { Accept: "application/json" } })
+          .then(responseJson).then(function (updated) {
+            if (updated.response.ok) {
+              renderPrivacyConflicts(updated.body);
+              rerenderCurrent();
+            }
+          });
+      }
+    }).catch(function (error) {
+      say(privacyConflictResult, error.message || "Conflict action failed.");
+    }).finally(function () {
+      privacyConflictList.querySelectorAll("button").forEach(function (item) { item.disabled = false; });
+    });
   });
   function copyText(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);

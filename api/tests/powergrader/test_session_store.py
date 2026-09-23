@@ -325,3 +325,36 @@ def test_current_actionable_session_returns_only_the_current_record(store):
 
     assert current["session_id"] == "second"
     assert current["status"] == "ready"
+
+
+def test_new_scoring_sessions_are_shared_leased_and_revision_independent(store, monkeypatch):
+    from pathlib import Path
+
+    from api import local_runtime
+
+    monkeypatch.setattr(local_runtime, "machine_id", lambda: "LAPTOP-TEST")
+    session = _session("shared-session")
+    session["storage_model"] = "shared_work.v1"
+    store.save_session(session)
+
+    summary = store.get_work_item("shared-session")
+    assert summary["holder"] == "LAPTOP-TEST"
+    assert not Path(store.session_path("shared-session")).exists()
+    assert store.load_session("shared-session")["storage_model"] == "shared_work.v1"
+
+    with store.session_lock("shared-session"):
+        current = store.load_session("shared-session")
+        current["mirror_revision"] = "laptop-revision"
+        current["submission_snapshot"] = "laptop-snapshot"
+        store.save_session(current)
+    assert store.session_staleness(
+        current, mirror_revision="desktop-revision", submission_snapshot="desktop-snapshot"
+    ) == {"stale": False}
+
+    store.handoff_work_item("shared-session")
+    monkeypatch.setattr(local_runtime, "machine_id", lambda: "DESKTOP-TEST")
+    store.take_over_work_item("shared-session")
+    resumed = store.load_session("shared-session")
+    resumed["status"] = "staged"
+    store.save_session(resumed)
+    assert store.load_session("shared-session")["status"] == "staged"

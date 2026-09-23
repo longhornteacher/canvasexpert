@@ -68,6 +68,14 @@ _STRUCTURAL_EXEMPT_KEYS = {
     "pseudonym",
 }
 
+# `section` is normally an identity-bearing roster field, but the MCP
+# freshness envelope uses that name for a small, fixed projection label. It
+# is safe only at the exact metadata boundary and for these declared scopes.
+_FRESHNESS_SECTIONS = frozenset({
+    "assignment_groups", "assignments", "gradebook_snapshot", "groups",
+    "modules", "pages", "roster", "scoring_discovery", "submissions",
+})
+
 # A real id found as a `\b`-bounded token inside free text is only a HARD
 # block at this length or longer. Below it, a coincidental short number (a
 # year, a count, a page number a student typed in an essay) must not
@@ -113,6 +121,9 @@ def scan_payload(payload, vault) -> dict:
 
     for path, key, value in _walk(payload):
         kl = (key or "").lower()
+        if (kl == "section" and path in {"freshness", ".freshness"}
+                and isinstance(value, str) and value in _FRESHNESS_SECTIONS):
+            continue
         # Layer 1a: forbidden identity-bearing keys with a non-empty value.
         if kl in _FORBIDDEN_KEYS and value not in (None, "", [], {}):
             hard.append(f"identity field '{key}' present at {path or 'root'}")

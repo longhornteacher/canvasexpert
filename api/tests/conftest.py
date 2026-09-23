@@ -15,6 +15,7 @@ import pytest
 from api.platform_services import workspace
 from api.webui import profiles
 from api.platform_services.config import _io as config_io
+from api import pseudonym_secret
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +32,9 @@ def _isolate_real_machine_and_workspace_paths(tmp_path, monkeypatch):
     # LOCALAPPDATA must be an explicit fake path, not unset: runtime_paths.local_app_dir()
     # falls back to Path.home() -- the real user profile -- when it's absent.
     monkeypatch.setenv("LOCALAPPDATA", str(fake_root / "LocalAppData"))
+    # SharedVault derives only synthetic identities during tests. Never read
+    # or write the developer's machine credential from an automated suite.
+    monkeypatch.setattr(pseudonym_secret, "get_secret", lambda: b"t" * 32)
     # OneDrive/OneDriveCommercial are safe to simply unset: workspace.onedrive_root()
     # already treats "unset" as "no workspace", matching how most tests here already
     # model a no-workspace machine.

@@ -245,11 +245,8 @@ def _require_dir(course_id, root):
 
 def _identity_vault(root=None):
     """Open the one vault paired with this workspace root."""
-    directory = workspace.identity_vault_dir(root)
-    if not directory:
-        raise ValueError("workspace not configured — no identity vault location")
-    from api.feedback_vault import Vault
-    return Vault(os.path.join(directory, "vault.json"))
+    from api.identity_vault_service import open_vault
+    return open_vault(root)
 
 
 @contextmanager

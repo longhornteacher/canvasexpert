@@ -35,6 +35,7 @@
       <p class="ce-rail-nav__kicker">Files &amp; calendars</p>
       <div class="ce-rail-nav__links">
         <a href="#workspace-settings-card" data-rail-link>Workspace</a>
+        <a href="#identity-vault-card" data-rail-link>Identity Vault</a>
         <a href="#download-root-card" data-rail-link>Downloads</a>
         <a href="#calendar-card" data-rail-link>Class schedule &amp; calendar</a>
       </div>
@@ -305,6 +306,33 @@
   </div>
 </section>
 
+<section class="ce-panel ce-settings-panel" id="identity-vault-card">
+  <h2>Identity Vault across devices</h2>
+  <p class="ce-hint">
+    Student identity records stay in the private M365 OneDrive workspace. Canvas Expert
+    uses them locally to pseudonymize agent results; agent-facing tools never return real
+    names or SIS IDs. The shared key stays in Windows Credential Manager on each device.
+  </p>
+  <p id="identity-vault-key-status" class="status" role="status" aria-live="polite">Checking this device…</p>
+  <div class="ce-actions">
+    <button type="button" id="identity-vault-show-key">Reveal transfer key</button>
+    <button type="button" id="identity-vault-copy-key" disabled>Copy transfer key</button>
+  </div>
+  <label id="identity-vault-transfer-wrap" hidden>
+    Private transfer key
+    <input type="text" id="identity-vault-transfer-key" readonly autocomplete="off" spellcheck="false">
+  </label>
+  <label>
+    Transfer key from the other device
+    <input type="password" id="identity-vault-import-key" autocomplete="off" spellcheck="false"
+           inputmode="text" placeholder="64 hexadecimal characters">
+  </label>
+  <div class="ce-actions">
+    <button type="button" id="identity-vault-save-key" class="primary">Save key in Credential Manager</button>
+  </div>
+  <p class="ce-hint">After saving, compare the six-character fingerprints on both devices. They must match before assigning new pseudonyms.</p>
+</section>
+
 <section class="ce-panel ce-settings-panel" id="download-root-card">
   <h2>Download location</h2>
   <p class="ce-hint">
@@ -394,6 +422,7 @@
 <script src="/static/settings/account.js?v={{ asset_v }}"></script>
 <script src="/static/settings/courses.js?v={{ asset_v }}"></script>
 <script src="/static/settings/workspace.js?v={{ asset_v }}"></script>
+<script src="/static/settings/identity-vault.js?v={{ asset_v }}"></script>
 <script src="/static/settings/updates.js?v={{ asset_v }}"></script>
 <script src="/static/ui/rail_nav.js?v={{ asset_v }}"></script>
 

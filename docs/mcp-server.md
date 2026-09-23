@@ -1,6 +1,6 @@
 # CanvasExpert MCP server
 
-A local, stdio-only [Model Context Protocol](https://modelcontextprotocol.io) server that
+A local, stdio-first [Model Context Protocol](https://modelcontextprotocol.io) server that
 lets any MCP-capable assistant help plan lessons and manage rosters conversationally,
 while CanvasExpert keeps sole custody of the Canvas PAT and almost every write path.
 
@@ -33,14 +33,18 @@ authoring guidance, call the relevant product guide or authoring contract:
 - **Pseudonymized, not anonymous.** Every student-data tool routes its result through the identity vault
   (`api/feedback_vault.py`) before returning it. Students are identified only by a stable
   one-word pseudonym (e.g. "Pikachu") — never a real name, Canvas user ID, or SIS ID. See
-  `docs/contracts/pseudonym-contract.md` for the full pseudonym shape contract.
+  `docs/contracts/pseudonym-contract.md` for the full pseudonym shape contract. The teacher
+  may keep private identity records in M365 OneDrive for device sync; the MCP boundary still
+  returns only pseudonymized data and never returns the vault or private filesystem paths.
 - **Fail-closed.** Every student-data result also passes the existing outbound safety scan
   (`api/feedback_safety.py::scan_payload`) as a final check. If it isn't green, the tool
   withholds the payload and returns only a sanitized violation description.
 - **Session-local.** Nothing here logs tool arguments or results. The pseudonym is the
   only student handle that crosses the wire, so it is also the only one an assistant has
   to work with.
-- **stdio transport only.** No network port is ever bound.
+- **stdio is the agent transport.** A loopback-only Streamable HTTP endpoint is mounted
+  inside the lock-owning local runtime so a second CE entry point can attach to the same
+  process. It is not exposed beyond `127.0.0.1` and is not a client configuration surface.
 - **Mirror-bounded, never a live relay.** `get_roster`, `get_submissions`, and
   `get_gradebook_snapshot` serve exclusively from the local CanvasMirror
   (`docs/mirror.md`). All three refuse
@@ -53,7 +57,7 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 57 (45 tools).
+Tool schema version 58 (49 tools). Version 58 adds the shared work-item tools and defaults `get_course_pages` to include unpublished pages, with an `include_unpublished` argument for explicit filtering.
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -65,10 +69,10 @@ Tool schema version 57 (45 tools).
 | `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | After approval, pushes the unchanged reviewed scores to the exact linked bridge through the Operation Ledger | No |
 | `reset_scoring_review(scoring_session_id)` | Reopens the current local scoring review without changing its packet or history | No |
 | `list_sections(course_id)` | Saved section values from the local mirror | No |
-| `get_course_assignments(course_id, full_descriptions=false)` | Disk-only catalog assignments; descriptions are previews unless `full_descriptions=true` | No |
-| `get_modules(course_id, include_items=false)` | Disk-only catalog modules; set `include_items=true` to include their items | No |
-| `refresh_course_structure(course_id)` | Coordinator-backed refresh of the student-free Course Catalog modules; returns status and opaque operation/revision only | No |
-| `get_course_pages(course_id, full_text=false)` | Published normalized pages from the Current course's local v3 catalog; set `full_text=true` for complete bodies | No |
+| `get_course_assignments(course_id, full_descriptions=false)` | Disk-only catalog assignments; descriptions are previews unless `full_descriptions=true`; reports aged unconfirmed CE writes | No |
+| `get_modules(course_id, include_items=false)` | Disk-only catalog modules; set `include_items=true` to include their items; reports aged unconfirmed CE writes | No |
+| `refresh_course_structure(course_id)` | Coordinator-backed refresh of all four student-free catalog sections; reports each section's state and the oldest successful read, with no Canvas rows | No |
+| `get_course_pages(course_id, full_text=false, include_unpublished=true)` | Normalized pages from the Current course's local v3 catalog, including unpublished pages by default; set `full_text=true` for complete bodies or `include_unpublished=false` to filter; reports aged unconfirmed CE writes | No |
 | `list_learning_objectives(course_id)` | Current reviewed learning objectives as a compact table; Current-course and local-document gated | No |
 | `preview_learning_objective(course_id, objective, effective_start, effective_end, source_refs, replaces?)` | Exact reviewed create or replacement preview grounded in current local module, assignment, or page records | No |
 | `apply_learning_objective(course_id, preview, preview_digest, expected_revision)` | Applies only the exact reviewed create or replacement preview after catalog/source/revision checks; replacement identity comes from the digest-protected preview | No |
@@ -99,6 +103,10 @@ Tool schema version 57 (45 tools).
 | `apply_workspace_reset(preview_digest)` | Applies only an unchanged, non-refused workspace cleanup preview and returns a local receipt | No |
 | `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input; a selected contract travels in page zero | No |
 | `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
+| `list_work_items()` | Shared work-item holders, sync progress, and orphan counts without private session contents | No |
+| `get_work_item(work_id)` | One shared work item's holder and sync status | No |
+| `handoff_work_item(work_id)` | Release this device's lease so another device can resume after sync | No |
+| `take_over_work_item(work_id, confirm_stale=false)` | Acquire a released item after sync, or explicitly confirm takeover after a stale lease | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
 | `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None)` | Validate and freeze valid SAFE-packet results locally; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |
 | `apply_staged_scoring_results(scoring_session_id, expected_stage_digest, idempotency_key="")` | Post only the unchanged private stage after a direct teacher instruction; preserves narrow transport and idempotency safeguards | Yes, pseudonymized |

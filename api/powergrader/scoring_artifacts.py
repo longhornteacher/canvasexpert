@@ -6,6 +6,7 @@ import json
 import os
 
 from api import feedback_safety
+from api.shared_vault import PseudonymProvisionalError
 from api import feedback_scrub
 from api.feedback_contract import safe as safe_filename
 from api.platform_services import workspace
@@ -132,5 +133,7 @@ def build_scoring_artifacts(
             "ai_by_uid": {}, "ai_item_by_uid": {}, "ai_failures": failures,
             "copilot_packet": None,
         }
+    except PseudonymProvisionalError:
+        return {"ok": False, "code": "pseudonym_provisional", "privacy_steps": steps}
     except Exception:
         return {"ok": False, "privacy_steps": steps}

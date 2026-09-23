@@ -401,7 +401,7 @@ def prepare_scoring_session(
         )
 
     freshness = mirror_result.get("freshness") or {}
-    if (str(freshness.get("state") or "").casefold() != "current"
+    if (str(freshness.get("projection_state", freshness.get("state")) or "").casefold() != "current"
             or not str(freshness.get("last_success_at") or "").strip()):
         return _typed_failure(
             "mirror_projection_unavailable", "freshness", retryable=True,
@@ -541,6 +541,13 @@ def prepare_scoring_session(
     except Exception:
         ai_result = {"ok": False}
     if not isinstance(ai_result, dict) or not ai_result.get("ok"):
+        if isinstance(ai_result, dict) and ai_result.get("code") == "pseudonym_provisional":
+            return _typed_failure(
+                "pseudonym_provisional", "privacy", retryable=False,
+                user_action="Resolve the provisional pseudonym in the local roster before preparing this scoring packet.",
+                error="A student has a provisional pseudonym assignment.",
+                assignment_name=assignment_name,
+            )
         return _typed_failure(
             "safe_preparation_failed", "prepare", retryable=True,
             user_action="The SAFE scoring packet could not be prepared. Retry this exact assignment.",
@@ -578,6 +585,10 @@ def prepare_scoring_session(
         oral_reading_passage={"enabled": False}, session_kind=SCORING_SESSION_KIND,
     )
     session["status"] = "ready"
+    # New sessions use shared immutable snapshots and a cross-device lease.
+    # Legacy in-flight records remain readable/writable in their existing
+    # store until they reach a terminal state.
+    session["storage_model"] = "shared_work.v1"
     session["assignment"] = {"points_possible": points_possible}
     session["writing_timeline_tracked"] = writing_timeline_tracked
     session["feedback_contract_id"] = contract_id

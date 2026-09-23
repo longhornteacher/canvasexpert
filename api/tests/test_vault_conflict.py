@@ -169,8 +169,8 @@ def test_get_roster_fails_closed_on_vault_conflict(monkeypatch, tmp_path):
     result = tools.get_roster("111")
     assert result == {
         "ok": False,
-        "error": ("identity vault conflict detected — open the Students page "
-                  "in Canvas Expert to review it before pseudonymized reads continue"),
+        "error": ("shared workspace conflict detected — open Local workspace & privacy in "
+                  "Canvas Expert to review it before student data is used"),
     }
     # No file basenames, and no student data, in the dumped result.
     dumped = json.dumps(result)
@@ -180,10 +180,11 @@ def test_get_roster_fails_closed_on_vault_conflict(monkeypatch, tmp_path):
 
 def test_get_roster_normal_when_no_conflict(monkeypatch, tmp_path):
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
+    monkeypatch.setattr(workspace.runtime_paths, "local_cache_dir", lambda: tmp_path / "local-cache")
     vault_path = str(tmp_path / "vault.json")
     _use_vault(monkeypatch, vault_path)
     _set_active_courses(monkeypatch, ["111"])
-    mirror_store.write_roster("111", FIXTURE_USERS, SECTION_MAP, root=str(tmp_path))
+    mirror_store.write_roster("111", FIXTURE_USERS, SECTION_MAP)
 
     result = tools.get_roster("111")
     assert result["ok"] is True

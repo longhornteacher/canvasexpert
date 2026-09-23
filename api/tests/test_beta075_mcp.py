@@ -19,7 +19,7 @@ def _explode_live(*_args, **_kwargs):
 def test_live_mcp_schema_matches_versioned_contract():
     from api.mcp_server import server
 
-    assert contract.TOOL_SCHEMA_VERSION == 57
+    assert contract.TOOL_SCHEMA_VERSION == 58
     expected = contract.load_contract()
     live = contract.live_contract(server.mcp)
     assert live == expected
@@ -130,7 +130,7 @@ def test_live_mcp_schema_matches_versioned_contract():
     assert len(contract.load_contract(40)["tools"]) == 44
     assert len(contract.load_contract(41)["tools"]) == 46
     assert len(contract.load_contract(42)["tools"]) == 46
-    assert len(live["tools"]) == 45
+    assert len(live["tools"]) == 49
     assert "confirm_sis_grade_bridge_passback" not in {
         tool["name"] for tool in live["tools"]
     }
@@ -265,15 +265,13 @@ def test_http_and_mcp_share_use_cases_and_student_outputs_stay_green(tmp_path, m
         "attachments": [{"filename": "private-name.pdf"}],
     }]
 
-    # Seed a real on-disk mirror instead of monkeypatching live Canvas reads:
-    # both the HTTP route (mirror-first-with-live-fallback) and the MCP tool
-    # (strict mirror-only) must genuinely read from it, not from a stub.
+    # Seed a real machine-local cache instead of monkeypatching live Canvas
+    # reads: both the HTTP route and the MCP tool must read that projection.
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    root = str(tmp_path)
-    mirror_store.write_roster("current", users, {"800001": "Period 1"}, root=root)
-    mirror_store.write_assignments("current", assignments, root=root)
-    mirror_store.merge_submissions("current", "700010", submissions, root=root, replace=True)
-    mirror_store.record_pass("current", "full", ok=True, root=root)
+    mirror_store.write_roster("current", users, {"800001": "Period 1"})
+    mirror_store.write_assignments("current", assignments)
+    mirror_store.merge_submissions("current", "700010", submissions, replace=True)
+    mirror_store.record_pass("current", "full", ok=True)
 
     # Tripwires: if either path ever fell back to a live Canvas read instead
     # of the mirror seeded above, one of these would raise. (roster_service
@@ -291,24 +289,30 @@ def test_http_and_mcp_share_use_cases_and_student_outputs_stay_green(tmp_path, m
     ])
     monkeypatch.setattr(tools, "_vault_factory", lambda: Vault(str(tmp_path / "vault.json")))
 
-    real_loader = gradebook_snapshot.load_snapshot
-    loader_calls = []
+    real_http_loader = gradebook_snapshot.load_snapshot
+    http_loader_calls = []
 
-    def counted_loader(course_id, **kwargs):
-        loader_calls.append(course_id)
-        return real_loader(course_id, **kwargs)
+    def counted_http_loader(course_id, **kwargs):
+        http_loader_calls.append(course_id)
+        return real_http_loader(course_id, **kwargs)
 
-    monkeypatch.setattr(gradebook_snapshot, "load_snapshot", counted_loader)
+    real_mcp_loader = tools.scoring_local.load_scoring_snapshot
+    mcp_loader_calls = []
+
+    def counted_mcp_loader(course_id, **kwargs):
+        mcp_loader_calls.append(course_id)
+        return real_mcp_loader(course_id, **kwargs)
+
+    monkeypatch.setattr(gradebook_snapshot, "load_snapshot", counted_http_loader)
+    monkeypatch.setattr(tools.scoring_local, "load_scoring_snapshot", counted_mcp_loader)
     http_result = gradebook_route.api_gradebook("current")
     assert http_result.body
     http_payload = json.loads(http_result.body)
     mcp_gradebook = tools.get_gradebook_snapshot("current")
-    # One call from the HTTP route's own load_snapshot(course_id) (queries=None,
-    # so it resolves the mirror itself), one from tools._load_snapshot's
-    # internal load_snapshot(course_id, queries=namespace) -- both still hit
-    # this wrapper even though the MCP path resolves the mirror namespace
-    # itself via mirror_queries.snapshot_queries before calling in.
-    assert len(loader_calls) == 2
+    # The HTTP gradebook and MCP scoring snapshot use their separate shared
+    # application services; both read the same local mirror without Canvas.
+    assert http_loader_calls == ["current"]
+    assert mcp_loader_calls == ["current"]
     assert http_payload["source"] == "mirror"
     assert mcp_gradebook["source"] == "mirror"
     assert "user_id" not in http_payload["students"][0]

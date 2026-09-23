@@ -6,22 +6,19 @@ still requiring every private projection to be current and structurally usable.
 """
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 
 from api import gradebook_snapshot
+from api import freshness_policy
 from api.mirror import read_service
-from api.platform_services import workspace
 
 
-LOCAL_TIMEZONE = ZoneInfo("America/Chicago")
-SCHOOL_START = time(7, 0)
-SCHOOL_END = time(16, 30)
-WORKING_HOURS_FRESHNESS_MINUTES = 60
-OUTSIDE_HOURS_FRESHNESS_MINUTES = 600
 FRESHNESS_COLUMNS = (
+    # Preserve the original leading table columns for existing host renderers;
+    # richer policy metadata is appended so consumers can migrate additively.
     "course_id", "course_name", "state", "last_success_at", "age_minutes",
-    "requires_teacher_confirmation",
+    "requires_teacher_confirmation", "source", "section", "synced_at",
+    "within_policy", "policy_window_minutes", "school_hours",
 )
 
 
@@ -38,19 +35,13 @@ def _parse_timestamp(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _age_minutes(timestamp: datetime, now: datetime) -> int:
-    return max(0, int((now - timestamp).total_seconds() // 60))
-
-
-def freshness_limit_minutes(now: datetime) -> int:
+def freshness_limit_minutes(now: datetime, *, holidays=None) -> int:
     """Return the advisory threshold for the local Chicago clock."""
-    local = now.astimezone(LOCAL_TIMEZONE)
-    if local.weekday() < 5 and SCHOOL_START <= local.time() < SCHOOL_END:
-        return WORKING_HOURS_FRESHNESS_MINUTES
-    return OUTSIDE_HOURS_FRESHNESS_MINUTES
+    return freshness_policy.policy_window_minutes(now, holidays)[0]
 
 
-def _freshness(course_id: str, course_name: str, scopes: list[dict], *, now=None) -> dict:
+def _freshness(course_id: str, course_name: str, scopes: list[dict], *, now=None,
+               holidays=None) -> dict:
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
@@ -60,25 +51,31 @@ def _freshness(course_id: str, course_name: str, scopes: list[dict], *, now=None
         if isinstance(scope, dict)
     ]
     valid_timestamps = [stamp for stamp in timestamps if stamp is not None]
-    all_current = all(
+    all_available = all(
         isinstance(scope, dict)
-        and scope.get("state") == "current"
-        and not str(scope.get("error_code") or "").strip()
+        and scope.get("state") in {"current", "stale"}
         for scope in scopes
     )
     usable_timestamps = len(valid_timestamps) == len(scopes) and bool(scopes)
+    has_stale_scope = any(scope.get("state") == "stale" for scope in scopes
+                          if isinstance(scope, dict))
     oldest = min(valid_timestamps) if usable_timestamps else None
-    age_minutes = _age_minutes(oldest, now) if oldest else 0
-    state = "current" if all_current and usable_timestamps else "unavailable"
-    threshold = freshness_limit_minutes(now)
+    projection_state = "current" if all_available and usable_timestamps else "unavailable"
+    synced_at = oldest.isoformat().replace("+00:00", "Z") if oldest else ""
+    envelope = freshness_policy.freshness_envelope(
+        "mirror", "gradebook_snapshot",
+        ("stale" if has_stale_scope and projection_state == "current" else projection_state),
+        synced_at, now=now,
+        holidays=holidays,
+    )
     return {
         "course_id": str(course_id),
         "course_name": str(course_name or ""),
-        "state": state,
-        "last_success_at": oldest.isoformat().replace("+00:00", "Z") if oldest else "",
-        "age_minutes": age_minutes,
+        **envelope,
+        "last_success_at": synced_at,
+        "projection_state": projection_state,
         "requires_teacher_confirmation": bool(
-            state == "current" and age_minutes > threshold
+            projection_state == "current" and not envelope["within_policy"]
         ),
     }
 
@@ -91,12 +88,6 @@ def load_scoring_snapshot(course_id: str, *, course_name: str = "", root=None,
     here.  The result contains ``snapshot`` only when all three required scopes
     and their records can be used by the existing gradebook snapshot builder.
     """
-    root = root or workspace.workspace_root()
-    if not root:
-        freshness = _freshness(course_id, course_name, [], now=now)
-        return {"snapshot": None, "freshness": freshness,
-                "error": "mirror_workspace_unavailable"}
-
     try:
         scopes = [
             read_service.private_roster(course_id, root=root, max_age_hours=None),
@@ -109,11 +100,13 @@ def load_scoring_snapshot(course_id: str, *, course_name: str = "", root=None,
                 "error": "mirror_projection_unavailable"}
 
     freshness = _freshness(course_id, course_name, scopes, now=now)
-    if freshness["state"] != "current":
+    if freshness.get("projection_state") != "current":
         return {"snapshot": None, "freshness": freshness,
                 "error": "mirror_projection_unavailable"}
     if any(not isinstance(scope.get("records"), list) for scope in scopes):
         freshness["state"] = "unavailable"
+        freshness["projection_state"] = "unavailable"
+        freshness["within_policy"] = False
         freshness["requires_teacher_confirmation"] = False
         return {"snapshot": None, "freshness": freshness,
                 "error": "mirror_projection_unavailable"}
@@ -124,6 +117,8 @@ def load_scoring_snapshot(course_id: str, *, course_name: str = "", root=None,
         )
     except Exception:
         freshness["state"] = "unavailable"
+        freshness["projection_state"] = "unavailable"
+        freshness["within_policy"] = False
         freshness["requires_teacher_confirmation"] = False
         return {"snapshot": None, "freshness": freshness,
                 "error": "mirror_projection_unavailable"}
@@ -133,6 +128,8 @@ def load_scoring_snapshot(course_id: str, *, course_name: str = "", root=None,
                  if str(scope.get("snapshot_id") or "")}
     if len(revisions) > 1 or len(snapshots) > 1:
         freshness["state"] = "unavailable"
+        freshness["projection_state"] = "unavailable"
+        freshness["within_policy"] = False
         freshness["requires_teacher_confirmation"] = False
         return {"snapshot": None, "freshness": freshness,
                 "error": "mirror_projection_unavailable"}

@@ -11,6 +11,7 @@ from pathlib import Path
 import keyring
 
 from api import runtime_paths
+from api.shared_kv import SharedKVStore
 from api.storage_support import atomic_write_json, interprocess_lock
 from .. import workspace
 
@@ -28,7 +29,8 @@ SYNCED_KEYS = ("saved_courses", "extra_time", "late_sweep", "tier_tags",
                "ai_ta_persona", "roster_student_settings", "roster_tier_schemes",
                "roster_group_schemes", "roster_score_matrices", "roster_relationships",
                "monitored_students", "roster_baselines",
-               "sis_grade_bridges")
+               "sis_grade_bridges", "custom_personas",
+               "protected_packs_enabled", "protected_names_custom")
 
 
 def _machine_load():
@@ -38,7 +40,6 @@ def _machine_load():
     with open(CONFIG_PATH, encoding="utf-8") as f:
         data = json.load(f)
     data.setdefault("canvas_base", CANVAS_BASE_DEFAULT)
-    data.setdefault("saved_courses", [])
     return data
 
 
@@ -67,34 +68,29 @@ def _workspace_load():
 
 
 def _workspace_save(state):
-    path = _workspace_settings_path()
-    if not path:
-        return
-    # OneDrive sync is last-writer-wins here; conflict copies like settings-<PC>.json
-    # are ignored by the app and left for the user to reconcile manually.
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with interprocess_lock(Path(path + ".lock")):
-        atomic_write_json(Path(path), state)
+    raise RuntimeError("workspace_settings_are_append_only")
 
 
 def _synced_state():
     machine = _machine_load()
     path = _workspace_settings_path()
     if not path:
+        machine.setdefault("saved_courses", [])
         return machine
-    if not os.path.exists(path):
-        _workspace_save({k: machine[k] for k in SYNCED_KEYS if k in machine})
-    ws = _workspace_load()
-    # Backfill synced keys that exist machine-local but were never written to the
-    # workspace — covers keys promoted to SYNCED_KEYS after the workspace was first
-    # seeded (e.g. monitored_students, now PII-synced). Machine data only fills gaps;
-    # the workspace copy stays authoritative once present.
-    missing = {k: machine[k] for k in SYNCED_KEYS if k in machine and k not in ws}
-    if missing:
-        ws.update(missing)
-        _workspace_save(ws)
+    fallback = {k: machine[k] for k in SYNCED_KEYS if k in machine}
+    store = SharedKVStore("settings", root=workspace.workspace_root(), legacy_path=path)
+    ws = store.read(fallback)
+    # Once the immutable snapshot exists, synced values have exactly one source:
+    # the shared journal. Remove old local duplicates so a later device-local
+    # write cannot resurrect a tombstoned setting.
+    stale = set(SYNCED_KEYS) & set(machine)
+    if stale:
+        for key in stale:
+            machine.pop(key, None)
+        _machine_save(machine)
     merged = dict(machine)
     merged.update(ws)
+    merged.setdefault("saved_courses", [])
     return merged
 
 
@@ -116,20 +112,10 @@ def _modify_machine(mutator) -> dict:
 
 
 def _modify_workspace(mutator) -> dict | None:
-    """Reload and atomically apply one workspace-settings mutation."""
-    path = _workspace_settings_path()
-    if not path:
+    """Compatibility wrapper that now records changes as journal events."""
+    if not _workspace_settings_path():
         return None
-    with interprocess_lock(Path(path + ".lock")):
-        state = _workspace_load()
-        updated = mutator(state)
-        if updated is None:
-            updated = state
-        if not isinstance(updated, dict):
-            raise TypeError("workspace mutator must return a dict or None")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        atomic_write_json(Path(path), updated)
-        return deepcopy(updated)
+    return _modify_synced(mutator)
 
 
 def _modify_synced(mutator) -> dict:
@@ -139,37 +125,30 @@ def _modify_synced(mutator) -> dict:
         return _modify_machine(mutator)
 
     machine_lock = Path(CONFIG_PATH + ".lock")
-    workspace_lock = Path(path + ".lock")
     with interprocess_lock(machine_lock):
-        with interprocess_lock(workspace_lock):
-            machine = _machine_load()
-            if not os.path.exists(path):
-                atomic_write_json(
-                    Path(path),
-                    {k: machine[k] for k in SYNCED_KEYS if k in machine},
-                )
-            ws = _workspace_load()
-            missing = {
-                k: machine[k] for k in SYNCED_KEYS
-                if k in machine and k not in ws
-            }
-            if missing:
-                ws.update(deepcopy(missing))
-                atomic_write_json(Path(path), ws)
-            merged = dict(machine)
-            merged.update(ws)
-            before = deepcopy(merged)
-            updated = mutator(merged)
-            if updated is None:
-                updated = merged
-            if not isinstance(updated, dict):
-                raise TypeError("synced mutator must return a dict or None")
-            for key in set(before) | set(updated):
-                if before.get(key) == updated.get(key):
-                    continue
-                if key in updated:
-                    ws[key] = deepcopy(updated[key])
-                else:
-                    ws.pop(key, None)
-            atomic_write_json(Path(path), ws)
-            return deepcopy(updated)
+        machine = _machine_load()
+        fallback = {k: machine[k] for k in SYNCED_KEYS if k in machine}
+        store = SharedKVStore("settings", root=workspace.workspace_root(), legacy_path=path)
+        ws = store.read(fallback)
+        merged = dict(machine)
+        for key in SYNCED_KEYS:
+            merged.pop(key, None)
+        merged.update(ws)
+        before = deepcopy(merged)
+        updated = mutator(merged)
+        if updated is None:
+            updated = merged
+        if not isinstance(updated, dict):
+            raise TypeError("synced mutator must return a dict or None")
+        before_synced = {k: before[k] for k in SYNCED_KEYS if k in before}
+        after_synced = {k: updated[k] for k in SYNCED_KEYS if k in updated}
+        store.append_changes(before_synced, after_synced)
+        local_state = _machine_load()
+        changed = False
+        for key in SYNCED_KEYS:
+            if key in local_state:
+                local_state.pop(key, None)
+                changed = True
+        if changed:
+            atomic_write_json(Path(CONFIG_PATH), local_state)
+        return deepcopy(updated)

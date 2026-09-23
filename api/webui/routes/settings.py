@@ -15,9 +15,64 @@ import requests
 from fastapi import APIRouter, Form
 from fastapi.responses import JSONResponse
 
+from api import pseudonym_secret
+from api.identity_ledger import SeedMismatchError
+from api.identity_vault_service import open_vault
 from api.platform_services import config
+from api.shared_storage import SharedStoreConflictError
+from api.shared_vault import PseudonymSecretRequired
 
 router = APIRouter(tags=["settings"])
+
+
+@router.get("/settings/identity-vault")
+def identity_vault_status():
+    """Return only local key status and a short fingerprint, never the key."""
+    try:
+        vault = open_vault()
+        secret = pseudonym_secret.get_secret()
+        return JSONResponse({
+            "ok": True,
+            "configured": secret is not None,
+            "fingerprint": pseudonym_secret.fingerprint(secret),
+            "conflicts": len(vault.conflicts()),
+        })
+    except SeedMismatchError as error:
+        return JSONResponse({
+            "ok": False, "error": "identity_seed_mismatch",
+            "local_fingerprint": error.local_fingerprint,
+            "shared_fingerprint": error.shared_fingerprint,
+        })
+    except SharedStoreConflictError:
+        return JSONResponse({"ok": False, "error": "shared_workspace_conflict"})
+    except PseudonymSecretRequired:
+        return JSONResponse({"ok": True, "configured": False, "fingerprint": "", "conflicts": 0})
+    except Exception:
+        return JSONResponse({"ok": False, "error": "identity_vault_unavailable"})
+
+
+@router.post("/settings/identity-vault-secret")
+def update_identity_vault_secret(action: str = Form(...), secret: str = Form("")):
+    """Manually reveal the existing transfer key or save one in Credential Manager."""
+    if action == "reveal":
+        try:
+            value = pseudonym_secret.get_secret()
+        except Exception:
+            return JSONResponse({"ok": False, "error": "credential_store_unavailable"})
+        if value is None:
+            return JSONResponse({"ok": False, "error": "pseudonym_secret_not_configured"})
+        return JSONResponse({
+            "ok": True,
+            "secret": value.hex(),
+            "fingerprint": pseudonym_secret.fingerprint(value),
+        })
+    if action == "save":
+        try:
+            result = pseudonym_secret.set_secret(secret)
+        except Exception:
+            return JSONResponse({"ok": False, "error": "credential_store_unavailable"})
+        return JSONResponse(result)
+    return JSONResponse({"ok": False, "error": "unknown_action"})
 
 @router.post("/settings/canvas")
 def save_canvas_account(base_url: str = Form(...), token: str = Form("")):

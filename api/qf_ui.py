@@ -17,10 +17,9 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from api import __version__
+from api.local_runtime import ProcessLock, clear_runtime, publish_runtime, running_runtime
 
 import uvicorn
-
-from api.webui.server import app
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -32,27 +31,42 @@ def main():
         port = int(sys.argv[sys.argv.index("--port") + 1])
     open_browser = "--no-browser" not in sys.argv
 
+    lock = ProcessLock()
+    if not lock.acquire():
+        endpoint = running_runtime(timeout=1.0)
+        if not endpoint:
+            raise SystemExit("Canvas Expert is already running, but its local endpoint did not answer.")
+        print(f"Canvas Expert is already running: {endpoint}  (Ctrl+C is not needed here)")
+        if open_browser:
+            webbrowser.open(endpoint)
+        return
+
     url = f"http://{HOST}:{port}"
-    if open_browser:
-        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    publish_runtime(port)
+    try:
+        from api.webui.server import app
 
-    print(f"Canvas Expert {__version__}: {url}  (Ctrl+C to stop)")
+        if open_browser:
+            threading.Timer(1.0, lambda: webbrowser.open(url)).start()
 
-    # Built explicitly (rather than uvicorn.run(...)) so a route can ask the
-    # server to stop with a specific exit code. "Open Canvas Expert.bat"
-    # inspects that code: 7 means "a self-update is staged, apply it" (see
-    # api/webui/routes/updates.py). Every other code (including a plain
-    # Ctrl+C) falls through unchanged.
-    config = uvicorn.Config(app, host=HOST, port=port, log_level="info")
-    server = uvicorn.Server(config)
+        print(f"Canvas Expert {__version__}: {url}  (Ctrl+C to stop)")
 
-    def request_restart(exit_code: int) -> None:
-        app.state.restart_exit_code = exit_code
-        server.should_exit = True
+        # Built explicitly (rather than uvicorn.run(...)) so a route can ask
+        # the server to stop with a specific exit code. "Open Canvas Expert.bat"
+        # inspects that code: 7 means "a self-update is staged, apply it".
+        config = uvicorn.Config(app, host=HOST, port=port, log_level="info")
+        server = uvicorn.Server(config)
 
-    app.state.request_restart = request_restart
-    server.run()
-    raise SystemExit(getattr(app.state, "restart_exit_code", 0))
+        def request_restart(exit_code: int) -> None:
+            app.state.restart_exit_code = exit_code
+            server.should_exit = True
+
+        app.state.request_restart = request_restart
+        server.run()
+        raise SystemExit(getattr(app.state, "restart_exit_code", 0))
+    finally:
+        clear_runtime()
+        lock.release()
 
 
 if __name__ == "__main__":

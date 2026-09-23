@@ -301,6 +301,8 @@ def _execute_target(adapter, operation: dict, payload: dict, target: dict) -> di
         if result.get("state") == "applied":
             reconcile_catalog_after_apply(
                 operation["kind"], target["course_id"], payload=payload,
+                result=result, target=target,
+                operation_id=operation["operation_id"],
             )
         return {
             "target_key": target_key,
