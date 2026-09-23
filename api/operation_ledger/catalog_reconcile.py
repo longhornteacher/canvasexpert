@@ -18,8 +18,19 @@ invalidates nothing. Two kinds are payload-sensitive:
   it must not mark ``catalog.modules`` stale, while a page attached to a
   module does.
 See ``docs/reference/mutation-reconciliation-map.md`` family 2.
+
+A successfully-``applied`` target can still have made no live Canvas write at
+all -- a link-only SIS bridge register/link, or any other adapter step that
+found its exact object already in the safe, expected shape and skipped the
+mutation. Invalidating the catalog for a harmless local-only outcome makes a
+healthy course look stale to the next reader for no reason (don't cry wolf).
+Whether *any* real outbound send happened is read from the ledger's own
+per-step ``outbound_started_at`` marker (set by every adapter's
+``context.before_send`` immediately before its one Canvas POST/PUT/DELETE),
+never inferred from the operation ``kind`` or a payload/action string.
 """
 from api import course_catalog
+from .adapters.adapter_support import has_outbound_marker
 
 # Conservative kind -> catalog scopes union for kinds whose affected scopes
 # do not depend on payload contents. Any kind not present here and not
@@ -104,6 +115,13 @@ def _created_objects(kind: str, payload: dict | None, result: dict | None,
     return objects
 
 
+def _steps_for(result: dict | None, target: dict | None) -> list[dict]:
+    result = result if isinstance(result, dict) else {}
+    target = target if isinstance(target, dict) else {}
+    steps = result.get("steps") or target.get("steps") or []
+    return [step for step in steps if isinstance(step, dict)]
+
+
 def reconcile_catalog_after_apply(
     kind: str,
     course_id: str,
@@ -121,7 +139,16 @@ def reconcile_catalog_after_apply(
     with no catalog document yet (``invalidate_scope`` no-ops per scope).
     Call exactly once per successfully-applied operation, never per adapter
     step and never for a failed/aborted operation.
+
+    AC1 (don't cry wolf): a target with no step carrying the ledger's own
+    ``outbound_started_at`` marker never sent a live Canvas write -- for
+    example a link-only SIS bridge register/link that found its bridge
+    already safe. That target invalidates no catalog scope and records no
+    pending write, whatever ``kind`` or payload it carries.
     """
+    steps = _steps_for(result, target)
+    if not has_outbound_marker(steps):
+        return
     for scope_key in sorted(_scopes_for(kind, payload)):
         course_catalog.invalidate_scope(
             course_id, scope_key, root=root, attempted_at=attempted_at,

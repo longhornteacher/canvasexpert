@@ -163,15 +163,64 @@ def list_sis_grade_bridges(course_id: str) -> dict:
     }
 
 
+class _CatalogNotCurrentError(ValueError):
+    """The local course catalog is not current (AC2).
+
+    A ``ValueError`` subclass so a caller with an existing bare
+    ``except ValueError`` (for example ``_preview_agent_grouping``'s
+    ``mirror_read_failed`` refusal) keeps catching it unchanged; the two
+    discovery entry points named by AC2 catch this type specifically first
+    to return the richer, distinguished refusal.
+    """
+
+    def __init__(self, sections: dict[str, str]):
+        super().__init__("local course catalog is not current")
+        self.sections = dict(sections)
+
+
+def _blocking_error_result(baseline: dict) -> dict:
+    """Shape a preview's ``capture_baseline`` blocking_error (AC2/AC5).
+
+    ``catalog_not_current`` gets the full host-neutral refusal shape;
+    every other blocking reason keeps its existing plain ``error``/
+    ``drift_fields`` shape unchanged.
+    """
+    error = baseline.get("blocking_error")
+    if error == "catalog_not_current":
+        return _catalog_not_current_refusal(baseline.get("sections") or {})
+    result = {"ok": False, "error": error, "blocking": True}
+    fields = baseline.get("drift_fields")
+    if isinstance(fields, list) and all(isinstance(field, str) for field in fields):
+        result["drift_fields"] = sorted(set(fields))
+    return result
+
+
+def _catalog_not_current_refusal(sections: dict[str, str]) -> dict:
+    """AC2/AC5: the one host-neutral, plain-text shape any MCP host can act
+    on -- documented in ``docs/mcp-server.md``, never assistant-specific."""
+    return {
+        "ok": False,
+        "code": "catalog_not_current",
+        "blocking": True,
+        "sections": dict(sections),
+        "error": "The local course catalog is not current.",
+        "next": (
+            "Ask the teacher whether to refresh this course's structure "
+            "(refresh_course_structure). Do not refresh automatically."
+        ),
+    }
+
+
 def _course_assignments(course_id: str) -> list[dict]:
     result = course_catalog.read_catalog(course_id)
     catalog = result.get("catalog") if isinstance(result, dict) else None
     scope = catalog.get("assignments") if isinstance(catalog, dict) else None
     if not isinstance(scope, dict) or scope.get("state") != "current":
-        raise ValueError("local assignment sync is not current")
+        state = scope.get("state") if isinstance(scope, dict) else "unavailable"
+        raise _CatalogNotCurrentError({"assignments": str(state or "unavailable")})
     records = scope.get("records")
     if not isinstance(records, dict):
-        raise ValueError("local assignment projection is incomplete")
+        raise _CatalogNotCurrentError({"assignments": "incomplete"})
     return [
         {"course_id": str(course_id), "id": str(assignment_id), **row}
         for assignment_id, row in records.items()
@@ -282,6 +331,10 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
         families = differentiated_bridge.discover_families(
             rows, registrations, config.get_tier_tags()
         )
+    except _CatalogNotCurrentError as exc:
+        # AC2: this is its own answer, not a failure and not drift -- the
+        # local catalog simply is not current yet.
+        return _catalog_not_current_refusal(exc.sections)
     except Exception:
         return {"ok": False, "error": "bridge discovery could not be completed", "blocking": True}
 
@@ -566,15 +619,7 @@ def preview_sis_grade_bridge(
         )[0]
         baseline = adapter.capture_baseline(payload, provisional)
         if baseline.get("blocking_error"):
-            result = {
-                "ok": False,
-                "error": baseline["blocking_error"],
-                "blocking": True,
-            }
-            fields = baseline.get("drift_fields")
-            if isinstance(fields, list) and all(isinstance(field, str) for field in fields):
-                result["drift_fields"] = sorted(set(fields))
-            return result
+            return _blocking_error_result(baseline)
         payload = adapter.freeze_payload(payload, baseline)
         target = adapter.verify_targets(
             payload, [{"course_id": course_key}]
@@ -583,15 +628,7 @@ def preview_sis_grade_bridge(
         # already the exact state that apply will drift-check.
         baseline = adapter.capture_baseline(payload, target)
         if baseline.get("blocking_error"):
-            result = {
-                "ok": False,
-                "error": baseline["blocking_error"],
-                "blocking": True,
-            }
-            fields = baseline.get("drift_fields")
-            if isinstance(fields, list) and all(isinstance(field, str) for field in fields):
-                result["drift_fields"] = sorted(set(fields))
-            return result
+            return _blocking_error_result(baseline)
 
         target_record = models.new_target(
             target_key=target["target_key"],

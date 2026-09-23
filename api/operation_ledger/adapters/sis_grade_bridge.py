@@ -27,7 +27,17 @@ _SCORE_TOLERANCE = 1e-6
 
 
 class _BridgeReadError(RuntimeError):
-    pass
+    """A local catalog/mirror read the preview needs was not current.
+
+    Every raise site reachable from ``capture_baseline`` (through
+    ``_read_mirror_snapshot``) is a local-currency problem, never a live
+    Canvas failure or a real structural mismatch -- AC2 needs that
+    distinguished from ``drift_detected`` at both preview and apply.
+    """
+
+    def __init__(self, message: str, *, sections: dict[str, str] | None = None):
+        super().__init__(message)
+        self.sections = dict(sections or {})
 
 
 class _BridgeInvariantError(ValueError):
@@ -229,8 +239,11 @@ class SisGradeBridgeAdapter:
                 result["drift_fields"] = exc.fields
             return result
         except _BridgeReadError as exc:
+            # AC2: this is the local catalog/mirror not being current, never a
+            # real Canvas mismatch -- distinct from drift_detected downstream.
             return {
-                "blocking_error": "mirror_read_failed",
+                "blocking_error": "catalog_not_current",
+                "sections": dict(exc.sections),
                 "private_diagnostic": str(exc),
             }
 
@@ -898,13 +911,22 @@ def _read_mirror_snapshot(
     read_result = course_catalog.read_catalog(course_id)
     catalog = read_result.get("catalog") if isinstance(read_result, dict) else None
     if not isinstance(catalog, dict):
-        raise _BridgeReadError("local course catalog is unavailable")
+        raise _BridgeReadError(
+            "local course catalog is unavailable",
+            sections={"assignments": "unavailable"},
+        )
     assignments_scope = catalog.get("assignments") or {}
     if assignments_scope.get("state") != "current":
-        raise _BridgeReadError("local assignment sync is not current")
+        raise _BridgeReadError(
+            "local assignment sync is not current",
+            sections={"assignments": str(assignments_scope.get("state") or "unavailable")},
+        )
     records = assignments_scope.get("records")
     if not isinstance(records, dict):
-        raise _BridgeReadError("local assignment projection is invalid")
+        raise _BridgeReadError(
+            "local assignment projection is invalid",
+            sections={"assignments": "incomplete"},
+        )
     assignments = {
         str(assignment_id): {
             "course_id": str(course_id), "id": str(assignment_id), **dict(row)
@@ -920,7 +942,10 @@ def _read_mirror_snapshot(
     if include_submissions:
         result = read_service.private_submissions(course_id)
         if result.get("source") != "mirror" or result.get("state") != "current":
-            raise _BridgeReadError("local submission sync is not current")
+            raise _BridgeReadError(
+                "local submission sync is not current",
+                sections={"submissions": str(result.get("state") or "unavailable")},
+            )
         for row in result.get("records") or []:
             if not isinstance(row, dict):
                 continue

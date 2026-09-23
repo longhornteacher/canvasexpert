@@ -603,7 +603,13 @@ def test_successful_apply_invalidates_the_kinds_mapped_catalog_scopes(tmp_path, 
         def check_drift(self, payload, target, baseline):
             return False
         def execute(self, payload, target, baseline, claim, context):
-            return {"state": "applied", "returned_object_id": "999"}
+            return {
+                "state": "applied", "returned_object_id": "999",
+                "steps": [{
+                    "step_key": "create_assignment", "state": "applied",
+                    "outbound_started_at": "2026-01-01T00:00:00+00:00",
+                }],
+            }
     monkeypatch.setattr(registry, "get_adapter", lambda kind: FakeAdapter())
 
     op = _make_operation("op-catalog-1", targets=[models.new_target(
@@ -617,6 +623,45 @@ def test_successful_apply_invalidates_the_kinds_mapped_catalog_scopes(tmp_path, 
 
     assert result["status"] == "applied"
     assert set(calls) == {("101", "assignments"), ("101", "modules")}
+
+
+def test_successful_apply_with_no_outbound_write_invalidates_nothing(tmp_path, monkeypatch):
+    """AC1 (don't cry wolf): a link-only repair that never sent a live Canvas
+    write -- no step carries the ledger's outbound_started_at marker --
+    invalidates no catalog scope, whatever kind or action it reports."""
+    _root(tmp_path, monkeypatch)
+    calls = _spy_invalidate_scope(monkeypatch)
+
+    class FakeAdapter:
+        kind = "gradebook.sis_bridge"
+        def capture_baseline(self, payload, target):
+            return {}
+        def check_drift(self, payload, target, baseline):
+            return False
+        def execute(self, payload, target, baseline, claim, context):
+            return {
+                "state": "applied", "returned_object_id": "bridge-1",
+                "steps": [{
+                    "step_key": "register_bridge", "state": "applied",
+                    "error_code": None,
+                }],
+            }
+    monkeypatch.setattr(registry, "get_adapter", lambda kind: FakeAdapter())
+
+    op = _make_operation("op-catalog-linkonly", targets=[models.new_target(
+        target_key="tk-catalog-linkonly", idempotency_key="ik-catalog-linkonly",
+        course_id="101")])
+    op["kind"] = "gradebook.sis_bridge"
+    operations.create_operation(op)
+    batch = batches.freeze_batch(
+        ["op-catalog-linkonly"], {"op-catalog-linkonly": [{}]})
+    operations.set_operation_review("op-catalog-linkonly", batch)
+
+    result = executor.apply_operation(
+        "op-catalog-linkonly", batch["batch_id"], batch["review_digest"])
+
+    assert result["status"] == "applied"
+    assert calls == []
 
 
 def test_failed_apply_never_invalidates_catalog(tmp_path, monkeypatch):
@@ -652,7 +697,12 @@ def test_recovery_apply_invalidates_catalog_scopes(tmp_path, monkeypatch):
     calls = _spy_invalidate_scope(monkeypatch)
 
     target = models.new_target(
-        target_key="tk-recover-catalog", idempotency_key="ik-recover-catalog", course_id="202")
+        target_key="tk-recover-catalog", idempotency_key="ik-recover-catalog", course_id="202",
+        steps=[{
+            "step_key": "create_quiz:0", "state": "sent_unknown",
+            "outbound_started_at": "2020-01-01T00:00:00+00:00",
+        }],
+    )
     target["state"] = "sent_unknown"
     target["attempt_id"] = "attempt-old"
     op = _make_operation("op-recover-catalog", targets=[target])
@@ -702,8 +752,14 @@ def test_catalog_reconcile_kind_mapping_respects_page_and_rubric_boundaries(
     monkeypatch, kind, payload, expected_scopes,
 ):
     calls = _spy_invalidate_scope(monkeypatch)
+    # A real outbound write happened; this test is about the kind -> scope
+    # mapping (_scopes_for), not the AC1 outbound-write gate.
+    sent_result = {"steps": [{
+        "step_key": "send", "state": "applied",
+        "outbound_started_at": "2026-01-01T00:00:00+00:00",
+    }]}
 
-    reconcile_catalog_after_apply(kind, "303", payload=payload)
+    reconcile_catalog_after_apply(kind, "303", payload=payload, result=sent_result)
 
     assert set(calls) == {("303", scope) for scope in expected_scopes}
 
@@ -720,7 +776,13 @@ def test_quick_assignment_apply_records_its_new_object_as_pending(monkeypatch):
     reconcile_catalog_after_apply(
         "content.quick_assignment", "course-quick",
         payload={"name": "Fictional Quick Assignment"},
-        result={"state": "applied", "returned_object_id": "assignment-quick"},
+        result={
+            "state": "applied", "returned_object_id": "assignment-quick",
+            "steps": [{
+                "step_key": "create_assignment", "state": "applied",
+                "outbound_started_at": "2026-01-01T00:00:00+00:00",
+            }],
+        },
         operation_id="op-quick",
     )
 
@@ -744,7 +806,13 @@ def test_page_apply_invalidates_the_pages_catalog_scope(tmp_path, monkeypatch):
         def check_drift(self, payload, target, baseline):
             return False
         def execute(self, payload, target, baseline, claim, context):
-            return {"state": "applied", "returned_object_id": "a-new-page"}
+            return {
+                "state": "applied", "returned_object_id": "a-new-page",
+                "steps": [{
+                    "step_key": "create_page", "state": "applied",
+                    "outbound_started_at": "2026-01-01T00:00:00+00:00",
+                }],
+            }
     monkeypatch.setattr(registry, "get_adapter", lambda kind: FakeAdapter())
 
     op = _make_operation("op-catalog-page", targets=[models.new_target(
@@ -805,6 +873,10 @@ def test_page_apply_actually_marks_a_real_catalog_document_stale(tmp_path):
 
     reconcile_catalog_after_apply(
         "content.page", "606", payload={"title": "New page"},
+        result={"steps": [{
+            "step_key": "create_page", "state": "applied",
+            "outbound_started_at": "2026-02-02T00:00:00+00:00",
+        }]},
         root=str(tmp_path), attempted_at="2026-02-02T00:00:00+00:00",
     )
 
@@ -889,6 +961,47 @@ def test_build_repair_plan_projects_only_steps_with_a_created_id():
         {"step": "create_tier_assignment:0", "created_id": "101", "state": "applied"},
         {"step": "create_bridge", "created_id": "205", "state": "sent_unknown"},
     ]
+
+
+def test_build_repair_plan_never_prints_a_target_key_hash():
+    """Law (AC4): the fallback path (a target-level returned_object_id with
+    no step carrying its own created id) names the first recorded step_key,
+    or the operation kind with no steps at all -- never the opaque
+    64-hex target_key."""
+    hex_target_key = "a" * 64
+    with_steps = {
+        "kind": "gradebook.sis_bridge",
+        "targets": [{
+            "target_key": hex_target_key,
+            "returned_object_id": "bridge-9",
+            "state": "applied",
+            "steps": [
+                {"step_key": "register_bridge", "state": "applied",
+                 "returned_object_id": None},
+            ],
+        }],
+    }
+    without_steps = {
+        "kind": "gradebook.sis_bridge",
+        "targets": [{
+            "target_key": hex_target_key,
+            "returned_object_id": "bridge-9",
+            "state": "applied",
+            "steps": [],
+        }],
+    }
+
+    plan_with_steps = executor.build_repair_plan(with_steps)
+    plan_without_steps = executor.build_repair_plan(without_steps)
+
+    assert plan_with_steps == [
+        {"step": "register_bridge", "created_id": "bridge-9", "state": "applied"},
+    ]
+    assert plan_without_steps == [
+        {"step": "gradebook.sis_bridge", "created_id": "bridge-9", "state": "applied"},
+    ]
+    for plan in (plan_with_steps, plan_without_steps):
+        assert all(row["step"] != hex_target_key for row in plan)
 
 
 def test_abandon_operation_blocks_later_resume_and_apply(tmp_path, monkeypatch):

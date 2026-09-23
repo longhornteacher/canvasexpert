@@ -183,6 +183,8 @@ def test_preview_is_mirror_only_and_does_not_call_canvas(bridge_harness, monkeyp
 
 
 def test_stale_local_mirror_refuses_without_live_fallback(bridge_harness, monkeypatch):
+    """AC2 (don't cry wolf): a non-current local mirror is its own plain-text
+    answer, not a bare 'mirror_read_failed' and never 'drift_detected'."""
     monkeypatch.setattr(course_catalog, "read_catalog", lambda *_args, **_kwargs: {
         "catalog": {"assignments": {"state": "stale", "records": {}}}
     })
@@ -191,7 +193,43 @@ def test_stale_local_mirror_refuses_without_live_fallback(bridge_harness, monkey
 
     result = _preview()
 
-    assert result == {"ok": False, "error": "mirror_read_failed", "blocking": True}
+    assert result == {
+        "ok": False,
+        "code": "catalog_not_current",
+        "blocking": True,
+        "sections": {"assignments": "stale"},
+        "error": "The local course catalog is not current.",
+        "next": (
+            "Ask the teacher whether to refresh this course's structure "
+            "(refresh_course_structure). Do not refresh automatically."
+        ),
+    }
+
+
+def test_apply_with_non_current_catalog_blocks_as_catalog_not_current_not_drift(
+    bridge_harness, monkeypatch,
+):
+    """Law (AC2): apply-time check_drift blocks as catalog_not_current, not
+    drift_detected, when the local catalog goes stale between preview and
+    apply -- the evidence's second symptom."""
+    preview = _preview()
+    assert preview["ok"] is True
+
+    monkeypatch.setattr(course_catalog, "read_catalog", lambda *_args, **_kwargs: {
+        "catalog": {"assignments": {"state": "stale", "records": {}}}
+    })
+
+    result = _apply(preview)
+
+    assert result["ok"] is False
+    operation = operations.get_operation(preview["operation_id"])
+    target = operation["targets"][0]
+    assert target["error_code"] == "catalog_not_current"
+    assert target["error_code"] != "drift_detected"
+    assert target["next"] == (
+        "Ask the teacher whether to refresh this course's structure "
+        "(refresh_course_structure). Do not refresh automatically."
+    )
 
 
 def test_present_tier_score_copies_even_without_post_marker(bridge_harness):
@@ -357,3 +395,95 @@ def test_reconcile_preview_apply_links_a_two_theme_family(tmp_path, monkeypatch)
 
     followup = sis_grade_bridge.preview_sis_grade_bridge("course-1", "Two Theme SCRs")
     assert followup["ok"] is True
+
+
+def test_two_link_only_repairs_previewed_together_both_apply(tmp_path, monkeypatch):
+    """Example (AC3): two link-only SIS bridge repairs, previewed together
+    and then applied one after the other, both reach 'applied'. This is the
+    exact evidence scenario (brief 'don't cry wolf'): the first repair's
+    apply must not invalidate the local catalog (AC1), so the second
+    repair's own drift check never sees a stale/not-current catalog and
+    never falsely reports drift_detected or catalog_not_current (AC2)."""
+    monkeypatch.setattr(paths, "private_root", lambda: tmp_path / "private")
+    monkeypatch.setattr(config, "active_courses", lambda: [{"id": "course-1", "name": "Synthetic Course", "active": True}])
+    monkeypatch.setattr(config, "saved_courses", lambda: [{"id": "course-1", "name": "Synthetic Course", "active": True}])
+    monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {
+        "Support": "Silver", "Core": "Gold", "Accelerate": "", "Extend": "",
+    })
+    saved_bridges: dict[str, dict] = {}
+    monkeypatch.setattr(
+        config, "get_sis_grade_bridge",
+        lambda _course, title: copy.deepcopy(saved_bridges.get(title)),
+    )
+    monkeypatch.setattr(
+        config, "list_sis_grade_bridges",
+        lambda _course: [copy.deepcopy(row) for row in saved_bridges.values()],
+    )
+
+    def fake_save(_course, registration):
+        saved_bridges[registration["family_title"]] = copy.deepcopy(registration)
+        return copy.deepcopy(registration)
+
+    monkeypatch.setattr(config, "save_sis_grade_bridge", fake_save)
+
+    fake = FakeCanvas()
+    # Family A reuses the harness's default source-a/source-b/bridge ids;
+    # family B is a second, fully independent, already-safe bridge family.
+    fake.assignments["source-c"] = {
+        **fake.assignments["source-a"], "id": "source-c", "name": "Family B - Silver",
+    }
+    fake.assignments["source-d"] = {
+        **fake.assignments["source-b"], "id": "source-d", "name": "Family B - Gold",
+    }
+    fake.assignments["bridge-b"] = {
+        **fake.assignments["bridge"], "id": "bridge-b", "name": "Family B - Bridge",
+    }
+    fake.assignments["source-a"]["name"] = "Family A - Silver"
+    fake.assignments["source-b"]["name"] = "Family A - Gold"
+    fake.assignments["bridge"]["name"] = "Family A - Bridge"
+
+    def read_local_catalog(_course_id, **_kwargs):
+        return {"catalog": {
+            "updated_at": "2026-09-21T12:00:00Z",
+            "assignments": {"state": "current", "records": copy.deepcopy(fake.assignments)},
+            "modules": {"state": "current", "records": [copy.deepcopy(row) for row in fake.modules.values()]},
+        }}
+
+    def read_local_submissions(_course_id, **_kwargs):
+        return {"source": "mirror", "state": "current", "records": []}
+
+    monkeypatch.setattr(course_catalog, "read_catalog", read_local_catalog)
+    monkeypatch.setattr(read_service, "private_submissions", read_local_submissions)
+    monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
+    monkeypatch.setattr(canvas_client, "canvas_get_all_complete", fake.get_all_complete)
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed", lambda _course: None)
+    invalidate_calls = []
+    monkeypatch.setattr(
+        course_catalog, "invalidate_scope",
+        lambda *args, **kwargs: invalidate_calls.append(args) or None,
+    )
+
+    preview_a = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "Family A"
+    )
+    preview_b = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "Family B"
+    )
+    assert preview_a["ok"] is True
+    assert preview_b["ok"] is True
+
+    result_a = sis_grade_bridge.apply_sis_grade_bridge(
+        preview_a["operation_id"], preview_a["batch_id"], preview_a["review_digest"]
+    )
+    result_b = sis_grade_bridge.apply_sis_grade_bridge(
+        preview_b["operation_id"], preview_b["batch_id"], preview_b["review_digest"]
+    )
+
+    assert result_a["ok"] is True
+    assert result_a["status"] == "applied"
+    assert result_b["ok"] is True
+    assert result_b["status"] == "applied"
+    # AC1: a link-only repair invalidates no catalog scope.
+    assert invalidate_calls == []

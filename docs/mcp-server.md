@@ -195,6 +195,16 @@ Reconciliation is the separate reviewed path for missing bridge links: it may cr
 register a bridge from exact local IDs, but never guesses from title alone or starts Canvas
 Grade Sync. Any invariant failure still stops the write.
 
+A non-current local catalog is its own plain-text answer, not a failure and not reported
+Canvas drift: `reconcile_sis_grade_bridges`, `preview_sis_grade_bridge_reconciliation`, and
+apply (when the catalog goes stale between preview and apply) all return
+`{"code": "catalog_not_current", "blocking": true, "sections": {<scope>: <state>}, "error":
+"The local course catalog is not current.", "next": "Ask the teacher whether to refresh this
+course's structure (refresh_course_structure). Do not refresh automatically."}`. This shape is
+plain text any MCP host can act on directly; do not refresh automatically on its own
+authority. A link-only repair (no live Canvas write) also never marks any local catalog scope
+stale.
+
 See the [SIS Grade Bridges guide](guides/sis-grade-bridges.md) for the complete three-tool
 workflow, automatic family creation, recurring updates, privacy boundaries, and exact-ID
 Attention recovery. The linked contract,

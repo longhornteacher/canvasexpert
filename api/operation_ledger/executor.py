@@ -252,6 +252,20 @@ def _execute_target(adapter, operation: dict, payload: dict, target: dict) -> di
     stored_baseline = target.get("baseline", {})
     try:
         fresh_baseline = adapter.capture_baseline(payload, target)
+        if fresh_baseline.get("blocking_error") == "catalog_not_current":
+            # AC2: the local catalog/mirror being non-current is its own
+            # answer, never a report of Canvas drift that did not happen.
+            next_step = (
+                "Ask the teacher whether to refresh this course's structure "
+                "(refresh_course_structure). Do not refresh automatically."
+            )
+            _update_target_state(operation["operation_id"], target_key, "blocked",
+                                 error_code="catalog_not_current",
+                                 next_step=next_step)
+            return {"target_key": target_key, "state": "blocked",
+                    "error_code": "catalog_not_current",
+                    "sections": fresh_baseline.get("sections") or {},
+                    "next": next_step}
         if adapter.check_drift(payload, target, stored_baseline):
             drift_fields = _diff_field_names(stored_baseline, fresh_baseline)
             next_step = _drift_next(target)
@@ -523,8 +537,15 @@ def build_repair_plan(operation: dict) -> list[dict]:
                     "state": step.get("state"),
                 })
         if not found_step and target.get("returned_object_id"):
+            # AC4: never print the opaque target_key hash. Use the first
+            # recorded step's own name, or the operation kind when the
+            # target has no steps at all.
+            steps = target.get("steps") or []
+            first_step_key = (
+                steps[0].get("step_key") if steps and isinstance(steps[0], dict) else None
+            )
             plan.append({
-                "step": target.get("target_key"),
+                "step": first_step_key or operation.get("kind") or "operation",
                 "created_id": target.get("returned_object_id"),
                 "state": target.get("state"),
             })

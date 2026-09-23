@@ -97,4 +97,95 @@ which ones), if AC2 would change a public tool's input schema, or if distinguish
 catalog staleness needs a new persistence format.
 
 ## Execution result
-_(Executor fills in.)_
+
+**Traffic light: GREEN.**
+
+**Commit:** created on `dev` in this batch (see chat report for the hash).
+
+**Gate:**
+```
+py -m pytest -p no:randomly api/tests/test_sis_grade_bridge.py api/tests/test_sis_grade_bridge_reconciliation.py api/tests/test_sis_grade_bridge_operation.py api/tests/test_routines_builtin_sis_grade_bridge.py api/tests/test_operation_ledger.py api/tests/test_course_catalog.py api/tests/test_assignment_tier_operation.py api/tests/platform_services/config/test_sis_grade_bridge.py api/tests/mcp_server/test_contract.py api/tests/mcp_server/test_tools.py api/tests/mcp_server/test_content_push_tools.py
+```
+- Baseline (at `89edc38`): 306 passed.
+- Final: 312 passed (6 new: 1 Law for AC1 no-outbound-write, 1 parametrized
+  Contract for AC2 across both discovery entry points [2 cases], 1 Law for
+  AC2 apply-time not-drift, 1 Example for AC3, 1 Law for AC4 no-hex).
+
+**AC1 outbound marker:** `adapter_support.has_outbound_marker(steps)`
+(already existed, checks any step's `outbound_started_at`, set by every
+adapter's `context.before_send` immediately before its one Canvas
+POST/PUT/DELETE). `catalog_reconcile.reconcile_catalog_after_apply` now
+reads `result.get("steps") or target.get("steps")` and returns before any
+`invalidate_scope`/`record_pending_write` call when no step carries the
+marker. Checked every writer adapter reachable through
+`_KIND_TO_CATALOG_SCOPES` plus `content.page`
+(`assignment_whole`/`assignment_update`/`page`/`quick_assignment`/
+`quiz_steps`/`differentiated_bridge`/`sis_grade_bridge` adapters): all
+call `context.before_send` before every live mutation, so none lacked the
+marker. One unrelated helper, `assignment_whole.upload_course_file`
+(printable PDF upload to Canvas Files), calls `canvas_client._canvas_send`
+directly with no step key at all -- it is not part of the Operation
+Ledger's step-checkpointed execute() path and is unreachable from
+`reconcile_catalog_after_apply`, so it is out of AC1's scope and not a
+stop condition.
+
+**AC2:** `api/operation_ledger/adapters/sis_grade_bridge.py`'s
+`_BridgeReadError` now carries `sections` and `capture_baseline` maps it to
+`blocking_error: "catalog_not_current"` (previously the same catch-all
+`"mirror_read_failed"` as every other read failure). `executor._execute_target`
+checks `fresh_baseline.get("blocking_error") == "catalog_not_current"`
+*before* `check_drift` and blocks the target with `error_code:
+"catalog_not_current"` and the fixed `next` text instead of ever reaching
+`drift_detected`. `api/sis_grade_bridge.py` gained
+`_CatalogNotCurrentError` (a `ValueError` subclass, so
+`_preview_agent_grouping`'s existing bare `except ValueError` ->
+`mirror_read_failed` path is untouched by design) and
+`_catalog_not_current_refusal()`, used by `reconcile_sis_grade_bridges`
+directly and reused by `preview_sis_grade_bridge`'s two `blocking_error`
+checks via a new `_blocking_error_result()` helper.
+`preview_sis_grade_bridge_reconciliation` needed no separate fix: it
+forwards `reconcile_sis_grade_bridges`'s return verbatim when not `ok`.
+
+**AC3:** Followed from AC1+AC2 with no additional code; proven by the new
+Example test (two independent link-only families, previewed together and
+applied sequentially, both reach `applied`, and `course_catalog.invalidate_scope`
+is never called).
+
+**AC4:** `executor.build_repair_plan`'s fallback (no per-step created id,
+only a target-level `returned_object_id`) now uses the target's first
+recorded `step_key`, or `operation.get("kind")` with no steps at all --
+never `target.get("target_key")`.
+
+**AC5:** `docs/mcp-server.md`'s SIS grade-bridge section documents the
+exact `catalog_not_current` shape (nearest equivalent to a shared refusal
+list; no dedicated section existed). `api/mcp_server/server.py`'s
+freshness paragraph gained one sentence: a `catalog_not_current` result
+means ask the teacher to refresh, and is not a failure or reported drift.
+Both are plain text; nothing here depends on any one assistant.
+
+**Schema:** no input schema changed; no bump.
+
+**Deviations:**
+- `preview_sis_grade_bridge`'s own top-level preview-time refusal (not
+  named by AC2's bullet, but sharing the same `capture_baseline` path) now
+  also gets the full `catalog_not_current` shape via the same
+  `_blocking_error_result()` helper, instead of just the bare
+  `{"error": "mirror_read_failed"}` it returned before. This is a strict
+  improvement toward AC5's host-neutral intent and did not need touching
+  any other `blocking_error` code's shape. One existing test
+  (`test_stale_local_mirror_refuses_without_live_fallback`) asserted the
+  old bare shape; updated to the new one.
+- Six other pre-existing tests in `test_operation_ledger.py` constructed a
+  `FakeAdapter`/direct call with no step data at all, which the new AC1
+  gate correctly treats as "no outbound write"; each was given a plausible
+  `outbound_started_at`-carrying step so its original intent (proving the
+  kind -> scope mapping, or pending-write recording) is unaffected.
+
+**Known pre-existing failures outside this gate (unrelated, not fixed):**
+`test_quick_fix_contract_and_version` (named by the brief); also
+`api/tests/mcp_server/test_server_instructions.py` (4 failures, tool-count
+and instruction-budget assertions expecting 45 registered tools where 52
+are now registered) -- confirmed present at `89edc38` before any change in
+this batch via `git stash`, and this file is not in the named gate.
+
+**Stop conditions checked, none triggered.**

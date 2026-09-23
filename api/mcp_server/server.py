@@ -35,6 +35,8 @@ _SERVER_INSTRUCTIONS = (
     "within_policy is true. If it is false, ask the teacher whether relevant Canvas "
     "work changed. Never refresh automatically; refresh_mirror or "
     "refresh_course_structure requires an explicit teacher request. "
+    "A catalog_not_current result means the same thing: ask the teacher whether to "
+    "refresh this course's structure; it is not a failure and not reported Canvas drift. "
     "For broad grading, call discover_scoring_work first. It reads every Current "
     "course's local mirror and returns the complete "
     "assignment and attention set without preparation or writes. Report all rows, "

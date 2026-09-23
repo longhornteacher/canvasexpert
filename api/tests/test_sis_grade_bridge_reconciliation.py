@@ -604,3 +604,39 @@ def test_preview_reconciliation_still_refuses_for_an_omitted_title(monkeypatch):
         "error": "differentiated family was not discovered",
         "blocking": True,
     }
+
+
+def _call_reconcile(course_id, family_title):
+    return sis_grade_bridge.reconcile_sis_grade_bridges(course_id)
+
+
+def _call_preview_reconciliation(course_id, family_title):
+    return sis_grade_bridge.preview_sis_grade_bridge_reconciliation(course_id, family_title)
+
+
+@pytest.mark.parametrize(
+    "entry_point", [_call_reconcile, _call_preview_reconciliation],
+    ids=["reconcile_sis_grade_bridges", "preview_sis_grade_bridge_reconciliation"],
+)
+def test_catalog_not_current_is_its_own_answer_contract(monkeypatch, entry_point):
+    """Contract (AC2/AC5): both SIS discovery entry points return the exact
+    same host-neutral catalog_not_current shape when the local catalog is
+    not current -- never a bare failure, never drift_detected."""
+    monkeypatch.setattr(
+        course_catalog, "read_catalog",
+        lambda _course: {"catalog": {"assignments": {"state": "stale", "records": {}}}},
+    )
+
+    result = entry_point("course-1", "Reading Check")
+
+    assert result == {
+        "ok": False,
+        "code": "catalog_not_current",
+        "blocking": True,
+        "sections": {"assignments": "stale"},
+        "error": "The local course catalog is not current.",
+        "next": (
+            "Ask the teacher whether to refresh this course's structure "
+            "(refresh_course_structure). Do not refresh automatically."
+        ),
+    }
