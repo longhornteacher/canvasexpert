@@ -29,6 +29,11 @@ computer's Windows Credential Manager.
 
 ## Before the first migration
 
+Migration is not a separate step. It starts the first time any Canvas Expert
+process on a computer with this code reads the vault or settings: the Web UI,
+or the MCP server that Claude or Codex launches from this checkout. Treat the
+next launch after pulling as the migration.
+
 Back up `<workspace>/_System/Identity Vault/` and `<workspace>/settings.json`.
 Close Canvas Expert completely on the desktop, where the previously committed
 version could recreate the retired files. Pull this change on both computers
@@ -66,3 +71,18 @@ backup and sync state before continuing.
 The automated storage and freshness checks do not replace the planned
 two-computer, one-week sync check. Do not treat cross-device handoff as field
 accepted until that check is complete.
+
+## Remaining field checks
+
+The storage checkpoint (`85ce67a`) passed its automated gates. These checks need
+the teacher, both computers, or live Canvas:
+
+- One week of same-day use on both computers with zero `*-<MACHINE>.*` files under `_Shared/`.
+- The same pseudonyms on both computers after migration; a test student added on one computer appears unchanged on the other.
+- Scoring session handoff between computers (clean hand-off, and stale-lease takeover with orphaned events surfaced).
+- Start the Web UI, then the MCP server: the MCP server attaches and exactly one process holds `ce.lock`.
+- One Web UI content refresh leaves all four catalog sections current; a Canvas create and delete show up in `added_ids` and `deleted_ids`.
+- A CE push appears in `pending_writes`, not the catalog, until the next refresh; an unpublished page push lists with `published:false` after refresh.
+- Four `discover_scoring_work` calls start no refresh operations; every read tool returns the freshness envelope.
+
+Known gap: refresh summaries report `http_status` and `pages_fetched` as `null`.
