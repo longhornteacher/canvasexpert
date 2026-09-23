@@ -8,6 +8,10 @@ from api import course_catalog, sis_grade_bridge
 from api.mirror import read_service
 from api.operation_ledger import operations, paths, receipts
 from api.operation_ledger.adapters import differentiated_bridge
+from api.operation_ledger.adapters.sis_grade_bridge import (
+    _grade_request,
+    _resolve_bridge_target,
+)
 from api.platform_services import canvas_client, config
 
 
@@ -239,8 +243,12 @@ def test_present_tier_score_copies_even_without_post_marker(bridge_harness):
 
     preview = _preview()
     assert preview["ok"] is True
-    assert preview["preview"]["counts"]["copied_scores"] == 1
+    assert preview["preview"]["counts"]["raised_scores"] == 1
     assert preview["preview"]["counts"]["copied_excused"] == 1
+    assert preview["preview"]["raises"] == 1
+    assert preview["preview"]["already_canon"] == 0
+    assert preview["preview"]["held"] == 0
+    assert preview["preview"]["held_students"] == []
 
     result = _apply(preview)
 
@@ -487,3 +495,127 @@ def test_two_link_only_repairs_previewed_together_both_apply(tmp_path, monkeypat
     assert result_b["status"] == "applied"
     # AC1: a link-only repair invalidates no catalog scope.
     assert invalidate_calls == []
+
+
+def _final_source(score=None, excused=False):
+    return {"score": score, "excused": excused}
+
+
+def _bridge_state(score=None, excused=False):
+    return {"score": score, "excused": excused}
+
+
+@pytest.mark.parametrize(
+    ("final_sources", "bridge", "expected_entry", "expected_held"),
+    [
+        pytest.param(
+            [_final_source(90)], _bridge_state(95), None, False,
+            id="bridge_95_source_90_no_write",
+        ),
+        pytest.param(
+            [_final_source(95)], _bridge_state(90),
+            {"action": "score", "excused": False, "score": 95}, False,
+            id="source_95_bridge_90_raises_to_95",
+        ),
+        pytest.param(
+            [_final_source(80), _final_source(92)], _bridge_state(None),
+            {"action": "score", "excused": False, "score": 92}, False,
+            id="two_sources_bridge_blank_takes_highest",
+        ),
+        pytest.param(
+            [], _bridge_state(70), None, False,
+            id="source_blank_bridge_70_no_entry",
+        ),
+        pytest.param(
+            [], _bridge_state(None), None, False,
+            id="all_sources_blank_no_entry",
+        ),
+        pytest.param(
+            [_final_source(excused=True)], _bridge_state(None),
+            {"action": "excuse", "excused": True, "score": None}, False,
+            id="source_excused_bridge_blank_excuses",
+        ),
+        pytest.param(
+            [_final_source(excused=True)], _bridge_state(80), None, True,
+            id="source_excused_bridge_scored_is_held",
+        ),
+        pytest.param(
+            [_final_source(excused=True), _final_source(70)], _bridge_state(None),
+            None, True,
+            id="one_excused_one_scored_is_held",
+        ),
+        pytest.param(
+            [_final_source(85)], _bridge_state(None),
+            {"action": "score", "excused": False, "score": 85}, False,
+            id="late_penalized_source_writes_the_final_85",
+        ),
+    ],
+)
+def test_resolve_bridge_target_law(final_sources, bridge, expected_entry, expected_held):
+    """Law (contract section 6 score reconciliation rule, AC1-AC4): highest
+    score is canon, a bridge score is never lowered, a blank source is left
+    alone, and any mix of excused/scored across the sources and the bridge
+    is held, never guessed."""
+    entry, held = _resolve_bridge_target(final_sources, bridge)
+    assert entry == expected_entry
+    assert held is expected_held
+
+
+def test_score_entry_never_carries_late_policy_status(monkeypatch):
+    """AC5: a score entry writes posted_grade only -- the Canvas-reported
+    final score already has any late penalty baked in, so no
+    late_policy_status is ever copied to the bridge."""
+    entry, held = _resolve_bridge_target([_final_source(85)], _bridge_state(None))
+    assert held is False
+    request = _grade_request(entry)
+    assert request == {"posted_grade": "85", "excuse": False}
+    assert "late_policy_status" not in request
+
+
+def test_preview_summary_shape_is_pseudonym_only_contract(bridge_harness, monkeypatch, tmp_path):
+    """Contract (AC6): the preview summary carries raises, already_canon,
+    held, and held_students -- pseudonyms only, resolved through the
+    existing identity/pseudonym service, never Canvas user ids or names."""
+    from api import feedback_vault, identity_vault_service
+    monkeypatch.setattr(
+        identity_vault_service, "open_vault",
+        lambda root=None: feedback_vault.Vault(str(tmp_path / "identity-vault.json")),
+    )
+    fake = bridge_harness
+    # student-2's source is excused while the bridge is already scored --
+    # a genuine mixed excused/scored state that must be held (AC4).
+    fake.submissions["source-a"][1]["excused"] = True
+    fake.submissions["source-a"][1]["score"] = None
+    fake.bridge_submissions["student-2"] = {"score": 50, "excused": False}
+
+    result = _preview()
+
+    assert result["ok"] is True
+    preview = result["preview"]
+    assert set(preview) >= {"raises", "already_canon", "held", "held_students"}
+    assert preview["raises"] == 1
+    assert preview["already_canon"] == 0
+    assert preview["held"] == 1
+    assert isinstance(preview["held_students"], list)
+    assert len(preview["held_students"]) == 1
+    pseudonym = preview["held_students"][0]
+    assert isinstance(pseudonym, str) and pseudonym
+    # Never a Canvas user id or a name -- a real vault pseudonym only.
+    assert pseudonym not in {"student-1", "student-2", "student-3"}
+
+
+def test_no_generated_grade_write_ever_targets_a_tier_source(bridge_harness):
+    """Law (AC2): every grade-write request path names the bridge
+    assignment id; none ever names a tier source id."""
+    fake = bridge_harness
+    fake.submissions["source-a"][0]["score"] = 99  # forces a raise
+
+    result = _apply(_preview())
+
+    assert result["status"] == "applied"
+    put_calls = [call for call in fake.send_calls if call[0] == "PUT"]
+    assert put_calls, "expected at least one grade write"
+    for _method, path, _request in put_calls:
+        assert "/assignments/bridge/" in path
+        assert "/assignments/source-a/" not in path
+        assert "/assignments/source-b/" not in path

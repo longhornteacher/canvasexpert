@@ -100,16 +100,24 @@ write routine, disabled by default, with manual Run and the existing local inter
 
 ## 6. Which grades move
 
-A present numeric source score copies as the same number of points, including zero, even when
-the mirrored record does not yet carry a separate posting marker. Multiple agreeing source
-scores resolve to that same value. One or more agreeing excused source states excuse the
-bridge. The student's tier membership does not choose the grade.
+The teacher may add extra credit directly on the bridge or on a tier source, so the highest
+score is canon (contract section 6). For each student, CanvasExpert compares Canvas's final
+score on every tier source (any late penalty is already applied) with the bridge's current
+score and takes the highest. It writes that score to the bridge only when it is higher than
+the bridge's current score or the bridge is blank; it never lowers a bridge score and never
+writes to a tier source. The penalty is already inside the copied score, so no late status is
+copied. Two tier sources with different scores (a student moved tiers) is normal, not a
+conflict -- the highest still wins.
 
-Differing source values are reported as `conflicting_final_values` and left unchanged. A blank
-or submitted-but-ungraded source stays blank. Bridge preview has no due-date rule and does not
-manufacture missing zeroes. Teacher edits and values without the reviewed projection's
-provenance are held. Comments, rubrics, attempts, submission text, feedback, and New Quiz item
-scores do not move.
+A blank or submitted-but-ungraded source is left alone: it never clears the bridge and no
+missing zero is written. CanvasExpert excuses the bridge when every present source is excused
+and the bridge is blank; any mix of excused and scored states across the sources and the
+bridge is held for the teacher and never guessed. Comments, rubrics, attempts, submission
+text, feedback, and New Quiz item scores do not move.
+
+The preview reports, per family, how many bridge scores would rise (`raises`), how many are
+already canon (`already_canon`), and how many are held (`held`), along with `held_students` --
+the held students' pseudonyms only, resolved through CE's existing identity/pseudonym service.
 
 ## 7. Update all linked families
 

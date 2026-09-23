@@ -366,25 +366,27 @@ class SisGradeBridgeAdapter:
         counts = {
             "active_students": len(active_ids), "assigned_active": len(active_ids),
             "uncovered_active": 0, "overlapping_active": 0,
-            "inactive_assignees": 0, "copied_scores": 0, "copied_excused": 0,
-            "missing_zeroes": 0, "cleared_prior_values": 0, "already_matching": 0,
-            "held": 0, "conflicting_final_values": 0, "planned_changes": 0,
+            "inactive_assignees": 0, "raised_scores": 0, "copied_excused": 0,
+            "already_matching": 0, "held": 0, "planned_changes": 0,
         }
+        held_user_ids: list[str] = []
         for user_id in sorted(active_ids):
             final_rows = [row for row in per_user[user_id] if row["final"]]
-            target_entry, conflict = _resolve_final_target(user_id, final_rows)
-            if conflict:
-                counts["conflicting_final_values"] += 1
+            target_entry, held = _resolve_bridge_target(final_rows, bridge_by_user[user_id])
+            if held:
+                counts["held"] += 1
+                held_user_ids.append(user_id)
                 continue
             if target_entry is None:
+                # A blank source is left alone (AC3): only count it as
+                # "already canon" when there was a final source signal to
+                # compare against the bridge in the first place.
+                if final_rows:
+                    counts["already_matching"] += 1
                 continue
-            current = bridge_by_user[user_id]
-            if _grade_matches(current, target_entry):
-                counts["already_matching"] += 1
-                continue
-            grade_entries.append(target_entry)
+            grade_entries.append({"user_id": user_id, **target_entry})
             counts["planned_changes"] += 1
-            counts["copied_excused" if target_entry["excused"] else "copied_scores"] += 1
+            counts["copied_excused" if target_entry["excused"] else "raised_scores"] += 1
 
         first = source_rows[0]
         bridge_state = _mirror_assignment_shape(bridge)
@@ -408,6 +410,10 @@ class SisGradeBridgeAdapter:
             "module_id": payload.get("module_id"),
             "module_name": payload.get("module_name"),
             "module_state": snapshot["modules"],
+            # Local ledger storage only (never a live Canvas identifier the
+            # assistant sees): api.sis_grade_bridge resolves these to
+            # pseudonyms for the AC6 preview summary's held_students.
+            "held_user_ids": sorted(held_user_ids),
         }
         baseline["validation_digest"] = models.sha256_dict({
             "source_assignment_ids": source_ids,
@@ -1060,69 +1066,69 @@ def _bridge_submission_state(user_id: str, submission: dict | None) -> dict:
     }
 
 
-def _resolve_final_target(
-    user_id: str, final_rows: list[dict],
+def _resolve_bridge_target(
+    final_source_rows: list[dict], bridge_state: dict,
 ) -> tuple[dict | None, bool]:
-    if not final_rows:
+    """Score reconciliation rule (contract §6): highest score is canon.
+
+    Compares every *final* (scored or excused) tier source plus the
+    bridge's own current state, and returns ``(entry, held)``:
+
+    - ``final_source_rows`` empty (every source is blank) -> ``(None,
+      False)``. A blank source never touches the bridge (AC3): no
+      raise, no clear, no missing zero.
+    - Every final source and the bridge (when it already carries a final
+      state) agree it is "excused" -> excuse the bridge, unless it is
+      already excused (nothing to do).
+    - Every final source and the bridge agree it is "scored" -> the
+      target is the highest of every source score and the bridge's own
+      score (never lower than what the bridge already has); write only
+      when that target exceeds the bridge's current score or the bridge
+      is blank (AC1/AC2). Differing scores across tier sources (a student
+      moved tiers) are normal, not a conflict.
+    - Any mix of "excused" and "scored" across the sources and the bridge
+      -> held for the teacher, never guessed (AC4).
+    """
+    if not final_source_rows:
         return None, False
-    first = final_rows[0]
-    for row in final_rows[1:]:
-        if bool(row["excused"]) != bool(first["excused"]):
-            return None, True
-        if not row["excused"] and not _numbers_equal(row["score"], first["score"]):
-            return None, True
-    if first["excused"]:
-        return {
-            "user_id": user_id,
-            "action": "excuse",
-            "excused": True,
-            "score": None,
-            "late_policy_status": None,
-        }, False
+    source_states = {"excused" if row["excused"] else "scored" for row in final_source_rows}
+    bridge_excused = bridge_state.get("excused") is True
+    bridge_scored = not bridge_excused and _is_number(bridge_state.get("score"))
+    combined_states = set(source_states)
+    if bridge_excused:
+        combined_states.add("excused")
+    elif bridge_scored:
+        combined_states.add("scored")
+    if len(combined_states) > 1:
+        return None, True
+    if combined_states == {"excused"}:
+        if bridge_excused:
+            return None, False  # already canon
+        return {"action": "excuse", "excused": True, "score": None}, False
+    target_score = max(row["score"] for row in final_source_rows)
+    if bridge_scored:
+        bridge_score = float(bridge_state["score"])
+        target_score = max(target_score, bridge_score)
+        if _numbers_equal(target_score, bridge_score):
+            return None, False  # already canon; never lower a bridge score
     return {
-        "user_id": user_id,
-        "action": "score",
-        "excused": False,
-        "score": _normalized_number(first["score"]),
-        "late_policy_status": None,
+        "action": "score", "excused": False,
+        "score": _normalized_number(target_score),
     }, False
 
 
-def _bridge_is_blank(submission: dict) -> bool:
-    return (
-        submission.get("excused") is not True
-        and not _is_number(submission.get("score"))
-        and str(submission.get("grade") or "").strip() == ""
-        and _late_status(submission) is None
-    )
-
-
 def _grade_request(entry: dict) -> dict:
-    if entry.get("action") == "clear":
-        return {
-            "posted_grade": "", "excuse": False,
-            "late_policy_status": "none",
-        }
-    request = {"excuse": True} if entry.get("excused") else {
-        "posted_grade": str(entry.get("score")),
-        "excuse": False,
-        "late_policy_status": entry.get("late_policy_status") or "none",
-    }
-    return request
+    """AC5: a score entry writes posted_grade only -- the penalty is already
+    inside the copied final score, so no late_policy_status is copied."""
+    if entry.get("excused"):
+        return {"excuse": True}
+    return {"posted_grade": str(entry.get("score")), "excuse": False}
 
 
 def _grade_matches(submission: dict, entry: dict) -> bool:
-    if entry.get("action") == "clear":
-        return _bridge_is_blank(submission)
     if entry.get("excused"):
-        if submission.get("excused") is not True:
-            return False
-    elif not _numbers_equal(submission.get("score"), entry.get("score")):
-        return False
-    expected_status = _late_status(entry)
-    if _late_status(submission) != expected_status:
-        return False
-    return True
+        return submission.get("excused") is True
+    return _numbers_equal(submission.get("score"), entry.get("score"))
 
 
 def _late_status(submission: dict) -> str | None:

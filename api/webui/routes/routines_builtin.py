@@ -62,17 +62,17 @@ def _run_routine_download(params):
 # --------------------------------------------------------------------------
 
 def _run_routine_sis_bridge_sync(_params):
+    """Score reconciliation rule (contract §6): the highest of every tier
+    source's final score and the bridge's own current score is canon. A
+    bridge score is never lowered and a tier source is never written."""
     lines = []
     ok = True
     totals = {
         "families": 0,
-        "copied_scores": 0,
+        "raised_scores": 0,
         "copied_excused": 0,
-        "missing_zeroes": 0,
-        "cleared_prior_values": 0,
         "already_matching": 0,
         "held": 0,
-        "conflicting_final_values": 0,
         "attention_families": 0,
     }
     for course in config.active_courses():
@@ -99,16 +99,9 @@ def _run_routine_sis_bridge_sync(_params):
                 preview["operation_id"], preview["batch_id"], preview["review_digest"]
             )
             counts = result.get("counts") or {}
-            for key in (
-                "copied_scores", "copied_excused", "missing_zeroes",
-                "cleared_prior_values", "already_matching", "held",
-                "conflicting_final_values",
-            ):
+            for key in ("raised_scores", "copied_excused", "already_matching", "held"):
                 totals[key] += int(counts.get(key) or 0)
-            attention = bool(
-                counts.get("held") or counts.get("conflicting_final_values")
-                or not result.get("ok")
-            )
+            attention = bool(counts.get("held") or not result.get("ok"))
             if attention:
                 totals["attention_families"] += 1
             if not result.get("ok"):
@@ -116,23 +109,18 @@ def _run_routine_sis_bridge_sync(_params):
             marker = "⚑" if attention else "✓"
             lines.append(
                 f"{marker} {family_title}: "
-                f"{int(counts.get('copied_scores') or 0)} copied, "
+                f"{int(counts.get('raised_scores') or 0)} raised, "
                 f"{int(counts.get('copied_excused') or 0)} excused, "
-                f"{int(counts.get('missing_zeroes') or 0)} missing zeroes, "
-                f"{int(counts.get('cleared_prior_values') or 0)} cleared, "
-                f"{int(counts.get('already_matching') or 0)} matching, "
-                f"{int(counts.get('held') or 0)} held, "
-                f"{int(counts.get('conflicting_final_values') or 0)} conflicting"
+                f"{int(counts.get('already_matching') or 0)} already canon, "
+                f"{int(counts.get('held') or 0)} held"
             )
     if not totals["families"] and not lines:
         lines.append("· no linked differentiated families in Current courses")
     summary = (
-        f"{totals['families']} families: {totals['copied_scores']} copied, "
-        f"{totals['missing_zeroes']} missing zeroes, "
-        f"{totals['cleared_prior_values']} cleared, "
-        f"{totals['already_matching']} matching, "
-        f"{totals['held']} held, "
-        f"{totals['conflicting_final_values']} conflicting"
+        f"{totals['families']} families: {totals['raised_scores']} raised, "
+        f"{totals['copied_excused']} excused, "
+        f"{totals['already_matching']} already canon, "
+        f"{totals['held']} held"
     )
     return {"ok": ok, "lines": lines, "summary": summary, "counts": totals}
 

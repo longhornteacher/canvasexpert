@@ -178,6 +178,24 @@ class _CatalogNotCurrentError(ValueError):
         self.sections = dict(sections)
 
 
+def _held_student_pseudonyms(user_ids: list[str] | None) -> list[str]:
+    """AC6: pseudonyms only, resolved through CE's existing identity/pseudonym
+    service -- never Canvas user ids or names. Never a new mapping; any
+    resolution failure fails closed to an empty list rather than raise, so a
+    held count is never blocked by a pseudonym-service hiccup."""
+    ids = sorted({str(value).strip() for value in (user_ids or []) if str(value).strip()})
+    if not ids:
+        return []
+    try:
+        from api.identity_vault_service import open_vault
+        vault = open_vault()
+        with vault.transaction():
+            pseudonyms = [vault.get_or_assign(user_id) for user_id in ids]
+    except Exception:
+        return []
+    return sorted({str(value) for value in pseudonyms if value})
+
+
 def _blocking_error_result(baseline: dict) -> dict:
     """Shape a preview's ``capture_baseline`` blocking_error (AC2/AC5).
 
@@ -654,6 +672,19 @@ def preview_sis_grade_bridge(
         )
         operations.create_operation(operation)
         frozen = adapter.freeze_review(payload, target_record, baseline)
+        if payload.get("mode") != "reconcile":
+            # AC6: per-family preview summary. held_students is pseudonyms
+            # only, resolved here (the assistant-facing boundary) -- the
+            # adapter's baseline stays student-free/mirror-only and only
+            # ever carries raw local user ids, never exposed as such.
+            counts = baseline.get("counts") or {}
+            frozen = {
+                **frozen,
+                "raises": int(counts.get("raised_scores") or 0),
+                "already_canon": int(counts.get("already_matching") or 0),
+                "held": int(counts.get("held") or 0),
+                "held_students": _held_student_pseudonyms(baseline.get("held_user_ids")),
+            }
         batch = batches.freeze_batch(
             [operation_id], {operation_id: [frozen]}
         )
@@ -895,10 +926,8 @@ def _result_projection(operation_key: str, result: dict, fallback: dict) -> dict
     baseline = target.get("baseline") or {}
     counts = copy.deepcopy(baseline.get("counts") or {})
     action_counts = {
-        "score": "copied_scores",
+        "score": "raised_scores",
         "excuse": "copied_excused",
-        "missing": "missing_zeroes",
-        "clear": "cleared_prior_values",
     }
     for count_key in action_counts.values():
         counts[count_key] = 0

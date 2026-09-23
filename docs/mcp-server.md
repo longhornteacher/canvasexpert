@@ -195,6 +195,15 @@ Reconciliation is the separate reviewed path for missing bridge links: it may cr
 register a bridge from exact local IDs, but never guesses from title alone or starts Canvas
 Grade Sync. Any invariant failure still stops the write.
 
+The highest score is canon (a teacher may add extra credit on either the bridge or a tier
+source): each preview compares every tier source's final Canvas score with the bridge's
+current score and takes the highest, writing it only when it is higher than the bridge's
+current score or the bridge is blank. It never lowers a bridge score and never writes to a
+tier source; no late status is copied since the penalty is already in the copied score. The
+preview reports `raises`, `already_canon`, `held`, and `held_students` (pseudonyms only,
+resolved through the existing identity/pseudonym service) per family; any mix of excused and
+scored states across the sources and the bridge is held for the teacher, never guessed.
+
 A non-current local catalog is its own plain-text answer, not a failure and not reported
 Canvas drift: `reconcile_sis_grade_bridges`, `preview_sis_grade_bridge_reconciliation`, and
 apply (when the catalog goes stale between preview and apply) all return

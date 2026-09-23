@@ -25,13 +25,10 @@ def test_builtin_bridge_sync_runs_each_registered_family_with_safe_counts(monkey
         return {
             "ok": True,
             "counts": {
-                "copied_scores": 1,
+                "raised_scores": 1,
                 "copied_excused": 0,
-                "missing_zeroes": 1,
-                "cleared_prior_values": 0,
                 "already_matching": 1,
                 "held": 0,
-                "conflicting_final_values": 0,
             },
         }
 
@@ -43,19 +40,15 @@ def test_builtin_bridge_sync_runs_each_registered_family_with_safe_counts(monkey
     assert result == {
         "ok": True,
         "lines": [
-            "✓ Invented Check: 1 copied, 0 excused, 1 missing zeroes, "
-            "0 cleared, 1 matching, 0 held, 0 conflicting"
+            "✓ Invented Check: 1 raised, 0 excused, 1 already canon, 0 held"
         ],
-        "summary": "1 families: 1 copied, 1 missing zeroes, 0 cleared, 1 matching, 0 held, 0 conflicting",
+        "summary": "1 families: 1 raised, 0 excused, 1 already canon, 0 held",
         "counts": {
             "families": 1,
-            "copied_scores": 1,
+            "raised_scores": 1,
             "copied_excused": 0,
-            "missing_zeroes": 1,
-            "cleared_prior_values": 0,
             "already_matching": 1,
             "held": 0,
-            "conflicting_final_values": 0,
             "attention_families": 0,
         },
     }
