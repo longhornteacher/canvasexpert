@@ -319,3 +319,23 @@ attribute's presence but renders its value as empty for comparison, leaving ever
 attribute, tag, and visible-text check unchanged; the Law test gained a parametrized case
 for a reformatted/pruned style plus its own changed-visible-text negative, and the
 named gate is 299 passed, 0 failed.
+
+## Live acceptance, continued (senior)
+- Fixes landed live: `35b53c5` (dash normalization), `100c5ab` (visible-text
+  description check), `759fe86` (family-link read-back against the normalized save).
+  The resume then created, published and verified Red/Blue, attached all three sources
+  to the module, and created and activated the bridge. All of it was verified with
+  `verify_live`.
+- The teacher then edited Canvas Live (renamed sources to `ECR Prep 3: …`, per-class due
+  dates). The next resume failed at `source_final_shape_unverified`, because
+  `_verified_family_sources` re-checks the exact title, the top-level `due_at`, and "no
+  overrides" against the original push.
+
+## Correction 3 (senior decision): teacher edits in Canvas Live are authoritative
+After CE's own verified create or publish, titles, due/unlock/lock dates, and
+per-section overrides belong to the teacher. Recovery (resume, family tail, family
+link) re-checks only CE-owned invariants: exact id exists, published, `grading_type`
+points, points and assignment group consistent across tiers, `omit_from_final_grade`
+true, and `post_to_sis` false. Create and publish postconditions keep verifying CE's own
+writes as they happen. The saved family link records the sources' current live titles.
+Ids stay the authority.
