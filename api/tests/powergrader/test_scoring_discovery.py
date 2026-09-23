@@ -151,3 +151,15 @@ def test_metadata_driven_family_without_bridge_requires_reconciliation():
     source = projected["tier-a"]
     assert source[15:18] == [None, "missing", True]
     assert "no bridge yet" in source[18].casefold()
+
+
+def test_single_unsuffixed_assignment_is_not_labeled_as_missing_bridge():
+    result = discover_scoring_work(
+        [{"id": "c1", "name": "One"}],
+        load_snapshot=lambda _cid, **_kw: {
+            "snapshot": _snapshot([_assignment("ordinary", "AI Questions", ungraded=2)]),
+            "freshness": _fresh("c1", "One"), "error": None,
+        },
+    )
+    row, = result["assignments"]["rows"]
+    assert row[12:19] == [None, None, None, None, None, False, None]

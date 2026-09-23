@@ -295,6 +295,64 @@ def test_agent_proposed_grouping_refuses_title_and_source_link_collisions(monkey
     assert source_collision["conflicting_family_title"] == "Existing Family"
 
 
+def test_agent_proposed_grouping_reviews_relink_after_exact_bridge_deletion(monkeypatch, tmp_path):
+    sources = _messy_rows()
+    bridge = {
+        **_assignment("surviving-bridge", "Chapter 7 reading - Bridge", family=None,
+                      bridge=True, excluded=False),
+        "submission_types": ["none"],
+        "published": True,
+    }
+    link = {
+        "family_title": "Chapter 7 reading",
+        "source_assignment_ids": [row["id"] for row in sources],
+        "source_titles": [row["name"] for row in sources],
+        "bridge_assignment_id": "deleted-bridge",
+        "bridge_state_digest": "a" * 64,
+    }
+    _wire_proposed_snapshot(monkeypatch, tmp_path, [*sources, bridge], [link])
+    monkeypatch.setattr(config, "get_sis_grade_bridge", lambda *_args: copy.deepcopy(link))
+
+    result = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "Chapter 7 reading",
+        source_assignment_ids=[row["id"] for row in sources],
+        bridge_assignment_id="surviving-bridge",
+    )
+
+    assert result["ok"] is True
+    assert result["preview"]["bridge_assignment_id"] == "surviving-bridge"
+    assert result["preview"]["source_titles"] == [row["name"] for row in sources]
+
+
+def test_relink_refuses_bridge_claimed_by_another_family(monkeypatch, tmp_path):
+    sources = _messy_rows()
+    bridge = _assignment("surviving-bridge", "Chapter 7 reading - Bridge",
+                         family=None, bridge=True, excluded=False)
+    old_link = {
+        "family_title": "Chapter 7 reading",
+        "source_assignment_ids": [row["id"] for row in sources],
+        "bridge_assignment_id": "deleted-bridge",
+        "bridge_state_digest": "a" * 64,
+    }
+    other_link = {
+        "family_title": "Other family",
+        "source_assignment_ids": ["other-a", "other-b"],
+        "bridge_assignment_id": "surviving-bridge",
+    }
+    _wire_proposed_snapshot(monkeypatch, tmp_path, [*sources, bridge],
+                            [old_link, other_link])
+
+    result = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "Chapter 7 reading",
+        source_assignment_ids=[row["id"] for row in sources],
+        bridge_assignment_id="surviving-bridge",
+    )
+
+    assert result["code"] == "family_already_linked"
+    assert result["conflicting_family_title"] == "Other family"
+    assert operations.list_operations() == []
+
+
 def test_agent_proposed_grouping_deduplicates_ids_before_threshold_check(monkeypatch):
     monkeypatch.setattr(config, "active_courses", lambda: [{"id": "course-1"}])
 

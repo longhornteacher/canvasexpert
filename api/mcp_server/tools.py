@@ -107,7 +107,9 @@ _ASSIGNMENT_COLUMNS = ("id", "title", "due_at", "points_possible",
                        "published", "description_text")
 _GRADEBOOK_ASSIGNMENT_COLUMNS = ("id", "title", "due_at", "points", "has_submission",
                                  "has_grade", "ungraded", "partially_scored",
-                                 "late_ungraded", "missing", "late", "avg_pct")
+                                 "late_ungraded", "missing", "late", "avg_pct",
+                                 "family_role", "family_title", "bridge_assignment_id",
+                                 "source_assignment_ids")
 _GRADEBOOK_STUDENT_COLUMNS = ("pseudonym", "missing", "late", "ungraded", "pct")
 _MODULE_COLUMNS = ("id", "name", "position", "item_count")
 _MODULE_ITEM_COLUMNS = ("id", "type", "title", "position", "content_id")

@@ -614,6 +614,7 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
 def preview_sis_grade_bridge(
     course_id: str, family_title: str, *, write_origin: str = "assistant",
     discovered_family: dict | None = None,
+    relink_missing_bridge: bool = False,
 ) -> dict:
     course_key = str(course_id or "").strip()
     title = str(family_title or "").strip()
@@ -624,7 +625,8 @@ def preview_sis_grade_bridge(
 
     adapter = registry.get_adapter(KIND)
     try:
-        registration = config.get_sis_grade_bridge(course_key, title)
+        registration = (None if relink_missing_bridge else
+                        config.get_sis_grade_bridge(course_key, title))
         payload = adapter.build_payload({
             "course_id": course_key,
             "family_title": title,
@@ -776,7 +778,9 @@ def _preview_agent_grouping(
             "blocking": True,
         }
     proposed_ids = set(source_ids)
+    proposed_bridge_id = str(bridge_assignment_id or "").strip()
     requested_title_key = title.casefold()
+    replacement_link = None
     for registration in registrations or []:
         if not isinstance(registration, dict):
             continue
@@ -787,10 +791,23 @@ def _preview_agent_grouping(
             if str(value).strip()
         }
         bridge_id = str(registration.get("bridge_assignment_id") or "").strip()
+        same_family_relink = (
+            existing_title == title
+            and existing_ids == proposed_ids
+            and bridge_id not in by_id
+            and bool(bridge_assignment_id)
+            and str(bridge_assignment_id).strip() != bridge_id
+        )
+        if same_family_relink:
+            replacement_link = registration
+            continue
         if (
             existing_title.casefold() == requested_title_key
             or proposed_ids.intersection(existing_ids)
             or bridge_id in proposed_ids
+            or (proposed_bridge_id and (
+                proposed_bridge_id in existing_ids or proposed_bridge_id == bridge_id
+            ))
         ):
             return {
                 "ok": False,
@@ -839,8 +856,16 @@ def _preview_agent_grouping(
         "module_id": None,
         "module_name": None,
     }
+    if replacement_link:
+        discovered["replaced_bridge_assignment_id"] = str(
+            replacement_link["bridge_assignment_id"]
+        )
+        discovered["replaced_bridge_digest"] = str(
+            replacement_link.get("bridge_state_digest") or ""
+        )
     result = preview_sis_grade_bridge(
-        course_key, title, discovered_family=discovered
+        course_key, title, discovered_family=discovered,
+        relink_missing_bridge=bool(replacement_link),
     )
     reserved_error = "Differentiated family titles must be unsuffixed; '- Bridge' is reserved"
     if result.get("error") == reserved_error:

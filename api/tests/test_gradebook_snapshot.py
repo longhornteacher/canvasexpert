@@ -68,3 +68,26 @@ def test_late_ungraded_is_exact_intersection_of_needs_grading_and_late():
     assert assignment["late_ungraded"] == sum(
         needs_grading(row) and bool(row.get("late")) for row in submissions
     ) == 1
+
+
+def test_snapshot_marks_exact_linked_bridge_and_source_partners():
+    assignments = [
+        {"id": 10, "name": "Renamed support"},
+        {"id": 11, "name": "Renamed core"},
+        {"id": 12, "name": "Renamed bridge"},
+        {"id": 13, "name": "Ordinary work"},
+    ]
+    link = {
+        "family_title": "Reading Check",
+        "source_assignment_ids": ["10", "11"],
+        "bridge_assignment_id": "12",
+    }
+    rows = build_snapshot([], assignments, [], family_links=[link])["assignments"]
+    by_id = {row["id"]: row for row in rows}
+    assert [by_id[value]["family_role"] for value in ("10", "11", "12", "13")] == [
+        "source", "source", "bridge", "ordinary",
+    ]
+    assert by_id["10"]["bridge_assignment_id"] == "12"
+    assert by_id["12"]["source_assignment_ids"] == ["10", "11"]
+    assert by_id["12"]["family_title"] == "Reading Check"
+    assert by_id["13"]["bridge_assignment_id"] == ""

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from api import gradebook_snapshot
 from api import freshness_policy
 from api.mirror import read_service
+from api.platform_services import config
 
 
 FRESHNESS_COLUMNS = (
@@ -114,6 +115,7 @@ def load_scoring_snapshot(course_id: str, *, course_name: str = "", root=None,
     try:
         snapshot = gradebook_snapshot.build_snapshot(
             scopes[0]["records"], scopes[1]["records"], scopes[2]["records"],
+            family_links=config.list_sis_grade_bridges(course_id),
         )
     except Exception:
         freshness["state"] = "unavailable"

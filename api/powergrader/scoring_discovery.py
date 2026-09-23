@@ -31,6 +31,10 @@ def _family_advisory(assignments: list[dict], *, tier_tags=None, registrations=(
     # with the same family facts used by bridge reconciliation so every
     # differentiated source receives one bridge obligation.
     metadata_by_id = {}
+    assignments_by_id = {
+        str(row.get("id") or ""): row
+        for row in assignments if isinstance(row, dict)
+    }
     for family in differentiated_bridge.discover_families(
         assignments, registrations, tier_tags
     ):
@@ -47,6 +51,22 @@ def _family_advisory(assignments: list[dict], *, tier_tags=None, registrations=(
         registered_bridge_id = str((registration or {}).get("bridge_assignment_id") or "")
         if registered_bridge_id and registered_bridge_id not in bridge_ids:
             bridge_ids.append(registered_bridge_id)
+        if len(source_ids) < 2 and not bridge_ids and not registration:
+            # Title fallback also discovers ordinary single assignments. A lone
+            # unsuffixed row is not evidence of differentiated work.
+            explicit_tier = any(
+                differentiated_bridge.title_tag_parts(
+                    assignments_by_id.get(source_id, {}).get("name"), tier_tags
+                )[1]
+                or (
+                    assignments_by_id.get(source_id, {}).get("metadata", {}).get("tier")
+                    if isinstance(assignments_by_id.get(source_id, {}).get("metadata"), dict)
+                    else None
+                )
+                for source_id in source_ids
+            )
+            if not explicit_tier:
+                continue
         bridge_id = bridge_ids[0] if len(bridge_ids) == 1 else (registered_bridge_id or None)
         bridge_status = (
             "ambiguous" if len(bridge_ids) > 1 else

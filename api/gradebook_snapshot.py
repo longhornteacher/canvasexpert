@@ -16,7 +16,32 @@ def needs_grading(submission: dict) -> bool:
     )
 
 
-def build_snapshot(students, assignments, subs) -> dict:
+def _family_roles(family_links) -> dict[str, dict]:
+    """Index verified local links by exact Canvas ID, never by title."""
+    roles = {}
+    for link in family_links or ():
+        if not isinstance(link, dict):
+            continue
+        source_ids = [str(value) for value in link.get("source_assignment_ids") or []]
+        bridge_id = str(link.get("bridge_assignment_id") or "")
+        if not bridge_id or len(source_ids) < 2:
+            continue
+        facts = {
+            "family_title": str(link.get("family_title") or ""),
+            "bridge_assignment_id": bridge_id,
+            "source_assignment_ids": source_ids,
+        }
+        for assignment_id, role in [*((value, "source") for value in source_ids),
+                                    (bridge_id, "bridge")]:
+            if assignment_id in roles:
+                # A duplicate claim cannot safely label either family.
+                roles[assignment_id] = {"family_role": "conflict"}
+            else:
+                roles[assignment_id] = {"family_role": role, **facts}
+    return roles
+
+
+def build_snapshot(students, assignments, subs, *, family_links=()) -> dict:
     """Pure aggregation: preserve the existing route/MCP snapshot shape."""
     smap = {s["id"]: {"name": s.get("sortable_name") or s.get("name", ""),
                       "missing": 0, "late": 0, "ungraded": 0,
@@ -70,6 +95,7 @@ def build_snapshot(students, assignments, subs) -> dict:
             if sub.get("score") is not None:
                 a["partially_scored"] += 1
 
+    roles = _family_roles(family_links)
     out_assignments = []
     for aid, a in amap.items():
         avg = (round(a["score_sum"] / a["score_n"] / a["points"] * 100)
@@ -82,6 +108,9 @@ def build_snapshot(students, assignments, subs) -> dict:
             "partially_scored": a["partially_scored"],
             "late_ungraded": a["late_ungraded"], "missing": a["missing"],
             "late": a["late"], "avg_pct": avg,
+            "family_role": "ordinary", "family_title": "",
+            "bridge_assignment_id": "", "source_assignment_ids": [],
+            **roles.get(str(aid), {}),
         })
     out_assignments.sort(key=lambda a: a["due_at"] or "0000-00-00", reverse=True)
 
@@ -140,7 +169,11 @@ def load_snapshot(course_id: str, *, queries=None) -> tuple[dict | None, str | N
     subs, error = queries.course_submissions(course_id)
     if error:
         return None, error
-    snapshot = build_snapshot(students, assignments, subs)
+    from api.platform_services import config
+    snapshot = build_snapshot(
+        students, assignments, subs,
+        family_links=config.list_sis_grade_bridges(course_id),
+    )
     snapshot["source"] = source
     snapshot["synced_at"] = synced_at
     return snapshot, None

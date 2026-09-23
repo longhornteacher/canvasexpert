@@ -73,6 +73,8 @@ class SisGradeBridgeAdapter:
                 "source_assignment_ids": source_ids,
                 "source_titles": [str(v or "").strip() for v in discovered.get("source_titles") or []],
                 "bridge_assignment_id": str(discovered.get("bridge_assignment_id") or "").strip() or None,
+                "replaced_bridge_assignment_id": str(discovered.get("replaced_bridge_assignment_id") or "").strip() or None,
+                "replaced_bridge_digest": str(discovered.get("replaced_bridge_digest") or "").strip() or None,
                 "module_id": str(discovered.get("module_id") or "").strip() or None,
                 "module_name": str(discovered.get("module_name") or "").strip() or None,
                 "read_source": "mirror",
@@ -180,6 +182,8 @@ class SisGradeBridgeAdapter:
             "source_titles": payload.get("source_titles") or [],
             "bridge_assignment_id": payload.get("bridge_assignment_id"),
             "registered_bridge_digest": payload.get("registered_bridge_digest"),
+            "replaced_bridge_assignment_id": payload.get("replaced_bridge_assignment_id"),
+            "replaced_bridge_digest": payload.get("replaced_bridge_digest"),
             "points_possible": payload.get("points_possible"),
             "assignment_group_id": payload.get("assignment_group_id"),
             "bridge_description": payload.get("bridge_description"),
@@ -270,6 +274,9 @@ class SisGradeBridgeAdapter:
             raise _BridgeInvariantError("mixed_assignment_groups")
 
         bridge_id = str(payload.get("bridge_assignment_id") or "") or None
+        replaced_id = str(payload.get("replaced_bridge_assignment_id") or "")
+        if replaced_id and replaced_id in assignments:
+            raise _BridgeInvariantError("replaced_bridge_still_present")
         bridge = assignments.get(bridge_id) if bridge_id else None
         if bridge_id and bridge is None:
             raise _BridgeInvariantError("bridge_exact_id_unverified")
@@ -600,6 +607,16 @@ class SisGradeBridgeAdapter:
             return adapter_support.build_result("blocked", steps=copy.deepcopy(target.get("steps") or []), error_code=baseline["blocking_error"])
         course_id = target["course_id"]
         steps = copy.deepcopy(target.get("steps") or [])
+        replaced_id = str(payload.get("replaced_bridge_assignment_id") or "")
+        if replaced_id:
+            current_link = config.get_sis_grade_bridge(course_id, payload["family_title"])
+            if (not current_link
+                    or str(current_link.get("bridge_assignment_id") or "") != replaced_id
+                    or str(current_link.get("bridge_state_digest") or "")
+                    != str(payload.get("replaced_bridge_digest") or "")):
+                return adapter_support.build_result(
+                    "blocked", steps=steps, error_code="family_link_changed"
+                )
         # Source-setting PUTs are the first mutation in the reviewed repair
         # sequence. Their exact assignment reads are also the only recovery
         # proof accepted after an uncertain transport outcome.

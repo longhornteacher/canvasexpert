@@ -1423,6 +1423,8 @@ def test_get_gradebook_snapshot_happy(monkeypatch, tmp_path, _rows, _use_vault, 
         "ungraded": 1, "partially_scored": 1,
         "late_ungraded": 0,
         "missing": 0, "late": 0, "avg_pct": 90,
+        "family_role": "ordinary", "family_title": "",
+        "bridge_assignment_id": "", "source_assignment_ids": [],
     }]
     assert result["students"]["columns"] == ["pseudonym", "missing", "late", "ungraded", "pct"]
     assert len(result["students"]["rows"]) == 2

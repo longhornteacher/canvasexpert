@@ -142,6 +142,9 @@ run against unchanged Canvas state performs no grade or status mutation.
 
 Do not create a replacement bridge for an Attention operation. The family link is written only after
 all family postconditions pass, so its absence is not evidence that no Canvas object exists.
+If a linked bridge was deleted and an exact surviving bridge exists, propose the original
+source IDs and surviving bridge ID for a reviewed relink. The preview refuses while the old
+bridge still exists; apply verifies the surviving bridge before replacing the stale local link.
 
 ## 9. Privacy and storage
 
