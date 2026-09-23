@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from api.operation_ledger import models
+from api.operation_ledger import batches, executor, models, operations, paths
 from api.operation_ledger.adapters import differentiated_bridge
 from api.operation_ledger.adapters.assignment import AssignmentAdapter
 from api.operation_ledger.adapters.assignment_groups import GroupResolutionError, resolve_assignment_groups
@@ -400,6 +400,68 @@ def test_created_tier_id_survives_create_verification_mismatch_and_resumes(monke
     assert any(path.endswith("/assignments/101") and method == "PUT" for method, path, _body in fake.sends)
 
 
+def test_resume_operation_on_a_recorded_tier_zero_id_continues_without_a_second_create(
+    monkeypatch, tmp_path,
+):
+    """Correction 1: resume_operation on a tier-0 sent_unknown operation with
+    a recorded id continues from that id -- through the real Operation
+    Ledger (executor.apply_operation, then retry_operation, exactly what the
+    resume_operation MCP tool calls), not a bare adapter re-call."""
+    monkeypatch.setattr(paths, "private_root", lambda: tmp_path / "private")
+    payload = _build(monkeypatch, module_id="501")
+    fake = FakeCanvas()
+    original_get = fake.get
+    mismatch_once = {"value": True}
+
+    def get_with_transient_canvas_normalization(path, params=None, timeout=20):
+        row, error = original_get(path, params, timeout)
+        if (
+            mismatch_once["value"]
+            and path.endswith("/assignments/101")
+            and isinstance(row, dict)
+        ):
+            mismatch_once["value"] = False
+            row["description"] = "Canvas returned a different description"
+        return row, error
+
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    monkeypatch.setattr(canvas_client, "canvas_get", get_with_transient_canvas_normalization)
+    monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
+
+    adapter = AssignmentAdapter()
+    target = models.new_target(target_key="tk-1", idempotency_key="ik-1", course_id="42")
+    baseline = adapter.capture_baseline(payload, target)
+    target["baseline"] = baseline
+    operation = models.new_operation(
+        operation_id="op-tier-resume", kind="content.assignment",
+        source_ref={"type": "test", "value": "tier-resume"},
+        source_digest=adapter.source_digest(payload),
+        normalized_payload=payload, targets=[target],
+    )
+    operations.create_operation(operation)
+    batch = batches.freeze_batch(["op-tier-resume"], {"op-tier-resume": [{}]})
+    operations.set_operation_review("op-tier-resume", batch)
+
+    first = executor.apply_operation("op-tier-resume", batch["batch_id"], batch["review_digest"])
+    assert first["status"] == "attention"
+    tier0_creates = [
+        body for _method, path, body in fake.sends
+        if path.endswith("/assignments")
+        and body.get("assignment", {}).get("name") == "Practice - Red"
+    ]
+    assert len(tier0_creates) == 1
+
+    resumed = executor.retry_operation("op-tier-resume")
+
+    assert resumed["status"] == "applied", resumed
+    tier0_creates_after_resume = [
+        body for _method, path, body in fake.sends
+        if path.endswith("/assignments")
+        and body.get("assignment", {}).get("name") == "Practice - Red"
+    ]
+    assert len(tier0_creates_after_resume) == 1, "resume must not create tier 0 a second time"
+
+
 def _matching_source_assignment(assignment_id: str, *, name: str = "Practice - Red") -> dict:
     """A live Canvas assignment matching exactly what tier 0 (Support ->
     Red) would have created, for AC3's ambiguous-create-lookup tests."""
@@ -538,6 +600,45 @@ def test_source_shape_matching_tolerates_canvas_html_normalization():
     actual = {**expected, "description": "  ECR &amp;   prep  ", "submission_types": ["on_paper"]}
 
     assert _source_shape_matches(actual, expected, published=False)
+
+
+def test_source_shape_matching_tolerates_a_sanitized_scaffolding_panel(monkeypatch):
+    """Correction 1: the composed base + scaffolding-panel description (a
+    real tag, attributes, and entities -- not just plain text) still
+    verifies after a Canvas-shaped sanitization round trip, but a changed
+    visible sentence inside it still does not."""
+    from api.operation_ledger.adapters.assignment_tiered import _source_shape_matches
+
+    expected = {
+        "name": "Practice - Silver",
+        "description": (
+            '<p>Read the passage and respond.</p>'
+            '<div class="scaffold" style="border:1px solid #000;" data-tier="Accelerate">'
+            '<p>Extension &mdash; cite two sources &middot; use a &quot;so what&quot; closer.</p>'
+            '</div>'
+        ),
+        "submission_types": ["online_text_entry"],
+        "grading_type": "points",
+        "only_visible_to_overrides": False,
+        "omit_from_final_grade": True,
+        "post_to_sis": False,
+        "points_possible": 10.0,
+        "published": False,
+    }
+    sanitized = {
+        **expected,
+        "description": (
+            '<p>Read the passage and respond.</p>'
+            '<div data-tier="Accelerate"   style="border:1px solid #000;"    class="scaffold">'
+            '  <p>Extension &#8212; cite two sources &#183; use a &#34;so what&#34; closer.</p>  '
+            '</div>'
+        ),
+    }
+    assert _source_shape_matches(sanitized, expected, published=False)
+
+    changed = {**sanitized, "description": sanitized["description"].replace(
+        "cite two sources", "cite three sources")}
+    assert not _source_shape_matches(changed, expected, published=False)
 
 
 def test_whole_class_payload_has_no_bridge(monkeypatch):

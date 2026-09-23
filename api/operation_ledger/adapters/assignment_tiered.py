@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import html
-import re
 from datetime import datetime
 
 from .. import models
 from .adapter_support import (
     build_result,
+    canonical_html,
     canvas_message_from_error,
     ensure_step,
     find_step,
@@ -411,16 +410,10 @@ def _shape_mismatches(actual: dict, expected: dict, *, published: bool) -> list[
 
 def _shape_value_matches(key: str, actual: object, expected: object) -> bool:
     if key == "description":
-        return _canonical_description(actual) == _canonical_description(expected)
+        return canonical_html(actual) == canonical_html(expected)
     if key == "submission_types":
         return sorted(actual or []) == sorted(expected or [])
     return actual == expected
-
-
-def _canonical_description(value: object) -> str:
-    """Compare Canvas HTML descriptions after entity/whitespace normalization."""
-    text = html.unescape(str(value or ""))
-    return re.sub(r"\s+", " ", text).strip()
 
 
 def _publish_assignment(*, course_id, assignment_id, payload, steps, context, step_key, failure_state):

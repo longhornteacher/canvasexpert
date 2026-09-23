@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from html.parser import HTMLParser
 
 from api.platform_services import canvas_client
 
@@ -154,3 +155,66 @@ def build_result(
     if canvas_message is not None:
         result["canvas_message"] = canvas_message
     return result
+
+
+class _CanonicalHTMLBuilder(HTMLParser):
+    """Re-serializes one HTML fragment into a form insensitive to exactly
+    what Canvas's own sanitizer is free to change: entity spelling,
+    attribute order, and incidental whitespace -- never to visible text or
+    tag structure (Issue #11 root cause; Correction 1)."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def _attrs_str(self, attrs) -> str:
+        rendered = "".join(
+            # Canvas's sanitizer re-serializes inline CSS (reformats
+            # whitespace/punctuation, may drop a disallowed property), so a
+            # style attribute's presence is kept but its value is ignored
+            # (Correction 2). Every other attribute still compares by value.
+            f' {name}="{"" if name == "style" else _normalize_ws(value)}"'
+            for name, value in sorted(attrs, key=lambda item: item[0])
+        )
+        return rendered
+
+    def handle_starttag(self, tag, attrs):
+        self.parts.append(f"<{tag}{self._attrs_str(attrs)}>")
+
+    def handle_startendtag(self, tag, attrs):
+        self.parts.append(f"<{tag}{self._attrs_str(attrs)}/>")
+
+    def handle_endtag(self, tag):
+        self.parts.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        if not data.strip():
+            # Whitespace-only text between/inside tags is incidental
+            # formatting (indentation, a wrapped line), not a visible
+            # character -- drop it rather than keep a phantom space so two
+            # differently-indented copies of the same markup canonicalize
+            # identically (Correction 1).
+            return
+        self.parts.append(_normalize_ws(data))
+
+
+def _normalize_ws(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value or ""))
+
+
+def canonical_html(value: object) -> str:
+    """Canonicalize one Canvas HTML field for postcondition comparison.
+
+    Decodes entities, drops attribute order, and collapses whitespace and
+    newlines -- inside text and inside tags -- to a single space, while
+    keeping every tag, attribute, and visible word significant. A changed
+    visible sentence still fails; Canvas's own HTML sanitization round-trip
+    of an unchanged one does not (Correction 1's law).
+
+    The one shared helper for every adapter that verifies a Canvas HTML
+    field postcondition -- do not add a second copy.
+    """
+    builder = _CanonicalHTMLBuilder()
+    builder.feed(str(value or ""))
+    builder.close()
+    return _normalize_ws("".join(builder.parts)).strip()

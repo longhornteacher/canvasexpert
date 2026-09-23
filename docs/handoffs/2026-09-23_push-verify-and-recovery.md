@@ -264,3 +264,58 @@ postcondition:
   changed) verifies. A changed visible sentence fails.
 - `resume_operation` on an operation stopped this way then continues from the
   recorded id without creating a duplicate.
+
+## Correction 1 execution result
+
+**GREEN.** Root cause found: `assignment_tiered.py` had its own private
+`_canonical_description` (entity-unescape + whitespace-collapse only, no tag/attribute
+awareness at all). A tier description is composed as base text plus an HTML scaffolding
+panel (`<div class="..." style="..." data-tier="...">...</div>`); Canvas's own sanitizer
+is free to reorder that div's attributes, re-encode entities, and reformat inter-tag
+whitespace, none of which the old string-level compare tolerated -- any of those alone
+produced `assignment postcondition mismatch: description` even though the visible text
+was byte-identical. `assignment_whole.py` never hit this because it has no description
+postcondition check at all (nothing to reproduce there; there was no second copy to
+compare against, only a gap).
+
+Fix: one shared, tag-aware canonicalizer, `adapter_support.canonical_html` (new;
+`html.parser.HTMLParser`-based) -- decodes entities, sorts each tag's attributes, drops
+whitespace-only text between/inside tags, collapses real text whitespace to single
+spaces. `assignment_tiered.py`'s private `_canonical_description` is deleted; its one
+caller (`_shape_value_matches`) now calls the shared helper. No second copy exists.
+
+**Tests added:**
+- Law: `api/tests/test_adapter_support.py` -- a Canvas-sanitized round trip (entities
+  re-encoded, attribute order changed, whitespace/newlines added) verifies; a changed
+  visible sentence does not.
+- Contract: `test_source_shape_matching_tolerates_a_sanitized_scaffolding_panel` in
+  `test_assignment_tier_operation.py` -- the same law through the real tiered
+  postcondition check (`_source_shape_matches`), using an actual scaffolding-panel div.
+- Example: `test_resume_operation_on_a_recorded_tier_zero_id_continues_without_a_second_create`
+  -- builds a real Operation Ledger operation (not a bare adapter call), applies it to a
+  tier-0 `sent_unknown`/recorded-id stop via `executor.apply_operation`, then resumes via
+  `executor.retry_operation` (what `resume_operation` calls) and asserts exactly one POST
+  ever created tier 0.
+
+**Named gate (as before) + the two new/changed test files:** 298 passed, 0 failed.
+Also reran `test_assignment_operation.py`, `test_quiz_operation.py`, `test_page_operation.py`,
+`test_quick_assignment_operation.py`, `test_printable_attach.py`, `test_operation_routes.py`,
+`test_canvas_mutation_ownership.py`, `test_beta075_mcp.py` (137 passed) since
+`adapter_support.py` is shared: no regressions.
+
+One test-writing correction along the way: my first version of the sanitized-panel fixture
+used whitespace-only text nodes between tags (e.g. indentation) that my first
+`canonical_html` draft kept as a phantom single space instead of dropping, so the two
+canonicalized strings differed only in incidental inter-tag spacing. Fixed by dropping
+whitespace-only text nodes entirely rather than collapsing them to one space, re-verified
+against both the Law test and the existing entity/whitespace test
+(`test_source_shape_matching_tolerates_canvas_html_normalization`).
+
+Commit: see `git log` on `dev` (this correction lands as a new commit on top of `149c2a4`).
+
+**Correction 2:** `style` value was still compared literally; Canvas's sanitizer reformats
+inline CSS and may prune a disallowed property, so `canonical_html` now keeps a `style`
+attribute's presence but renders its value as empty for comparison, leaving every other
+attribute, tag, and visible-text check unchanged; the Law test gained a parametrized case
+for a reformatted/pruned style plus its own changed-visible-text negative, and the
+named gate is 299 passed, 0 failed.
