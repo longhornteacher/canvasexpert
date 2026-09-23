@@ -104,6 +104,25 @@ Recovery must identify the exact family and repair only its frozen bridge/score
 operation; it must not infer a group, module, bridge, publication choice, or due
 date from live Canvas during preview.
 
+## 7a. Reconciliation and repair
+
+Reconciliation title matching normalizes casefold, collapsed whitespace, unified dash
+variants (`—`/`–`/`-`), one trailing configured tier tag or legacy `- Bridge` suffix, and
+one parenthetical present on the source titles (for example `(Paper)`) that does not
+appear on the bridge; a registered family link always beats title fallback. Two families
+that share the same normalized word set in a different order are never merged; both are
+reported as `title_mismatch_suspected` for the teacher to resolve.
+
+A family with at least two tag-suffixed sources and exactly one unsuffixed member always
+treats that member as the bridge candidate, whatever its current settings prove. Its
+non-bridge-safe settings (SIS off, still counting toward the final grade) are surfaced as
+a repair the reviewed operation can apply; they never add a third source. More than one
+unsuffixed candidate is `bridge_candidates_ambiguous` and is never guessed.
+
+Two tiers that resolve to the same public tag inside one envelope refuse at preview with a
+stable `tier_tag_collision` code naming both labels and the shared tag. The same tag reused
+by a different family elsewhere is not a collision.
+
 ## 8. Non-goals
 
 - No authoring-grammar merger between AssignmentForge and QuizForge.

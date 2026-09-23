@@ -105,6 +105,25 @@ def test_bridge_title_is_server_owned_and_bridge_tag_is_reserved(monkeypatch):
         differentiated_bridge.resolve_public_tags(["Support", "Extend"])
 
 
+def test_quizforge_tier_tag_collision_is_a_stable_envelope_refusal(monkeypatch):
+    """Contract (AC5): a tier-tag collision inside one QuizForge envelope
+    refuses with a stable ``tier_tag_collision`` code, not a bare message.
+    Support/Core/Extend -> Silver/Red/Blue (all distinct) still passes."""
+    _plans(monkeypatch)
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {
+        "Support": "Silver", "Core": "Red", "Accelerate": "Silver", "Extend": "Blue",
+    })
+    with pytest.raises(differentiated_bridge.TierTagCollisionError) as excinfo:
+        differentiated_bridge.resolve_public_tags(["Support", "Accelerate"])
+    assert excinfo.value.labels == ["Support", "Accelerate"]
+    assert excinfo.value.tag == "Silver"
+
+    # Extend->Blue alongside Accelerate->Blue in Settings is valid; a
+    # collision exists only inside one envelope (locked decision).
+    resolved = differentiated_bridge.resolve_public_tags(["Support", "Core", "Extend"])
+    assert [row["tag"] for row in resolved] == ["Silver", "Red", "Blue"]
+
+
 @pytest.mark.parametrize(
     "tags",
     [

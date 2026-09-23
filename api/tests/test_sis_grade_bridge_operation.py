@@ -279,3 +279,81 @@ def test_operation_records_only_local_read_source(bridge_harness):
     assert operation["normalized_payload"]["bridge_only"] is True
     assert operation["normalized_payload"]["due_at"] is None
     assert receipts.list_receipts() == []
+
+
+def test_reconcile_preview_apply_links_a_two_theme_family(tmp_path, monkeypatch):
+    """Example (happy path): reconcile -> preview -> apply for a synthetic,
+    not-yet-linked Two Theme-shaped family (T4.1).
+
+    Family-link storage is stubbed in-memory (never the real machine/workspace
+    config) so this test cannot read or write outside the sandbox.
+    """
+    monkeypatch.setattr(paths, "private_root", lambda: tmp_path / "private")
+    monkeypatch.setattr(config, "active_courses", lambda: [{"id": "course-1", "name": "Synthetic Course", "active": True}])
+    monkeypatch.setattr(config, "saved_courses", lambda: [{"id": "course-1", "name": "Synthetic Course", "active": True}])
+    monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {
+        "Support": "Silver", "Core": "Gold", "Accelerate": "", "Extend": "",
+    })
+    saved_bridges: dict[str, dict] = {}
+    monkeypatch.setattr(
+        config, "get_sis_grade_bridge",
+        lambda _course, title: copy.deepcopy(saved_bridges.get(title)),
+    )
+    monkeypatch.setattr(
+        config, "list_sis_grade_bridges",
+        lambda _course: [copy.deepcopy(row) for row in saved_bridges.values()],
+    )
+
+    def fake_save(_course, registration):
+        saved_bridges[registration["family_title"]] = copy.deepcopy(registration)
+        return copy.deepcopy(registration)
+
+    monkeypatch.setattr(config, "save_sis_grade_bridge", fake_save)
+    fake = FakeCanvas()
+    fake.assignments["source-a"]["name"] = "Two Theme SCRs - Silver"
+    fake.assignments["source-b"]["name"] = "Two Theme SCRs - Gold"
+    fake.assignments["bridge"]["name"] = "Two Theme SCRs - Bridge"
+
+    def read_local_catalog(_course_id, **_kwargs):
+        return {"catalog": {
+            "updated_at": "2026-09-21T12:00:00Z",
+            "assignments": {"state": "current", "records": copy.deepcopy(fake.assignments)},
+            "modules": {"state": "current", "records": [copy.deepcopy(row) for row in fake.modules.values()]},
+        }}
+
+    def read_local_submissions(_course_id, **_kwargs):
+        records = []
+        for assignment_id, rows in fake.submissions.items():
+            for row in rows:
+                records.append({"assignment_id": assignment_id, **copy.deepcopy(row)})
+        return {"source": "mirror", "state": "current", "records": records}
+
+    monkeypatch.setattr(course_catalog, "read_catalog", read_local_catalog)
+    monkeypatch.setattr(read_service, "private_submissions", read_local_submissions)
+    monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
+    monkeypatch.setattr(canvas_client, "canvas_get_all_complete", fake.get_all_complete)
+    monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
+    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed", lambda _course: None)
+
+    matrix = sis_grade_bridge.reconcile_sis_grade_bridges("course-1")
+    row = next(item for item in matrix["matrix"] if item["family_title"] == "Two Theme SCRs")
+    assert row["status"] == "missing"
+    assert row["bridge_assignment_id"] == "bridge"
+    assert row["source_assignment_ids"] == ["source-a", "source-b"]
+
+    preview = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+        "course-1", "Two Theme SCRs"
+    )
+    assert preview["ok"] is True
+
+    result = sis_grade_bridge.apply_sis_grade_bridge(
+        preview["operation_id"], preview["batch_id"], preview["review_digest"]
+    )
+    assert result["ok"] is True
+
+    linked = config.get_sis_grade_bridge("course-1", "Two Theme SCRs")
+    assert linked["bridge_assignment_id"] == "bridge"
+
+    followup = sis_grade_bridge.preview_sis_grade_bridge("course-1", "Two Theme SCRs")
+    assert followup["ok"] is True

@@ -6,6 +6,7 @@ import json
 import pytest
 
 from api.operation_ledger import models
+from api.operation_ledger.adapters import differentiated_bridge
 from api.operation_ledger.adapters.assignment import AssignmentAdapter
 from api.operation_ledger.adapters.assignment_groups import GroupResolutionError, resolve_assignment_groups
 from api.operation_ledger.adapters.module_placement import attach_assignment_type_module_item
@@ -276,6 +277,35 @@ def test_prepare_requires_unique_public_tags(monkeypatch):
                 {"tier": "Extend", "group_name": "Gold"},
             ],
         })
+
+
+def test_assignmentforge_tier_tag_collision_is_a_stable_envelope_refusal(monkeypatch):
+    """Contract (AC5): a tier-tag collision inside one AssignmentForge
+    envelope refuses with a stable ``tier_tag_collision`` code, not a bare
+    message. Support/Core/Extend -> Silver/Red/Blue (all distinct) still
+    passes, matching QuizForge's identical shared rule."""
+    colliding_data = {
+        "title": "Practice", "description": "base", "points": 10,
+        "tiers": [
+            {"label": "Support", "group": "Blue", "description": "support body"},
+            {"label": "Accelerate", "group": "Gold", "description": "accelerate body"},
+        ],
+    }
+    monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.parse_file", lambda _path: (colliding_data, []))
+    monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.tier_payloads", lambda data: copy.deepcopy(data["tiers"]))
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {
+        "Support": "Silver", "Core": "Red", "Accelerate": "Silver", "Extend": "Blue",
+    })
+    with pytest.raises(differentiated_bridge.TierTagCollisionError) as excinfo:
+        AssignmentAdapter().build_payload({
+            "path": "synthetic.txt", "due_at": "2026-09-14T15:30:00-05:00",
+            "module_name": "Week 1", "tier_targets": [
+                {"tier": "Support", "group_name": "Blue"},
+                {"tier": "Accelerate", "group_name": "Gold"},
+            ],
+        })
+    assert excinfo.value.labels == ["Support", "Accelerate"]
+    assert excinfo.value.tag == "Silver"
 
 
 def test_differentiated_assignment_family_is_unrestricted_and_student_free(monkeypatch):

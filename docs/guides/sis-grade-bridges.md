@@ -44,7 +44,12 @@ date, the source timestamp is preserved and the bridge is due at 23:59 on the sa
 
 If real Canvas titles drift from the configured `Base - <tag>` shape, the family remains
 recoverable without renaming anything in Canvas; an agent can propose the exact source IDs for
-teacher confirmation.
+teacher confirmation. Title matching normalizes casefold, collapsed whitespace, dash variants,
+one trailing tier tag or legacy `- Bridge` suffix, and one source-only parenthetical (for
+example `(Paper)`); two titles that share the same words in a different order are reported,
+never silently merged. A family with two tag-suffixed sources and one unsuffixed member always
+treats that member as the bridge, and repairs its SIS/final-grade settings through the same
+reviewed path rather than adding a third source.
 
 A teacher request to land the family authorizes the complete reviewed Operation Ledger
 sequence for that course and family. CanvasExpert reports the exact created objects. Open Canvas

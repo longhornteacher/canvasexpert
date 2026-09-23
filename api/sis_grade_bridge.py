@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 
 from api.operation_ledger import batches, executor, models, operations, receipts, registry
 from api.operation_ledger.adapters.sis_grade_bridge import KIND
@@ -23,7 +24,36 @@ _REPAIRABLE_REASONS = frozenset({
     "family_link_missing",
     "accepted_existing_bridge",
     "bridge_missing",
+    "bridge_omitted_from_final_grade",
+    "bridge_sis_sync_disabled",
 })
+
+# AC1: a bridge candidate whose only unsafe settings are these two fields is
+# repairable through the same reviewed path as a source's settings; any other
+# unsafe bridge field (not published, accepts submissions, points/group drift,
+# ...) still blocks and is never auto-repaired.
+_BRIDGE_REPAIRABLE_REASONS = frozenset({
+    "bridge_omitted_from_final_grade",
+    "bridge_sis_sync_disabled",
+})
+
+
+def _bridge_setting_repairs(row: dict | None) -> list[dict]:
+    if not row:
+        return []
+    fields = []
+    if "omit_from_final_grade" in row and row.get("omit_from_final_grade") is not False:
+        fields.append("omit_from_final_grade")
+    if "post_to_sis" in row and row.get("post_to_sis") is not True:
+        fields.append("post_to_sis")
+    if not fields:
+        return []
+    return [{"bridge_assignment_id": str(row.get("id") or ""), "fields": fields}]
+
+
+def _title_word_signature(title: str) -> tuple[str, ...]:
+    """Order-independent word signature used to flag likely title splits (AC3)."""
+    return tuple(sorted(re.findall(r"[\w']+", str(title or "").casefold())))
 
 
 def _source_setting_repairs(source_rows: list[dict]) -> list[dict]:
@@ -226,6 +256,19 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
     for candidate in families:
         candidate_title = str(candidate.get("family_title") or "").casefold()
         title_counts[candidate_title] = title_counts.get(candidate_title, 0) + 1
+    # AC3: two families with the same normalized word set but a different
+    # word order are never merged; both are reported so the teacher can
+    # disambiguate rather than watch one silently vanish into the other.
+    signature_titles: dict[tuple[str, ...], set[str]] = {}
+    for candidate in families:
+        signature = _title_word_signature(candidate.get("family_title"))
+        if signature:
+            signature_titles.setdefault(signature, set()).add(
+                str(candidate.get("family_title") or "").casefold()
+            )
+    mismatch_signatures = {
+        signature for signature, titles in signature_titles.items() if len(titles) > 1
+    }
     for family in families:
         title = family["family_title"]
         identity = _family_row_identity(family)
@@ -239,33 +282,58 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
         )
         source_ids = list(family.get("source_assignment_ids") or [])
         source_rows = [row for row in rows if str(row.get("id")) in {str(v) for v in source_ids}]
-        # Discovery treats an unsuffixed title as a structural candidate. If
-        # its live shape proves it is the no-submission bridge, move it back
-        # to bridge candidates instead of counting it as a source.
-        bridge_like = {
-            str(row.get("id")) for row in source_rows
-            if str(row.get("name") or "").strip().casefold() == title.casefold()
-            and _bridge_safety_reasons(row) == []
-        }
-        if bridge_like:
-            source_ids = [value for value in source_ids if str(value) not in bridge_like]
-            source_rows = [row for row in source_rows if str(row.get("id")) not in bridge_like]
-        source_titles = [str(row.get("name") or "") for row in sorted(source_rows, key=lambda item: str(item.get("id") or ""))]
-        # An unsuffixed assignment is a source only when its live source shape
-        # proves that role; title alone may never classify it as a bridge.
         base = title.casefold()
+        # A saved registration's source IDs are proof-bearing exact identity.
+        # AC1 never reclassifies a registered source as the bridge, whatever
+        # its title looks like.
+        registered_source_ids = {
+            str(v) for v in (registration or {}).get("source_assignment_ids") or []
+        }
+        # AC1: an unsuffixed row (exact base title, no configured tag) is
+        # bridge material -- never a source -- whenever at least two real
+        # tag-suffixed sources exist, whatever the unsuffixed row's current
+        # settings are. With fewer than two suffixed sources there is nothing
+        # yet to anchor that rule, so an unsuffixed row keeps the legacy
+        # source-shape-proves-the-role behavior.
+        unsuffixed_rows = [
+            row for row in source_rows
+            if str(row.get("name") or "").strip().casefold() == base
+            and str(row.get("id")) not in registered_source_ids
+        ]
+        suffixed_rows = [row for row in source_rows if row not in unsuffixed_rows]
         for row in rows:
-            if str(row.get("id")) in {str(v) for v in source_ids}:
+            row_id = str(row.get("id"))
+            if row_id in {str(v) for v in source_ids}:
                 continue
-            if str(row.get("name") or "").strip().casefold() == base and _source_shape_reasons(row) == [] and row.get("published") is True:
-                source_ids.append(str(row.get("id")))
-                source_rows.append(row)
-                source_titles.append(str(row.get("name") or ""))
+            if row_id in registered_source_ids:
+                continue
+            if str(row.get("name") or "").strip().casefold() == base:
+                unsuffixed_rows.append(row)
+
         reasons = []
         status = "synced"
         if title_counts.get(title.casefold(), 0) > 1:
             status = "blocked"
             reasons.append("ambiguous_family_identity")
+        signature = _title_word_signature(title)
+        ambiguous_bridge_candidates = False
+        if signature in mismatch_signatures:
+            status = "blocked"
+            reasons.append("title_mismatch_suspected")
+
+        if len(suffixed_rows) >= 2 and len(unsuffixed_rows) > 1:
+            ambiguous_bridge_candidates = True
+            status = "blocked"
+            reasons.append("bridge_candidates_ambiguous")
+            source_ids = [str(row.get("id")) for row in suffixed_rows]
+            source_rows = suffixed_rows
+        elif len(suffixed_rows) >= 2 and len(unsuffixed_rows) == 1:
+            # The lone unsuffixed row is bridge candidate material: pull it
+            # out of the sources so it is picked up by the bridge-candidate
+            # scan below, whatever its current settings prove.
+            source_ids = [str(row.get("id")) for row in suffixed_rows]
+            source_rows = suffixed_rows
+        source_titles = [str(row.get("name") or "") for row in sorted(source_rows, key=lambda item: str(item.get("id") or ""))]
         source_failures = []
         for row in source_rows:
             source_failures.extend(_source_shape_reasons(row))
@@ -284,38 +352,52 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
 
         expected_name = differentiated_bridge.bridge_title(title)
         bridge_candidates = []
-        for row in rows:
-            row_name = str(row.get("name") or "").strip()
-            if row_name.casefold() not in {title.casefold(), expected_name.casefold()}:
-                continue
-            if str(row.get("id")) in {str(v) for v in source_ids}:
-                continue
-            bridge_candidates.append(row)
-        # A linked bridge ID is exact authority and is retained even when
-        # title discovery no longer finds the family.
-        if registration and str(registration.get("bridge_assignment_id") or "") not in {str(row.get("id")) for row in bridge_candidates}:
-            linked_bridge = next((row for row in rows if str(row.get("id")) == str(registration.get("bridge_assignment_id"))), None)
-            if linked_bridge:
-                bridge_candidates.append(linked_bridge)
+        if not ambiguous_bridge_candidates:
+            for row in rows:
+                row_name = str(row.get("name") or "").strip()
+                if row_name.casefold() not in {title.casefold(), expected_name.casefold()}:
+                    continue
+                if str(row.get("id")) in {str(v) for v in source_ids}:
+                    continue
+                bridge_candidates.append(row)
+            # A linked bridge ID is exact authority and is retained even when
+            # title discovery no longer finds the family.
+            if registration and str(registration.get("bridge_assignment_id") or "") not in {str(row.get("id")) for row in bridge_candidates}:
+                linked_bridge = next((row for row in rows if str(row.get("id")) == str(registration.get("bridge_assignment_id"))), None)
+                if linked_bridge:
+                    bridge_candidates.append(linked_bridge)
         safe_bridges = []
+        repairable_bridge = None
+        repairable_bridge_reasons: list[str] = []
         unsafe_bridge_reasons = []
-        for bridge in bridge_candidates:
+        for candidate_row in bridge_candidates:
             safety = _bridge_safety_reasons(
-                bridge,
+                candidate_row,
                 expected_points=(source_rows[0].get("points_possible") if source_rows else None),
                 expected_group=(source_rows[0].get("assignment_group_id") if source_rows else None),
             )
             if not safety:
-                safe_bridges.append(bridge)
+                safe_bridges.append(candidate_row)
+            elif set(safety) <= _BRIDGE_REPAIRABLE_REASONS and repairable_bridge is None and not safe_bridges:
+                repairable_bridge = candidate_row
+                repairable_bridge_reasons = safety
             else:
                 unsafe_bridge_reasons.extend(safety)
         if len(safe_bridges) > 1:
             status = "blocked"
             reasons.append("multiple_bridge_targets")
-        if unsafe_bridge_reasons and not safe_bridges:
+        bridge = None
+        if len(safe_bridges) == 1:
+            bridge = safe_bridges[0]
+        elif not safe_bridges and repairable_bridge is not None and not unsafe_bridge_reasons:
+            # AC1: a bridge candidate that is only SIS-off or still counts
+            # toward the final grade is repairable, not a hard block.
+            bridge = repairable_bridge
+            status = "blocked"
+            reasons.extend(sorted(set(repairable_bridge_reasons)))
+        if unsafe_bridge_reasons and not safe_bridges and bridge is None:
             status = "blocked"
             reasons.extend(sorted(set(unsafe_bridge_reasons)))
-        bridge = safe_bridges[0] if len(safe_bridges) == 1 else None
         drift_fields = []
         if bridge is None and not unsafe_bridge_reasons and status == "synced":
             status = "missing"
@@ -374,6 +456,7 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
                 "bridge_assignment_id": str(bridge.get("id")) if bridge else None,
                 "action": action,
                 "source_setting_repairs": _source_setting_repairs(source_rows),
+                "bridge_setting_repairs": _bridge_setting_repairs(bridge),
             },
         })
     # A saved registration is proof-bearing exact identity.  If discovery no
@@ -400,6 +483,7 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
                 "bridge_assignment_id": registration.get("bridge_assignment_id"),
                 "action": "blocked",
                 "source_setting_repairs": [],
+                "bridge_setting_repairs": [],
             },
         })
     return {"ok": True, "course_id": course_key, "matrix": matrix}

@@ -24,6 +24,7 @@ from pathlib import Path
 
 from api import runtime_paths
 from api.operation_ledger import batches, executor, models, operations, registry
+from api.operation_ledger.adapters import differentiated_bridge
 from api.operation_ledger.adapters.assignment import KIND as ASSIGNMENT_KIND
 from api.operation_ledger.adapters.assignment_update import KIND as ASSIGNMENT_UPDATE_KIND
 from api.operation_ledger.adapters.page import KIND as PAGE_KIND
@@ -229,6 +230,15 @@ def preview_content_push(
         frozen = adapter.freeze_review(payload, target_record, baseline)
         batch = batches.freeze_batch([operation_id], {operation_id: [frozen]})
         operations.set_operation_review(operation_id, batch)
+    except differentiated_bridge.TierTagCollisionError as exc:
+        return {
+            "ok": False,
+            "code": "tier_tag_collision",
+            "error": str(exc),
+            "labels": exc.labels,
+            "tag": exc.tag,
+            "blocking": True,
+        }
     except ValueError as exc:
         message = str(exc)
         code = None
@@ -330,6 +340,15 @@ def preview_differentiated_quiz_push(
         frozen = adapter.freeze_review(payload, target_record, baseline)
         batch = batches.freeze_batch([operation_id], {operation_id: [frozen]})
         operations.set_operation_review(operation_id, batch)
+    except differentiated_bridge.TierTagCollisionError as exc:
+        return {
+            "ok": False,
+            "code": "tier_tag_collision",
+            "error": str(exc),
+            "labels": exc.labels,
+            "tag": exc.tag,
+            "blocking": True,
+        }
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "blocking": True}
     except Exception:

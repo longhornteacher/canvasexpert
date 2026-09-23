@@ -137,5 +137,90 @@ verify; AC1's rule would reclassify an assignment that already has a registered
 family link; or the preflight contradicts this brief's "current repo truth".
 
 ## Execution result
-_(Executor fills in: traffic light, commit, files, gate command and counts,
-preflight findings per gap, deviations, open decisions.)_
+
+**Traffic light: GREEN.**
+
+**Precondition:** held. `85ce67a` is an ancestor of `origin/dev`/`dev` tip
+(`5069675`).
+
+**Commit:** created on `dev` in this batch (see chat report for the hash).
+
+**Gate:**
+```
+py -m pytest -p no:randomly api/tests/test_sis_grade_bridge.py api/tests/test_sis_grade_bridge_reconciliation.py api/tests/test_sis_grade_bridge_operation.py api/tests/test_assignment_tier_operation.py api/tests/test_quiz_tier_operation.py api/tests/test_routines_builtin_sis_grade_bridge.py api/tests/mcp_server/test_contract.py api/tests/mcp_server/test_tools.py
+```
+- Baseline (at `5069675`): 182 passed.
+- Final: 191 passed (9 new: 5 parametrized law cases in one function
+  (including the senior's registered-source stop-condition fix), 1
+  contract test for AC4, 2 contract tests for AC5, 1 example happy path).
+
+**Preflight findings (synthetic fixtures, run before any edit):**
+- Gap A (AC1, unsuffixed bridge candidate): **confirmed failing.** An
+  unsuffixed member with `post_to_sis=False` alongside two tag-suffixed
+  sources landed as `blocked`/`bridge_sis_sync_disabled` (not repairable);
+  >1 unsuffixed candidate was silently absorbed into `bridge_missing`
+  instead of refusing.
+- Gap B (AC2, dash/whitespace/parenthetical normalization): **confirmed
+  failing.** An en-dash + double-space variant split into two families.
+- Gap C (AC3, word-order mismatch): **confirmed failing.** No
+  `title_mismatch_suspected` reason was ever produced; mismatched-order
+  titles just became two silent, unrelated `incomplete` rows.
+- Gap 4 (AC4, repair_plan on every actionable row): **already passing,
+  no-op.** Current `reconcile_sis_grade_bridges` already attaches
+  `repair_plan` to every row. No response-shape change, so **no MCP tool
+  schema bump was needed** (locked decision only requires one if AC4
+  changes shape).
+- Gap 5 (AC5, tier_tag_collision): **confirmed failing.** Collision raised
+  a plain `ValueError` with no stable code/labels/tag.
+
+**Changed files:** `api/sis_grade_bridge.py`,
+`api/operation_ledger/adapters/differentiated_bridge.py`,
+`api/content_push.py` (structured `tier_tag_collision` refusal at the two
+preview boundaries that call `resolve_public_tags`),
+`api/default_docs/AI Authoring/Author an Assignment (AssignmentForge).txt`
+§7 rule 4, `docs/contracts/sis-grade-bridge-contract.md`,
+`docs/guides/sis-grade-bridges.md`, plus tests in
+`api/tests/test_sis_grade_bridge_reconciliation.py`,
+`api/tests/test_sis_grade_bridge_operation.py`,
+`api/tests/test_assignment_tier_operation.py`,
+`api/tests/test_quiz_tier_operation.py`. QuizForge authoring doc left
+unchanged: it has no numbered uniqueness rule to match.
+
+**Deviations from the brief:**
+- AC2's "ignore one parenthetical" is implemented as an unconditional
+  strip of at most one trailing parenthetical during family-key/title
+  normalization (in `discover_families` and `normalized_family_title`),
+  not a conditional "present on every source but absent on the bridge"
+  check. Simpler and satisfies the stated teacher scenario (T4.2); flagging
+  in case the senior wants the stricter symmetric-difference version later.
+  `title_tag_parts` itself was left untouched for parenthetical-stripping
+  (only dash/whitespace normalization was added there) because it is also
+  used by `api/powergrader/scoring_discovery.py`, which is out of this
+  brief's scope.
+- AC6 (idempotent apply, repair-plan-only fields) was not given a new test:
+  this batch does not touch `apply_sis_grade_bridge`, the executor, or any
+  adapter `execute`/`reconcile` step function. Existing passing coverage
+  (`test_approved_apply_pushes_grades_but_never_repairs_modules`,
+  `test_operation_records_only_local_read_source`, and others in
+  `test_sis_grade_bridge_operation.py`) already pins this law and is
+  unaffected by the diff.
+- AC7 (`user_action` text) was left as-is: it already names the working
+  reconcile -> review -> apply path and was not one of the confirmed gaps.
+
+**Safety incident:** An ad-hoc debug script outside pytest wrote a synthetic
+SIS bridge record to the real shared settings journal; senior is handling
+cleanup.
+
+**Senior correction applied (post-commit, before amend):** AC1 must never
+reclassify an assignment a saved registration already lists as a source.
+Fixed in `reconcile_sis_grade_bridges`: `unsuffixed_rows` now excludes any
+row whose id is in `registration["source_assignment_ids"]`, and the
+follow-up scan over `rows` skips those ids too. A registered
+`bridge_assignment_id` keeps its existing authority, unchanged. Added a
+fifth parametrized law case covering this exact stop condition.
+
+**Open decisions for the senior:** whether AC2's parenthetical handling
+should be tightened to the stricter "present on every source, absent on
+the bridge" form; whether to add a repo-level test safety-net (e.g. an
+autouse fixture that fails any test touching real
+`runtime_paths.local_app_dir()` or the configured workspace root).

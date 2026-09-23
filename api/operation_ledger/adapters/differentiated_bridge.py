@@ -30,6 +30,32 @@ RECONCILIATION_FIELDS = ("name", "description", "due_at")
 _FAMILY_KEYS = ("family_id", "differentiation_family_id", "canonical_family_id")
 _TIER_KEYS = ("tier", "canonical_tier", "variant", "variant_label")
 
+_DASH_VARIANTS = ("—", "–")  # em dash, en dash
+_TRAILING_PARENTHETICAL_RE = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+class TierTagCollisionError(ValueError):
+    """A tier-tag collision inside one envelope (AC5).
+
+    Carries the colliding tier ``labels`` and the shared public ``tag`` so a
+    preview boundary can return a stable ``tier_tag_collision`` refusal
+    instead of a plain message.
+    """
+
+    def __init__(self, message: str, *, labels: list[str], tag: str):
+        super().__init__(message)
+        self.labels = list(labels)
+        self.tag = tag
+
+
+def _normalize_title_text(value: object) -> str:
+    """Casefold, collapse whitespace, and unify dash variants (AC2)."""
+    text = normalize_student_text(value or "").strip()
+    for dash in _DASH_VARIANTS:
+        text = text.replace(dash, "-")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
 
 def supported_renderers() -> tuple[str, ...]:
     """Return the renderer registry for the shared family contract."""
@@ -81,10 +107,12 @@ def _public_tags(tier_tags: dict | None = None) -> list[str]:
 def title_tag_parts(value: object, tier_tags: dict | None = None) -> tuple[str, str | None]:
     """Split an exact configured ``Base - <tag>`` title.
 
-    This is candidate discovery only.  Callers still have to prove the live
+    Matching normalizes casefold, collapsed whitespace, and dash variants
+    (``—``/``–``/``-``) before the suffix comparison (AC2). This is
+    candidate discovery only.  Callers still have to prove the live
     assignment structure before treating the result as a source or bridge.
     """
-    title = normalize_student_text(value or "").strip()
+    title = _normalize_title_text(value)
     folded = title.casefold()
     for tag in _public_tags(tier_tags):
         suffix = f" - {tag}".casefold()
@@ -94,11 +122,19 @@ def title_tag_parts(value: object, tier_tags: dict | None = None) -> tuple[str, 
 
 
 def normalized_family_title(value: object, tier_tags: dict | None = None) -> str:
-    """Normalize a candidate title using configured tags and the bridge suffix."""
-    title = normalize_student_text(value or "").strip()
+    """Normalize a candidate title using configured tags and the bridge suffix.
+
+    Strips at most one trailing configured tier tag or the legacy
+    ``- Bridge`` suffix, then ignores at most one trailing parenthetical
+    (for example ``(Paper)``) so a source-only parenthetical does not split
+    an otherwise identical family (AC2).
+    """
+    title = _normalize_title_text(value)
     if title.casefold().endswith(" - bridge"):
-        return title[:-len(" - bridge")].rstrip()
-    return title_tag_parts(title, tier_tags)[0].strip()
+        base = title[:-len(" - bridge")].rstrip()
+    else:
+        base = title_tag_parts(title, tier_tags)[0].strip()
+    return _TRAILING_PARENTHETICAL_RE.sub("", base).strip() or base
 
 
 def discover_families(
@@ -131,6 +167,10 @@ def discover_families(
         family_key = canonical_family_key(assignment)
         tier = canonical_assignment_tier(assignment)
         base_title, public_tag = title_tag_parts(assignment.get("name"), tier_tags)
+        # Ignore at most one trailing parenthetical (e.g. "(Paper)") for
+        # grouping/display so a source-only parenthetical does not split an
+        # otherwise identical family from its unsuffixed bridge (AC2).
+        base_title = _TRAILING_PARENTHETICAL_RE.sub("", base_title).strip() or base_title
         identity = "metadata"
         is_bridge = (
             _metadata_value(assignment, ("bridge", "is_bridge", "bridge_assignment")) is True
@@ -213,7 +253,7 @@ def resolve_public_tags(labels: list[object]) -> list[dict]:
         raise ValueError("Differentiated delivery requires at least two tiers")
     configured = config.get_tier_tags()
     resolved = []
-    seen_tags: set[str] = set()
+    seen_tags: dict[str, str] = {}
     seen_tiers: set[str] = set()
     for value in labels:
         tier = canonical_tier(value)
@@ -228,12 +268,19 @@ def resolve_public_tags(labels: list[object]) -> list[dict]:
         if tag_key == "bridge":
             raise ValueError("The public Canvas tag 'Bridge' is reserved for the family bridge")
         if tag_key in seen_tags:
-            raise ValueError(
-                "Public Canvas tags for the used tiers must be unique after trimming "
-                "and case-folding; update them in Settings."
+            # AC5: two tiers resolving to the same public tag inside one
+            # envelope is a stable, structured refusal, not a bare message.
+            # The same tag reused across different envelopes (for example
+            # Extend->Blue in one family and Accelerate->Blue in another) is
+            # not a collision; only reuse inside this one envelope is.
+            raise TierTagCollisionError(
+                "Public Canvas tags for the used tiers must be unique within the "
+                "envelope after trimming and case-folding; update them in Settings.",
+                labels=[seen_tags[tag_key], tier],
+                tag=tag,
             )
         seen_tiers.add(tier)
-        seen_tags.add(tag_key)
+        seen_tags[tag_key] = tier
         resolved.append({"tier": tier, "tag": tag})
     return resolved
 
@@ -907,4 +954,5 @@ __all__ = [
     "supported_renderers",
     "source_title",
     "structural_digest",
+    "TierTagCollisionError",
 ]

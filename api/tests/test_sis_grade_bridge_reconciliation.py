@@ -2,6 +2,8 @@
 
 import copy
 
+import pytest
+
 from api import sis_grade_bridge
 from api import course_catalog
 from api.operation_ledger import operations, paths
@@ -340,3 +342,165 @@ def test_agent_proposed_grouping_preserves_family_link_identity(monkeypatch):
     assert len(families) == 1
     assert families[0]["identity_source"] == "family_link"
     assert families[0]["source_assignment_ids"] == [row["id"] for row in rows]
+
+
+def _tag_source(assignment_id, name, *, points=10, group="g"):
+    """A plain title-fallback tag-suffixed or unsuffixed source row, with no
+    stable family/tier metadata, used to exercise title-based matching."""
+    return {
+        "id": assignment_id, "name": name,
+        "points_possible": points, "assignment_group_id": group,
+        "published": True, "grading_type": "points",
+        "only_visible_to_overrides": True,
+        "omit_from_final_grade": True, "post_to_sis": False,
+    }
+
+
+def _default_tier_tags():
+    return {"Support": "Blue", "Core": "Red", "Accelerate": "", "Extend": ""}
+
+
+def _assert_ac1_unsuffixed_becomes_bridge_candidate(monkeypatch):
+    """AC1: an unsuffixed member with two suffixed sources is bridge
+    material -- not a source -- whatever its own settings prove."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
+    rows = [
+        _tag_source("s1", "Reading Check - Blue"),
+        _tag_source("s2", "Reading Check - Red"),
+        {
+            "id": "u1", "name": "Reading Check",
+            "points_possible": 10, "assignment_group_id": "g",
+            "published": True, "grading_type": "points",
+            "only_visible_to_overrides": False,
+            "submission_types": ["none"],
+            "omit_from_final_grade": False,
+            "post_to_sis": False,  # SIS off -- not yet bridge-safe
+        },
+    ]
+    result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+    row = result["matrix"][0]
+    assert row["source_assignment_ids"] == ["s1", "s2"]
+    assert row["source_count"] == 2
+    assert row["bridge_assignment_id"] == "u1"
+    assert row["repairable"] is True
+    assert row["repair_plan"]["bridge_setting_repairs"] == [
+        {"bridge_assignment_id": "u1", "fields": ["post_to_sis"]}
+    ]
+
+
+def _assert_ac1_ambiguous_unsuffixed_candidates_refuse(monkeypatch):
+    """AC1: more than one unsuffixed candidate is a hard refusal, never a guess."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
+    rows = [
+        _tag_source("s1", "Reading Check - Blue"),
+        _tag_source("s2", "Reading Check - Red"),
+        {"id": "u1", "name": "Reading Check", "points_possible": 10, "assignment_group_id": "g", "published": True},
+        {"id": "u2", "name": "Reading Check", "points_possible": 10, "assignment_group_id": "g", "published": True},
+    ]
+    result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+    row = result["matrix"][0]
+    assert "bridge_candidates_ambiguous" in row["reasons"]
+    assert row["status"] == "blocked"
+    assert row["source_assignment_ids"] == ["s1", "s2"]
+
+
+def _assert_ac1_never_reclassifies_a_registered_source(monkeypatch):
+    """AC1 stop condition: a registration that already lists an unsuffixed
+    id as a source keeps it a source; it is never pulled out as the bridge,
+    whatever its title looks like."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    registration = {
+        "family_key": "reading-check-registered",
+        "family_title": "Reading Check",
+        "source_assignment_ids": ["s1", "s2", "u1"],
+        "source_titles": ["Reading Check - Blue", "Reading Check - Red", "Reading Check"],
+        "bridge_assignment_id": "bridge-1",
+        "bridge_state_digest": "a" * 64,
+    }
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [registration])
+    rows = [
+        _tag_source("s1", "Reading Check - Blue"),
+        _tag_source("s2", "Reading Check - Red"),
+        {
+            "id": "u1", "name": "Reading Check",
+            "points_possible": 10, "assignment_group_id": "g",
+            "published": True, "grading_type": "points",
+            "only_visible_to_overrides": True,
+            "omit_from_final_grade": True, "post_to_sis": False,
+        },
+    ]
+    result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+    row = result["matrix"][0]
+    assert row["source_assignment_ids"] == ["s1", "s2", "u1"]
+    assert row["bridge_assignment_id"] != "u1"
+
+
+def _assert_ac2_dash_whitespace_and_parenthetical_normalize(monkeypatch):
+    """AC2: dash variants, collapsed whitespace, and a source-only
+    parenthetical do not split one family into two."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
+    rows = [
+        _tag_source("s1", "Ch 1  Reading (Paper) – Blue"),
+        _tag_source("s2", "Ch 1 Reading (Paper) - Red"),
+    ]
+    result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+    assert len(result["matrix"]) == 1
+    assert result["matrix"][0]["family_title"] == "Ch 1 Reading"
+
+
+def _assert_ac3_word_order_mismatch_is_reported_not_merged(monkeypatch):
+    """AC3: same normalized word set, different order -> reported, never merged."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
+    rows = [
+        _tag_source("s1", "Outsiders Chapter 7 - Blue"),
+        _tag_source("s2", "Chapter 7 Outsiders - Red"),
+    ]
+    result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+    assert len(result["matrix"]) == 2
+    titles = {row["family_title"] for row in result["matrix"]}
+    assert titles == {"Outsiders Chapter 7", "Chapter 7 Outsiders"}
+    for row in result["matrix"]:
+        assert "title_mismatch_suspected" in row["reasons"]
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        _assert_ac1_unsuffixed_becomes_bridge_candidate,
+        _assert_ac1_ambiguous_unsuffixed_candidates_refuse,
+        _assert_ac1_never_reclassifies_a_registered_source,
+        _assert_ac2_dash_whitespace_and_parenthetical_normalize,
+        _assert_ac3_word_order_mismatch_is_reported_not_merged,
+    ],
+)
+def test_family_classification_law_ac1_ac2_ac3(monkeypatch, check):
+    """Law: family classification -- unsuffixed bridge candidates (AC1),
+    title normalization (AC2), and word-order mismatch reporting (AC3) --
+    is exercised once, directly, at the reconciliation matrix boundary."""
+    check(monkeypatch)
+
+
+def test_reconciliation_rows_carry_the_preview_repair_plan_contract(monkeypatch):
+    """Contract (AC4): every missing/drifted/repairable-blocked row carries
+    the same repair_plan shape the reviewed preview would freeze."""
+    monkeypatch.setattr(config, "get_tier_tags", _default_tier_tags)
+    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
+    rows = [
+        _tag_source("s1", "Reading Check - Blue"),
+        _tag_source("s2", "Reading Check - Red"),
+    ]
+    result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
+    row = result["matrix"][0]
+    assert row["status"] == "missing"
+    plan = row["repair_plan"]
+    assert set(plan) == {
+        "source_assignment_ids", "bridge_assignment_id", "action",
+        "source_setting_repairs", "bridge_setting_repairs",
+    }
+    assert plan["source_assignment_ids"] == row["source_assignment_ids"]
+    assert plan["bridge_assignment_id"] == row["bridge_assignment_id"]
+    assert plan["action"] == row["action"]

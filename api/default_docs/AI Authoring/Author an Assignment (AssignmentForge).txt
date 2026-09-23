@@ -238,8 +238,9 @@ Include these as a "Resources You Can Use" section with clickable links. If a re
 2. `type` is `ASSIGNMENT`; `title` and `description` non-empty.
 3. `submission.types` values all from the Section 4 list; `external_tool` not combined with other types; `external_tool_url` present when used; `annotatable_file` present when `student_annotation` used.
 4. If `tiers` is present, it has at least two entries. Every tier has `label`;
-   labels are unique canonical tier names. Each used public tag must exist and be unique in
-   Settings before delivery.
+   labels are unique canonical tier names. Each used public tag must exist and be unique
+   within the envelope (this one family) before delivery -- the same tag used by a
+   different family elsewhere is not a collision.
 5. `points` ≥ 0 when present.
 6. `supports` entries use `stem_frame`/`verb_bank` string arrays and an optional
    `scaffold` of `bullet` or `outline`.
