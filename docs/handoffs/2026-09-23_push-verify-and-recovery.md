@@ -238,3 +238,29 @@ field I added to `api/sis_grade_bridge.py`'s `_result_projection` (needed for
 `mcp_server/test_sis_grade_bridge_tools.py` suites).
 
 **Live acceptance (T3.1/T3.2/T3.4):** not run — reserved for the senior/teacher per the brief.
+
+## Live acceptance result (2026-09-23, senior)
+- T2.1 (storage brief): `refresh_course_structure` on ELA 7 and ELA 7 PAP returned
+  `complete` with all four sections current.
+- T3.1: `verify_live` on the PAP whole-assignment push returned published, module,
+  due, and SIS state in one call. PASS.
+- T3.2: the ELA 7 tiered push reproduced Issue #11. Tier 0 was created, then
+  `sent_unknown`/`assignment_create_unverified`, with the ledger diagnostic
+  `assignment postcondition mismatch: description`. AC4/AC7 behaved as specified: a
+  `repair_plan` was returned and there was no drift loop. The same description passed
+  the whole-assignment postcondition in ELA 7 PAP, so the tiered comparison is stricter
+  than the whole path's.
+
+## Correction 1 (senior decision)
+Scope is now open for the Issue #11 root cause, limited to the tiered description
+postcondition:
+- `assignment_tiered.py` must compare a created source's description with the same
+  canonicalization the whole-assignment path uses. That means one shared helper, not
+  a second copy.
+- Canvas's HTML sanitization of the tier description (base description plus scaffolding)
+  must not count as a mismatch. Missing or different visible text still must.
+- **Law test:** a tier description round-tripped through a Canvas-like sanitizer
+  (entities decoded, whitespace and newlines inside tags normalized, attribute order
+  changed) verifies. A changed visible sentence fails.
+- `resume_operation` on an operation stopped this way then continues from the
+  recorded id without creating a duplicate.
