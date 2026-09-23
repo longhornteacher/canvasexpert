@@ -188,15 +188,10 @@ def test_agent_proposed_grouping_recovers_the_real_messy_title_case(monkeypatch,
 
     matrix = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
 
-    # Two of the three messy rows carry a real configured tag ("- Blue",
-    # "- Silver") and are still reported as incomplete lone sources (AC2).
-    # The third ("...SCRs Red", no dash before the tag) has no structurally
-    # detected tag and is an ordinary-looking single assignment, so AC1
-    # omits it from the matrix and counts it instead -- agent-proposed
-    # grouping below still recovers it by exact id, unaffected by the
-    # reconciliation matrix.
-    assert len(matrix["matrix"]) == 2
-    assert matrix["omitted_single_assignments"] == 1
+    # All three messy rows stay visible: two carry "- Blue"/"- Silver", and
+    # "...SCRs Red" ends in a configured tag word without the dash.
+    assert len(matrix["matrix"]) == 3
+    assert matrix["omitted_single_assignments"] == 0
     assert all(row["status"] == "incomplete" for row in matrix["matrix"])
     result = _preview_proposed(monkeypatch, tmp_path, rows)
 

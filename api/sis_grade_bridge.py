@@ -56,7 +56,9 @@ def _title_word_signature(title: str) -> tuple[str, ...]:
     return tuple(sorted(re.findall(r"[\w']+", str(title or "").casefold())))
 
 
-def _is_omittable_single_assignment(row: dict, *, has_registration: bool) -> bool:
+def _is_omittable_single_assignment(
+    row: dict, *, has_registration: bool, tier_tags: dict | None = None,
+) -> bool:
     """AC1: an ordinary single assignment is not a discovered bridge family.
 
     Omit a row only when every one of these holds: no saved registration
@@ -79,6 +81,13 @@ def _is_omittable_single_assignment(row: dict, *, has_registration: bool) -> boo
     reasons = set(row.get("reasons") or [])
     if "title_mismatch_suspected" in reasons or "bridge_candidates_ambiguous" in reasons:
         return False
+    # A title ending in a configured tag word without the " - " separator
+    # ("... SCRs Red") may be a messy tier source; keep it visible.
+    tags = {str(v).strip().casefold() for v in (tier_tags or {}).values() if str(v or "").strip()}
+    for title in row.get("source_titles") or []:
+        words = re.findall(r"[\w']+", str(title or "").casefold())
+        if words and words[-1] in tags:
+            return False
     return True
 
 
@@ -489,7 +498,10 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
         # AC1: an ordinary single assignment (no registration, no real tag,
         # no bridge candidate, under the two-source threshold) is not a
         # discovered bridge family; it is counted, never listed (AC3).
-        if _is_omittable_single_assignment(matrix_row, has_registration=registration is not None):
+        if _is_omittable_single_assignment(
+            matrix_row, has_registration=registration is not None,
+            tier_tags=config.get_tier_tags(),
+        ):
             omitted_single_assignments += 1
             continue
         matrix.append(matrix_row)
