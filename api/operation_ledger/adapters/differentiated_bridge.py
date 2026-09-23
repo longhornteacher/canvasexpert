@@ -614,7 +614,9 @@ def execute_family_tail(
     # surfaced as ``family_link`` at the agent boundary.
     register_step = adapter_support.ensure_step(steps, "register_family")
     try:
-        config.save_sis_grade_bridge(course_id, registration)
+        # Verify the read-back against what save normalized (it drops empty
+        # fields such as a blank module_name), not the raw input.
+        expected_registration = config.save_sis_grade_bridge(course_id, registration)
         saved = config.get_sis_grade_bridge(course_id, family["base_title"])
     except Exception as exc:
         register_step["state"] = "blocked"
@@ -626,7 +628,7 @@ def execute_family_tail(
             "blocked", steps=steps, returned_object_id=str(bridge_id),
             error_code="family_link_save_failed",
         )
-    if saved != registration:
+    if saved != expected_registration:
         register_step["state"] = "blocked"
         register_step["error_code"] = "family_registration_unverified"
         register_step = context.checkpoint_step(register_step)
