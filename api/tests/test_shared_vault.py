@@ -145,3 +145,21 @@ def test_different_shared_conflict_can_be_quarantined(tmp_path):
     assert result["quarantined"] == conflict.name
     assert not conflict.exists()
     assert list((tmp_path / "_Shared" / "_conflicts").rglob(conflict.name))
+
+
+def test_recorded_pseudonym_outside_the_registry_stays_permanent(tmp_path, monkeypatch):
+    """Law (R1): a pseudonym already in the seed stays valid and owned even if
+    the word has since left the registry; the vault must still load, and a new
+    student never receives that word."""
+    retired = "Zzretiredword"
+    assert feedback_vault._canonical_registry_word(retired) is None
+    legacy = _write_legacy_vault(tmp_path, {
+        "synthetic-id-1": {"pseudonym": retired, "real_name": "Synthetic One",
+                           "first_seen": "2026-01-01T00:00:00Z"},
+    })
+    monkeypatch.setattr(pseudonym_secret, "ensure_primary_secret", lambda: b"s" * 32)
+
+    vault = _shared_vault(tmp_path, legacy)
+
+    assert vault.get_or_assign("synthetic-id-1") == retired
+    assert vault.get_or_assign("synthetic-id-2") != retired

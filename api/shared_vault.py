@@ -28,6 +28,24 @@ class PermanentPseudonymError(ValueError):
     """An existing student-to-Pokémon assignment is immutable."""
 
 
+def _recorded_pseudonym(value: object) -> str | None:
+    """A pseudonym already recorded in the seed or a journal (R1: permanent).
+
+    The registry governs only new assignments. A recorded word that has since
+    left the registry stays valid and owned; it only has to be one non-empty
+    word. Registry words keep their canonical casing.
+    """
+    canonical = feedback_vault._canonical_registry_word(value)
+    if canonical is not None:
+        return canonical
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate or len(candidate.split()) != 1:
+        return None
+    return candidate
+
+
 class SharedVault(feedback_vault.Vault):
     """API-compatible vault facade whose shared writes are append-only."""
 
@@ -75,7 +93,7 @@ class SharedVault(feedback_vault.Vault):
                 raise feedback_vault.VaultSchemaError("Identity Vault seed entry is invalid.")
             pokemon = str(entry.get("pseudonym") or "")
             if pokemon:
-                canonical = feedback_vault._canonical_registry_word(pokemon)
+                canonical = _recorded_pseudonym(pokemon)
                 if canonical is None:
                     raise feedback_vault.VaultSchemaError("Identity Vault seed pseudonym is invalid.")
                 assignments.append({
@@ -165,7 +183,7 @@ class SharedVault(feedback_vault.Vault):
         if not canvas_id:
             raise feedback_vault.VaultSchemaError("Identity Vault journal identity is invalid.")
         if operation == "assign":
-            pokemon = feedback_vault._canonical_registry_word(event.get("pokemon"))
+            pokemon = _recorded_pseudonym(event.get("pokemon"))
             if pokemon is None or not isinstance(event.get("k"), int) or event["k"] < 0:
                 raise feedback_vault.VaultSchemaError("Identity Vault assignment is invalid.")
             assignments.append({
