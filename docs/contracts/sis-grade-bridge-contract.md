@@ -85,12 +85,30 @@ local assignment/submission snapshot, re-read exact source and bridge IDs from
 that snapshot, and refuse with typed `mirror_read_failed` or
 `family_link_required` guidance when the local state is unavailable.
 
-Assignment and Quiz renderer identity does not change projection behavior. The
-approved projection writes each present numeric source score, including zero
-and scores without a separate posting marker, to the exact verified bridge
-through the Operation Ledger. Agreeing excused source states excuse the bridge;
-conflicting source states remain held. New Quiz item scores and per-item
-feedback remain out of scope.
+Assignment and Quiz renderer identity does not change projection behavior.
+
+**Score reconciliation rule (teacher decision, 2026-09-23).** The teacher may add
+extra credit directly on the bridge or on a tier source, so the highest score is
+canon. For each student, the approved projection:
+
+- Compares Canvas's final `score` (late penalties already applied) on every tier
+  source with the bridge's current score, and takes the **highest**.
+- Writes that score to the bridge only when it is higher than the bridge's current
+  score or the bridge is blank. **It never lowers a bridge score and never writes
+  to a tier source.** The penalty is already inside the copied score, so no late
+  status is copied.
+- Leaves blanks alone: a blank source never clears the bridge, and no missing
+  zeroes are written.
+- Excuses the bridge when every present source is excused and the bridge is blank.
+  Any mix of excused and scored states across the sources and the bridge is
+  **held for the teacher** and never guessed.
+- Treats different scores on two tier sources (a student moved tiers) as normal:
+  the highest wins.
+
+Every write goes through the Operation Ledger to the exact verified bridge. The
+preview reports per family how many bridge scores would rise, how many are
+already canon, and which students are held (pseudonyms only). New Quiz item
+scores and per-item feedback remain out of scope.
 
 ## 7. Privacy, review, and recovery
 
