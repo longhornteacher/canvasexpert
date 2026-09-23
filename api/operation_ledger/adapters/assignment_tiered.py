@@ -8,6 +8,7 @@ from .. import models
 from .adapter_support import (
     build_result,
     canonical_html,
+    canonical_text,
     canvas_message_from_error,
     ensure_step,
     find_step,
@@ -410,10 +411,11 @@ def _shape_mismatches(actual: dict, expected: dict, *, published: bool) -> list[
 
 def _shape_value_matches(key: str, actual: object, expected: object) -> bool:
     if key == "description":
-        # The create sends normalize_student_text(description), so compare
-        # both sides after the same normalization (Issue #11: em dashes).
-        return (canonical_html(normalize_student_text(actual))
-                == canonical_html(normalize_student_text(expected)))
+        # The create sends normalize_student_text(description), and Canvas's
+        # sanitizer rewrites markup, so compare normalized visible text only
+        # (Issue #11 live root cause).
+        return (canonical_text(normalize_student_text(actual))
+                == canonical_text(normalize_student_text(expected)))
     if key == "submission_types":
         return sorted(actual or []) == sorted(expected or [])
     return actual == expected

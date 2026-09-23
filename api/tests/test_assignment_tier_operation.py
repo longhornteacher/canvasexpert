@@ -646,6 +646,13 @@ def test_source_shape_matching_tolerates_a_sanitized_scaffolding_panel(monkeypat
         " &#8212; ", " - ")}
     assert _source_shape_matches(dash_normalized, expected, published=False)
 
+    # Canvas's sanitizer may add structure and drop attributes; only visible
+    # text is compared (Issue #11 live run).
+    restructured = {**expected, "description": (
+        '<p>Read the passage and respond.</p><div>'
+        '<p>Extension - cite two sources · use a "so what" closer.</p></div>')}
+    assert _source_shape_matches(restructured, expected, published=False)
+
 
 def test_whole_class_payload_has_no_bridge(monkeypatch):
     data = {"title": "Whole", "description": "body", "points": 10}

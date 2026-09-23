@@ -198,6 +198,28 @@ class _CanonicalHTMLBuilder(HTMLParser):
         self.parts.append(_normalize_ws(data))
 
 
+class _VisibleTextBuilder(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def canonical_text(value: object) -> str:
+    """Visible text of one Canvas HTML field, with all whitespace removed.
+
+    Postconditions compare content, not markup: Canvas's sanitizer may add
+    structure (e.g. ``<tbody>``), drop attributes, or reflow whitespace, but
+    it keeps the visible words. A changed visible word still differs.
+    """
+    builder = _VisibleTextBuilder()
+    builder.feed(str(value or ""))
+    builder.close()
+    return re.sub(r"\s+", "", "".join(builder.parts))
+
+
 def _normalize_ws(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or ""))
 
