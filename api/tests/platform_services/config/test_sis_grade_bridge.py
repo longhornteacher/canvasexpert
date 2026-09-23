@@ -16,3 +16,4 @@ def test_saved_family_link_reads_back_as_save_returned_it():
     }
     saved = config.save_sis_grade_bridge("42", registration)
     assert config.get_sis_grade_bridge("42", "Practice") == saved
+    assert config.save_sis_grade_bridge_verified("42", registration) is True

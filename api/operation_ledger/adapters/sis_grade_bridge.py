@@ -735,9 +735,7 @@ class SisGradeBridgeAdapter:
             "module_id": baseline.get("module_id"),
             "module_name": baseline.get("module_name"),
         }
-        config.save_sis_grade_bridge(course_id, registration)
-        saved = config.get_sis_grade_bridge(course_id, payload["family_title"])
-        if saved != registration:
+        if not config.save_sis_grade_bridge_verified(course_id, registration):
             return adapter_support.build_result("blocked", steps=steps, returned_object_id=bridge_id, error_code="family_registration_unverified")
         step["state"] = "applied"
         step["returned_object_id"] = bridge_id
@@ -862,13 +860,12 @@ class SisGradeBridgeAdapter:
                 "module_name": baseline.get("module_name"),
             }
             try:
-                config.save_sis_grade_bridge(target["course_id"], registration)
-                saved = config.get_sis_grade_bridge(
-                    target["course_id"], payload["family_title"],
+                verified = config.save_sis_grade_bridge_verified(
+                    target["course_id"], registration,
                 )
             except Exception:
                 return {"state": "sent_unknown", "steps": steps}
-            if saved != registration:
+            if not verified:
                 return {"state": "sent_unknown", "steps": steps}
         for step in steps:
             if step.get("state") in {"sent_unknown", "pending"}:

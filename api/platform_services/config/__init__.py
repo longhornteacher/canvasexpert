@@ -100,8 +100,22 @@ from .roster import (
 
 # --- SIS grade bridge registrations ---
 from .sis_grade_bridge import (
-    get_sis_grade_bridge, list_sis_grade_bridges, save_sis_grade_bridge,
+    get_sis_grade_bridge, list_sis_grade_bridges, normalize_sis_grade_bridge,
+    save_sis_grade_bridge,
 )
+
+
+def save_sis_grade_bridge_verified(course_id: str, registration: dict) -> bool:
+    """Save a family link and confirm the read-back equals what was stored.
+
+    The one check every writer uses. Save normalizes (it drops blank fields
+    such as an empty module_name), so comparing against the raw input always
+    fails. Defined here so it resolves this package's names at call time.
+    """
+    stored = save_sis_grade_bridge(course_id, registration)
+    if not isinstance(stored, dict):
+        stored = normalize_sis_grade_bridge(registration)
+    return get_sis_grade_bridge(course_id, stored["family_title"]) == stored
 
 # --- private I/O helpers (needed by sibling sub-modules and test monkeypatches) ---
 from . import _io

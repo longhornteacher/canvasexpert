@@ -99,8 +99,14 @@ def save_sis_grade_bridge(course_id: str, registration: dict) -> dict:
     return deepcopy(clean)
 
 
+def normalize_sis_grade_bridge(registration: dict) -> dict:
+    """The stored form of a family link, for comparing against a read-back."""
+    return _normalize_registration(registration)
+
+
 __all__ = [
     "SETTINGS_KEY",
+    "normalize_sis_grade_bridge",
     "get_sis_grade_bridge",
     "list_sis_grade_bridges",
     "save_sis_grade_bridge",
