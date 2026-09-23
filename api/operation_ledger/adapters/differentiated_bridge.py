@@ -806,12 +806,15 @@ def _verified_family_sources(
         # across sources, below). The restricted/group branch is unchanged.
         expected = {
             "published": True,
-            "only_visible_to_overrides": not unrestricted,
             "omit_from_final_grade": True,
             "post_to_sis": False,
             "grading_type": "points",
         }
         if not unrestricted:
+            # Assign To (who sees an unrestricted source, and its per-class
+            # dates) is teacher-owned tier placement, so only the restricted
+            # branch checks visibility.
+            expected["only_visible_to_overrides"] = True
             expected["name"] = title
             expected["due_at"] = payload.get("due_at") or None
         if not _fields_match(assignment, expected):

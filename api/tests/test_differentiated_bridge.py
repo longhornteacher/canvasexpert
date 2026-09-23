@@ -46,8 +46,10 @@ def test_unrestricted_sources_tolerate_a_rename_cleared_due_date_and_overrides(m
     """Law: a teacher's rename, cleared due date, and overrides never block,
     and overrides are never even fetched for an unrestricted tier."""
     rows = {
-        "101": _base_row(id="101", name="ECR Prep 3: Red", due_at=None),
-        "102": _base_row(id="102", name="ECR Prep 3: Blue", due_at=None),
+        "101": _base_row(id="101", name="ECR Prep 3: Red", due_at=None,
+                         only_visible_to_overrides=True),
+        "102": _base_row(id="102", name="ECR Prep 3: Blue", due_at=None,
+                         only_visible_to_overrides=True),
     }
     _install_rows(monkeypatch, rows)
 
