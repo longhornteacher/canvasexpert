@@ -332,7 +332,7 @@ Allow several pedagogical labels to map to one public tag. Refuse only when a si
 
 **Traffic light:** YELLOW. Phase 1–2 implementation checkpoint only. No Phase 3/4 work started. No real OneDrive workspace or live Canvas course was opened or changed.
 
-**Commit hash:** pending the implementation checkpoint commit; its hash will be recorded in this section by the follow-up documentation commit.
+**Commit hash:** `85ce67a` (implementation checkpoint; this execution-result update is the follow-up commit).
 
 **Changed files (71):**
 - Root: `MIGRATION.md`.
