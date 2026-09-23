@@ -115,6 +115,8 @@ def api_ai_ta_file(name: str):
     if not os.path.isfile(canonical):
         return JSONResponse({"error": "file not found"}, status_code=404)
     ai_ta_dir = runtime_paths.ai_ta_dir()
+    if not ai_ta_dir:
+        return JSONResponse({"error": "file not found"}, status_code=404)
     path = os.path.join(ai_ta_dir, name)
     if not os.path.isfile(path) or not os.path.abspath(path).startswith(
             os.path.abspath(ai_ta_dir)):
@@ -132,7 +134,10 @@ def api_ai_ta_toolkit_file(name: str):
     canonical = os.path.join(REPO_ROOT, "api", "default_docs", "AI Authoring", "MagicSchool Toolkit", name)
     if not os.path.isfile(canonical):
         return JSONResponse({"error": "file not found"}, status_code=404)
-    toolkit_dir = os.path.join(runtime_paths.ai_ta_dir(), "MagicSchool Toolkit")
+    ai_ta_dir = runtime_paths.ai_ta_dir()
+    if not ai_ta_dir:
+        return JSONResponse({"error": "file not found"}, status_code=404)
+    toolkit_dir = os.path.join(ai_ta_dir, "MagicSchool Toolkit")
     path = os.path.join(toolkit_dir, name)
     if not os.path.isfile(path) or not os.path.abspath(path).startswith(
             os.path.abspath(toolkit_dir)):
@@ -144,8 +149,11 @@ def api_ai_ta_toolkit_file(name: str):
 
 @router.post("/api/ai-ta/rebuild")
 def api_ai_ta_rebuild():
+    ai_ta_dir = runtime_paths.ai_ta_dir()
+    if not ai_ta_dir:
+        return JSONResponse({"ok": False, "error": "no workspace configured"})
     try:
-        files = ai_ta.build_library(runtime_paths.ai_ta_dir())
+        files = ai_ta.build_library(ai_ta_dir)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
     return JSONResponse({"ok": True, "files": [os.path.basename(p) for p in files]})

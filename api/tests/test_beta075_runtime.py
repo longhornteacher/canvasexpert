@@ -46,6 +46,40 @@ def test_workspace_paths_are_resolved_at_call_time(tmp_path, monkeypatch):
     assert runtime_paths.python_executable() == Path(sys.executable).resolve()
 
 
+def test_no_workspace_never_seeds_ai_authoring_under_the_repo_root(tmp_path, monkeypatch):
+    """With no workspace configured, ai_ta_dir() is None and building the
+    library at startup writes nothing under the repo root.
+
+    Regression for the 2026-09-23 incident where an unconfigured workspace
+    made ai_ta_dir() fall back to app_root() / "AI Authoring", and
+    build_library then copied the canonical api/default_docs/AI Authoring/
+    contracts into a second copy in the source tree.
+    """
+    from api import runtime_paths
+    from api.platform_services import workspace
+    from api.webui import ai_ta, server
+
+    monkeypatch.setattr(workspace, "workspace_root", lambda: None)
+    monkeypatch.setattr(runtime_paths, "app_root", lambda: tmp_path)
+
+    assert runtime_paths.ai_ta_dir() is None
+
+    ai_ta_target = runtime_paths.ai_ta_dir()
+    if ai_ta_target is not None:
+        ai_ta.build_library(ai_ta_target)
+
+    assert not (tmp_path / "AI Authoring").exists()
+    assert list(tmp_path.iterdir()) == []
+
+    # The same guard server._lifespan applies must be present in the module
+    # source, so a future edit that removes the None check is caught even if
+    # this test's own inline mirror of it is not.
+    import inspect
+    lifespan_src = inspect.getsource(server._lifespan)
+    assert "ai_ta_dir()" in lifespan_src
+    assert "is not None" in lifespan_src
+
+
 def test_all_content_pickers_use_only_the_synced_library(tmp_path, monkeypatch):
     from api import runtime_paths
     from api.platform_services import workspace

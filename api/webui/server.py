@@ -93,7 +93,11 @@ async def _lifespan(app):
     except Exception as e:
         print(f"Workspace pin note: {e}")
     try:
-        ai_ta.build_library(runtime_paths.ai_ta_dir())
+        # No workspace configured yet: never build the library, and never fall
+        # back to writing it under the repo root (see runtime_paths.ai_ta_dir).
+        ai_ta_target = runtime_paths.ai_ta_dir()
+        if ai_ta_target is not None:
+            ai_ta.build_library(ai_ta_target)
     except Exception as e:
         print(f"AI Authoring library build failed: {e}")
     try:

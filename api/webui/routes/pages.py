@@ -98,9 +98,9 @@ def _push_base_ctx(request: Request) -> dict:
 def ai_expert_page(request: Request):
     ai_ta_files = list_ai_ta_files()
     ai_ta_dir = runtime_paths.ai_ta_dir()
-    toolkit_dir = os.path.join(ai_ta_dir, "MagicSchool Toolkit")
+    toolkit_dir = os.path.join(ai_ta_dir, "MagicSchool Toolkit") if ai_ta_dir else None
     toolkit_files = []
-    if os.path.isdir(toolkit_dir):
+    if toolkit_dir and os.path.isdir(toolkit_dir):
         canonical_toolkit_dir = os.path.join(REPO_ROOT, "api", "default_docs", "AI Authoring", "MagicSchool Toolkit")
         toolkit_files = sorted(
             os.path.basename(p)
@@ -111,7 +111,7 @@ def ai_expert_page(request: Request):
         "nav_section":    "help",
         "token_is_set":   config.token_is_set(),
         "ai_ta_files":    ai_ta_files,
-        "ai_ta_dir":      str(ai_ta_dir),
+        "ai_ta_dir":      str(ai_ta_dir) if ai_ta_dir else "",
         "toolkit_files":  toolkit_files,
         "workspace_root": workspace.workspace_root(),
     })
@@ -236,7 +236,7 @@ def settings_page(request: Request):
         "previous_courses": [course for course in saved_courses if not course.get("active", True)],
         "base_default":  config.CANVAS_BASE_DEFAULT,
         "download_root": config.get_download_root(),
-        "ai_ta_dir":     str(runtime_paths.ai_ta_dir()),
+        "ai_ta_dir":     str(runtime_paths.ai_ta_dir() or ""),
         "workspace_root": root,
         "workspace_files": [
             {"name": "Library / AI Authoring", "path": ai_authoring_folder},

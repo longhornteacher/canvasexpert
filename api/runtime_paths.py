@@ -194,5 +194,15 @@ def inbox_folder(kind: str) -> Path | None:
     return folder
 
 
-def ai_ta_dir() -> Path:
-    return library_folder("AI Authoring") or (app_root() / "AI Authoring")
+def ai_ta_dir() -> Path | None:
+    """The teacher's seeded AI Authoring library folder, or None with no workspace.
+
+    Unlike printables_dir/canvas_uploads_dir, this has no app_root() fallback:
+    the AI Authoring library is seeded from api/default_docs/AI Authoring/, the
+    single canonical source for these contracts, and falling back to the repo
+    root would copy that canonical text into the source tree as a second copy.
+    Callers with no workspace must not build or write a library at all; a
+    caller that only needs to read the contracts should read
+    ai_ta.DEFAULT_AI_TA_DIR directly instead of this workspace-derived path.
+    """
+    return library_folder("AI Authoring")

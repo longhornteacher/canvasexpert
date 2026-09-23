@@ -185,7 +185,7 @@ def list_ai_ta_files():
     found = []
     ai_ta_dir = runtime_paths.ai_ta_dir()
     canonical_dir = os.path.join(REPO_ROOT, "api", "default_docs", "AI Authoring")
-    if not os.path.isdir(ai_ta_dir):
+    if not ai_ta_dir or not os.path.isdir(ai_ta_dir):
         return found
     for path in sorted(_glob.glob(os.path.join(ai_ta_dir, "*.txt"))):
         if not os.path.isfile(os.path.join(canonical_dir, os.path.basename(path))):
