@@ -1,6 +1,6 @@
 # Brief: Bridge scores use the highest score as canon
 
-**Status:** Current. **Risk:** High (grade writes). The teacher reviews the diff
+**Status:** Retired — accepted 2026-09-24. **Risk:** High (grade writes). The teacher reviews the diff
 before push. **Senior:** Claude (Opus). **Executor:** Sonnet. **Branch:** `dev`.
 **Baseline known failures:** `test_quick_fix_contract_and_version`; 4 in
 `api/tests/mcp_server/test_server_instructions.py` (pre-existing at `b2261da`).

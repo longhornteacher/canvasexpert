@@ -1,6 +1,6 @@
 # Brief: Agents can adjust existing grades (curve, bump, fix)
 
-**Status:** Current. **Risk:** High (changes grades students can see). The teacher
+**Status:** Retired — accepted 2026-09-24. **Risk:** High (changes grades students can see). The teacher
 reviews the diff before push. **Senior:** Claude (Opus). **Executor:** Sonnet.
 **Branch:** `dev`. **Baseline known failures:** `test_quick_fix_contract_and_version`
 and 4 in `api/tests/mcp_server/test_server_instructions.py` (recorded at `b2261da`).
