@@ -1,5 +1,4 @@
 import json
-import os
 import runpy
 import sys
 import types
@@ -216,13 +215,13 @@ def test_health_snapshot_pseudonym_registry_reflects_this_machines_real_vault(tm
     from api import diagnostics, feedback_vault
     from api.platform_services import workspace
 
+    from api.identity_vault_service import open_vault
+
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    vault_dir = workspace.identity_vault_dir()
-    os.makedirs(vault_dir, exist_ok=True)
-    vault = feedback_vault.Vault(os.path.join(vault_dir, "vault.json"))
-    vault.get_or_assign("9001", "Student One")
-    vault.get_or_assign("9002", "Student Two")
-    vault.save()
+    vault = open_vault()
+    with vault.transaction():
+        vault.get_or_assign("9001", "Student One")
+        vault.get_or_assign("9002", "Student Two")
 
     registry = diagnostics.health_snapshot()["pseudonym_registry"]
     total = len(feedback_vault._REGISTRY_WORDS)

@@ -87,6 +87,10 @@ def test_gradebook_snapshot_route_aggregates_mocked_canvas_data(monkeypatch):
         "missing": 0,
         "late": 0,
         "avg_pct": 90,
+        "family_role": "ordinary",
+        "family_title": "",
+        "bridge_assignment_id": "",
+        "source_assignment_ids": [],
     }]
     assert data["students"] == [
         {"name": "One, Learner", "missing": 0, "late": 0, "ungraded": 0, "pct": 90.0},

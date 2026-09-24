@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+from datetime import datetime, timezone
 
 from api import course_catalog, learning_objectives
 from api.mcp_server import tools
@@ -8,6 +9,8 @@ from api.platform_services import workspace
 
 
 STAMP = "2026-08-30T12:00:00+00:00"
+# Freshness is age based, so the sync stamp must be recent for "current".
+SYNCED = datetime.now(timezone.utc).isoformat()
 
 
 def _catalog():
@@ -16,7 +19,7 @@ def _catalog():
         "course_id": "course-1",
         "course_name": "Fictional Course",
         "updated_at": STAMP,
-        "assignments": {"state": "current", "last_success_at": STAMP, "last_attempt_at": STAMP, "error_code": "", "records": {
+        "assignments": {"state": "current", "last_success_at": SYNCED, "last_attempt_at": SYNCED, "error_code": "", "records": {
             "a1": {"id": "a1", "name": "Explain Evidence", "description_text": "", "points_possible": 10,
                    "due_at": "", "unlock_at": "", "lock_at": "", "created_at": "", "updated_at": "",
                    "published": True, "submission_types": [], "assignment_group_id": "", "quiz_id": "",
@@ -26,11 +29,11 @@ def _catalog():
                                         "hide_score_total_for_assessment": False, "hide_points": False,
                                         "hide_outcome_results": False}},
         }},
-        "modules": {"state": "current", "last_success_at": STAMP, "last_attempt_at": STAMP, "error_code": "", "records": [
+        "modules": {"state": "current", "last_success_at": SYNCED, "last_attempt_at": SYNCED, "error_code": "", "records": [
             {"id": "m1", "name": "Unit 1", "position": 1, "items": []},
         ]},
-        "assignment_groups": {"state": "current", "last_success_at": STAMP, "last_attempt_at": STAMP, "error_code": "", "records": []},
-        "pages": {"state": "current", "last_success_at": STAMP, "last_attempt_at": STAMP, "error_code": "", "records": [
+        "assignment_groups": {"state": "current", "last_success_at": SYNCED, "last_attempt_at": SYNCED, "error_code": "", "records": []},
+        "pages": {"state": "current", "last_success_at": SYNCED, "last_attempt_at": SYNCED, "error_code": "", "records": [
             {"id": "p1", "title": "Welcome", "body_text": "Read this.", "published": True, "front_page": True, "updated_at": STAMP},
         ]},
     }
@@ -84,7 +87,7 @@ def test_mcp_pages_are_current_gated_and_bounded(tmp_path, monkeypatch):
     assert blocked["ok"] is False
 
 
-def test_mcp_pages_omits_unpublished_records(tmp_path, monkeypatch):
+def test_mcp_pages_includes_unpublished_unless_filtered(tmp_path, monkeypatch):
     _seed(tmp_path, monkeypatch)
     catalog = _catalog()
     catalog["pages"]["records"].append({
@@ -92,8 +95,12 @@ def test_mcp_pages_omits_unpublished_records(tmp_path, monkeypatch):
         "published": False, "front_page": False, "updated_at": STAMP,
     })
     course_catalog.write_catalog(catalog)
+    published = ["p1", "Welcome", "Read this.", True, True, STAMP]
+    draft = ["p2", "Draft", "Not for the classroom.", False, False, STAMP]
     result = tools.get_course_pages("course-1")
-    assert result["pages"]["rows"] == [["p1", "Welcome", "Read this.", True, True, STAMP]]
+    assert result["pages"]["rows"] == [published, draft]
+    filtered = tools.get_course_pages("course-1", include_unpublished=False)
+    assert filtered["pages"]["rows"] == [published]
 
 
 def test_preview_rejects_unknown_source_and_overlapping_ranges(tmp_path, monkeypatch):

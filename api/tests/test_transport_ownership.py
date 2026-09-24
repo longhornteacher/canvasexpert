@@ -40,6 +40,7 @@ ALLOWED_DIRECT_HTTP = {
     "api/canvas.py",                     # shared transport for standalone sandbox scripts
     # External / diagnostic / sandbox owners
     "api/webui/self_update.py",          # pinned GitHub self-update transport (not Canvas); see the self-update brief's D5
+    "api/local_runtime.py",              # loopback-only 127.0.0.1 ping of this machine's own runtime (not Canvas)
     # Specialized New Quiz / PowerGrader native transports (documented owners)
     "api/powergrader/canvas_fetch.py",   # specialized PowerGrader fetch transport
     "api/powergrader/new_quiz_fetch.py", # specialized native New Quiz file/evidence transport

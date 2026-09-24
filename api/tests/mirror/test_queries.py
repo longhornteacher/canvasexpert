@@ -12,7 +12,6 @@ from datetime import datetime, timedelta, timezone
 
 from api import gradebook_queries, gradebook_snapshot
 from api import freshness_policy
-from api.feedback_vault import Vault
 from api.mirror import queries, store
 from api.mcp_server import tools
 from api.platform_services import workspace
@@ -220,8 +219,8 @@ def test_load_snapshot_explicit_queries_override_skips_mirror(monkeypatch, tmp_p
 def _mcp_setup(monkeypatch, tmp_path):
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
     monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": COURSE}])
-    monkeypatch.setattr(tools, "_vault_factory",
-                        lambda: Vault(str(tmp_path / "vault.json")))
+    # No _vault_factory override: the mirror scrubs bodies at rest with the
+    # workspace identity vault, so the tool must read through that same vault.
 
 
 def test_mcp_get_roster_serves_from_mirror_without_canvas(monkeypatch, tmp_path):

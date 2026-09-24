@@ -38,7 +38,12 @@ INSTRUCTION_BUDGET = 2200
 # The current unified scoring surface has one preparation, one packet, one staged
 # write, one apply, and one optional identity-free list tool.
 # v54 keeps the measured listing ceiling while replacing the old direct submit.
-LISTING_BUDGET = 15950
+# Raised once to the measured 18,569 for nine tools added while the title
+# assertion above was failing on verify_live's real `title` parameter and
+# masking this one: shared work-item handoff (85ce67a, 4 tools, +982), push
+# verification and tiered recovery (149c2a4, 3 tools, +1,097), and reviewed
+# grade adjustment (23f32c9, 2 tools, +652). Held at 15,950 through b2f28b7.
+LISTING_BUDGET = 18569
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
@@ -119,8 +124,27 @@ def test_no_generated_schema_titles_reach_the_client():
     wire = json.dumps([tool.model_dump(exclude_none=True) for tool in listed],
                       separators=(",", ":"), ensure_ascii=False)
 
+    def generated_titles(node, path="$"):
+        # A key inside "properties" is a parameter name -- verify_live has a real
+        # one called "title" -- so only each property's own schema is searched.
+        if isinstance(node, list):
+            return [hit for i, item in enumerate(node)
+                    for hit in generated_titles(item, f"{path}[{i}]")]
+        if not isinstance(node, dict):
+            return []
+        hits = [path] if "title" in node else []
+        for key, value in node.items():
+            if key == "properties" and isinstance(value, dict):
+                hits += [hit for name, prop in value.items()
+                         for hit in generated_titles(prop, f"{path}.properties.{name}")]
+            else:
+                hits += generated_titles(value, f"{path}.{key}")
+        return hits
+
+    leaked = [hit for tool in listed
+              for hit in generated_titles(tool.inputSchema, tool.name)]
     assert server._STRIPPED_SCHEMA_TITLES > 0, "the strip pass found nothing to strip"
-    assert '"title"' not in wire, "a generated schema title is reaching clients again"
+    assert not leaked, f"a generated schema title is reaching clients again: {leaked}"
     assert len(wire) <= LISTING_BUDGET, (
         f"serialized tools/list is {len(wire)} chars, over the {LISTING_BUDGET} "
         "character budget"
