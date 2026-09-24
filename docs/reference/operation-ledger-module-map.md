@@ -43,6 +43,10 @@ results.
   bridge comparison, provenance-safe clear planning, aggregate review, grade projection,
   and ambiguous grade-write reconciliation for `gradebook.sis_bridge`. It owns no family
   discovery, structure repair, family-link repair, or SIS-sync request.
+- `api/operation_ledger/adapters/grade_adjustment.py` — mirror-backed existing-grade
+  baseline, assignment drift check, per-student prior-score guard, posted-grade
+  write/readback, uncertainty reconciliation, and private receipt entries for
+  `gradebook.grade_adjustment`.
 
 ## Shared Support
 
@@ -92,6 +96,8 @@ results.
 - `api/tests/test_quick_assignment_operation.py`
 - `api/tests/test_operation_ledger.py`
 - `api/tests/test_sis_grade_bridge_operation.py`
+- `api/tests/test_grade_adjustment_operation.py`
+- `api/tests/test_grade_adjustment.py`
 - `api/tests/test_routines_builtin_sis_grade_bridge.py`
 - `api/tests/test_operation_routes.py`
 

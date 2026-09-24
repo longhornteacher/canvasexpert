@@ -89,7 +89,7 @@ def _days_late(seconds):
         return None
 
 
-def _info_blocks(subs, curve_rows, sections):
+def _info_blocks(subs, adjustment_rows, sections):
     standing, late, adj, comments = [], [], [], []
     for s in subs:
         a = s.get("assignment") or {}
@@ -121,8 +121,8 @@ def _info_blocks(subs, curve_rows, sections):
                 comments.append(f'{when} — {who}: {c.get("comment", "")}')
             else:
                 comments.append(f'{when}: {c.get("comment", "")}')
-    for cr in curve_rows:
-        adj.append(cr)   # pre-formatted neutral strings, built in build_packet
+    for row in adjustment_rows:
+        adj.append(row)   # pre-formatted neutral strings, built in build_packet
     blocks = []
     if "standing" in sections:
         blocks.append(("Standing", "table",
@@ -137,18 +137,18 @@ def _info_blocks(subs, curve_rows, sections):
     return blocks
 
 
-def _signature(subs, curve_rows):
+def _signature(subs, adjustment_rows):
     """Cheap change-detector for dedupe: latest submission marker + counts."""
     last = max([(s.get("submitted_at") or "") for s in subs] + [""])
     graded = sum(1 for s in subs if s.get("workflow_state") == "graded")
-    return f"{last}|{graded}|{len(curve_rows)}"
+    return f"{last}|{graded}|{len(adjustment_rows)}"
 
 
 # ── Per-student build ───────────────────────────────────────────────────────
 
 
 def build_packet(user_id, student_name, sections, courses, base, token,
-                 reports_root, curve_events, skip_unchanged=False):
+                 reports_root, adjustment_rows, skip_unchanged=False):
     """Generator of progress strings. `courses` = [{id, name}] to consider.
     Final line: 'FOLDER: <student root>'. Set skip_unchanged for the routine path."""
     session_box: dict = {}
@@ -215,20 +215,20 @@ def build_packet(user_id, student_name, sections, courses, base, token,
             # straight from Canvas and already carry real author_name values,
             # exactly as _info_blocks reads them today; leave them untouched.
             report_local_reads.apply_comment_display(subs, user_id, student_name)
-        # curve adjustments for this student+course (local records, neutral phrasing)
-        curve_rows = []
-        for ev in curve_events:
-            if str(ev.get("course_id")) != cid or ev.get("reverted"):
+        # Grade adjustments for this student+course (local records, neutral phrasing).
+        course_adjustments = []
+        for adjustment in adjustment_rows:
+            if str(adjustment.get("course_id")) != cid:
                 continue
-            for st in (ev.get("students") or []):
+            for st in (adjustment.get("students") or []):
                 if str(st.get("user_id")) == str(user_id):
-                    old, new = st.get("original_score"), st.get("curved_score")
-                    when = (ev.get("applied_at") or "")[:10]
-                    curve_rows.append(
-                        f'{ev.get("assignment_name", ev.get("assignment_id"))}: '
+                    old, new = st.get("before"), st.get("after")
+                    when = (adjustment.get("applied_at") or "")[:10]
+                    course_adjustments.append(
+                        f'{adjustment.get("assignment_name", adjustment.get("assignment_id"))}: '
                         f'Score adjusted via curve on {when}: {old} → {new}')
 
-        sig = _signature(subs, curve_rows)
+        sig = _signature(subs, course_adjustments)
         if skip_unchanged and manifest.get(cid, {}).get("signature") == sig:
             yield f"· {cname}: no change since last packet — skipped"
             continue
@@ -291,7 +291,7 @@ def build_packet(user_id, student_name, sections, courses, base, token,
             yield f"✓ {cname}: {n} work file(s)"
 
         # Info DOCX
-        blocks = _info_blocks(subs, curve_rows, sections)
+        blocks = _info_blocks(subs, course_adjustments, sections)
         out = os.path.join(info_dir, f"{safe_name(student_name)} - {safe_name(cname)} "
                                      f"- {datetime.now():%Y-%m-%d}.docx")
         _render_info_docx(out, student_name, cname, blocks)

@@ -27,7 +27,3 @@ def ledger_lock_file() -> Path:
 
 def quarantine_dir() -> Path:
     return private_root() / "quarantine"
-
-
-def curve_events_file() -> Path:
-    return private_root() / "curve_events.v1.json"

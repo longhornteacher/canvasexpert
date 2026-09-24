@@ -130,9 +130,9 @@ review/edit surface. See
 Gradebook is also intentionally split for low-token debugging.
 
 - Route facade: `api/webui/routes/gradebook.py`
-- Route feature files: `routes/gradebook_policy.py`, `routes/gradebook_extra_time.py`, `routes/gradebook_curves.py`, `routes/gradebook_snapshot.py`
+- Route feature files: `routes/gradebook_policy.py`, `routes/gradebook_extra_time.py`, `routes/gradebook_snapshot.py`
 - Shared browser bootstrap: `gradebook.js`
-- Feature files: `gradebook/policy.js`, `gradebook/extra_time.js`, `gradebook/curves.js`, `gradebook/snapshot.js`
+- Feature files: `gradebook/policy.js`, `gradebook/extra_time.js`, `gradebook/snapshot.js`
 
 For the full ownership map and current source-size report, see `docs/reference/gradebook-module-map.md`.
 

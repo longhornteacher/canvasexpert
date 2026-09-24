@@ -895,7 +895,7 @@ The senior must reverify symbols on `dev` before writing a handoff. As of this d
 | Work provider compatibility shim | `api/work_registry/providers/__init__.py` |
 | PowerGrader acquisition | `api/powergrader/canvas_fetch.py`, `assignment_refresh.py`, `new_quiz_fetch.py` |
 | New Quiz response acquisition (read-only) | `api/powergrader/new_quiz_fetch.py` |
-| Gradebook | `api/webui/gradebook_service.py`, `api/webui/routes/gradebook_*.py` |
+| Gradebook | `api/grade_adjustment.py`, `api/operation_ledger/adapters/grade_adjustment.py`, `api/webui/routes/gradebook_*.py` |
 | Roster/Course Info | `api/webui/routes/roster*.py`, `api/webui/routes/courses.py` |
 | Create pickers | `api/webui/routes/push.py` |
 | Student Reports/portfolios | `api/webui/routes/reports.py`, `api/student_packet.py`, `api/portfolio_service.py` |

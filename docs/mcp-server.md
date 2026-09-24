@@ -57,7 +57,8 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 59 (52 tools). Version 59 adds `verify_live`, `resume_operation`, and
+Tool schema version 60 (54 tools). Version 60 adds the reviewed existing-grade adjustment
+pair. Version 59 added `verify_live`, `resume_operation`, and
 `abandon_operation`, and adds a `verify_hint` field to every successful apply
 (`apply_content_push`, `push_content_live`, `apply_assignment_update`, `apply_sis_grade_bridge`)
 naming the object(s) it created or changed for a follow-up `verify_live` call.
@@ -99,6 +100,8 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `get_submissions(course_id, assignment_id, include_text=true, pseudonyms="", max_text_chars=2000)` | Mirror submissions including historical rows; current_enrollment marks same-mirror roster membership; optional pseudonym narrowing and bounded text | Yes, pseudonymized |
 | `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |
 | `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state; exact saved family links label each bridge and differentiated source with its partner IDs | Yes, pseudonymized |
+| `preview_grade_adjustment(course_id, assignment_id, adjustment)` | Mirror-backed, pseudonymized before/after review for a points-based existing-grade adjustment, including rule, explicit, and revert previews | Yes, pseudonymized |
+| `apply_grade_adjustment(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grade-adjustment operation with live per-student score checks, readback, and a receipt | Yes, pseudonymized |
 | `refresh_mirror(course_id)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |
 | `list_feedback_contracts()` | List teacher-authored judgment and feedback-shape contracts available in the private workspace; returns ids, summaries, and projected sizes only | No |
 | `discover_scoring_work()` | Read every Current course locally and return student-free assignment, freshness, and attention tables; no refresh, preparation, or Canvas write | No |
@@ -190,6 +193,13 @@ live fallback. Preview does not inspect due dates, student coverage, overrides, 
 placement. After teacher approval, apply pushes only the unchanged reviewed scores to the
 exact linked bridge, performs live postconditions for those writes, and requests a targeted
 mirror refresh. Bridge operations do not repair or rearrange modules.
+
+The grade-adjustment pair is the only existing-score write lane. Preview reads the
+typed private mirror and returns pseudonym-only review rows; apply uses the Operation
+Ledger assignment drift check and live prior-score check before each `posted_grade` PUT.
+Undo is another preview with `adjustment.kind = "revert"`, and completed, non-reverted
+receipts supply the private student-report projection and the built-in curve routine's
+already-adjusted guard.
 
 Reconciliation is the separate reviewed path for missing bridge links: it may create or
 register a bridge from exact local IDs, but never guesses from title alone or starts Canvas

@@ -38,7 +38,7 @@ import re
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
-from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, gradebook_queries, learning_objectives, live_verify, operational_log, roster_context, roster_service, sis_grade_bridge
+from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, gradebook_queries, learning_objectives, live_verify, operational_log, roster_context, roster_service, sis_grade_bridge
 from api.operation_ledger import claims as operation_claims
 from api.operation_ledger import executor as operation_executor
 from api.operation_ledger import operations as operation_operations
@@ -158,6 +158,11 @@ _NEXT_STEPS = {
     "preview_sis_grade_bridge_reconciliation": (
         "Reconcile -> preview the exact family -> teacher confirms -> apply the unchanged "
         "operation coordinates."
+    ),
+    "preview_grade_adjustment": (
+        "Summarize the pseudonymized before/after review and get teacher confirmation, "
+        "then call apply_grade_adjustment with operation_id, batch_id, and review_digest "
+        "unchanged."
     ),
     "preview_learning_objective": (
         "Summarize the preview and get teacher confirmation, then call "
@@ -301,6 +306,24 @@ def apply_sis_grade_bridge(
             }],
         }
     return result
+
+
+def preview_grade_adjustment(course_id: str, assignment_id: str,
+                             adjustment: dict) -> dict:
+    """Prepare one exact, pseudonymized existing-grade adjustment review."""
+    return _with_next(
+        "preview_grade_adjustment",
+        grade_adjustment.preview_grade_adjustment(course_id, assignment_id, adjustment),
+    )
+
+
+def apply_grade_adjustment(
+    operation_id: str, batch_id: str, review_digest: str
+) -> dict:
+    """Apply only the opaque, digest-protected grade adjustment review."""
+    return grade_adjustment.apply_grade_adjustment(
+        operation_id, batch_id, review_digest
+    )
 
 
 def verify_live(course_id: str, kind: str, id: str = "", title: str = "") -> dict:
@@ -1365,7 +1388,11 @@ _TOOL_GROUPS = {
         "apply_staged_scoring_results",
         "reset_scoring_review",
     ),
-    "Gradebook": ("get_gradebook_snapshot",),
+    "Gradebook": (
+        "get_gradebook_snapshot",
+        "preview_grade_adjustment",
+        "apply_grade_adjustment",
+    ),
     "SIS Grade Bridges": (
         "list_sis_grade_bridges",
         "reconcile_sis_grade_bridges",

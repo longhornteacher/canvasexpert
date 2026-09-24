@@ -356,32 +356,6 @@
       "reason": "The central operation-ledger post-apply hook invalidates catalog.modules after the confirmed operation succeeds."
     },
     {
-      "path": "api/webui/routes/gradebook_curves.py",
-      "symbol": "curve_apply",
-      "detector": "name:_canvas_send",
-      "call_index": 1,
-      "call_form": "_canvas_send(\"PUT\", <submission_path>, request) [apply curve]",
-      "classification": "canvas_mutation",
-      "scopes": [
-        "private.submissions"
-      ],
-      "reconciliation": "targeted",
-      "reason": "Direct webui route: on the success branch (any push ok) it calls mirror_service.notify_course_changed(course_id), which runs sync.refresh_submissions_course_delta — the same narrow per-course submissions delta refresh PowerGrader uses, inline rather than via the _notify_write_through helper. The parallel ledger adapter operation_ledger/adapters/curve.py is dead (no producer emits gradebook.curve); the scheduled-routine path routines_builtin.py _curve_apply_core is the only remaining unreconciled curve writer (Batch 7 unit 02)."
-    },
-    {
-      "path": "api/webui/routes/gradebook_curves.py",
-      "symbol": "revert_curve",
-      "detector": "name:_canvas_send",
-      "call_index": 1,
-      "call_form": "_canvas_send(\"PUT\", <submission_path>, request) [revert curve]",
-      "classification": "canvas_mutation",
-      "scopes": [
-        "private.submissions"
-      ],
-      "reconciliation": "targeted",
-      "reason": "Direct webui route: on the success branch (any push ok) it calls mirror_service.notify_course_changed(course_id), which runs sync.refresh_submissions_course_delta — the same narrow per-course submissions delta refresh PowerGrader uses, inline rather than via the _notify_write_through helper. Reverting a curve writes posted_grade back and is reconciled identically to the apply path above."
-    },
-    {
       "path": "api/webui/routes/gradebook_policy.py",
       "symbol": "apply_late_policy",
       "detector": "name:_canvas_send",
@@ -458,19 +432,6 @@
       ],
       "reconciliation": "targeted",
       "reason": "Route calls the injected invalidate_groups callback (roster.py's _reconcile_group_category) after a verified create, same targeted-merge-with-invalidate-fallback path as roster_canvas.py."
-    },
-    {
-      "path": "api/webui/routes/routines_builtin.py",
-      "symbol": "_curve_apply_core",
-      "detector": "name:_canvas_send",
-      "call_index": 1,
-      "call_form": "_canvas_send(\"PUT\", <submission_path>, request) [routine-triggered curve apply]",
-      "classification": "canvas_mutation",
-      "scopes": [
-        "private.submissions"
-      ],
-      "reconciliation": "targeted",
-      "reason": "Scheduled-routine curve writer. Its caller _run_routine_curve fires one coalesced mirror_service.notify_course_changed(course_id) after each course's whole curve batch (once per course that curved at least one assignment), which runs sync.refresh_submissions_course_delta — the same narrow per-course submissions delta refresh PowerGrader and the direct curve routes use. Fire-and-forget; the heartbeat repairs any miss."
     },
     {
       "path": "api/powergrader/session_actions.py",
@@ -616,6 +577,19 @@
       ],
       "reconciliation": "n/a",
       "reason": "Standalone experimental CLI script; no CanvasMirror or operation-ledger integration."
+    },
+    {
+      "path": "api/operation_ledger/adapters/grade_adjustment.py",
+      "symbol": "GradeAdjustmentAdapter.execute",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(\"PUT\", <submission_path>, request)",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "private.submissions"
+      ],
+      "reconciliation": "targeted",
+      "reason": "The reviewed grade-adjustment adapter verifies each successful write, then requests the same narrow per-course submissions refresh used by other grade writes."
     }
   ]
 }

@@ -39,29 +39,18 @@ the suite.
 through `_notify_write_through` in `api/webui/routes/powergrader.py` (and, for
 the scheduled-autoscore path, an inline `notify_course_changed` in
 `routines_powergrader.py`), which calls `mirror_service.notify_course_changed`
-(a narrow per-course submissions delta refresh). The **direct grade-curve
-routes** `webui/routes/gradebook_curves.py` (`curve_apply`, `revert_curve`)
-are ALSO already reconciled: each calls `mirror_service.notify_course_changed`
-on its success branch (the same hook, inline rather than via
-`_notify_write_through`). A 2026-07-19 audit corrected these two from a false
-`none` to `targeted`.
+(a narrow per-course submissions delta refresh).
 
-**Gap — no reconciliation:** the one remaining unreconciled live curve writer
-is the scheduled-routine path `webui/routes/routines_builtin.py`
-(`_curve_apply_core`, driven by `_run_routine_curve`): it writes `posted_grade`
-directly and neither it nor its caller calls a mirror refresh. This is the
-Batch 7 unit 02 target — point `_run_routine_curve` at the same
-`mirror_service.notify_course_changed` hook (coalesced once per course), not new
-machinery. The ledger adapter `operation_ledger/adapters/curve.py` was **dead**
-(no producer emitted `gradebook.curve`) — Batch 8 retired it.
+**Covered (targeted):** existing-grade adjustments are owned by
+`api/operation_ledger/adapters/grade_adjustment.py` (`execute`). It writes only
+`posted_grade`, verifies each readback, and calls
+`mirror_service.notify_course_changed` after successful writes. The built-in
+curve routine is a caller of this reviewed operation and does not own a Canvas
+mutation.
 
-**Duplicate implementation — retired 2026-07-19 (Batch 8):** the
-ledger adapter `operation_ledger/adapters/curve.py` (`gradebook.curve` KIND) was
-**dead** — no non-test producer emitted that KIND. The live curve writers are
-`webui/routes/gradebook_curves.py` (direct route) and
-`routines_builtin.py _curve_apply_core` (scheduled routine); the former
-reconciles, the latter is Batch 7 unit 02. The dead ledger adapter file and its
-contract and test entries have been removed.
+The former console curve routes, routine writer, curve-event store, and dead
+`gradebook.curve` adapter were retired together. No legacy curve-event data is
+read or migrated.
 
 **Covered (targeted) — SIS bridge:**
 `operation_ledger/adapters/sis_grade_bridge.py` reads the current local
@@ -208,13 +197,10 @@ Canvas content. They remain classified `canvas_read_acquisition`, reconciliation
 
 ## Batch 7 seeds (named gaps, in priority order)
 
-1. **Submissions/comments** (family 1): the direct curve routes
-   `webui/routes/gradebook_curves.py` (`curve_apply`, `revert_curve`) were found
-   ALREADY reconciled (corrected to `targeted` 2026-07-19), so the only remaining
-   gap is the scheduled-routine writer `routines_builtin.py _curve_apply_core` /
-   `_run_routine_curve` — wire it to the same `mirror_service.notify_course_changed`
-   targeted refresh PowerGrader uses (coalesced once per course; Batch 7 unit 02).
-   The ledger `curve.py` adapter is dead (see family 1) — do not reconcile it.
+1. **Submissions/comments** (family 1): reviewed existing-grade writes use
+   `operation_ledger/adapters/grade_adjustment.py::execute`, which performs the
+   targeted per-course refresh after verified writes. The routine caller uses
+   this operation and therefore introduces no separate mutation owner.
 2. **Catalog structure** (family 2): **covered 2026-07-19** for
    `catalog.assignments` and `catalog.modules` by the central ledger post-apply
    stale-mark hook (ten `none` → `invalidate` contract transitions), and

@@ -238,17 +238,6 @@ def test_custom_sdkcanvas_get_all_and_canvas_send_remain(monkeypatch, tmp_path):
     assert sdk["canvas_get"] is routines_custom.canvas_get
 
 
-# --- (g) proof that writing-routine (sweep/curve) owners/imports are unchanged --
-
-def test_curve_still_uses_the_unmigrated_mirror_reads_helpers():
-    """Locked non-goal: only download migrates to read_scope.
-    Curve's audit-baseline submissions_or_live stays on the existing
-    compatibility reader, unchanged (same function objects mirror_reads.py defines)."""
-    assert routines_builtin.students_or_live is mirror_reads.students_or_live
-    assert routines_builtin.submissions_or_live is mirror_reads.submissions_or_live
-    assert not hasattr(routines_builtin, "assignments_or_live")
-
-
 def test_read_scope_owns_no_canvas_import():
     assert not hasattr(routine_reads, "canvas_get")
     assert not hasattr(routine_reads, "canvas_get_all")

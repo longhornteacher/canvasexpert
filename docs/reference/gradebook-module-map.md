@@ -20,9 +20,8 @@ As of 2026-07-08, Gradebook is split on both sides:
 - Backend feature routers:
   - `api/webui/routes/gradebook_policy.py`
   - `api/webui/routes/gradebook_extra_time.py`
-  - `api/webui/routes/gradebook_curves.py`
   - `api/webui/routes/gradebook_snapshot.py`
-- Shared grade math and event storage: `api/webui/gradebook_service.py`
+- Shared grade-adjustment math and receipt projection: `api/grade_adjustment.py`
 - Main browser bootstrap: `api/webui/static/gradebook.js`
 - Browser feature scripts: `api/webui/static/gradebook/*.js`
 
@@ -31,7 +30,6 @@ Facade include order:
 1. `gradebook_snapshot.py`
 2. `gradebook_policy.py`
 3. `gradebook_extra_time.py`
-4. `gradebook_curves.py`
 
 ## Source-size reports
 
@@ -50,10 +48,12 @@ Feature ownership:
 
 - `gradebook_policy.py` - late-policy load/apply flow
 - `gradebook_extra_time.py` - extra-time roster, student list, tier tags
-- `gradebook_curves.py` - curve preview/apply/history/revert
 - `gradebook_snapshot.py` - whole-course grading snapshot
 - `gradebook_common.py` - shared Canvas fetch helpers used by the route modules
-- `gradebook_service.py` - shared curve math and curve event storage
+
+Existing-grade adjustments are agent-facing: `api/grade_adjustment.py` owns the
+mirror-backed preview, receipt-backed apply projection, and revert preview. The
+Operation Ledger adapter performs the reviewed Canvas writes.
 
 Assistant-operated SIS grade bridges do not belong to this control-console facade. Start with the
 [SIS Grade Bridges guide](../guides/sis-grade-bridges.md), then follow its exact contract and
@@ -73,7 +73,6 @@ Feature ownership:
 
 - `policy.js` - late-policy load/apply flow
 - `extra_time.js` - extra-time roster and save flow
-- `curves.js` - curve preview/apply/history/revert
 - `snapshot.js` - whole-course grading snapshot
 
 Namespace seams:
@@ -81,7 +80,6 @@ Namespace seams:
 - backend import seam: `api.webui.routes.gradebook`
 - browser shared namespace: `window.CE_GRADEBOOK`
   - shared helpers such as `postForm`, `showBanner`, `showLog`, `gbCourseId`
-  - mutable accessors for `curveResults`
 
 ## First places to look by symptom
 
@@ -91,10 +89,9 @@ Namespace seams:
 - extra-time problems:
   - `gradebook_extra_time.py`
   - `gradebook_common.py` if student list fetches are failing
-- curve problems:
-  - `gradebook_curves.py`
-  - `gradebook_service.py`
-  - `gradebook_common.py`
+- grade-adjustment problems:
+  - `api/grade_adjustment.py`
+  - `api/operation_ledger/adapters/grade_adjustment.py`
 - summary snapshot problems:
   - `gradebook_snapshot.py`
   - `gradebook_common.py`
@@ -109,6 +106,6 @@ Namespace seams:
 - put new backend behavior into `gradebook_*.py` feature files instead of growing
   the facade
 - use `gradebook_common.py` only for shared Canvas fetch helpers
-- use `gradebook_service.py` for curve math and curve event storage
+- keep existing-grade adjustment math and receipt projections in `api/grade_adjustment.py`
 - keep `window.CE_GRADEBOOK` for browser shared helpers instead of copying fetch
   helpers across tabs

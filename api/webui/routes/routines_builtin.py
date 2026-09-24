@@ -9,10 +9,8 @@ from datetime import datetime, timedelta
 
 from api.platform_services import config
 from .. import mirror_service
-from api.platform_services.canvas_client import canvas_get, canvas_get_all, _canvas_send
-from ..gradebook_service import _load_curve_events, _save_curve_events, _apply_curve_model
-from ..mirror_reads import students_or_live, submissions_or_live
-from api import operational_log, routine_reads, sis_grade_bridge, student_packet
+from api.platform_services.canvas_client import canvas_get_all
+from api import grade_adjustment, operational_log, routine_reads, sis_grade_bridge, student_packet
 from api.powergrader import assignment_refresh
 
 
@@ -129,53 +127,12 @@ def _run_routine_sis_bridge_sync(_params):
 # Curve
 # --------------------------------------------------------------------------
 
-def _curve_apply_core(course_id, assignment_id, curve_type, settings, rows):
-    a, err = canvas_get(f"/api/v1/courses/{course_id}/assignments/{assignment_id}")
-    if err:
-        return False, None, [{"error": err}]
-    # Audit-only baseline (recorded on the curve event as score_at_apply_time,
-    # not used to compute the curved value written below) — safe to serve
-    # from the mirror. course_submissions() returns all of the course's
-    # submissions, so filter down to this assignment.
-    current_subs, _current_err, _source = submissions_or_live(course_id)
-    current_score_by_uid = {str(sub["user_id"]): sub.get("score")
-                            for sub in (current_subs or [])
-                            if str(sub.get("assignment_id")) == str(assignment_id)}
-    event_id = f"curve_{_uuid.uuid4().hex[:8]}"
-    event_students, push_results = [], []
-    for r in rows:
-        uid = str(r["user_id"])
-        curved = r["curved_score"]
-        _, err = _canvas_send(
-            "PUT",
-            f"/api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{uid}",
-            {"submission": {"posted_grade": str(curved)}})
-        push_results.append({"student": r.get("student_name", uid),
-                             "original": r["original_score"],
-                             "curved": curved, "ok": not err, "error": err})
-        event_students.append({"user_id": uid, "student_name": r.get("student_name", uid),
-                               "original_score": r["original_score"], "curved_score": curved,
-                               "score_at_apply_time": current_score_by_uid.get(uid),
-                               "changed": r.get("changed", True)})
-    events = _load_curve_events()
-    events.append({"id": event_id, "course_id": str(course_id),
-                   "assignment_id": str(assignment_id),
-                   "assignment_name": a.get("name", assignment_id),
-                   "curve_type": curve_type, "curve_settings": settings,
-                   "applied_at": datetime.now().isoformat(timespec="seconds"),
-                   "reverted": False, "students": event_students})
-    _save_curve_events(events)
-    all_ok = all(r["ok"] for r in push_results)
-    return all_ok, event_id, push_results
-
-
 def _run_routine_curve(params):
     floor = float(params.get("floor", 80))
     mode = params.get("mode", "flag")
     window = int(params.get("window_days", 30))
     cutoff = (datetime.now().date() - timedelta(days=window)).isoformat()
-    curved_already = {(e["course_id"], e["assignment_id"])
-                      for e in _load_curve_events() if not e.get("reverted")}
+    curved_already = grade_adjustment.active_adjustment_assignments()
     lines, ok, flagged, applied = [], True, 0, 0
     for c in config.active_courses():
         cid = str(c["id"])
@@ -209,23 +166,27 @@ def _run_routine_curve(params):
             if mode != "apply":
                 lines.append(f"⚑ {c['nickname']}: \"{a.get('name','')}\" avg {avg_pct:.1f}% < {floor:g}%")
                 continue
-            students, err, _source = students_or_live(cid)
-            name_by_id = {str(st["id"]): (st.get("sortable_name") or st.get("name", ""))
-                          for st in (students or [])}
-            scored = [{"user_id": str(s_["user_id"]),
-                       "student_name": name_by_id.get(str(s_["user_id"]), str(s_["user_id"])),
-                       "score": s_.get("score")}
-                      for s_ in (subs or []) if s_.get("workflow_state") == "graded"]
-            settings = {"target_avg_pct": floor, "do_no_harm": True}
-            rows = _apply_curve_model(scored, "target_average", settings, pts)
-            rows = [r for r in rows if r["changed"]]
-            if not rows:
+            preview = grade_adjustment.preview_grade_adjustment(
+                cid, aid, {"kind": "rule", "model": "target_average",
+                           "settings": {"target_avg_pct": floor,
+                                        "do_no_harm": True}})
+            if not preview.get("ok"):
+                ok = False
+                lines.append(f"✗ {c['nickname']}: \"{a.get('name', '')}\" — "
+                             f"{preview.get('error', 'grade adjustment preview failed')}")
                 continue
-            all_ok, event_id, _ = _curve_apply_core(cid, aid, "target_average", settings, rows)
-            ok = ok and all_ok
+            review = preview.get("preview") or {}
+            changed = int((review.get("summary") or {}).get("changed") or 0)
+            result = grade_adjustment.apply_grade_adjustment(
+                preview["operation_id"], preview["batch_id"], preview["review_digest"])
+            ok = ok and bool(result.get("ok"))
+            if not result.get("ok"):
+                lines.append(f"✗ {c['nickname']}: \"{a.get('name', '')}\" — "
+                             f"{result.get('error', 'grade adjustment apply failed')}")
+                continue
             applied += 1
             course_applied += 1
-            lines.append(f"✓ {c['nickname']}: curved \"{a.get('name','')}\" {avg_pct:.1f}% → {floor:g}% ({len(rows)} students)")
+            lines.append(f"✓ {c['nickname']}: curved \"{a.get('name','')}\" {avg_pct:.1f}% → {floor:g}% ({changed} students)")
         # Coalesced write-through: after this course's whole curve batch, fire one
         # per-course submissions refresh so mirror-backed grade reads pick up the
         # curved scores. Fire-and-forget (self-guarding, swallows its own errors);
@@ -253,12 +214,13 @@ def _run_routine_student_reports(params):
         return {"ok": False, "lines": ["✗ no token"], "summary": "no token"}
     root = config.get_student_reports_root()
     courses = [{"id": c["id"], "name": c["name"]} for c in config.active_courses()]
-    events = _load_curve_events()
     lines, ok, n = [], True, 0
     for uid, v in mon.items():
         try:
             for line in student_packet.build_packet(uid, v["name"], student_packet.SECTIONS, courses,
-                                                    base, token, root, events, skip_unchanged=True):
+                                                    base, token, root,
+                                                    grade_adjustment.report_adjustments(),
+                                                    skip_unchanged=True):
                 if line.startswith("FOLDER:"):
                     continue
                 if line.startswith("!!"):

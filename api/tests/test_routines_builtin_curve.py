@@ -1,25 +1,13 @@
-"""Batch 7 unit 02 — scheduled-routine curve write-through reconciliation.
-
-`_run_routine_curve` writes curved grades to Canvas via `_curve_apply_core`.
-After each course's whole curve batch it must fire exactly one coalesced
-`mirror_service.notify_course_changed(course_id)` so mirror-backed grade reads
-pick up the curved scores — once per course that curved at least one
-assignment, never per assignment, never for a course that curved nothing, and
-never in flag (non-apply) mode. This mirrors the direct curve routes and the
-PowerGrader grade-push path; failure semantics are fire-and-forget with the
-heartbeat as the backstop (no new stale-mark).
-
-These tests isolate the coalescing behavior by stubbing the curve internals
-(`_curve_apply_core`, `_apply_curve_model`) and recording the notify calls.
-"""
+"""Focused tests for the built-in curve routine's shared grade-adjustment path."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 
 from api.webui.routes import routines_builtin
 
-COURSE_A = "5001"  # will curve one assignment
-COURSE_B = "5002"  # nothing to curve (average above floor)
+
+COURSE_A = "5001"
+COURSE_B = "5002"
 
 
 def _recent_due() -> str:
@@ -27,15 +15,11 @@ def _recent_due() -> str:
 
 
 def _wire(monkeypatch):
-    """Two active courses; A has a below-floor assignment, B is above floor.
-    Returns the list that records notify_course_changed(course_id) calls."""
     monkeypatch.setattr(routines_builtin.config, "active_courses",
                         lambda: [{"id": COURSE_A, "nickname": "Course A"},
                                  {"id": COURSE_B, "nickname": "Course B"}])
-    monkeypatch.setattr(routines_builtin, "students_or_live",
-                        lambda cid: ([], None, "mirror"))
-    monkeypatch.setattr(routines_builtin, "_load_curve_events", lambda: [])
-
+    monkeypatch.setattr(routines_builtin.grade_adjustment,
+                        "active_adjustment_assignments", lambda: set())
     due = _recent_due()
 
     def fake_get_all(path, params=None, timeout=None):
@@ -44,47 +28,70 @@ def _wire(monkeypatch):
             return [{"id": aid, "name": "Quiz", "due_at": due,
                      "points_possible": 10, "published": True}], None
         if path.endswith("/submissions"):
-            score = 5 if f"/courses/{COURSE_A}/" in path else 9  # A: 50% < 80; B: 90% >= 80
+            score = 5 if f"/courses/{COURSE_A}/" in path else 9
             return [{"user_id": str(i), "workflow_state": "graded", "score": score}
                     for i in range(3)], None
         return [], None
 
     monkeypatch.setattr(routines_builtin, "canvas_get_all", fake_get_all)
-    # Only reached for course A (B is skipped before the curve model); return a
-    # single changed row so the curve is attempted.
-    monkeypatch.setattr(routines_builtin, "_apply_curve_model",
-                        lambda scored, model, settings, pts: [
-                            {"user_id": "0", "original_score": 5, "curved_score": 8,
-                             "changed": True}])
+    previews = []
+    applies = []
 
-    applied_calls = []
-    monkeypatch.setattr(routines_builtin, "_curve_apply_core",
-                        lambda cid, aid, ctype, settings, rows:
-                        (applied_calls.append((cid, aid)) or (True, "evt", [])))
+    def fake_preview(course_id, assignment_id, adjustment):
+        previews.append((course_id, assignment_id, adjustment))
+        return {"ok": True, "operation_id": "op-1", "batch_id": "batch-1",
+                "review_digest": "digest-1",
+                "preview": {"summary": {"changed": 3}}}
 
+    def fake_apply(operation_id, batch_id, review_digest):
+        applies.append((operation_id, batch_id, review_digest))
+        return {"ok": True, "status": "applied",
+                "counts": {"adjusted": 3}}
+
+    monkeypatch.setattr(routines_builtin.grade_adjustment,
+                        "preview_grade_adjustment", fake_preview)
+    monkeypatch.setattr(routines_builtin.grade_adjustment,
+                        "apply_grade_adjustment", fake_apply)
     notified = []
     monkeypatch.setattr(routines_builtin.mirror_service, "notify_course_changed",
                         lambda course_id, **kw: notified.append(str(course_id)))
-    return notified, applied_calls
+    return previews, applies, notified
 
 
-def test_apply_mode_reconciles_once_for_the_curved_course_only(monkeypatch):
-    notified, applied_calls = _wire(monkeypatch)
+def test_apply_mode_uses_reviewed_adjustment_and_reconciles_once(monkeypatch):
+    previews, applies, notified = _wire(monkeypatch)
 
     result = routines_builtin._run_routine_curve({"mode": "apply", "floor": 80})
 
     assert result["ok"] is True
-    # Course A curved one assignment; Course B curved nothing.
-    assert applied_calls == [(COURSE_A, "111")]
-    # Exactly one coalesced refresh, for the curved course, and not for course B.
+    assert previews[0][0:2] == (COURSE_A, "111")
+    assert previews[0][2] == {
+        "kind": "rule", "model": "target_average",
+        "settings": {"target_avg_pct": 80, "do_no_harm": True},
+    }
+    assert applies == [("op-1", "batch-1", "digest-1")]
     assert notified == [COURSE_A]
 
 
-def test_flag_mode_never_reconciles(monkeypatch):
-    notified, applied_calls = _wire(monkeypatch)
+def test_flag_mode_never_previews_or_reconciles(monkeypatch):
+    previews, applies, notified = _wire(monkeypatch)
 
     result = routines_builtin._run_routine_curve({"mode": "flag", "floor": 80})
 
-    # Flag mode identifies below-floor assignments but writes nothing.
-    assert applied_calls == []
+    assert result["ok"] is True
+    assert previews == []
+    assert applies == []
     assert notified == []
+
+
+def test_already_adjusted_assignment_is_skipped(monkeypatch):
+    previews, applies, _notified = _wire(monkeypatch)
+    monkeypatch.setattr(routines_builtin.grade_adjustment,
+                        "active_adjustment_assignments",
+                        lambda: {(COURSE_A, "111")})
+
+    result = routines_builtin._run_routine_curve({"mode": "apply", "floor": 80})
+
+    assert result["ok"] is True
+    assert previews == []
+    assert applies == []

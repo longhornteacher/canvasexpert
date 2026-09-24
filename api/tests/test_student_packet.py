@@ -94,6 +94,38 @@ def test_build_packet_makes_zero_canvas_calls_when_local_current_and_no_attachme
     assert any(line.startswith("FOLDER:") for line in lines)
 
 
+def test_build_packet_renders_private_receipt_adjustment_projection_and_detects_no_change(
+        monkeypatch, tmp_path):
+    _seed_local_current_course()
+    _forbid_canvas_calls(monkeypatch)
+    projection = [{
+        "course_id": COURSE_ID,
+        "assignment_id": ASSIGNMENT_ID,
+        "assignment_name": "Essay 1",
+        "applied_at": "2026-07-19T12:00:00Z",
+        "students": [{"user_id": USER_ID, "before": 7, "after": 9}],
+    }]
+
+    first = list(student_packet.build_packet(
+        USER_ID, STUDENT_NAME, ["adjustments"], [_course_dict()],
+        "https://canvas.test", "tok", str(tmp_path / "reports"),
+        projection, skip_unchanged=True))
+    second = list(student_packet.build_packet(
+        USER_ID, STUDENT_NAME, ["adjustments"], [_course_dict()],
+        "https://canvas.test", "tok", str(tmp_path / "reports"),
+        projection, skip_unchanged=True))
+
+    assert any("Info document written" in line for line in first)
+    assert any("no change since last packet" in line for line in second)
+    local_subs = report_local_reads.local_course_submissions(COURSE_ID, USER_ID)
+    blocks = student_packet._info_blocks(
+        local_subs,
+        ["Essay 1: Score adjusted via curve on 2026-07-19: 7 → 9"],
+        ["adjustments"],
+    )
+    assert blocks[0][2][0] == "Essay 1: Score adjusted via curve on 2026-07-19: 7 → 9"
+
+
 def test_local_assembly_produces_identical_info_blocks_to_the_old_live_shape():
     """`report_local_reads.local_course_submissions` must feed `_info_blocks`
     the same nested shape a live fetch used to — same rendered content for the

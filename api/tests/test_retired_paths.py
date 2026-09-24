@@ -156,6 +156,10 @@ RETIRED_PATHS = (
     ("api/webui/static/gradebook/extensions.js", "(none)", "Retire the school calendar, bell schedules, and the late-work sweep"),
     ("api/default_docs/AI Authoring/Author a Class Schedule.txt", "(none)", "Retire the school calendar, bell schedules, and the late-work sweep"),
     ("api/tests/test_reports_routes.py", "(none)", "Retire GET /api/assignments-full; its last browser consumer went with the extension UI"),
+    ("api/webui/routes/gradebook_curves.py", "(none)", "Retire the console curve controls in favor of the reviewed MCP grade-adjustment lane"),
+    ("api/webui/static/gradebook/curves.js", "(none)", "Retire the console curve controls in favor of the reviewed MCP grade-adjustment lane"),
+    ("api/webui/gradebook_service.py", "(none)", "Retire the curve-event store after moving grade adjustment math to the shared service"),
+    ("api/tests/test_curve_event_storage.py", "(none)", "Retire the curve-event store and its storage tests"),
 )
 
 

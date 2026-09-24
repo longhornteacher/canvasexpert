@@ -11,11 +11,10 @@ from datetime import datetime
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
-from api import nq_report, portfolio, portfolio_service, student_packet
+from api import grade_adjustment, nq_report, portfolio, portfolio_service, student_packet
 from api.mirror import read_service, store as mirror_store
 from api.platform_services import config, workspace
 from api.platform_services.canvas_client import canvas_get_all, canvas_headers
-from ..gradebook_service import _load_curve_events
 
 router = APIRouter(prefix="/api", tags=["reports"])
 
@@ -109,7 +108,7 @@ def api_student_packet_stream(user_id: str, student_name: str,
                 user_id, student_name, secs,
                 [{"id": c["id"], "name": c["name"]} for c in courses],
                 base, token, config.get_student_reports_root(),
-                _load_curve_events(), skip_unchanged=False)
+                grade_adjustment.report_adjustments(), skip_unchanged=False)
             yield "[exit 0]"
         except Exception as e:
             yield f"!! {e}"

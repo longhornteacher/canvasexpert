@@ -58,6 +58,9 @@ results or become a generic browser-first architecture.
    default: there is no config flag or fallback path that lets an MCP tool
    relay a live Canvas response to the AI.
 
+Grade-adjustment previews read the local mirror; the apply-time live prior-score
+check protects each reviewed write from overwriting a newer Canvas change.
+
 ## On-disk layout
 
 ```

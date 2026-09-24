@@ -367,8 +367,7 @@ def score(http_post=None):
 # `reconciliation` field itself is human-authored and unverified: a call site
 # that actually refreshes the mirror can still be mislabeled "none" (an
 # unreconciled gap), which misdirects planning. This guard closes the specific
-# error class that a real audit found — `gradebook_curves.py` curve_apply /
-# revert_curve were labeled "none" while calling notify_course_changed. It
+# error class that a real audit found in a retired gradebook mutation owner. It
 # asserts no first-party owner marked reconciliation="none" has a
 # reconcile-call token anywhere in its enclosing function's source.
 
@@ -438,8 +437,8 @@ def test_no_none_owner_actually_reconciles():
     """A reconciliation="none" label asserts the owner performs NO post-write
     mirror reconciliation. If the owner's enclosing function actually calls a
     reconcile function, the label is a lie — exactly the defect an audit found
-    on gradebook_curves.py curve_apply/revert_curve. Fail, naming the offender,
-    so the label must be corrected (usually to "targeted"/"invalidate")."""
+    on a gradebook mutation owner. Fail, naming the offender, so the label must
+    be corrected (usually to "targeted"/"invalidate")."""
     per_file_sources: dict[str, dict[str, list[str]]] = {}
     offenders = []
     for owner in CONTRACT["owners"]:

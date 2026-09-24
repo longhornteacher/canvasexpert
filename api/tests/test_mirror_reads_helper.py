@@ -8,18 +8,16 @@ marks a pass fresh; a pinned old ISO string marks it stale.
 
 Write-path observation (documented here, not just in the summary): reads that
 feed a Canvas write stay fully live, because mirror-served computes could build
-a write on stale data, which locked decision 1 forbids. That applies inside
-``_run_routine_curve`` (assignments/submissions feed the ``posted_grade`` it
-writes in "apply" mode) — those two reads stay live; only the name-lookup
-student reads and the audit-only baseline read in ``_curve_apply_core`` are
-mirror-first. Tests below lock in exactly that split.
+a write on stale data, which locked decision 1 forbids. The built-in curve
+routine now delegates its reviewed write to the grade-adjustment operation;
+these helpers cover only independent mirror-first student-data reads. Tests
+below lock in that split.
 """
 from __future__ import annotations
 
 from api.mirror import store
 from api.platform_services import workspace
 from api.webui import mirror_reads
-from api.webui.routes import routines_builtin
 
 COURSE = "555201"
 
@@ -132,32 +130,4 @@ def test_helper_falls_back_live_when_mirror_read_errors(monkeypatch, tmp_path):
     monkeypatch.setattr(mirror_reads, "canvas_get_all", lambda *a, **k: (live_rows, None))
     rows, err, source = mirror_reads.assignments_or_live(COURSE)
     assert err is None and source == "canvas" and rows == live_rows
-
-
-# --- routines_builtin integration: flipped sites vs. sites left live --------------
-
-def test_curve_apply_core_reads_audit_baseline_from_mirror(monkeypatch, tmp_path):
-    """current_subs in _curve_apply_core only records score_at_apply_time
-    (audit trail) — it does not determine the curved value written, so it is
-    safe to flip. course_submissions() returns all assignments, filtered here
-    to the target one."""
-    _mount(monkeypatch, tmp_path)
-    _populate(str(tmp_path))
-    monkeypatch.setattr(mirror_reads, "canvas_get_all", _explode)
-    monkeypatch.setattr(routines_builtin, "canvas_get",
-                        lambda path: ({"name": "Lab Report"}, None))
-    sent = []
-    monkeypatch.setattr(routines_builtin, "_canvas_send",
-                        lambda method, path, payload: (sent.append((method, path, payload)) or ({}, None)))
-    monkeypatch.setattr(routines_builtin, "_load_curve_events", lambda: [])
-    saved = []
-    monkeypatch.setattr(routines_builtin, "_save_curve_events", lambda events: saved.append(events))
-
-    rows = [{"user_id": "900201", "student_name": "Learner One",
-            "original_score": None, "curved_score": 5, "changed": True}]
-    all_ok, event_id, push_results = routines_builtin._curve_apply_core(
-        COURSE, "700200", "target_average", {}, rows)
-    assert all_ok is True
-    assert saved[0][0]["students"][0]["score_at_apply_time"] is None  # 900201 was ungraded
-
 

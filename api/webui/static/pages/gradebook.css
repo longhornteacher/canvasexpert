@@ -29,21 +29,13 @@
 .ce-gradebook-grid--dates { grid-template-columns: repeat(2, minmax(0, 160px)); align-items: start; margin-bottom: var(--ce-space-2); }
 .ce-gradebook-grid--single { grid-template-columns: minmax(0, 1fr); }
 .ce-gradebook-grid--extension { grid-template-columns: minmax(0, 1fr) 130px; align-items: start; }
-.ce-gradebook-grid--curve { grid-template-columns: minmax(0, 1fr) 180px; align-items: start; }
-.ce-gradebook-grid--curve-flat { grid-template-columns: 140px 160px auto; align-items: end; }
-.ce-gradebook-grid--curve-target, .ce-gradebook-grid--curve-proportional { grid-template-columns: 200px 160px auto; align-items: end; }
-.ce-gradebook-grid--curve-floor { grid-template-columns: repeat(2, minmax(0, 160px)); align-items: end; }
 .ce-gradebook-warn { margin: 0 0 var(--ce-space-3); padding: 7px 11px; border: 1px solid var(--ce-attention); background: var(--ce-attention-soft); color: var(--ce-ink); font-size: 12.5px; }
 .ce-gradebook-chips { display: flex; gap: var(--ce-space-2); flex-wrap: wrap; margin-bottom: var(--ce-space-4); }
 .ce-gradebook-action-row { margin-top: var(--ce-space-3); }
 .ce-gradebook-table-check { width: 32px; }
 .ce-gradebook-table-note { margin: var(--ce-space-2) 0 0; font-size: 12.5px; }
-.ce-gradebook-curve-load { margin-top: 24px; }
 .ce-gradebook-model-label { display: block; margin-top: var(--ce-space-3); }
-.ce-gradebook-curve-settings { margin-top: var(--ce-space-3); }
-.ce-gradebook-curve-settings[hidden] { display: none; }
 .ce-gradebook-initially-hidden { display: none; }
-.ce-gradebook-curve-check { margin-bottom: var(--ce-space-2); }
 .ce-gradebook-summary { margin: var(--ce-space-2) 0 var(--ce-space-3); color: var(--ce-ink-muted); font-size: 13.5px; }
 .ce-gradebook-history { margin-top: var(--ce-space-4); }
 .ce-gradebook-history .ce-actions, .ce-gradebook-snapshot-actions { margin-top: 0; }
@@ -78,7 +70,7 @@
   .ce-gradebook-course-head, .gb-course-row { align-items: stretch; }
   .gb-course-row { justify-content: stretch; }
   .gb-course-row select { width: 100%; max-width: none; }
-  .ce-gradebook-grid--policy, .ce-gradebook-grid--dates, .ce-gradebook-grid--extension, .ce-gradebook-grid--curve, .ce-gradebook-grid--curve-flat, .ce-gradebook-grid--curve-target, .ce-gradebook-grid--curve-proportional, .ce-gradebook-grid--curve-floor { grid-template-columns: minmax(0, 1fr); }
+  .ce-gradebook-grid--policy, .ce-gradebook-grid--dates, .ce-gradebook-grid--extension { grid-template-columns: minmax(0, 1fr); }
   .ce-gradebook-action-row > * { flex: 1 1 100%; }
   .xt-list { grid-template-columns: minmax(0, 1fr); }
 }

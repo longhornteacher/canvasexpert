@@ -16,7 +16,6 @@
     <div class="ce-tabs ce-gradebook-tabs gb-tabs" role="tablist" aria-orientation="vertical">
       <button type="button" id="gb-tab-button-policy" class="gb-tab active" data-tab="policy" role="tab" aria-selected="true" aria-controls="gb-tab-policy" tabindex="0">Policy</button>
       <button type="button" id="gb-tab-button-extra-time" class="gb-tab" data-tab="extra-time" role="tab" aria-selected="false" aria-controls="gb-tab-extra-time" tabindex="-1">Extra-time</button>
-      <button type="button" id="gb-tab-button-curves" class="gb-tab" data-tab="curves" role="tab" aria-selected="false" aria-controls="gb-tab-curves" tabindex="-1">Curves</button>
       <button type="button" id="gb-tab-button-snapshot" class="gb-tab" data-tab="snapshot" role="tab" aria-selected="false" aria-controls="gb-tab-snapshot" tabindex="-1">Snapshot</button>
       <button type="button" id="gb-tab-button-routines" class="gb-tab" data-tab="routines" role="tab" aria-selected="false" aria-controls="gb-tab-routines" tabindex="-1">Routines</button>
     </div>
@@ -25,7 +24,7 @@
 {% endif %}
 {% endblock %}
 
-{% block workspace_header %}{{ page_header('Gradebook', 'Late policy, extra time, and curves for one course.') }}{% endblock %}
+{% block workspace_header %}{{ page_header('Gradebook', 'Late policy, extra time, and gradebook snapshot.') }}{% endblock %}
 
 {% block primary %}
 
@@ -123,119 +122,6 @@
     </div>
   </div>
 
-  <!-- ── Curves ───────────────────────────────────────────────────────── -->
-  <div id="gb-tab-curves" class="gb-panel" role="tabpanel" aria-labelledby="gb-tab-button-curves" hidden>
-    <div class="ce-panel ce-gradebook-panel">
-      <h2>Curves</h2>
-      <p class="ce-hint ce-gradebook-snapshot-lede">
-        Preview-first. Curved scores are applied before Canvas's late policy runs.
-        Every curve is saved as a locally revertible event.
-      </p>
-
-      <p id="cv-status" class="status hint"></p>
-
-      <div class="ce-gradebook-grid ce-gradebook-grid--curve">
-        <label>Assignment <small class="lbl-hint" id="cv-assign-hint">(loading…)</small>
-          <select id="cv-assignment" disabled><option value="">— loading —</option></select>
-        </label>
-        <div class="ce-gradebook-curve-load">
-          <button id="btn-curve-load" class="small">↻ Reload assignments</button>
-        </div>
-      </div>
-
-      <label class="ce-gradebook-model-label">Curve model
-        <select id="cv-model">
-          <option value="flat_bump">Flat bump — add points to everyone</option>
-          <option value="target_average">Target average — raise class avg to X%</option>
-          <option value="proportional">Proportional — more help to lower scores</option>
-          <option value="floor_cap">Floor / cap — enforce min and/or max score</option>
-        </select>
-      </label>
-
-      <div id="cv-settings-flat_bump" class="cv-settings ce-gradebook-curve-settings">
-        <div class="ce-gradebook-grid ce-gradebook-grid--curve-flat">
-          <label>Add points
-            <input type="number" id="cv-bump" value="5" min="0" step="0.5">
-          </label>
-          <label>Cap <small class="lbl-hint">(blank = assignment max)</small>
-            <input type="number" id="cv-bump-cap" step="0.5" placeholder="no cap">
-          </label>
-          <label class="opt-check ce-gradebook-curve-check">
-            <input type="checkbox" id="cv-bump-donh"> Do no harm
-          </label>
-        </div>
-      </div>
-
-      <div id="cv-settings-target_average" class="cv-settings ce-gradebook-curve-settings ce-gradebook-initially-hidden">
-        <div class="ce-gradebook-grid ce-gradebook-grid--curve-target">
-          <label>Target class average <small class="lbl-hint">%</small>
-            <input type="number" id="cv-target-avg-pct" value="75" min="0" max="100" step="1">
-          </label>
-          <label>Cap <small class="lbl-hint">(blank = assignment max)</small>
-            <input type="number" id="cv-target-cap" step="0.5" placeholder="no cap">
-          </label>
-          <label class="opt-check ce-gradebook-curve-check">
-            <input type="checkbox" id="cv-target-donh" checked> Do no harm
-          </label>
-        </div>
-      </div>
-
-      <div id="cv-settings-proportional" class="cv-settings ce-gradebook-curve-settings ce-gradebook-initially-hidden">
-        <div class="ce-gradebook-grid ce-gradebook-grid--curve-proportional">
-          <label>Target class average <small class="lbl-hint">%</small>
-            <input type="number" id="cv-prop-avg-pct" value="75" min="0" max="100" step="1">
-          </label>
-          <label>Cap <small class="lbl-hint">(blank = assignment max)</small>
-            <input type="number" id="cv-prop-cap" step="0.5" placeholder="no cap">
-          </label>
-          <label class="opt-check ce-gradebook-curve-check">
-            <input type="checkbox" id="cv-prop-donh" checked> Do no harm
-          </label>
-        </div>
-      </div>
-
-      <div id="cv-settings-floor_cap" class="cv-settings ce-gradebook-curve-settings ce-gradebook-initially-hidden">
-        <div class="ce-gradebook-grid ce-gradebook-grid--curve-floor">
-          <label>Floor <small class="lbl-hint">(min score, 0 = no floor)</small>
-            <input type="number" id="cv-floor" value="0" min="0" step="0.5">
-          </label>
-          <label>Cap <small class="lbl-hint">(blank = no cap)</small>
-            <input type="number" id="cv-cap" step="0.5" placeholder="no cap">
-          </label>
-        </div>
-      </div>
-
-      <div class="ce-actions ce-gradebook-action-row">
-        <button id="btn-curve-preview">Preview curve (no changes)</button>
-        <button id="btn-curve-apply" class="primary" hidden>Apply curve to 0 students…</button>
-      </div>
-
-      <div id="cv-preview-wrap" class="ce-gradebook-table-scroll" hidden>
-        <div id="cv-summary" class="ce-gradebook-summary"></div>
-        <table class="ce-table ce-gradebook-table">
-          <thead><tr>
-            <th class="ce-gradebook-table-check"><input type="checkbox" id="cv-check-all" checked title="Toggle all"></th>
-            <th>Student</th><th>Original</th><th>Curved</th><th>Change</th>
-          </tr></thead>
-          <tbody id="cv-tbody"></tbody>
-        </table>
-      </div>
-      <pre id="cv-log" class="log" hidden></pre>
-      <div id="cv-banner" class="push-banner" hidden></div>
-
-      <details class="ce-gradebook-history">
-        <summary class="delivery-summary">Curve history &amp; revert</summary>
-        <div class="delivery-inner">
-          <div class="ce-actions">
-            <button id="btn-curve-events" class="small">Load curve history for this assignment…</button>
-          </div>
-          <p id="cv-events-status" class="status hint"></p>
-          <div id="cv-events-list"></div>
-        </div>
-      </details>
-    </div>
-  </div>
-
   <!-- ── Snapshot ─────────────────────────────────────────────────────── -->
   <div id="gb-tab-snapshot" class="gb-panel" role="tabpanel" aria-labelledby="gb-tab-button-snapshot" hidden>
     <div class="ce-panel ce-gradebook-panel">
@@ -306,6 +192,5 @@
 <script src="/static/gradebook.js?v={{ asset_v }}"></script>
 <script src="/static/gradebook/policy.js?v={{ asset_v }}"></script>
 <script src="/static/gradebook/extra_time.js?v={{ asset_v }}"></script>
-<script src="/static/gradebook/curves.js?v={{ asset_v }}"></script>
 <script src="/static/gradebook/snapshot.js?v={{ asset_v }}"></script>
 {% endblock %}

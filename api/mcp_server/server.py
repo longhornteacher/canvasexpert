@@ -235,6 +235,26 @@ def apply_sis_grade_bridge(
 
 
 @mcp.tool(structured_output=False)
+def preview_grade_adjustment(
+    course_id: str, assignment_id: str, adjustment: dict
+) -> str:
+    """Prepare a pseudonymized existing-grade adjustment for teacher review."""
+    return _compact(tools.preview_grade_adjustment(
+        course_id, assignment_id, adjustment
+    ))
+
+
+@mcp.tool(structured_output=False)
+def apply_grade_adjustment(
+    operation_id: str, batch_id: str, review_digest: str
+) -> str:
+    """Write the exact frozen grade-adjustment review to Canvas."""
+    return _compact(tools.apply_grade_adjustment(
+        operation_id, batch_id, review_digest
+    ))
+
+
+@mcp.tool(structured_output=False)
 def preview_workspace_reset() -> str:
     """Dry-run the explicitly authorized local assignment/evidence workspace reset."""
     return _compact(tools.preview_workspace_reset())
