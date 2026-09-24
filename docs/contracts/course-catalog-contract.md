@@ -6,11 +6,11 @@ authoritative for focused state, submissions, grades, comments, and every write.
 
 ## Location and identity
 
-Each course owns this canonical/previous pair below the configured synced workspace:
+Each course owns this canonical/previous pair in the machine-local `%LOCALAPPDATA%\CanvasExpert\cache\Canvas Catalog\` directory:
 
 ```text
-_System/Canvas Catalog/<canvas-course-id>/catalog.v3.json
-_System/Canvas Catalog/<canvas-course-id>/catalog.v3.previous.json
+%LOCALAPPDATA%\CanvasExpert\cache\Canvas Catalog\<canvas-course-id>\catalog.v3.json
+%LOCALAPPDATA%\CanvasExpert\cache\Canvas Catalog\<canvas-course-id>\catalog.v3.previous.json
 ```
 
 The Canvas course ID, not a display name, is directory identity. A disk read is local-only;

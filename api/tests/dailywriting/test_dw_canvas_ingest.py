@@ -79,7 +79,7 @@ def _write_catalog(root, *, description="Write a paragraph.", due_at="2026-09-14
         "assignment_groups": scope([]),
         "pages": scope([]),
     }
-    course_catalog.write_catalog(document, root=root)
+    course_catalog.write_catalog(document)
     return assignment
 
 

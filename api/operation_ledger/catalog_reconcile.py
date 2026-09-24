@@ -152,10 +152,10 @@ def reconcile_catalog_after_apply(
         return
     for scope_key in sorted(_scopes_for(kind, payload)):
         course_catalog.invalidate_scope(
-            course_id, scope_key, root=root, attempted_at=attempted_at,
+            course_id, scope_key, attempted_at=attempted_at,
         )
     for created in _created_objects(kind, payload, result, target):
         course_catalog.record_pending_write(
             course_id, created["kind"], created["id"], created["title"],
-            operation_id, created_at=attempted_at, root=root,
+            operation_id, created_at=attempted_at,
         )

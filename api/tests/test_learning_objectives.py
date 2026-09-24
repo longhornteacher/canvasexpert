@@ -38,7 +38,7 @@ def _catalog():
 
 def _seed(tmp_path, monkeypatch):
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    course_catalog.write_catalog(_catalog(), root=str(tmp_path))
+    course_catalog.write_catalog(_catalog())
     monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "course-1", "active": True}])
 
 
@@ -72,7 +72,7 @@ def test_mcp_pages_are_current_gated_and_bounded(tmp_path, monkeypatch):
     _seed(tmp_path, monkeypatch)
     catalog = _catalog()
     catalog["pages"]["records"][0]["body_text"] = "x" * 400
-    course_catalog.write_catalog(catalog, root=str(tmp_path))
+    course_catalog.write_catalog(catalog)
     preview = tools.get_course_pages("course-1")
     assert preview["ok"] is True
     assert preview["state"] == "current"
@@ -91,7 +91,7 @@ def test_mcp_pages_omits_unpublished_records(tmp_path, monkeypatch):
         "id": "p2", "title": "Draft", "body_text": "Not for the classroom.",
         "published": False, "front_page": False, "updated_at": STAMP,
     })
-    course_catalog.write_catalog(catalog, root=str(tmp_path))
+    course_catalog.write_catalog(catalog)
     result = tools.get_course_pages("course-1")
     assert result["pages"]["rows"] == [["p1", "Welcome", "Read this.", True, True, STAMP]]
 

@@ -246,6 +246,59 @@ def test_legacy_canvas_caches_are_marked_but_preserved(tmp_path, monkeypatch):
     assert conflict.read_text(encoding="utf-8") == "retained conflict evidence"
 
 
+@pytest.mark.parametrize("cache_kind", ["catalog", "mirror"])
+def test_canvas_cache_documents_stay_machine_local_across_workspace_roots(
+        cache_kind, tmp_path, monkeypatch):
+    from api import course_catalog
+    from api.mirror import read_service, store
+
+    root = tmp_path / "workspace"
+    root.mkdir()
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    course_id = "cache-location-law"
+    local_cache = runtime_paths.local_cache_dir()
+
+    if cache_kind == "catalog":
+        scope = {
+            "state": "unavailable", "last_success_at": "",
+            "last_attempt_at": "", "error_code": "", "records": [],
+        }
+        document = {
+            "version": 3, "course_id": course_id,
+            "course_name": "Synthetic Course",
+            "updated_at": "2026-09-24T12:00:00Z",
+            "assignments": {**scope, "records": {}},
+            "modules": dict(scope),
+            "assignment_groups": dict(scope),
+            "pages": dict(scope),
+        }
+        course_catalog.write_catalog(document)
+        assert course_catalog.read_catalog(course_id)["catalog"] == document
+        cache_path = Path(workspace.course_catalog_v3_path(course_id))
+        cache_root_fn = workspace.canvas_catalog_root
+        path_fn = workspace.course_catalog_dir
+    else:
+        users = [{
+            "id": 900001, "name": "Learner One",
+            "sortable_name": "One, Learner", "short_name": "Learner One",
+            "sis_user_id": "SIS-900001", "enrollments": [],
+        }]
+        store.write_roster(course_id, users, {}, root=str(root))
+        assert read_service.private_roster(course_id, max_age_hours=6)["state"] == "current"
+        store.write_roster(course_id, users, {})
+        assert store.read_roster(course_id, root=str(root))["state"] == "current"
+        cache_path = Path(store.roster_path(course_id, root=str(root)))
+        cache_root_fn = workspace.canvas_mirror_root
+        path_fn = workspace.course_mirror_dir
+
+    assert local_cache in cache_path.parents
+    assert (root / "_System") not in cache_path.parents
+    with pytest.raises(TypeError):
+        cache_root_fn(str(root))
+    with pytest.raises(TypeError):
+        path_fn(course_id, str(root))
+
+
 def test_canonical_course_first_paths_keep_ids_and_bound_long_names(tmp_path, monkeypatch):
     root = tmp_path / "CanvasExpert"
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))

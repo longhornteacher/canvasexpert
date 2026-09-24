@@ -6,7 +6,7 @@ migration program live in
 the current contracts until its individual implementation briefs are completed.
 
 A disposable local mirror of Canvas course facts, kept fresh by deterministic
-background sync, living in the synced workspace at `_System/Canvas Mirror/`.
+background sync, living on this computer at `%LOCALAPPDATA%\CanvasExpert\cache\Canvas Mirror\`.
 Reads that used to cost live Canvas round trips are served from disk in
 milliseconds when the mirror is fresh. Two different rules apply to what
 happens when it isn't fresh, by design:
@@ -64,7 +64,7 @@ check protects each reviewed write from overwriting a newer Canvas change.
 ## On-disk layout
 
 ```
-<workspace>/_System/Canvas Mirror/<course_id>/
+%LOCALAPPDATA%\CanvasExpert\cache\Canvas Mirror\<course_id>\
   _sync.v1.json                    pass envelopes + delta watermarks
   roster.v1.json                   students + sections (consumer fields only —
                                    no emails, no avatars)

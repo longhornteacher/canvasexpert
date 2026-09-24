@@ -869,7 +869,7 @@ def test_page_apply_actually_marks_a_real_catalog_document_stale(tmp_path):
             "updated_at": "2026-01-01T00:00:00+00:00",
         }]),
     }
-    course_catalog.write_catalog(copy.deepcopy(document), root=str(tmp_path))
+    course_catalog.write_catalog(copy.deepcopy(document))
 
     reconcile_catalog_after_apply(
         "content.page", "606", payload={"title": "New page"},
@@ -880,7 +880,7 @@ def test_page_apply_actually_marks_a_real_catalog_document_stale(tmp_path):
         root=str(tmp_path), attempted_at="2026-02-02T00:00:00+00:00",
     )
 
-    stored = course_catalog.read_catalog("606", root=str(tmp_path))["catalog"]
+    stored = course_catalog.read_catalog("606")["catalog"]
     assert stored["pages"]["state"] == "stale"
     assert stored["pages"]["error_code"] == "invalidated"
     assert stored["pages"]["last_attempt_at"] == "2026-02-02T00:00:00+00:00"

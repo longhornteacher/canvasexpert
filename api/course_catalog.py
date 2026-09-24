@@ -815,8 +815,8 @@ def _course_lock(course_id: str) -> threading.RLock:
         return _COURSE_LOCKS.setdefault(str(course_id), threading.RLock())
 
 
-def _catalog_conflicts(course_id: str, root=None) -> list[Path]:
-    directory_value = workspace.course_catalog_dir(course_id, root)
+def _catalog_conflicts(course_id: str) -> list[Path]:
+    directory_value = workspace.course_catalog_dir(course_id)
     if not directory_value or not os.path.isdir(workspace.extended_path(directory_value)):
         return []
     # os.listdir(extended) + basename comparison instead of Path.glob/.resolve:
@@ -824,8 +824,8 @@ def _catalog_conflicts(course_id: str, root=None) -> list[Path]:
     # (which can itself fail past MAX_PATH). All catalog files share one dir, so
     # a basename check is sufficient and precise.
     excluded_names = {
-        os.path.basename(workspace.course_catalog_v3_path(course_id, root) or ""),
-        os.path.basename(workspace.course_catalog_v3_previous_path(course_id, root) or ""),
+        os.path.basename(workspace.course_catalog_v3_path(course_id) or ""),
+        os.path.basename(workspace.course_catalog_v3_previous_path(course_id) or ""),
     }
     conflicts = [
         Path(os.path.join(directory_value, name))
@@ -855,13 +855,13 @@ def _read_valid(path: Path) -> dict | None:
         return None
 
 
-def read_catalog(course_id: str, *, root=None) -> dict:
+def read_catalog(course_id: str) -> dict:
     """Read the validated v3 canonical/previous pair without contacting Canvas."""
-    warnings = ["competing_catalog_files"] if _catalog_conflicts(course_id, root) else []
-    if not workspace.course_catalog_v3_path(course_id, root) or not workspace.course_catalog_v3_previous_path(course_id, root):
+    warnings = ["competing_catalog_files"] if _catalog_conflicts(course_id) else []
+    if not workspace.course_catalog_v3_path(course_id) or not workspace.course_catalog_v3_previous_path(course_id):
         return {"catalog": None, "source": "none", "warnings": warnings + ["workspace_not_configured"]}
-    canonical_path = Path(workspace.course_catalog_v3_path(course_id, root))
-    previous_path = Path(workspace.course_catalog_v3_previous_path(course_id, root))
+    canonical_path = Path(workspace.course_catalog_v3_path(course_id))
+    previous_path = Path(workspace.course_catalog_v3_previous_path(course_id))
     canonical = _read_valid(canonical_path)
     if canonical is not None and canonical["course_id"] == str(course_id):
         return {"catalog": canonical, "source": "canonical", "warnings": warnings}
@@ -875,8 +875,8 @@ def read_catalog(course_id: str, *, root=None) -> dict:
     return {"catalog": None, "source": "none", "warnings": warnings}
 
 
-def _pending_writes_path(course_id: str, root=None) -> Path | None:
-    directory = workspace.course_catalog_dir(course_id, root)
+def _pending_writes_path(course_id: str) -> Path | None:
+    directory = workspace.course_catalog_dir(course_id)
     return Path(directory) / PENDING_WRITES_FILENAME if directory else None
 
 
@@ -885,8 +885,8 @@ def _empty_pending_writes(course_id: str) -> dict:
             "updated_at": _now(), "records": []}
 
 
-def _read_pending_writes(course_id: str, *, root=None) -> dict:
-    path = _pending_writes_path(course_id, root)
+def _read_pending_writes(course_id: str) -> dict:
+    path = _pending_writes_path(course_id)
     if path is None or not os.path.isfile(workspace.extended_path(str(path))):
         return _empty_pending_writes(course_id)
     try:
@@ -920,8 +920,8 @@ def _read_pending_writes(course_id: str, *, root=None) -> dict:
         return _empty_pending_writes(course_id)
 
 
-def _write_pending_writes(course_id: str, records: list[dict], *, root=None) -> None:
-    path = _pending_writes_path(course_id, root)
+def _write_pending_writes(course_id: str, records: list[dict]) -> None:
+    path = _pending_writes_path(course_id)
     if path is None:
         raise ValueError("workspace_not_configured")
     document = {"version": PENDING_WRITES_VERSION, "course_id": str(course_id),
@@ -930,8 +930,7 @@ def _write_pending_writes(course_id: str, records: list[dict], *, root=None) -> 
 
 
 def record_pending_write(course_id: str, kind: str, object_id: str, title: str,
-                         operation_id: str, *, created_at: str | None = None,
-                         root=None) -> dict:
+                         operation_id: str, *, created_at: str | None = None) -> dict:
     """Record a Canvas object created by CE without inserting it into catalog records."""
     course_key = str(course_id or "").strip()
     object_key = str(object_id or "").strip()
@@ -948,25 +947,25 @@ def record_pending_write(course_id: str, kind: str, object_id: str, title: str,
         "confirmed": False,
     }
     with _course_lock(course_key):
-        document = _read_pending_writes(course_key, root=root)
+        document = _read_pending_writes(course_key)
         dedupe_key = (record["kind"], record["id"], record["created_by_op"])
         existing = {(row["kind"], row["id"], row["created_by_op"])
                     for row in document["records"]}
         if dedupe_key not in existing:
             document["records"].append(record)
-            _write_pending_writes(course_key, document["records"], root=root)
+            _write_pending_writes(course_key, document["records"])
     return record
 
 
-def pending_unconfirmed(course_id: str, *, kinds=None, now: datetime | None = None,
-                        root=None) -> list[dict]:
+def pending_unconfirmed(course_id: str, *, kinds=None,
+                        now: datetime | None = None) -> list[dict]:
     """Return pending entries unseen by Canvas after the 24-hour confirmation window."""
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     wanted = set(kinds) if kinds is not None else None
     result = []
-    for row in _read_pending_writes(str(course_id), root=root)["records"]:
+    for row in _read_pending_writes(str(course_id))["records"]:
         if wanted is not None and row["kind"] not in wanted:
             continue
         try:
@@ -982,8 +981,8 @@ def pending_unconfirmed(course_id: str, *, kinds=None, now: datetime | None = No
     return result
 
 
-def _confirm_pending_writes(course_id: str, document: dict, *, root=None) -> None:
-    pending = _read_pending_writes(course_id, root=root)["records"]
+def _confirm_pending_writes(course_id: str, document: dict) -> None:
+    pending = _read_pending_writes(course_id)["records"]
     assignments = document.get("assignments") or {}
     modules = document.get("modules") or {}
     pages = document.get("pages") or {}
@@ -1033,7 +1032,7 @@ def _confirm_pending_writes(course_id: str, document: dict, *, root=None) -> Non
             continue
         keep.append(row)
     if len(keep) != len(pending):
-        _write_pending_writes(course_id, keep, root=root)
+        _write_pending_writes(course_id, keep)
 
 
 def _atomic_write(path: Path, document: dict) -> None:
@@ -1063,14 +1062,14 @@ def _atomic_write(path: Path, document: dict) -> None:
         raise
 
 
-def write_catalog(document: dict, *, root=None) -> dict:
+def write_catalog(document: dict) -> dict:
     """Atomically replace v3 canonical while preserving its validated last-good value."""
     validate_catalog(document)
     if document["version"] != CATALOG_VERSION:
         raise ValueError("catalog_v3_required")
     course_id = document["course_id"]
-    canonical_value = workspace.course_catalog_v3_path(course_id, root)
-    previous_value = workspace.course_catalog_v3_previous_path(course_id, root)
+    canonical_value = workspace.course_catalog_v3_path(course_id)
+    previous_value = workspace.course_catalog_v3_previous_path(course_id)
     if not canonical_value or not previous_value:
         raise ValueError("workspace_not_configured")
     canonical_path = Path(canonical_value)
@@ -1082,7 +1081,7 @@ def write_catalog(document: dict, *, root=None) -> dict:
         else:
             _atomic_write(previous_path, existing)
     _atomic_write(canonical_path, copy.deepcopy(document))
-    return {"catalog": copy.deepcopy(document), "warnings": ["competing_catalog_files"] if _catalog_conflicts(course_id, root) else []}
+    return {"catalog": copy.deepcopy(document), "warnings": ["competing_catalog_files"] if _catalog_conflicts(course_id) else []}
 
 
 INVALIDATABLE_SCOPES = {"assignments", "modules", "assignment_groups", "pages"}
@@ -1092,7 +1091,6 @@ def invalidate_scope(
     course_id: str,
     scope_key: str,
     *,
-    root=None,
     attempted_at: str | None = None,
 ) -> dict | None:
     """Mark one catalog scope stale after a confirmed ledger-applied Canvas write.
@@ -1113,7 +1111,7 @@ def invalidate_scope(
         raise ValueError("course_id_required")
     attempted_at = attempted_at or _now()
     with _course_lock(course_id):
-        document = read_catalog(course_id, root=root).get("catalog")
+        document = read_catalog(course_id).get("catalog")
         if document is None or document.get("version") != CATALOG_VERSION or scope_key not in document:
             return None
         document[scope_key] = {
@@ -1122,7 +1120,7 @@ def invalidate_scope(
             "last_attempt_at": attempted_at,
             "error_code": "invalidated",
         }
-        written = write_catalog(document, root=root)
+        written = write_catalog(document)
         return written["catalog"]
 
 
@@ -1132,7 +1130,6 @@ def refresh_catalog(
     *,
     canvas_get_all: CanvasGetAll,
     canvas_get_all_complete: CanvasGetAllComplete,
-    root=None,
     attempted_at: str | None = None,
     assignment_receipt: AssignmentCollectionReceipt | None = None,
 ) -> dict:
@@ -1141,7 +1138,7 @@ def refresh_catalog(
     if not course_id:
         raise ValueError("course_id_required")
     with _course_lock(course_id):
-        previous_read = read_catalog(course_id, root=root)
+        previous_read = read_catalog(course_id)
         previous = previous_read.get("catalog")
         timestamp = attempted_at or _now()
         previous_assignments = previous.get("assignments") if isinstance(previous, dict) else None
@@ -1182,8 +1179,8 @@ def refresh_catalog(
             "pages": pages,
         }
         validate_catalog(document)
-        written = write_catalog(document, root=root)
-        _confirm_pending_writes(course_id, written["catalog"], root=root)
+        written = write_catalog(document)
+        _confirm_pending_writes(course_id, written["catalog"])
         warnings = sorted(set(previous_read.get("warnings", []) + written.get("warnings", [])))
         summary = catalog_status_summary(written["catalog"])
         previous_scopes = previous if isinstance(previous, dict) else {}
@@ -1217,7 +1214,6 @@ def refresh_catalog_assignments_only(
     course_id: str,
     *,
     assignment_receipt: AssignmentCollectionReceipt,
-    root=None,
     attempted_at: str | None = None,
     course_name: str | None = None,
 ) -> dict:
@@ -1236,7 +1232,7 @@ def refresh_catalog_assignments_only(
     if not course_id:
         raise ValueError("course_id_required")
     with _course_lock(course_id):
-        previous_read = read_catalog(course_id, root=root)
+        previous_read = read_catalog(course_id)
         previous = previous_read.get("catalog")
         timestamp = attempted_at or _now()
         previous_assignments = previous.get("assignments") if isinstance(previous, dict) else None
@@ -1275,8 +1271,8 @@ def refresh_catalog_assignments_only(
             "pages": pages,
         }
         validate_catalog(document)
-        written = write_catalog(document, root=root)
-        _confirm_pending_writes(course_id, written["catalog"], root=root)
+        written = write_catalog(document)
+        _confirm_pending_writes(course_id, written["catalog"])
         warnings = sorted(set(previous_read.get("warnings", []) + written.get("warnings", [])))
         return {"catalog": written["catalog"], "source": "canonical", "warnings": warnings}
 

@@ -29,7 +29,7 @@ def _refresh(tmp_path, page_rows):
 
     return course_catalog.refresh_catalog(
         "course-1", "Fictional Course", canvas_get_all=lambda path, params: ([], None),
-        canvas_get_all_complete=complete, root=str(tmp_path), attempted_at=STAMP,
+        canvas_get_all_complete=complete, attempted_at=STAMP,
     )
 
 
@@ -41,7 +41,7 @@ def test_catalog_pages_are_exact_plain_text_and_typed_disk_read(tmp_path):
         "published": True, "front_page": False, "updated_at": STAMP,
     }
     assert read_service.catalog_pages(
-        "course-1", root=str(tmp_path), catalog_reader=lambda _cid: course_catalog.read_catalog(_cid, root=str(tmp_path)),
+        "course-1", root=str(tmp_path), catalog_reader=lambda _cid: course_catalog.read_catalog(_cid),
     )["records"] == [page]
 
 

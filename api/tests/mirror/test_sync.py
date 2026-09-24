@@ -644,7 +644,7 @@ def _seed_catalog_with_modules_and_groups(tmp_path, *, course_id=COURSE, course_
 
     return course_catalog.refresh_catalog(
         course_id, course_name, canvas_get_all=refuses_legacy_get,
-        canvas_get_all_complete=complete, root=str(tmp_path), attempted_at=NOW,
+        canvas_get_all_complete=complete, attempted_at=NOW,
     )["catalog"]
 
 
@@ -657,7 +657,7 @@ def test_full_pass_forwards_valid_receipt_to_catalog_leaving_modules_groups_unch
                             course_name="Fresh Name")
 
     assert result["ok"] is True
-    catalog = course_catalog.read_catalog(COURSE, root=str(tmp_path))["catalog"]
+    catalog = course_catalog.read_catalog(COURSE)["catalog"]
     assert catalog["assignments"]["state"] == "current"
     assert set(catalog["assignments"]["records"]) == {"700010", "700020"}
     assert catalog["modules"] == previous_catalog["modules"]
@@ -677,7 +677,7 @@ def test_delta_pass_forwards_valid_receipt_to_catalog_leaving_modules_groups_unc
                              now="2026-07-16T13:00:00Z", course_name="Fresh Name")
 
     assert result["ok"] is True
-    catalog = course_catalog.read_catalog(COURSE, root=str(tmp_path))["catalog"]
+    catalog = course_catalog.read_catalog(COURSE)["catalog"]
     assert catalog["assignments"]["state"] == "current"
     assert set(catalog["assignments"]["records"]) == {"700010", "700020"}
     assert catalog["modules"] == previous_catalog["modules"]
@@ -696,7 +696,7 @@ def test_delta_pass_bad_receipt_still_reaches_catalog_without_affecting_mirror_r
         root=str(tmp_path), now="2026-07-16T13:00:00Z")
 
     assert result == {"ok": False, "error": "pagination_incomplete"}
-    catalog = course_catalog.read_catalog(COURSE, root=str(tmp_path))["catalog"]
+    catalog = course_catalog.read_catalog(COURSE)["catalog"]
     assert catalog["assignments"]["state"] == "stale"
     assert catalog["assignments"]["error_code"] == "pagination_incomplete"
     assert catalog["assignments"]["records"] == previous_catalog["assignments"]["records"]
@@ -715,7 +715,7 @@ def test_full_pass_bad_receipt_still_reaches_catalog_without_affecting_mirror_re
     # The mirror pass's own result/control-flow is exactly what it already was
     # before this receipt was ever forwarded to Catalog.
     assert result == {"ok": False, "error": "HTTP 503: do not expose this"}
-    catalog = course_catalog.read_catalog(COURSE, root=str(tmp_path))["catalog"]
+    catalog = course_catalog.read_catalog(COURSE)["catalog"]
     assert catalog["assignments"]["state"] == "stale"
     assert catalog["assignments"]["records"] == previous_catalog["assignments"]["records"]
     # Catalog's own document never leaks the raw transport detail.

@@ -243,7 +243,9 @@ def _group_by_assignment(rows) -> dict[str, list[dict]]:
 
 
 def _guard(course_id, root):
-    if store.course_dir(course_id, root) is None:
+    try:
+        store._require_dir(course_id, root)
+    except ValueError:
         return {"ok": False, "error": "workspace not configured"}
     return None
 
@@ -471,7 +473,7 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
     try:
         course_catalog.refresh_catalog_assignments_only(
             course_id, assignment_receipt=(assignments, error, complete),
-            course_name=course_name, root=root, attempted_at=started,
+            course_name=course_name, attempted_at=started,
         )
     except Exception as exc:
         operational_log.emit("catalog.refresh_full_pass", "failed", error_class=type(exc))
@@ -564,7 +566,7 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
     try:
         course_catalog.refresh_catalog_assignments_only(
             course_id, assignment_receipt=(assignments, error, complete),
-            course_name=course_name, root=root, attempted_at=started,
+            course_name=course_name, attempted_at=started,
         )
     except Exception as exc:
         operational_log.emit("catalog.refresh_delta_pass", "failed", error_class=type(exc))

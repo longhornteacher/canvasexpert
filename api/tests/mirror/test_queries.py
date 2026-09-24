@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 
 from api import gradebook_queries, gradebook_snapshot
+from api import freshness_policy
 from api.feedback_vault import Vault
 from api.mirror import queries, store
 from api.mcp_server import tools
@@ -56,8 +58,8 @@ ORPHAN_ROW = [{
 }]
 
 
-def _populate(root, *, fresh=True):
-    stamp = store.now_iso() if fresh else "2026-01-01T00:00:00Z"
+def _populate(root, *, fresh=True, stamp=None):
+    stamp = stamp or (store.now_iso() if fresh else "2026-01-01T00:00:00Z")
     store.write_roster(COURSE, USERS, SECTIONS, root=root, attempted_at=stamp)
     store.write_assignments(COURSE, ASSIGNMENTS, root=root, attempted_at=stamp)
     store.merge_submissions(COURSE, "700010", SUBMISSIONS, root=root,
@@ -262,11 +264,57 @@ def test_mcp_get_gradebook_snapshot_serves_from_mirror(monkeypatch, tmp_path):
     assert len(result["students"]["rows"]) == 2
 
 
-def test_mcp_stale_mirror_is_not_served(monkeypatch, tmp_path):
+def _pin_mcp_freshness(monkeypatch, now):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return now.replace(tzinfo=None)
+            return now.astimezone(tz)
+
+    monkeypatch.setattr(freshness_policy, "datetime", FixedDateTime)
+    monkeypatch.setattr(store, "datetime", FixedDateTime)
+    monkeypatch.setattr(freshness_policy.config, "get_late_sweep_holidays", lambda: [])
+    monkeypatch.setattr(tools.mirror_queries, "_serve_max_age_hours", lambda: 6.0)
+
+
+def _assert_mcp_freshness_results(monkeypatch, tmp_path, *, age_minutes, within_policy):
     _mcp_setup(monkeypatch, tmp_path)
-    _populate(str(tmp_path), fresh=False)
-    assert tools._mirror_roster_doc(COURSE) is None
-    assert tools._mirror_submission_bundle(COURSE, "700010") == (None, None)
+    now = datetime(2026, 9, 25, 2, 0, tzinfo=timezone.utc)
+    _pin_mcp_freshness(monkeypatch, now)
+    stamp = (now - timedelta(minutes=age_minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _populate(str(tmp_path), stamp=stamp)
+
+    roster = tools.get_roster(COURSE)
+    submissions = tools.get_submissions(COURSE, "700010")
+    for result in (roster, submissions):
+        assert result["freshness"]["school_hours"] is False
+        assert result["freshness"]["policy_window_minutes"] == 600
+        assert result["freshness"]["age_minutes"] == age_minutes
+        assert result["freshness"]["within_policy"] is within_policy
+    return roster, submissions
+
+
+def test_mcp_r3_past_policy_window_asks_teacher_without_student_rows(monkeypatch, tmp_path):
+    roster, submissions = _assert_mcp_freshness_results(
+        monkeypatch, tmp_path, age_minutes=601, within_policy=False)
+    for result in (roster, submissions):
+        assert result["ok"] is False
+        assert result["attention"]["action"] == "ask_teacher_confirmation"
+        assert "roster" not in result
+        assert "submissions" not in result
+
+
+def test_mcp_r3_within_policy_serves_past_mirror_cutoff(monkeypatch, tmp_path):
+    roster, submissions = _assert_mcp_freshness_results(
+        monkeypatch, tmp_path, age_minutes=480, within_policy=True)
+    assert 480 > tools.mirror_queries._serve_max_age_hours() * 60
+    assert roster["ok"] is True
+    assert submissions["ok"] is True
+    assert roster["freshness"]["age_minutes"] == 480
+    assert submissions["freshness"]["age_minutes"] == 480
+    assert roster["roster"]["rows"]
+    assert submissions["submissions"]["rows"]
 
 
 def test_mcp_seamed_tests_bypass_the_mirror(monkeypatch, tmp_path):

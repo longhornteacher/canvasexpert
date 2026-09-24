@@ -1,17 +1,18 @@
 """Offline tests for the CanvasMirror on-disk store.
 
-Every test passes an explicit ``root=tmp_path`` — no workspace monkeypatching
-needed because all store paths resolve at call time. Fabricated data uses
-generic names and large made-up Canvas IDs (test_mcp_server_tools convention).
+The test conftest isolates machine-local cache paths. Explicit roots exercise
+the corresponding identity vault, while mirror documents stay machine-local.
+Fabricated data uses generic names and large made-up Canvas IDs.
 """
 from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
-from api.mirror import course_context, store
+from api.mirror import course_context, read_service, store
 
 COURSE = "111"
 
@@ -54,7 +55,9 @@ def _submission_row(user_id=900001, attempt=1, body="First draft.",
 
 # --- roster ------------------------------------------------------------------
 
-def test_roster_round_trip_keeps_only_consumer_fields(tmp_path):
+def test_roster_round_trip_keeps_only_consumer_fields(tmp_path, monkeypatch):
+    from api.platform_services import workspace
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
     store.write_roster(COURSE, USERS, SECTIONS, root=str(tmp_path))
     document = store.read_roster(COURSE, root=str(tmp_path))
     assert document["state"] == "current"
@@ -64,6 +67,10 @@ def test_roster_round_trip_keeps_only_consumer_fields(tmp_path):
     assert student["enrollments"] == [{"course_section_id": "800001"}]
     assert "email" not in student
     assert document["sections"] == SECTIONS
+    assert read_service.private_roster(COURSE, max_age_hours=6)["state"] == "current"
+
+    store.write_roster(COURSE, USERS, SECTIONS)
+    assert store.read_roster(COURSE, root=str(tmp_path))["state"] == "current"
 
 
 def test_roster_unions_sections_for_a_user_listed_once_per_enrollment(tmp_path):
@@ -478,12 +485,29 @@ def test_submission_comments_state_failure_leaves_last_good_submission_files_unt
 def test_writers_raise_without_workspace(monkeypatch):
     from api.platform_services import workspace
     monkeypatch.setattr(workspace, "workspace_root", lambda: None)
-    try:
-        store.write_roster(COURSE, USERS, SECTIONS)
-        raised = False
-    except ValueError:
-        raised = True
-    assert raised
+    attempted_writes = [
+        lambda: store.write_roster(COURSE, USERS, SECTIONS),
+        lambda: store.write_groups(COURSE, []),
+        lambda: store.write_assignments(COURSE, []),
+        lambda: store.merge_submissions(COURSE, "700010", []),
+        lambda: store.prune_submission_files(COURSE, []),
+        lambda: store.invalidate_groups(COURSE),
+        lambda: store.merge_group_category(COURSE, {"category_id": "800001", "groups": []}),
+        lambda: store.mark_groups_stale(COURSE),
+        lambda: store.begin_refresh(COURSE, operation_id="op-synthetic"),
+        lambda: store.finish_refresh(COURSE, operation_id="op-synthetic", ok=True),
+        lambda: store.record_course_context(COURSE, ok=True),
+        lambda: store.write_late_policy(COURSE, {}),
+        lambda: store.invalidate_late_policy(COURSE),
+        lambda: store.write_new_quiz_capability(
+            COURSE, capability="unknown", last_probe_at="2026-09-24T00:00:00Z"),
+        lambda: store.record_pass(COURSE, "full", ok=True),
+        lambda: store.record_submission_comments_state(COURSE, ok=True),
+    ]
+    for write in attempted_writes:
+        with pytest.raises(ValueError, match="workspace not configured"):
+            write()
+    assert not (Path(workspace.canvas_mirror_root()) / COURSE).exists()
     assert store.read_roster(COURSE) is None
 
 

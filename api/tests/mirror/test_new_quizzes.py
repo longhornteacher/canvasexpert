@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 from api.mirror import new_quizzes, store
 from api.powergrader import assignment_refresh, canvas_fetch, new_quiz_fetch
@@ -203,10 +204,10 @@ def test_corrupt_v2_files_are_absent_and_identical_refresh_is_idempotent(tmp_pat
         "root": str(tmp_path), "attempted_at": NOW,
     }
     new_quizzes.write_response_snapshot(COURSE, ASSIGNMENT, **kwargs)
-    first = (tmp_path / "_System" / "Canvas Mirror" / COURSE / "new_quizzes" /
+    first = (Path(store.course_dir(COURSE)) / "new_quizzes" /
              ASSIGNMENT / "students" / "student-synthetic.v2.json").read_text(encoding="utf-8")
     new_quizzes.write_response_snapshot(COURSE, ASSIGNMENT, **kwargs)
-    second = (tmp_path / "_System" / "Canvas Mirror" / COURSE / "new_quizzes" /
+    second = (Path(store.course_dir(COURSE)) / "new_quizzes" /
               ASSIGNMENT / "students" / "student-synthetic.v2.json").read_text(encoding="utf-8")
     assert first == second
 

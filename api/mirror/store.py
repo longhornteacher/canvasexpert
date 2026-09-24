@@ -1,6 +1,6 @@
 """CanvasMirror on-disk store — envelope-wrapped collections of Canvas facts.
 
-Layout, under ``_System/Canvas Mirror/<course_id>/`` in the synced workspace:
+Layout, under ``%LOCALAPPDATA%\CanvasExpert\cache\Canvas Mirror\<course_id>\``:
 
   _sync.v1.json                    pass envelopes + delta watermarks
   roster.v1.json                   students + sections
@@ -20,8 +20,9 @@ attempts and update ``current``, but never drops an attempt while its
 submission row is retained. Merges are idempotent so watermark-overlap
 duplicates from the sync engine are harmless.
 
-Pure stdlib + storage_support; no Canvas imports; offline-testable via the
-``root=`` parameter every public function accepts.
+Pure stdlib + storage_support; no Canvas imports. Store operations accept an
+optional workspace ``root`` for the matching identity vault; mirror documents
+always use the machine-local cache.
 """
 from __future__ import annotations
 
@@ -173,39 +174,39 @@ def course_lock(course_id) -> threading.RLock:
         return _COURSE_LOCKS.setdefault(str(course_id), threading.RLock())
 
 
-# --- paths (resolved at call time so tests can redirect the workspace) -------
+# --- machine-local mirror paths ---------------------------------------------
 
-def course_dir(course_id, root=None):
-    return workspace.course_mirror_dir(course_id, root)
+def course_dir(course_id):
+    return workspace.course_mirror_dir(course_id)
 
 
 def sync_path(course_id, root=None):
-    directory = course_dir(course_id, root)
+    directory = course_dir(course_id)
     return os.path.join(directory, SYNC_FILENAME) if directory else None
 
 
 def refresh_path(course_id, root=None):
-    directory = course_dir(course_id, root)
+    directory = course_dir(course_id)
     return os.path.join(directory, REFRESH_FILENAME) if directory else None
 
 
 def roster_path(course_id, root=None):
-    directory = course_dir(course_id, root)
+    directory = course_dir(course_id)
     return os.path.join(directory, ROSTER_FILENAME) if directory else None
 
 
 def groups_path(course_id, root=None):
-    directory = course_dir(course_id, root)
+    directory = course_dir(course_id)
     return os.path.join(directory, GROUPS_FILENAME) if directory else None
 
 
 def assignments_path(course_id, root=None):
-    directory = course_dir(course_id, root)
+    directory = course_dir(course_id)
     return os.path.join(directory, ASSIGNMENTS_FILENAME) if directory else None
 
 
 def submissions_dir(course_id, root=None):
-    directory = course_dir(course_id, root)
+    directory = course_dir(course_id)
     return os.path.join(directory, SUBMISSIONS_DIRNAME) if directory else None
 
 
@@ -217,27 +218,29 @@ def submission_path(course_id, assignment_id, root=None):
 
 
 def new_quiz_capability_path(course_id, root=None):
-    directory = course_dir(course_id, root)
+    directory = course_dir(course_id)
     return os.path.join(directory, NEW_QUIZ_CAPABILITY_FILENAME) if directory else None
 
 
 def late_policy_path(course_id, root=None):
-    directory = course_dir(course_id, root)
+    directory = course_dir(course_id)
     return os.path.join(directory, LATE_POLICY_FILENAME) if directory else None
 
 
 def course_context_path(course_id, root=None):
-    directory = course_dir(course_id, root)
+    directory = course_dir(course_id)
     return os.path.join(directory, COURSE_CONTEXT_FILENAME) if directory else None
 
 
 def submission_comments_state_path(course_id, root=None):
-    directory = course_dir(course_id, root)
+    directory = course_dir(course_id)
     return os.path.join(directory, SUBMISSION_COMMENTS_STATE_FILENAME) if directory else None
 
 
 def _require_dir(course_id, root):
-    directory = course_dir(course_id, root)
+    if (root is None and not workspace.workspace_root()) or (root is not None and not root):
+        raise ValueError("workspace not configured — no mirror location")
+    directory = course_dir(course_id)
     if not directory:
         raise ValueError("workspace not configured — no mirror location")
     return directory
@@ -1025,6 +1028,7 @@ def merge_submissions(course_id, assignment_id, rows: list[dict], *,
 def prune_submission_files(course_id, keep_assignment_ids, *, root=None) -> list[str]:
     """Full-pass deletion true-up: remove mirror files for assignments that no
     longer exist in Canvas. Returns the removed assignment ids."""
+    _require_dir(course_id, root)
     directory = submissions_dir(course_id, root)
     if not directory or not os.path.isdir(workspace.extended_path(directory)):
         return []

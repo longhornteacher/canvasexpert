@@ -50,7 +50,7 @@ def age_hours(iso_z: str, now_iso_z: str | None = None) -> float | None:
 
 
 def new_quizzes_dir(course_id, root=None):
-    base = store.course_dir(course_id, root)
+    base = store.course_dir(course_id)
     return os.path.join(base, NEW_QUIZZES_DIRNAME) if base else None
 
 

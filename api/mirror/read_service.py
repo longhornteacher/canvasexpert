@@ -231,11 +231,10 @@ def private_submission_comments(course_id, *, root=None, max_age_hours=None, now
     )
 
 
-def _catalog_scope(course_id, scope: str, scope_key: str, *, catalog_reader=None, root=None,
+def _catalog_scope(course_id, scope: str, scope_key: str, *, catalog_reader=None,
                    max_age_hours=None, now=None) -> dict:
     if catalog_reader is None:
-        read_result = (course_catalog.read_catalog(course_id)
-                       if root is None else course_catalog.read_catalog(course_id, root=root))
+        read_result = course_catalog.read_catalog(course_id)
     else:
         read_result = catalog_reader(course_id)
     document = read_result.get("catalog") if isinstance(read_result, dict) else None
@@ -259,26 +258,26 @@ def _catalog_scope(course_id, scope: str, scope_key: str, *, catalog_reader=None
 
 def catalog_assignments(course_id, *, catalog_reader=None, root=None, max_age_hours=None, now=None) -> dict:
     return _catalog_scope(course_id, CATALOG_ASSIGNMENTS, "assignments",
-                          catalog_reader=catalog_reader, root=root,
+                          catalog_reader=catalog_reader,
                           max_age_hours=max_age_hours, now=now)
 
 
 def catalog_modules(course_id, *, catalog_reader=None, root=None, max_age_hours=None, now=None) -> dict:
     return _catalog_scope(course_id, CATALOG_MODULES, "modules",
-                          catalog_reader=catalog_reader, root=root,
+                          catalog_reader=catalog_reader,
                           max_age_hours=max_age_hours, now=now)
 
 
 def catalog_assignment_groups(course_id, *, catalog_reader=None, root=None, max_age_hours=None, now=None) -> dict:
     return _catalog_scope(course_id, CATALOG_ASSIGNMENT_GROUPS, "assignment_groups",
-                          catalog_reader=catalog_reader, root=root,
+                          catalog_reader=catalog_reader,
                           max_age_hours=max_age_hours, now=now)
 
 
 def catalog_pages(course_id, *, catalog_reader=None, root=None, max_age_hours=None, now=None) -> dict:
     """Typed disk-only published-page projection from the v3 Catalog."""
     return _catalog_scope(course_id, CATALOG_PAGES, "pages",
-                          catalog_reader=catalog_reader, root=root,
+                          catalog_reader=catalog_reader,
                           max_age_hours=max_age_hours, now=now)
 
 

@@ -28,7 +28,7 @@ def _catalog_from_receipt(receipt, root, attempted_at):
             AssertionError("empty modules must not request module items")),
         canvas_get_all_complete=module_receipt,
         assignment_receipt=receipt,
-        root=str(root),
+
         attempted_at=attempted_at,
     )
 

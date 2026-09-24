@@ -1,8 +1,8 @@
 """Read-only CanvasMirror release harness.
 
 ``--live-readonly`` performs configured Canvas release measurements using only
-core GET-backed owners and fresh disposable projection roots. ``--self-check``
-is the synthetic disposable-root and aggregate-output safety check.
+core GET-backed owners and fresh isolated machine-cache roots. ``--self-check``
+is the synthetic disposable-cache and aggregate-output safety check.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,13 @@ def _temporary_root() -> Path:
     return root
 
 
+def _in_cache_root(root: Path, operation):
+    """Run one operation with its machine-local cache redirected to a disposable root."""
+    from api import runtime_paths
+    with patch.object(runtime_paths, "local_cache_dir", return_value=Path(root) / "cache"):
+        return operation()
+
+
 def validate_profile(profile: dict) -> None:
     """Release comparisons are fixed to one current and two concluded courses."""
     if profile != {"current_courses": 1, "concluded_courses": 2}:
@@ -56,16 +64,17 @@ def validate_profile(profile: dict) -> None:
 
 
 def synthetic_self_check(output: str | Path, *, workspace_root: str | Path | None = None) -> dict:
-    """Exercise projection-root isolation without contacting Canvas or config."""
+    """Exercise disposable machine-cache isolation without contacting Canvas or config."""
     output_path = validate_output_path(output, workspace_root=workspace_root)
     root = _temporary_root()
     try:
         from api.mirror import store
-        # Existing projection ownership receives only this disposable root.
-        store.write_groups("synthetic", [], root=str(root), attempted_at="2026-01-01T00:00:00Z")
-        projection = Path(store.groups_path("synthetic", root=str(root)))
-        if not projection.is_file() or not _is_within(projection, root):
-            raise RuntimeError("temporary projection-root proof failed")
+        def write_and_verify():
+            store.write_groups("synthetic", [], root=str(root), attempted_at="2026-01-01T00:00:00Z")
+            projection = Path(store.groups_path("synthetic", root=str(root)))
+            if not projection.is_file() or not _is_within(projection, root):
+                raise RuntimeError("temporary machine-cache proof failed")
+        _in_cache_root(root, write_and_verify)
         result = {
             "kind": "canvasmirror_release_harness",
             "classification": "synthetic_self_check",
@@ -148,9 +157,10 @@ def run_live_readonly(courses: list[dict], *, canvas_get, canvas_get_all, canvas
     try:
         lifecycles = []
         for course in candidates:
-            outcome, _metrics_ignored = _metrics(lambda course=course: context_refresh(
-                course["id"], canvas_get=canvas_get, canvas_get_all=canvas_get_all,
-                root=str(validation_root)))
+            outcome, _metrics_ignored = _in_cache_root(validation_root, lambda course=course: _metrics(
+                lambda: context_refresh(
+                    course["id"], canvas_get=canvas_get, canvas_get_all=canvas_get_all,
+                    root=str(validation_root))))
             lifecycles.append((course, outcome.get("lifecycle") if outcome.get("state") == "current" else "unknown"))
         current = [course for course, lifecycle in lifecycles if lifecycle == "current"]
         concluded = [course for course, lifecycle in lifecycles if lifecycle == "concluded"]
@@ -170,24 +180,26 @@ def run_live_readonly(courses: list[dict], *, canvas_get, canvas_get_all, canvas
                                               canvas_get_all_complete=canvas_get_all_complete, root=str(root),
                                               skip_new_quiz_metadata=course in concluded))
                 return outcomes
-            cold_outcomes, cold_metric = _metrics(cold)
+            cold_outcomes, cold_metric = _in_cache_root(root, lambda: _metrics(cold))
             if not all(item.get("ok") for item in cold_outcomes):
                 cold_metric["status_classes"]["sync_failed"] = 1
             cold_samples.append(cold_metric)
 
-            warm_outcome, warm_metric = _metrics(lambda: delta_pass(
+            warm_outcome, warm_metric = _in_cache_root(root, lambda: _metrics(lambda: delta_pass(
                 current[0]["id"], canvas_get_all=canvas_get_all,
-                canvas_get_all_complete=canvas_get_all_complete, root=str(root)))
+                canvas_get_all_complete=canvas_get_all_complete, root=str(root))))
             if not warm_outcome.get("ok"):
                 warm_metric["status_classes"]["sync_failed"] = 1
             warm_samples.append(warm_metric)
 
             if focused_assignment_id:
-                projection = store.read_assignments(current[0]["id"], root=str(root)) or {}
+                projection = _in_cache_root(root, lambda: store.read_assignments(
+                    current[0]["id"], root=str(root))) or {}
                 if focused_assignment_id in (projection.get("assignments") or {}):
-                    focused_outcome, focused_metric = _metrics(lambda: focused_refresh(
-                        current[0]["id"], focused_assignment_id, canvas_get_all=canvas_get_all,
-                        root=str(root)))
+                    focused_outcome, focused_metric = _in_cache_root(root, lambda: _metrics(
+                        lambda: focused_refresh(
+                            current[0]["id"], focused_assignment_id, canvas_get_all=canvas_get_all,
+                            root=str(root))))
                     if not focused_outcome.get("ok"):
                         focused_metric["status_classes"]["sync_failed"] = 1
                     focused_samples.append(focused_metric)
@@ -203,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only CanvasMirror release harness")
     parser.add_argument("--output", required=True, help="aggregate JSON output outside repo/workspace")
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--self-check", action="store_true", help="run only the synthetic disposable-root check")
+    mode.add_argument("--self-check", action="store_true", help="run only the synthetic disposable-cache check")
     mode.add_argument("--live-readonly", action="store_true", help="run configured read-only release profile")
     args = parser.parse_args(argv)
     try:

@@ -498,27 +498,25 @@ def archive_dir(root=None):
     return system_folder("Archive", root)
 
 
-def canvas_catalog_root(root=None):
+def canvas_catalog_root():
     """Return this machine's disposable Canvas Catalog cache root."""
-    if root is not None:
-        return system_folder(CANVAS_CATALOG_NAME, root)
     _retire_legacy_canvas_caches()
     return str(runtime_paths.local_cache_dir() / CANVAS_CATALOG_NAME)
 
 
-def course_catalog_dir(course_id, root=None):
+def course_catalog_dir(course_id):
     """Return the stable per-course catalog directory owned by Canvas course ID."""
-    base = canvas_catalog_root(root)
+    base = canvas_catalog_root()
     return os.path.join(base, safe_id(course_id)) if base else None
 
 
-def course_catalog_v3_path(course_id, root=None):
-    directory = course_catalog_dir(course_id, root)
+def course_catalog_v3_path(course_id):
+    directory = course_catalog_dir(course_id)
     return os.path.join(directory, "catalog.v3.json") if directory else None
 
 
-def course_catalog_v3_previous_path(course_id, root=None):
-    directory = course_catalog_dir(course_id, root)
+def course_catalog_v3_previous_path(course_id):
+    directory = course_catalog_dir(course_id)
     return os.path.join(directory, "catalog.v3.previous.json") if directory else None
 
 
@@ -528,10 +526,8 @@ def learning_objectives_path(root=None):
     return os.path.join(directory, "Learning Objectives.json") if directory else None
 
 
-def canvas_mirror_root(root=None):
+def canvas_mirror_root():
     """Return this machine's disposable CanvasMirror cache root."""
-    if root is not None:
-        return system_folder(CANVAS_MIRROR_NAME, root)
     _retire_legacy_canvas_caches()
     return str(runtime_paths.local_cache_dir() / CANVAS_MIRROR_NAME)
 
@@ -604,9 +600,9 @@ def _retire_legacy_canvas_caches() -> None:
     _legacy_cache_retirement_checked.add(identity)
 
 
-def course_mirror_dir(course_id, root=None):
+def course_mirror_dir(course_id):
     """Return the stable per-course mirror directory owned by Canvas course ID."""
-    base = canvas_mirror_root(root)
+    base = canvas_mirror_root()
     return os.path.join(base, safe_id(course_id)) if base else None
 
 
