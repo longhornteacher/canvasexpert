@@ -540,8 +540,16 @@ code. Locked now:
 
 ## 9. Next batch (single current pointer)
 
-**Next: Batch 2 (§5).** Read this plan's §0, §1.1, §1.4–§1.6, §2, §3, and §5;
-read the contract's §1–§5, §7, and §8. There are no outstanding decisions.
+**Next: Batch 3 (§6).** Read this plan's §0, §1.4, §3 (the Printable bullet), and §6;
+read the contract's §6 and §7 (laws 1, 2 and 4); and read
+`docs/reference/operation-ledger-module-map.md` plus the ordered-step and checkpoint
+sections of `docs/contracts/operation-ledger-contract.md`. There are no outstanding
+decisions.
+
+Carried over from Batch 2: the teacher's sandbox smoke (§5) is still outstanding. It
+should pass before the Batch 3 brief is accepted, because the printable link renders
+inside the Batch 2 HTML. It also confirms that Canvas keeps the renderer's `<section>`,
+`<aside>` and `<details>` elements.
 
 ## 10. Known adjacent defects (outside this plan)
 
