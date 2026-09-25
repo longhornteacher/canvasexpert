@@ -14,7 +14,6 @@
     <nav class="roster-workbench-lenses">
       <button type="button" class="roster-lens-btn roster-filter-btn active" data-lens="students" data-filter="all" aria-pressed="true">Students</button>
       <button type="button" class="roster-lens-btn roster-filter-btn" data-lens="accommodations" data-filter="extra_time" aria-pressed="false">Accommodations</button>
-      <button type="button" class="roster-lens-btn roster-filter-btn" data-lens="groups" data-filter="group_unset" aria-pressed="false">Groups <span>Needs placement</span></button>
       <button type="button" class="roster-lens-btn roster-filter-btn" data-lens="monitoring" data-filter="monitored" aria-pressed="false">Monitoring</button>
       <button type="button" class="roster-lens-btn roster-filter-btn" data-lens="issues" data-filter="warnings" aria-pressed="false">Issues</button>
       <button type="button" class="roster-lens-btn roster-privacy-btn" data-lens="privacy" aria-pressed="false">Privacy</button>
@@ -24,7 +23,7 @@
 {% endcall %}
 {% endblock %}
 
-{% block workspace_header %}{{ page_header('Students', 'Your class list, accommodations, groups, and private notes.') }}{% endblock %}
+{% block workspace_header %}{{ page_header('Students', 'Your class list, accommodations, and private notes.') }}{% endblock %}
 
 {% block primary %}
 
@@ -38,7 +37,6 @@
           <span class="roster-v2-summary-item" id="roster-summary-total">0 students</span>
           <span class="roster-v2-summary-item" id="roster-summary-extra">Extra 0</span>
           <span class="roster-v2-summary-item" id="roster-summary-monitored">Monitored 0</span>
-          <span class="roster-v2-summary-item" id="roster-summary-group-unset">Unset 0</span>
           <span class="roster-v2-summary-item" id="roster-summary-warnings">Issues 0</span>
         </span>
       </div>
@@ -57,12 +55,6 @@
         <span id="roster-status" class="hint"></span>
       </div>
       <div class="roster-v2-toolbar-row roster-search-row">
-        <label class="roster-v2-group-set-picker">
-          Group set
-          <select id="roster-group-set-picker">
-            <option value="">— no group sets —</option>
-          </select>
-        </label>
         <input type="search" id="roster-search" placeholder="Search students..." class="roster-search-input" aria-label="Search students">
       </div>
     </div>
@@ -78,37 +70,9 @@
       <div id="roster-changes-list" class="roster-changes-list"></div>
     </section>
 
-    <details class="ce-panel roster-v2-details roster-group-builder" id="roster-group-builder">
-      <summary><strong>Create Canvas groups</strong></summary>
-      <div class="roster-group-builder-body">
-        <div class="roster-group-builder-row">
-          <label>New group set
-            <input type="text" id="roster-new-group-set-name" placeholder="Group set name">
-          </label>
-          <button type="button" id="roster-create-group-set" class="primary small">Create group set</button>
-        </div>
-        <label>Groups
-          <textarea id="roster-new-group-names" rows="3" placeholder="One group name per line"></textarea>
-        </label>
-        <div class="ce-actions">
-          <button type="button" id="roster-add-groups" class="small">Add to selected group set</button>
-          <span id="roster-group-builder-status" class="hint"></span>
-        </div>
-      </div>
-    </details>
-
     <div class="ce-panel roster-bulk-bar" id="roster-bulk-bar" hidden>
       <span id="roster-bulk-count" class="roster-bulk-title">Bulk edit: 0 selected</span>
       <span class="roster-bulk-actions">
-        <span class="roster-bulk-cluster roster-bulk-cluster--groups">
-          <label>Canvas group
-            <select id="roster-bulk-group" class="roster-bulk-select">
-              <option value="">Choose group...</option>
-            </select>
-          </label>
-          <button type="button" class="small" data-bulk="set_canvas_group">Apply group</button>
-          <button type="button" class="small" data-bulk="clear_canvas_group">Clear group</button>
-        </span>
         <span class="roster-bulk-cluster roster-bulk-cluster--accommodations">
           <label>Extra days
             <input type="number" id="roster-bulk-extra-days" class="roster-bulk-days" min="0" max="30" value="2" placeholder="days">
@@ -133,14 +97,13 @@
             <th class="roster-col-nicknames">Nicknames</th>
             <th class="roster-col-pseudo">Pseudonym</th>
             <th class="roster-col-extratime">Extra time</th>
-            <th class="roster-col-group">Canvas group</th>
             <th class="roster-col-monitor">M</th>
             <th class="roster-col-note">Note</th>
             <th class="roster-col-status">Status</th>
           </tr>
         </thead>
         <tbody id="roster-table-body">
-          <tr><td colspan="14" class="roster-empty">Select a course and click Refresh.</td></tr>
+          <tr><td colspan="9" class="roster-empty">Select a course and click Refresh.</td></tr>
         </tbody>
       </table>
     </div>
@@ -212,16 +175,6 @@
       <div id="roster-relationships-list" class="roster-relationships-list"></div>
     </section>
 
-    <details class="ce-panel roster-v2-details" id="roster-group-labels-editor" hidden>
-      <summary><strong>Group labels</strong></summary>
-      <div class="roster-v2-tier-editor" id="roster-group-labels-body">
-        <div class="roster-v2-tier-rows" id="roster-group-labels-rows"></div>
-        <div class="ce-actions ce-roster-action-row">
-          <button type="button" id="roster-group-labels-save" class="primary small">Save labels</button>
-          <span id="roster-group-labels-status" class="hint"></span>
-        </div>
-      </div>
-    </details>
 
     <div id="roster-reports">
       {% include "_student_reports_panels.html" %}
@@ -280,9 +233,7 @@
 <script src="/static/roster/table.js?v={{ asset_v }}"></script>
 <script src="/static/roster/filters.js?v={{ asset_v }}"></script>
 <script src="/static/roster/inline_edit.js?v={{ asset_v }}"></script>
-<script src="/static/roster/group_state.js?v={{ asset_v }}"></script>
 <script src="/static/roster/bulk.js?v={{ asset_v }}"></script>
-<script src="/static/roster/groups.js?v={{ asset_v }}"></script>
 <script src="/static/roster/safety.js?v={{ asset_v }}"></script>
 <script src="/static/roster/scores.js?v={{ asset_v }}"></script>
 <script src="/static/roster/relationships.js?v={{ asset_v }}"></script>

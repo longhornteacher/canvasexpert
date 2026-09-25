@@ -148,7 +148,7 @@ def test_tools_delegate_to_the_shared_use_case(monkeypatch):
     assert "next" not in tools.preview_content_push("course-x", "page", "gone")
 
 
-def test_differentiated_preview_ignores_deprecated_group_names(_workspace, monkeypatch):
+def test_differentiated_preview_refuses_removed_group_names(_workspace, monkeypatch):
     _stage("quiz", "one")
     _stage("quiz", "two")
     adapter = DifferentiatedAdapter()
@@ -156,9 +156,8 @@ def test_differentiated_preview_ignores_deprecated_group_names(_workspace, monke
     result = content_push.preview_differentiated_quiz_push(
         "course-x", [{"label": "one"}, {"label": "two", "group_name": "ignored"}]
     )
-    assert result["ok"] is True
-    assert result["variants"] == [{"label": "one.txt"}, {"label": "two.txt"}]
-    assert all("group_name" not in row for row in adapter.requests[0]["variants"])
+    assert result["ok"] is False
+    assert adapter.requests == []
 
 
 @pytest.mark.parametrize(
@@ -188,8 +187,7 @@ def test_differentiated_preview_refuses_baseline_error_before_persisting(_worksp
     adapter.capture_baseline = lambda payload, target: {"canvas_error": "private transport error"}
     monkeypatch.setattr(content_push.registry, "get_adapter", lambda _kind: adapter)
     result = content_push.preview_differentiated_quiz_push(
-        "course-x", [{"label": "one", "group_name": "Blue"},
-                      {"label": "two", "group_name": "Gold"}])
+        "course-x", [{"label": "one"}, {"label": "two"}])
     assert result["ok"] is False
     assert result["blocking"] is True
     assert "private transport error" not in json.dumps(result)
@@ -660,8 +658,7 @@ def test_mcp_differentiated_quiz_requires_dated_module_family(monkeypatch):
     )
     result = tools.preview_differentiated_quiz_push(
         "course-x",
-        [{"label": "variant-a", "group_name": "Blue"},
-         {"label": "variant-b", "group_name": "Gold"}],
+        [{"label": "variant-a"}, {"label": "variant-b"}],
         due_at="2026-09-14T15:00:00-05:00",
         module_name="Week 1",
     )

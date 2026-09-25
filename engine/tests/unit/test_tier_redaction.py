@@ -87,9 +87,8 @@ def test_redaction_is_monotonic_across_tiers():
     support = _blanked_key_ids(redact(doc, "Support"))
     core = _blanked_key_ids(redact(doc, "Core"))
     accelerate = _blanked_key_ids(redact(doc, "Accelerate"))
-    extend = _blanked_key_ids(redact(doc, "Extend"))
 
-    assert support <= core <= accelerate <= extend
+    assert support <= core <= accelerate
 
 
 def test_non_key_slots_are_never_blanked():
@@ -100,14 +99,6 @@ def test_non_key_slots_are_never_blanked():
         non_key = [slot for slot in iter_slots(redacted) if not slot.key]
         assert {slot.id for slot in non_key} == {"scaffold-a", "scaffold-b"}
         assert all(slot.given for slot in non_key)
-
-
-def test_extend_blanks_every_key_slot():
-    redacted = redact(_synthetic_doc(), "Extend")
-    key_slots = [slot for slot in iter_slots(redacted) if slot.key]
-
-    assert key_slots
-    assert all(not slot.given for slot in key_slots)
 
 
 def test_filled_document_is_answer_key_copy():

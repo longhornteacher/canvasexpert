@@ -226,7 +226,7 @@ def _support_html(support, support_key=""):
     else:
         key = str(support_key or "").casefold()
         heading = ("<strong>Push your analysis with verbs like:</strong> "
-                   if key in {"blue", "accelerate", "extend"}
+                   if key in {"blue", "accelerate"}
                    else "<strong>Word bank:</strong> ")
         inner = heading + ", ".join(escaped(item) for item in verb_bank)
     return _SUPPORT_WRAP.format(inner=inner)

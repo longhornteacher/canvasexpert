@@ -4,7 +4,7 @@ Uses lazy module-reference so monkeypatches to config._io propagate correctly.
 """
 from . import _io as _io_mod
 
-TIER_NAMES = ["Support", "Core", "Accelerate", "Extend"]
+TIER_NAMES = ["Support", "Core", "Accelerate"]
 
 
 def get_extra_time(course_id: str) -> list[dict]:
@@ -24,4 +24,15 @@ def get_tier_tags() -> dict:
 
 def set_tier_tags(tags: dict):
     clean = {name: str(tags.get(name, "")).strip() for name in TIER_NAMES}
-    _io_mod._modify_synced(lambda state: state.__setitem__("tier_tags", clean) or state)
+
+    def update(state):
+        # Retain stored keys for tiers retired from the live UI. get_tier_tags
+        # exposes only the canonical set, but changing current tags must not
+        # erase teacher settings that may still belong to historical records.
+        saved = state.get("tier_tags")
+        preserved = dict(saved) if isinstance(saved, dict) else {}
+        preserved.update(clean)
+        state["tier_tags"] = preserved
+        return state
+
+    _io_mod._modify_synced(update)

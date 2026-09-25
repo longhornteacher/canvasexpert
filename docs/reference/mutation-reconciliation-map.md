@@ -134,21 +134,10 @@ is deferred for 1.0beta. If reopened, verify these facts against code first.
 
 ### 4. Groups and membership (`private.groups`)
 
-**Covered (targeted):** the direct webui path —
-`webui/routes/roster_canvas.py` (`create_canvas_group`,
-`canvas_add_group_membership`, `canvas_remove_group_membership`) and
-`webui/routes/roster_groups.py create_group_set` — is reconciled via
-`_reconcile_group_category` (`api/webui/routes/roster.py`), which live-merges
-the one changed category (`mirror_store.merge_group_category`) and falls back
-to a whole-document `invalidate_groups` stale-mark only on failure. This is
-the most complete reconciliation family in the codebase today.
-
-**Duplicate implementation — retired 2026-07-19 (Batch 8):** the
-operation-ledger adapters `operation_ledger/adapters/roster_membership.py`
-(`roster.membership`) and `operation_ledger/adapters/roster_group_set.py`
-(`roster.group_set`) were **dead** — no non-test producer emitted those KINDs. The
-live, already-reconciled path is the direct route above. The dead adapter files
-and their contract and test entries have been removed.
+Course Info and the agent-facing `list_groups` tool retain read-only group-set and
+name display from the private mirror. Canvas Expert no longer creates group sets or
+edits memberships through Roster; the former `roster_canvas.py` and `roster_groups.py`
+write routes were retired in Forge Batch 1 (three tiers, no student-to-tier knowledge).
 
 ### 5. Gradebook configuration (`gradebook.late_policy`)
 

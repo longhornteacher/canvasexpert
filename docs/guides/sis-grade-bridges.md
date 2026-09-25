@@ -22,7 +22,7 @@ Whole-class delivery creates one ordinary Canvas object and does not create a br
 
 ## 2. Configure public tags
 
-Settings maps the pedagogical tiers `Support`, `Core`, `Accelerate`, and `Extend` to the public
+Settings maps the three pedagogical tiers `Support`, `Core`, and `Accelerate` to the public
 tags used in Canvas titles. Every tier used by a family needs a nonempty tag, and used tags must
 be unique after trimming and case-folding. A missing or duplicate tag blocks delivery before a
 Canvas write.
@@ -106,8 +106,8 @@ score on every tier source (any late penalty is already applied) with the bridge
 score and takes the highest. It writes that score to the bridge only when it is higher than
 the bridge's current score or the bridge is blank; it never lowers a bridge score and never
 writes to a tier source. The penalty is already inside the copied score, so no late status is
-copied. Two tier sources with different scores (a student moved tiers) is normal, not a
-conflict -- the highest still wins.
+copied. Different tier sources may have different scores; that is normal, not a
+conflict -- the highest still wins. Canvas Expert does not know which tier is assigned to a student.
 
 A blank or submitted-but-ungraded source is left alone: it never clears the bridge and no
 missing zero is written. CanvasExpert excuses the bridge when every present source is excused
@@ -148,8 +148,8 @@ bridge still exists; apply verifies the surviving bridge before replacing the st
 
 ## 9. Privacy and storage
 
-Live roster, group membership, overrides, submissions, and scores remain inside the local
-token-holding process and private Operation Ledger. Reviews and assistant results contain only
+Live roster, overrides, submissions, and scores remain inside the local token-holding process
+and private Operation Ledger. Reviews and assistant results contain only
 aggregate counts, warnings, opaque coordinates, content-free step states, and the bridge reference.
 The synced family link contains only course-scoped family/source/bridge identity and the verified
 bridge digest.

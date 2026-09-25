@@ -96,7 +96,6 @@ def drop_test_course(document: dict) -> dict:
     if _contains_fixture(result.get("42")):
         result.pop("42", None)
     for key in ("sis_grade_bridges", "extra_time", "roster_student_settings",
-                "roster_tier_schemes", "roster_group_schemes",
                 "roster_score_matrices", "roster_relationships", "roster_baselines"):
         mapping = result.get(key)
         if isinstance(mapping, dict) and _contains_fixture(mapping.get("42")):

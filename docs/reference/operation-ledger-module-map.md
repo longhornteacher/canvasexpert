@@ -13,12 +13,11 @@ results.
 
 - `api/operation_ledger/adapters/assignment.py` — `AssignmentAdapter` payload build,
   digest, target verification, baseline/drift, review shaping, retry/reversal, and
-  compatibility seams for `resolve_assignment_groups`, `_autoscore_queue`,
-  `_validate_printable_pdf`, `_upload_course_file`, `_allowed_printable_roots`, and
+  compatibility seams for `_autoscore_queue`, `_validate_printable_pdf`,
+  `_upload_course_file`, `_allowed_printable_roots`, and
   `requests`.
 - `api/operation_ledger/adapters/quiz.py` — `QuizAdapter` payload build, digest,
-  target verification, baseline/drift, review shaping, retry/reversal, and the
-  compatibility seam for `resolve_assignment_groups`.
+  target verification, baseline/drift, review shaping, and retry/reversal.
 - `api/operation_ledger/adapters/page.py` — page create/reconcile facade; still owns
   Page-specific module-item behavior because Canvas page module attachment semantics
   differ from Assignment-type items.
@@ -56,8 +55,6 @@ results.
   uncertain transport classification, and standard result shaping.
 - `api/operation_ledger/adapters/module_placement.py` — shared Canvas Assignment-type
   module find/create/attach behavior for Assignment and Quiz flows only.
-- `api/operation_ledger/adapters/assignment_groups.py` — canonical safe group-resolution
-  helper used by differentiated quizzes; AssignmentForge tier delivery does not call it.
 - `api/operation_ledger/adapters/differentiated_bridge.py` — one shared owner for
   public-tag normalization, source/bridge shape verification, end-of-day bridge due
   time, runtime Dashboard instructions, bridge create/activate, source-only module

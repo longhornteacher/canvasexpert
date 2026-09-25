@@ -610,7 +610,7 @@ def _course_gate_check(course_id: str) -> str | None:
 
 _MCP_ROSTER_PATCH_KEYS = {
     "pseudonym", "regenerate_pseudonym", "extra_time", "monitored",
-    "canvas_group", "classroom_profile", "add_nicknames",
+    "classroom_profile", "add_nicknames",
 }
 _MCP_ROSTER_CLEAR_KEYS = {"extra_time", "monitored", "classroom_profile"}
 
@@ -620,31 +620,14 @@ def _canonical_digest(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _roster_group_for_user(course_id: str, user_id: str) -> dict | None:
-    document = mirror_store.read_groups(course_id) or {}
-    scheme = config.get_roster_group_scheme(course_id)
-    selected = str(scheme.get("selected_group_category_id") or "")
-    for category in document.get("categories") or document.get("groups") or []:
-        category_id = str(category.get("category_id") or category.get("id") or "")
-        if selected and category_id != selected:
-            continue
-        for group in category.get("groups") or []:
-            members = group.get("student_ids") or []
-            if str(user_id) in {str(member) for member in members}:
-                return {"category_id": category_id, "group_id": str(group.get("id") or ""),
-                        "group_name": group.get("name") or ""}
-            for membership in group.get("memberships") or []:
-                if str(membership.get("user_id") or "") == str(user_id):
-                    return {"category_id": category_id, "group_id": str(group.get("id") or ""),
-                            "group_name": group.get("name") or ""}
-    return None
-
-
 def _roster_full_record(course_id: str, user_id: str, vault) -> dict:
     vault_entry = next((entry for entry in vault.entries()
                         if str(entry.get("canvas_id")) == str(user_id)), {})
     local = config.get_roster_student_settings(course_id) or {}
-    local_entry = local.get(str(user_id), {}) if isinstance(local, dict) else {}
+    stored_entry = local.get(str(user_id), {}) if isinstance(local, dict) else {}
+    local_entry = ({"classroom_profile": stored_entry["classroom_profile"]}
+                   if isinstance(stored_entry, dict) and "classroom_profile" in stored_entry
+                   else {})
     extra = next((entry for entry in config.get_extra_time(course_id) or []
                   if str(entry.get("id")) == str(user_id)), None)
     monitored = (config.get_monitored_students() or {}).get(str(user_id))
@@ -653,7 +636,6 @@ def _roster_full_record(course_id: str, user_id: str, vault) -> dict:
         "local": local_entry if isinstance(local_entry, dict) else {},
         "extra_time": extra,
         "monitored": monitored,
-        "canvas_group": _roster_group_for_user(course_id, user_id),
     }
 
 
@@ -662,7 +644,6 @@ def _roster_safe_projection(course_id: str, user_id: str, vault) -> dict:
     local = record["local"]
     extra = record["extra_time"] or {}
     monitored = record["monitored"] or {}
-    group = record["canvas_group"]
     profile = local.get("classroom_profile", config.empty_classroom_profile())
     try:
         profile = config.validate_classroom_profile(profile)
@@ -672,7 +653,6 @@ def _roster_safe_projection(course_id: str, user_id: str, vault) -> dict:
         "pseudonym": record["vault"].get("pseudonym", ""),
         "extra_time": {"enabled": bool(extra), "days": extra.get("days", 0) if extra else 0},
         "monitored": {"enabled": bool(monitored)},
-        "canvas_group": group,
         "classroom_profile": profile,
     }
 
@@ -974,12 +954,6 @@ def list_groups(course_id: str) -> dict:
                 "state": freshness["state"], "freshness": freshness,
                 "attention": attention}
     group_sets = []
-    selected_id = str(
-        (config.get_roster_group_scheme(course_id) or {}).get(
-            "selected_group_category_id"
-        ) or ""
-    )
-    selected_name = None
     for category in records:
         if not isinstance(category, dict):
             return {
@@ -991,7 +965,6 @@ def list_groups(course_id: str) -> dict:
                 "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry list_groups."},
             }
         category_name = str(category.get("category_name") or "").strip()
-        category_id = str(category.get("category_id") or "")
         groups = category.get("groups")
         if not category_name or not isinstance(groups, list):
             return {
@@ -1002,8 +975,6 @@ def list_groups(course_id: str) -> dict:
                                          str(scope.get("last_success_at") or "")),
                 "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry list_groups."},
             }
-        if selected_id and category_id == selected_id:
-            selected_name = category_name
         safe_groups = []
         for group in groups:
             if not isinstance(group, dict) or not str(group.get("name") or "").strip():
@@ -1016,13 +987,7 @@ def list_groups(course_id: str) -> dict:
             safe_groups.append({"name": str(group["name"]).strip()})
         group_sets.append({"name": category_name, "groups": safe_groups})
     result = {"ok": True, "course_id": str(course_id), "group_sets": group_sets,
-              "selected_group_set": selected_name,
               "freshness": freshness}
-    if selected_name is None and not attention:
-        result["attention"] = {
-            "action": "select_group_set",
-            "reason": "Select the group set to use for Roster in the Roster page before differentiated delivery.",
-        }
     return result
 
 

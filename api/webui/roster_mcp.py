@@ -18,13 +18,9 @@ def update_student(course_id: str, user_id: str, patch: dict, vault) -> dict:
         update_roster_student_settings=config.update_roster_student_settings,
         validate_classroom_profile=config.validate_classroom_profile,
         as_int=roster_routes._as_int,
-        validate_canvas_group_target=roster_routes._validate_canvas_group_target,
-        update_student_canvas_group=roster_routes._update_student_canvas_group,
-        invalidate_groups=roster_routes._reconcile_group_category,
         # The replacing nickname path is unreachable from this adapter, not just
         # from the MCP tool that currently calls it. set_nicknames overwrites the
         # teacher's scrub-coverage list, and a caller that skipped the tool-layer
         # validator would otherwise be able to erase it through here.
         allowed_keys=(roster_routes.ALLOWED_STUDENT_PATCH_KEYS - {"nicknames"}) | {"add_nicknames"},
-        obsolete_keys=roster_routes.OBSOLETE_PATCH_KEYS,
     )

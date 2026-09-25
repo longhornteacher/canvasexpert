@@ -562,8 +562,6 @@ def prepare_scoring_session(
         ai_by_uid=ai_result.get("ai_by_uid") or {},
         ai_item_by_uid=ai_result.get("ai_item_by_uid") or {},
         ai_failures=dict(ai_result.get("ai_failures") or {}),
-        roster_settings=config.get_roster_student_settings(course_id),
-        tier_map=config.roster_tier_by_id(course_id),
         monitored=config.get_monitored_students(),
         extra_time_map=_extra_time_map(config.get_extra_time(course_id)),
     )

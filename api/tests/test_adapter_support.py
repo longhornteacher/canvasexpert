@@ -35,14 +35,14 @@ from api.operation_ledger.adapters.adapter_support import canonical_html
     ),
     pytest.param(
         (
-            '<div style="border-left:4px solid #000;color:#111;" data-tier="Extend">'
+            '<div style="border-left:4px solid #000;color:#111;" data-tier="Accelerate">'
             'Read the passage and cite one source.'
             '</div>'
         ),
         # Reformatted CSS punctuation, and Canvas's sanitizer has pruned the
         # disallowed "color" property entirely.
         (
-            '<div data-tier="Extend" style="border-left: 4px solid #000;">'
+            '<div data-tier="Accelerate" style="border-left: 4px solid #000;">'
             'Read the passage and cite one source.'
             '</div>'
         ),

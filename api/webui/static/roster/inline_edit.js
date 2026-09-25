@@ -4,7 +4,6 @@
   var roster = window.CE_ROSTER || {};
   var ready = [
     "getStudents",
-    "getGroupState",
     "postForm",
     "toast",
     "setRowStatus",
@@ -31,22 +30,8 @@
     return null;
   }
 
-  function findCurrentCategoryGroup(targetGroupId) {
-    var state = roster.getGroupState() || {};
-    var categoryGroups = state.currentCategoryGroups || [];
-    var target = String(targetGroupId || "");
-    for (var i = 0; i < categoryGroups.length; i++) {
-      var group = categoryGroups[i];
-      if (String(group && (group.id || group.group_id) || "") === target) {
-        return group;
-      }
-    }
-    return null;
-  }
-
   function saveField(userId, key, value) {
-    var isCanvasGroup = key === "canvas_group";
-    roster.setRowStatus(userId, isCanvasGroup ? "syncing to Canvas..." : "saving locally...", "roster-v2-status-saving");
+    roster.setRowStatus(userId, "saving locally...", "roster-v2-status-saving");
 
     if (saveTimeouts[userId]) {
       clearTimeout(saveTimeouts[userId]);
@@ -73,7 +58,7 @@
             } else {
               updateLocalStudent(userId, key, value);
             }
-            roster.setRowStatus(userId, isCanvasGroup ? "synced to Canvas" : "saved locally", "roster-v2-status-ok");
+            roster.setRowStatus(userId, "saved locally", "roster-v2-status-ok");
           } else {
             var apiMsg = data.error || "Save failed.";
             roster.setRowStatus(userId, "Error: " + apiMsg, "roster-v2-status-error");
@@ -103,31 +88,6 @@
       s.pseudonym = value;
     } else if (key === "extra_time") {
       s.extra_time = { enabled: !!value.enabled, days: value.days || 0 };
-    } else if (key === "canvas_group") {
-      var group = findCurrentCategoryGroup(value.group_id);
-      if (group && value.group_id) {
-        var state = roster.getGroupState() || {};
-        var labels = state.groupLabelScheme || {};
-        var gid = String((group && (group.id || group.group_id)) || "");
-        var label = (labels[gid] && labels[gid].teacher_label) || group.teacher_label || "";
-        var matchingCategory = null;
-        for (var i = 0; i < (state.groups || []).length; i++) {
-          if (String(state.groups[i].category_id) === String(value.category_id)) {
-            matchingCategory = state.groups[i];
-            break;
-          }
-        }
-        s.canvas_group = {
-          category_id: value.category_id,
-          category_name: matchingCategory ? (matchingCategory.category_name || "") : "",
-          group_id: gid,
-          group_name: group.name,
-          teacher_label: label || null,
-          display: label && label !== group.name ? label + " / " + group.name : group.name
-        };
-      } else {
-        s.canvas_group = null;
-      }
     } else if (key === "monitored") {
       s.monitored = { enabled: !!value.enabled, note: value.note || "" };
     } else if (key === "classroom_profile") {
@@ -238,15 +198,6 @@
           enabled: cb.checked,
           days: parseInt(el.value, 10) || 0,
           name: s ? (s.display_name || s.name) : ""
-        });
-      });
-    });
-
-    tableBody.querySelectorAll(".roster-v2-canvas-group").forEach(function (el) {
-      el.addEventListener("change", function () {
-        saveField(el.dataset.id, "canvas_group", {
-          category_id: el.dataset.category || roster.getGroupState().selectedGroupCategoryId,
-          group_id: el.value || null
         });
       });
     });

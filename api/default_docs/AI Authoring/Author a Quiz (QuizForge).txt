@@ -41,7 +41,7 @@
 - `metadata`: free-form key/value notes (strings/numbers/booleans). A file used for
   differentiated live delivery must include one canonical pedagogical tier as
   `metadata.variant` (preferred) or `metadata.variant_label`: `Support`, `Core`,
-  `Accelerate`, or `Extend`.
+  or `Accelerate`.
 - Metadata may include tool-specific or extension-specific keys. Students never see metadata, and tools are free to ignore keys they do not recognize.
 - Extensions may place structured data under `metadata.extensions`. Tools that do not recognize an extension MUST ignore it without warning.
 - `instructions` (optional, string): Quiz-level directions displayed to students **before any questions**, in the Canvas Instructions panel. Use this for test-wide directions (e.g., "Read the article and answer the questions that follow."). HTML is supported. Do **not** use STIMULUS for this purpose.
@@ -60,9 +60,10 @@ Differentiated delivery requires a module and equal point totals. Dates are opti
 the teacher sets them in Canvas after delivery. CanvasExpert does not resolve Canvas pods or
 groups, create placement overrides, or restrict visibility: it publishes each real quiz as an
 unrestricted source, omits it from the final grade, disables its SIS Sync setting, and places it
-in the selected module. It also creates one unsuffixed
-no-submission bridge as a gradebook-only record; the configured-tag source assignments are the module items. The teacher reviews the family in Canvas Live
-and owns Canvas Grade Sync.
+in the selected module. It also creates one unsuffixed no-submission bridge as a gradebook-only
+record; the configured-tag source assignments are the module items. Canvas Expert has no
+student-to-tier mapping; Canvas access controls which students or pods see each source.
+The teacher reviews the family in Canvas Live and owns Canvas Grade Sync.
 
 ## 4. COMMON ITEM FIELDS (APPLY TO ALL ITEMS)
 - `id` (string): Required for STIMULUS; optional but recommended for all other items so rationales can target them.
@@ -121,7 +122,6 @@ FITB questions have historically caused the most LLM errors. Follow these rules 
 |------|------------------|-----------|
 | **Support** | Word bank (`answer_mode: "wordbank"`) or dropdown (`answer_mode: "dropdown"`) | Reduces extraneous load; eliminates spelling/case errors; scaffolds recall at the same standard |
 | **Core / Accelerate** | Open-entry (default, case-insensitive) | Tests recall without spelling penalties; standard rigor |
-| **Extend** | Open-entry; case-sensitive when discipline-appropriate | Adds precision demand on the same content |
 
 ### FITB Field Reference
 - `answer_mode` (optional): `"open_entry"` (default), `"dropdown"`, or `"wordbank"`.
@@ -231,11 +231,10 @@ a watered-down standard. **Support is access to the same work, not a smaller ver
 from the teacher's Settings mapping, not authored title text. The pedagogical tier comes
 from `metadata.variant`; student placement remains a separate teacher-owned Canvas choice.
 
-**The four tiers (lowest → highest readiness)** — Canvas Expert's fixed product standard:
+**The three tiers (lowest → highest readiness)** — Canvas Expert's fixed product standard:
 - **Support** *(below grade level)* — the **same Bloom target and standard as Core**, reached by removing barriers: high-frequency vocabulary, define complex terms, active voice, shorter sentences; reduce extraneous load with Word Banks or Dropdowns for FITB, chunking, and text descriptions for visuals. Addresses **language or motivation** barriers, **never** ability — do not lower the cognitive bar or condescend.
 - **Core** *(on grade level, DEFAULT)* — Bloom 3–4; academic vocabulary; MC distractors reflect misconceptions; open-entry FITB (case-insensitive); ordering sequences; categorization by attributes.
 - **Accelerate** *(pre-AP)* — Bloom 4–5; richer academic/discipline vocabulary; MA prompts; multi-step reasoning and required justification on the same content.
-- **Extend** *(gifted)* — Bloom 5–6; discipline-specific terminology; multi-step auto-graded reasoning; case-sensitive FITB when discipline-appropriate; deeper, more rigorous coverage of the same standard.
 
 ## 8. UDL & ACCESSIBILITY DEFAULTS
 - Bold headers, avoid ALL CAPS and heavy italics, prefer active voice unless discipline demands passive.

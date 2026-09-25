@@ -75,7 +75,7 @@ def _configure_fictional(monkeypatch):
     monkeypatch.setattr(pages.config, "saved_courses", lambda: courses)
     monkeypatch.setattr(pages.config, "get_download_root", lambda: "")
     monkeypatch.setattr(pages.config, "get_tier_tags", lambda: {
-        "Support": "", "Core": "", "Accelerate": "", "Extend": "",
+        "Support": "", "Core": "", "Accelerate": "",
     })
     monkeypatch.setattr(pages.workspace, "workspace_root", lambda: None)
     monkeypatch.setattr(pages.workspace, "onedrive_root", lambda: "Fictional")
@@ -194,6 +194,21 @@ def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_pat
         response = client.get(url)
         assert response.status_code == 200, url
         text = response.text
+        if key == "/roster":
+            for removed in (
+                "Needs placement", "group-set-select", "group-label",
+                "canvas_group", "canvas_groups", "group_state.js", "groups.js",
+            ):
+                assert removed not in text
+        if key == "/settings":
+            assert "the three tiers" in text
+            assert 'data-tier="Support"' in text
+            assert 'data-tier="Core"' in text
+            assert 'data-tier="Accelerate"' in text
+            assert 'placeholder="e.g. Silver"' in text
+            assert 'placeholder="e.g. Red"' in text
+            assert 'placeholder="e.g. Blue"' in text
+            assert text.count('class="tier-tag-input"') == 3
         assert f'data-ce-layout="{layout}"' in text
         if variant:
             assert f'ce-{layout}--{variant}' in text

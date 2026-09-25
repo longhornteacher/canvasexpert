@@ -28,6 +28,10 @@ item identity or guess by prompt text.
 
 ## 2. The `Accelerate` tier can be undeliverable in a configured workspace
 
+The only canonical AssignmentForge tiers are Support, Core, and Accelerate. The teacher maps
+their public tags in Settings and assigns the resulting Canvas assignments to students or pods
+in Canvas; Canvas Expert keeps no student-to-tier mapping.
+
 `tier_tags` in workspace settings maps each canonical label to a public title tag. If a used label
 has no configured tag, delivery fails the tag validation rather than creating an ambiguous draft.
 The authoring contract does not currently surface the missing configuration before delivery.

@@ -16,7 +16,7 @@ def isolated_roster_settings(monkeypatch):
 
     def fake_modify_synced(mutator):
         updated = mutator(state)
-        if updated is not None:
+        if updated is not None and updated is not state:
             state.clear()
             state.update(updated)
         return state
@@ -33,8 +33,8 @@ def test_get_returns_empty_for_unknown_course():
 
 def test_set_and_get_roundtrip():
     settings = {
-        "101": {"tier": "Support"},
-        "102": {"tier": "Core", "planned_group": {"category_id": "1", "group_id": "2"}},
+        "101": {"classroom_profile": {"birthday": "04-10"}},
+        "102": {"classroom_profile": {"birthday": "09-03"}},
     }
     config.set_roster_student_settings("100", settings)
 
@@ -43,39 +43,53 @@ def test_set_and_get_roundtrip():
     assert config.get_roster_student_settings("200") == {}
 
 
-def test_update_patches_one_student():
-    config.set_roster_student_settings("100", {
-        "101": {"tier": "Support"},
-        "102": {"tier": "Core"},
+def test_tier_tags_expose_three_canonical_keys_and_preserve_retired_storage():
+    historical_key = "Ex" + "tend"
+    config._io._save_synced_key("tier_tags", {
+        "Support": "Silver", "Core": "Red", "Accelerate": "Blue",
+        historical_key: "Gold",
     })
 
-    config.update_roster_student_settings("100", "101", {"tier": "Accelerate"})
+    config.set_tier_tags({"Support": "S", "Core": "C", "Accelerate": "A", historical_key: "Changed"})
+
+    assert config.TIER_NAMES == ["Support", "Core", "Accelerate"]
+    assert config.get_tier_tags() == {"Support": "S", "Core": "C", "Accelerate": "A"}
+    assert config._io._synced_state()["tier_tags"][historical_key] == "Gold"
+
+
+def test_update_patches_one_student():
+    config.set_roster_student_settings("100", {
+        "101": {"classroom_profile": {"birthday": "04-10"}},
+        "102": {"classroom_profile": {"birthday": "09-03"}},
+    })
+
+    config.update_roster_student_settings("100", "101", {"classroom_profile": {"birthday": "05-11"}})
 
     result = config.get_roster_student_settings("100")
-    assert result["101"]["tier"] == "Accelerate"
-    assert result["102"]["tier"] == "Core"
+    assert result["101"]["classroom_profile"]["birthday"] == "05-11"
+    assert result["102"]["classroom_profile"]["birthday"] == "09-03"
 
 
 def test_update_adds_new_student():
-    config.set_roster_student_settings("100", {"101": {"tier": "Support"}})
+    config.set_roster_student_settings("100", {"101": {"classroom_profile": {"birthday": "04-10"}}})
 
-    config.update_roster_student_settings("100", "103", {"tier": "Extend"})
+    config.update_roster_student_settings("100", "103", {"classroom_profile": {"birthday": "07-13"}})
 
     result = config.get_roster_student_settings("100")
-    assert result["101"]["tier"] == "Support"
-    assert result["103"]["tier"] == "Extend"
+    assert result["101"]["classroom_profile"]["birthday"] == "04-10"
+    assert result["103"]["classroom_profile"]["birthday"] == "07-13"
 
 
 def test_update_removes_key_when_none():
     config.set_roster_student_settings("100", {
-        "101": {"tier": "Support", "planned_group": {"cat": "1"}},
+        "101": {"classroom_profile": {"birthday": "04-10"}, "temporary": "value"},
     })
 
-    config.update_roster_student_settings("100", "101", {"planned_group": None})
+    config.update_roster_student_settings("100", "101", {"temporary": None})
 
     result = config.get_roster_student_settings("100")
-    assert "planned_group" not in result["101"]
-    assert result["101"]["tier"] == "Support"
+    assert "temporary" not in result["101"]
+    assert result["101"]["classroom_profile"]["birthday"] == "04-10"
 
 
 def test_classroom_profile_round_trip_and_clear_preserves_other_settings():
@@ -176,94 +190,4 @@ def test_replace_overwrites_course():
 
 
 def test_valid_tier_names():
-    assert "Support" in config.TIER_NAMES
-    assert "Core" in config.TIER_NAMES
-    assert "Accelerate" in config.TIER_NAMES
-    assert "Extend" in config.TIER_NAMES
-    assert "" not in config.TIER_NAMES
-    assert len(config.TIER_NAMES) == 4
-
-
-# --------------------------------------------------------------------------
-# V2 Tier scheme tests
-# --------------------------------------------------------------------------
-
-
-def test_default_scheme_has_three_tiers():
-    scheme = config.ROSTER_DEFAULT_TIER_SCHEME
-    assert len(scheme) == 3
-    ids = [t["id"] for t in scheme]
-    assert ids == ["support", "core", "extend"]
-    assert scheme[0]["alias"] == "Blue"
-    assert scheme[1]["alias"] == "Red"
-    assert scheme[2]["alias"] == "White"
-
-
-def test_default_tier_scheme_returned_for_unknown_course():
-    cid = "test_default_fallback"
-    scheme = config.get_roster_tier_scheme(cid)
-    assert len(scheme) == 3
-    assert scheme[0]["id"] == "support"
-
-
-def test_set_and_get_tier_scheme_roundtrip():
-    cid = "roundtrip_course"
-    custom = [
-        {"id": "low", "teacher_label": "Low", "meaning": "below", "alias": "Gray", "order": 5, "active": True},
-        {"id": "high", "teacher_label": "High", "meaning": "above", "alias": "Gold", "order": 25, "active": True},
-    ]
-    config.set_roster_tier_scheme(cid, custom)
-    result = config.get_roster_tier_scheme(cid)
-    assert len(result) == 2
-    assert result[0]["id"] == "low"
-    assert result[0]["alias"] == "Gray"
-    assert result[1]["id"] == "high"
-
-
-def test_tier_scheme_courses_are_independent():
-    config.set_roster_tier_scheme("course_a", config.ROSTER_DEFAULT_TIER_SCHEME)
-    config.set_roster_tier_scheme("course_b", [{"id": "x", "teacher_label": "X", "alias": "X", "order": 1, "active": True}])
-    a = config.get_roster_tier_scheme("course_a")
-    b = config.get_roster_tier_scheme("course_b")
-    assert len(a) == 3
-    assert len(b) == 1
-    assert b[0]["id"] == "x"
-
-
-def test_validate_rejects_duplicate_ids():
-    with pytest.raises(ValueError, match="Duplicate"):
-        config.set_roster_tier_scheme("dup_test", [
-            {"id": "a", "teacher_label": "A", "alias": "One", "order": 1, "active": True},
-            {"id": "a", "teacher_label": "B", "alias": "Two", "order": 2, "active": True},
-        ])
-
-
-def test_validate_rejects_blank_alias():
-    with pytest.raises(ValueError, match="blank"):
-        config.set_roster_tier_scheme("alias_test", [
-            {"id": "x", "teacher_label": "X", "alias": "", "order": 1, "active": True},
-        ])
-
-
-def test_validate_rejects_blank_label():
-    with pytest.raises(ValueError, match="teacher_label"):
-        config.set_roster_tier_scheme("label_test", [
-            {"id": "x", "teacher_label": "", "alias": "X", "order": 1, "active": True},
-        ])
-
-
-def test_roster_tier_by_id():
-    cid = "by_id_test"
-    config.set_roster_tier_scheme(cid, [
-        {"id": "a", "teacher_label": "A", "alias": "A1", "order": 1, "active": True},
-        {"id": "b", "teacher_label": "B", "alias": "B1", "order": 2, "active": False},
-    ])
-    by_id = config.roster_tier_by_id(cid)
-    assert by_id["a"]["alias"] == "A1"
-    assert by_id["b"]["alias"] == "B1"
-    assert by_id["b"]["active"] is False
-
-
-def test_validate_requires_non_empty_scheme():
-    with pytest.raises(ValueError, match="non-empty"):
-        config.set_roster_tier_scheme("empty_test", [])
+    assert config.TIER_NAMES == ["Support", "Core", "Accelerate"]

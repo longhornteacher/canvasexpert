@@ -1609,7 +1609,7 @@ def test_refresh_mirror_accepts_previous_course(monkeypatch, _set_previous_cours
     }
 
 
-def test_list_groups_projects_names_and_selected_set_without_private_ids(monkeypatch, _set_active_courses):
+def test_list_groups_projects_names_without_private_ids_or_student_selection(monkeypatch, _set_active_courses):
     _set_active_courses(["111"])
     monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: {
         "state": "current", "last_success_at": mirror_store.now_iso(), "records": [{
@@ -1619,13 +1619,11 @@ def test_list_groups_projects_names_and_selected_set_without_private_ids(monkeyp
                          "memberships": [{"user_id": "user-secret"}]}],
         }],
     })
-    monkeypatch.setattr(tools.config, "get_roster_group_scheme",
-                        lambda _course: {"selected_group_category_id": "category-secret"})
     result = tools.list_groups("111")
     assert result["ok"] is True
     assert result["course_id"] == "111"
     assert result["group_sets"] == [{"name": "Teams", "groups": [{"name": "Blue"}]}]
-    assert result["selected_group_set"] == "Teams"
+    assert "selected_group_set" not in result
     assert result["freshness"]["section"] == "groups"
     assert "attention" not in result
     dumped = json.dumps(result)
@@ -1649,16 +1647,16 @@ def test_list_groups_refuses_unusable_mirror_with_refresh_attention(monkeypatch,
     )
 
 
-def test_list_groups_without_roster_selection_still_lists_names(monkeypatch, _set_active_courses):
+def test_list_groups_lists_names_without_roster_selection(monkeypatch, _set_active_courses):
     _set_active_courses(["111"])
     monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: {
         "state": "current", "last_success_at": mirror_store.now_iso(),
         "records": [{"category_id": "cat", "category_name": "Teams",
                                              "groups": [{"name": "Blue"}]}]})
-    monkeypatch.setattr(tools.config, "get_roster_group_scheme", lambda _course: {})
     result = tools.list_groups("111")
     assert result["group_sets"][0]["groups"] == [{"name": "Blue"}]
-    assert result["attention"]["action"] == "select_group_set"
+    assert "selected_group_set" not in result
+    assert "attention" not in result
 
 
 def test_refresh_mirror_reports_synced_on_success(monkeypatch, _set_active_courses):

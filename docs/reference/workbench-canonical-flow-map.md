@@ -19,7 +19,7 @@ their own conversation and preview presentation from Canvas Expert's host-neutra
 | 1 | **CanvasAgent** – local connection and service health | `/` | `canvasagent.html` (`layouts/workspace.html`, `full`) | `canvasagent.js` | `routes/connections.py`, `api/connections.py`, `api/diagnostics.py`, `readiness.py`, `mirror_service.py` | `mcp-server.md`, `settings-module-map.md` | Local stdio MCP; Canvas readiness probe; read-only CanvasMirror status and explicit read-only refresh; no work-card scan. |
 | 2 | **Course content creation & delivery** | `/course-expert` | `course_expert.html` (`layouts/workspace.html`, `three`) | `push.js` + `push/*.js` + `course_expert/*.js` | `routes/push.py`, `routes/push_validation.py`, `routes/operations.py`, `operation_ledger/adapters/` | `course-expert-module-map.md`, `operation-ledger-module-map.md` | Typed operation-ledger prepare/review/apply; no generic push fallback; teacher review gate before Canvas writes |
 | 3 | **Gradebook actions** | `/gradebook` | `gradebook.html` (`layouts/workspace.html`, `left-main`) | `gradebook.js` + `gradebook/*.js` | `routes/gradebook.py` (facade) + `routes/gradebook_*.py` | `gradebook-module-map.md` | Single-course scope; late-policy writes remain in the console, while existing-grade adjustments use the reviewed MCP operation; extra-time reads from Roster config |
-| 4 | **Roster & student-group actions** | `/roster` | `roster.html` (`layouts/workspace.html`, `left-main`) | `roster.js` + `roster/*.js` | `routes/roster.py` + `routes/roster_*.py`, `routes/names.py` | `roster-module-map.md` | V3: Canvas groups are source of truth; V2 tier/planned_group writes rejected; vault is PRIVATE |
+| 4 | **Roster & student settings** | `/roster` | `roster.html` (`layouts/workspace.html`, `left-main`) | `roster.js` + `roster/*.js` | `routes/roster.py` + `routes/roster_*.py`, `routes/names.py` | `roster-module-map.md` | No student-group controls or student-to-tier mapping; local roster data and vault are PRIVATE |
 | 5 | **Student reports** | `/students/reports` | `student_reports.html` (`layouts/document.html`, `wide`) | `course_expert/student_reports.js`, `course_expert/portfolio.js` | `routes/pages.py::student_reports_page`, `routes/reports.py` | `roster-module-map.md` | Private report roots, monitored-student data, CSV handling, and portfolio behavior remain owned by the existing report routes; no data migration or new Canvas write path. |
 | 6 | **Scoring Sessions** – agent-assisted scoring | MCP `discover_scoring_work` → teacher direction → `prepare_scoring_session` → `get_scoring_packet` → `stage_scoring_results` → direct teacher apply → `apply_staged_scoring_results` | No Canvas Expert scoring page | MCP server and private scoring engine | `api/mcp_server/`, `api/powergrader/` | `powergrader-scoring-map.md`, `feedback-scoring-contract.md` | Discovery is cross-course, student-free, local-mirror-only, and read-only. Each selected assignment then gets its own SAFE packet, frozen stage, and narrow apply boundary with per-student review, idempotency, verification, and receipts. Canvas Live is review/edit surface. |
 | 8 | **Settings & first-run** | `/settings` (first-run: `/welcome`) | `settings.html` (`layouts/workspace.html`, `left-main`) / `welcome.html` (`layouts/wizard.html`) | `settings.js` + `settings/*.js` / `welcome.js` | `routes/settings.py`, `routes/calendar.py`, `routes/onboarding.py`, `config/` | `settings-module-map.md` | Token in OS credential store only; no district defaults in source; local-only bind |
@@ -41,14 +41,13 @@ their own conversation and preview presentation from Canvas Expert's host-neutra
 
 ## Completed retirements
 
-### July 2026: Tier-scheme HTTP endpoints removed
+### September 2026: Roster tier and group controls removed
 
 | Removed | Replacement | Changes |
 |---|---|---|
-| `GET /api/roster/tier-scheme` | Roster V3 Canvas group scheme | Routes removed from `roster.py`; 5 endpoint tests removed from `test_roster_routes.py`; 2 entries removed from `test_route_contract.py::EXPECTED` |
-| `POST /api/roster/tier-scheme` | Roster V3 Canvas group scheme | Routes removed from `roster.py`; 5 endpoint tests removed from `test_roster_routes.py`; 2 entries removed from `test_route_contract.py::EXPECTED` |
+| Group-set selection, group labels, student group editing, and local tier scheme | Teacher assigns students/pods to tier assignments in Canvas | Roster group controls and APIs removed; Course Info retains generic group-set display |
 
-The retired roster tier-scheme HTTP endpoints have no scoring-UI dependency.
+Roster settings keep their stored legacy values inert; Canvas Expert does not read them.
 
 ### July 2026: QuizForge streaming HTTP wrappers removed
 

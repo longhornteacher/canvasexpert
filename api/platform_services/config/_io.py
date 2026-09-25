@@ -26,8 +26,10 @@ DOWNLOAD_ROOT_DEFAULT = os.path.join(os.path.expanduser("~"), "Desktop", "Canvas
 LEGACY_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.json")
 CONFIG_PATH = str(runtime_paths.local_app_dir() / "config.json")
 SYNCED_KEYS = ("saved_courses", "extra_time", "late_sweep", "tier_tags",
-               "ai_ta_persona", "roster_student_settings", "roster_tier_schemes",
-               "roster_group_schemes", "roster_score_matrices", "roster_relationships",
+               "ai_ta_persona", "roster_student_settings",
+               # Retired tier/group schemes remain registered as inert stored state.
+               "roster_tier_schemes", "roster_group_schemes",
+               "roster_score_matrices", "roster_relationships",
                "monitored_students", "roster_baselines",
                "sis_grade_bridges", "custom_personas",
                "protected_packs_enabled", "protected_names_custom")

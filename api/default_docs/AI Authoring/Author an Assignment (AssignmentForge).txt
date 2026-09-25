@@ -95,8 +95,8 @@ A writing assignment is either **tracked** or **not tracked**, and the submissio
 
 ## 5. DIFFERENTIATION TIERS
 
-Canvas Expert ships a **fixed four-tier model** — the product standard across every
-Forge (lowest → highest readiness): **Support · Core · Accelerate · Extend**. Author
+Canvas Expert ships a **fixed three-tier model** — the product standard across every
+Forge (lowest → highest readiness): **Support · Core · Accelerate**. Author
 `label` with these names. Settings maps each used pedagogical label to the public color tag
 appended to the Canvas title; the teacher handles all Canvas student/group assignment.
 
@@ -106,9 +106,7 @@ appended to the Canvas title; the teacher handles all Canvas student/group assig
     "scaffolding": "<div><h3>Helpful supports</h3><ul><li><strong>Word bank:</strong> …</li><li>Sentence starter: \"…\"</li></ul></div>" },
   { "label": "Core" },
   { "label": "Accelerate",
-    "scaffolding": "<div><h3>Go further</h3><p>A raised-rigor prompt on the same task — more academic register, deeper justification.</p></div>" },
-  { "label": "Extend",
-    "scaffolding": "<div><h3>Extend</h3><p>A high-level prompt and/or more rigorous coverage of the same content — independent, evidence-rich expectations.</p></div>" }
+    "scaffolding": "<div><h3>Go further</h3><p>A raised-rigor prompt on the same task — more academic register, deeper justification.</p></div>" }
 ]
 ```
 
@@ -119,10 +117,10 @@ appended to the Canvas title; the teacher handles all Canvas student/group assig
   title `Base - <configured tag>`, publishes it after verification, and places it in the
   selected module. The family also
   includes one whole-course grade bridge that is absent from modules.
-- `label` (required): one of the four standard pedagogical names. It selects the
+- `label` (required): one of the three standard pedagogical names. It selects the
   teacher-configured public Canvas title tag and distinguishes authored content; it does
   not select or imply student placement.
-- `scaffolding` (optional, HTML): appended to the base `description` in a visually distinct panel — word banks, sentence starters, chunked steps, worked examples (Support); extension/justification prompts (Accelerate/Extend).
+- `scaffolding` (optional, HTML): appended to the base `description` in a visually distinct panel — word banks, sentence starters, chunked steps, worked examples (Support); extension/justification prompts (Accelerate).
 - `description` (optional, HTML): **full replacement** of the base description for this tier, when appending scaffolding isn't enough. If both are present, `description` wins and `scaffolding` is appended to it.
 
 Canvas Expert does not use Canvas groups, pods, or roster membership to deliver AssignmentForge
@@ -138,7 +136,6 @@ Sync.
 | **Support** | below grade level | The **same content challenge as Core**; lower grade-level grammar/vocabulary **or** vocabulary scaffolding, plus supports (word banks, sentence starters, chunked steps, worked examples). Addresses **language or motivation** barriers — **never** ability. Do not condescend or shrink the task. |
 | **Core** | on grade level | The baseline task at grade-level register. |
 | **Accelerate** | pre-AP | The same task, raised rigor and academic register; extension prompts and deeper justification. |
-| **Extend** | gifted | The same task, high-level grammar/vocabulary and/or more rigorous coverage; independent, evidence-rich expectations. |
 
 **Always scaffold UP:** every tier assesses the same learning target; only language register
 and rigor of coverage flex — never the objective, never a watered-down standard. Support is
@@ -147,7 +144,7 @@ and rigor of coverage flex — never the objective, never a watered-down standar
 ### 5.1 Standing support blocks
 
 `supports` is keyed by either the canonical tier label (`Support`, `Core`,
-`Accelerate`, `Extend`) or that tier's configured public Canvas tag. Keys are
+`Accelerate`) or that tier's configured public Canvas tag. Keys are
 case-insensitive, so a teacher using `silver`, `red`, and `blue` tags can keep
 those names in the envelope without changing the canonical tier labels.
 
@@ -161,7 +158,7 @@ those names in the envelope without changing the canonical tier labels.
 
 `stem_frame` renders as a Silver-style “Complete the sentence” box, a Red
 entry with `scaffold` renders as a “Word bank” box alongside the existing
-structural scaffold, and a Blue/Accelerate/Extend entry without `scaffold`
+structural scaffold, and a Blue/Accelerate entry without `scaffold`
 renders as a challenge: “Push your analysis with verbs like:”. Use the
 Tier 2/Tier 3 vocabulary model in the ELA authoring references for the word
 bank; do not invent a new vocabulary list just for the renderer. Each block is
@@ -264,9 +261,7 @@ Include these as a "Resources You Can Use" section with clickable links. If a re
       "scaffolding": "<div style=\"border-left: 4px solid #ffa500; padding: 1rem; background-color: #fff9f0; margin-top: 1rem;\"><h3 style=\"margin-top: 0;\">Helpful Supports</h3><ul><li>Start by circling 10 <em>nouns</em> and 5 <em>verbs</em> that feel powerful.</li><li>Try this frame for your first line: \"<em>(a place or time from the article)</em>, where <em>(something happens)</em>.\"</li><li>Lines can be short — even one word.</li></ul></div>" },
     { "label": "Core" },
     { "label": "Accelerate",
-      "scaffolding": "<div style=\"border-left: 4px solid #28a745; padding: 1rem; background-color: #f0fff4; margin-top: 1rem;\"><h3 style=\"margin-top: 0;\">Go Further</h3><p>Add a 3–4 sentence artist's statement explaining one deliberate choice you made about line breaks or word order.</p></div>" },
-    { "label": "Extend",
-      "scaffolding": "<div style=\"border-left: 4px solid #6f42c1; padding: 1rem; background-color: #f8f5ff; margin-top: 1rem;\"><h3 style=\"margin-top: 0;\">Extend Your Thinking</h3><p>Write a second found poem from the <em>same</em> article that takes the opposite stance, then add a short paragraph analyzing how word choice alone shifted the tone.</p></div>" }
+      "scaffolding": "<div style=\"border-left: 4px solid #28a745; padding: 1rem; background-color: #f0fff4; margin-top: 1rem;\"><h3 style=\"margin-top: 0;\">Go Further</h3><p>Add a 3–4 sentence artist's statement explaining one deliberate choice you made about line breaks or word order.</p></div>" }
   ]
 }
 </ASSIGNMENTFORGE_JSON>

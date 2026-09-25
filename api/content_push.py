@@ -291,11 +291,7 @@ def preview_differentiated_quiz_push(
     module_id: str = "",
     create_module: bool = False,
 ) -> dict:
-    """Freeze an unrestricted QuizForge family from staged labels.
-
-    Legacy ``group_name`` fields are accepted and ignored so old callers do not
-    become a new delivery dependency.
-    """
+    """Freeze an unrestricted QuizForge family from staged labels."""
     course_key = str(course_id or "").strip()
     if not course_key:
         return {"ok": False, "error": "course_id is required"}
@@ -318,8 +314,7 @@ def preview_differentiated_quiz_push(
     resolved = []
     seen_labels = set()
     for variant in variants:
-        if (not isinstance(variant, dict) or "label" not in variant or
-                set(variant) - {"label", "group_name"}):
+        if not isinstance(variant, dict) or "label" not in variant or set(variant) != {"label"}:
             return {"ok": False, "error": "each variant must contain a staged label"}
         label = variant["label"]
         if not isinstance(label, str):

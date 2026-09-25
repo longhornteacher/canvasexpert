@@ -32,7 +32,6 @@ def _wire(monkeypatch, tmp_path, *, assignment=None, submissions=None, freshness
     monkeypatch.setattr(scoring_preparation.workspace, "workspace_root", lambda: str(tmp_path))
     monkeypatch.setattr(scoring_preparation.config, "course_display_name", lambda _id: "Course")
     monkeypatch.setattr(scoring_preparation.config, "get_roster_student_settings", lambda _id: {})
-    monkeypatch.setattr(scoring_preparation.config, "roster_tier_by_id", lambda _id: {})
     monkeypatch.setattr(scoring_preparation.config, "get_monitored_students", lambda: {})
     monkeypatch.setattr(scoring_preparation.config, "get_extra_time", lambda _id: [])
     monkeypatch.setattr(scoring_preparation.assignment_refresh, "prepare_assignment_from_mirror",

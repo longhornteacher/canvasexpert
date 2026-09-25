@@ -38,7 +38,6 @@ def _setup(monkeypatch, tmp_path):
     monkeypatch.setattr(tools.config, "set_monitored_student", lambda *args, **kwargs: None)
     monkeypatch.setattr(tools.config, "remove_monitored_student", lambda user_id: None)
     monkeypatch.setattr(tools.config, "get_roster_student_settings", lambda course_id: {})
-    monkeypatch.setattr(tools.config, "get_roster_group_scheme", lambda course_id: {})
     return path, pseudo
 
 

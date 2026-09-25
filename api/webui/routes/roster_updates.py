@@ -20,15 +20,7 @@ def update_student(
     update_roster_student_settings: Callable[[str, str, dict], None],
     validate_classroom_profile: Callable[[object], dict],
     as_int: Callable[[object, str], tuple[int | None, str | None]],
-    validate_canvas_group_target: Callable[
-        [str, str, str | None], tuple[list[dict], dict | None, str | None]
-    ],
-    update_student_canvas_group: Callable[
-        [str, str, str, str | None, list[dict] | None], tuple[bool, str | None]
-    ],
-    invalidate_groups: Callable[[str, str], None],
     allowed_keys: set[str],
-    obsolete_keys: set[str],
 ) -> dict:
     """Validate and apply one student's roster update."""
     if not course_id or not user_id:
@@ -40,16 +32,6 @@ def update_student(
         return {"ok": False, "error": f"Invalid patch JSON: {e}"}
     if not isinstance(data, dict):
         return {"ok": False, "error": "patch must be a JSON object."}
-
-    obsolete = set(data.keys()) & obsolete_keys
-    if obsolete:
-        return {
-            "ok": False,
-            "error": (
-                "Local tier/group assignment is obsolete; update canvas_group instead. "
-                f"Rejected keys: {sorted(obsolete)}"
-            ),
-        }
 
     unknown = set(data.keys()) - allowed_keys
     if unknown:
@@ -94,21 +76,6 @@ def update_student(
         monitored = data["monitored"]
         if not isinstance(monitored, dict):
             return {"ok": False, "error": "monitored must be an object."}
-
-    canvas_group = None
-    if "canvas_group" in data:
-        canvas_group = data["canvas_group"]
-        if not isinstance(canvas_group, dict):
-            return {"ok": False, "error": "canvas_group must be an object."}
-        category_id = canvas_group.get("category_id")
-        if not category_id:
-            return {"ok": False, "error": "canvas_group.category_id required."}
-        target_group_id = None if not canvas_group.get("group_id") else str(canvas_group["group_id"])
-        categories, _, validation_err = validate_canvas_group_target(
-            course_id, category_id, target_group_id
-        )
-        if validation_err:
-            return {"ok": False, "error": validation_err}
 
     vault = vault_factory()
 
@@ -161,24 +128,6 @@ def update_student(
         else:
             remove_monitored_student(user_id)
 
-    if canvas_group is not None:
-        cg = canvas_group
-        category_id = cg.get("category_id")
-        group_id = cg.get("group_id")
-        target_group_id = None if not group_id else str(group_id)
-        categories, _, validation_err = validate_canvas_group_target(
-            course_id, category_id, target_group_id
-        )
-        if validation_err:
-            return {"ok": False, "error": validation_err}
-
-        ok, err = update_student_canvas_group(
-            course_id, user_id, category_id, target_group_id, categories
-        )
-        if not ok:
-            return {"ok": False, "error": err}
-        invalidate_groups(course_id, category_id)
-
     if "classroom_profile" in data:
         update_roster_student_settings(
             course_id, user_id, {"classroom_profile": classroom_profile}
@@ -202,13 +151,6 @@ def update_bulk(
     remove_monitored_student: Callable[[str], None],
     as_int: Callable[[object, str], tuple[int | None, str | None]],
     value_name: Callable[[dict | None, str], str],
-    validate_canvas_group_target: Callable[
-        [str, str, str | None], tuple[list[dict], dict | None, str | None]
-    ],
-    update_student_canvas_group: Callable[
-        [str, str, str, str | None, list[dict] | None], tuple[bool, str | None]
-    ],
-    invalidate_groups: Callable[[str, str], None],
 ) -> dict:
     """Apply a bulk roster action."""
     if not course_id or not user_ids or not action:
@@ -230,8 +172,6 @@ def update_bulk(
     updated = 0
     failed = 0
     errors: list[str] = []
-    group_membership_changed = False
-    changed_category_id: str | None = None
 
     if action == "set_extra_time":
         if not isinstance(val, dict):
@@ -262,55 +202,6 @@ def update_bulk(
         set_extra_time(course_id, et_list)
         updated = len(ids)
 
-    elif action == "set_canvas_group":
-        if not isinstance(val, dict):
-            return {"ok": False, "error": "set_canvas_group requires value object."}
-        category_id = val.get("category_id")
-        group_id = val.get("group_id")
-        if not category_id:
-            return {"ok": False, "error": "set_canvas_group requires category_id."}
-        categories, _, validation_err = validate_canvas_group_target(
-            course_id, category_id, str(group_id) if group_id else None
-        )
-        if validation_err:
-            return {"ok": False, "error": validation_err}
-        for uid in ids:
-            ok, err = update_student_canvas_group(
-                course_id, str(uid), category_id, str(group_id) if group_id else None, categories
-            )
-            if ok:
-                updated += 1
-                group_membership_changed = True
-                changed_category_id = str(category_id)
-            else:
-                failed += 1
-                errors.append(f"User {uid}: {err}")
-
-    elif action == "clear_canvas_group":
-        if not isinstance(val, dict):
-            return {"ok": False, "error": "clear_canvas_group requires value object."}
-        category_id = val.get("category_id")
-        if not category_id:
-            return {"ok": False, "error": "clear_canvas_group requires category_id."}
-        categories, _, validation_err = validate_canvas_group_target(course_id, category_id, None)
-        if validation_err:
-            return {"ok": False, "error": validation_err}
-        for uid in ids:
-            ok, err = update_student_canvas_group(course_id, str(uid), category_id, None, categories)
-            if ok:
-                updated += 1
-                group_membership_changed = True
-                changed_category_id = str(category_id)
-            else:
-                failed += 1
-                errors.append(f"User {uid}: {err}")
-
-    elif action in ("set_tier", "clear_tier", "set_planned_group", "clear_planned_group"):
-        return {
-            "ok": False,
-            "error": f"'{action}' is obsolete in V3; use set_canvas_group or clear_canvas_group.",
-        }
-
     elif action in ("set_monitored", "clear_monitored"):
         is_set = action == "set_monitored"
         for uid in ids:
@@ -323,9 +214,6 @@ def update_bulk(
 
     else:
         return {"ok": False, "error": f"Unknown action '{action}'."}
-
-    if group_membership_changed:
-        invalidate_groups(course_id, changed_category_id)
 
     result = {"ok": True, "updated": updated}
     if failed > 0:

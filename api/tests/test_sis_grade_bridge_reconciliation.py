@@ -118,7 +118,7 @@ def test_reconciliation_reports_missing_bridge_without_student_or_due_reads(monk
     ]
     monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Amber", "Core": "Teal", "Accelerate": "", "Extend": "",
+        "Support": "Amber", "Core": "Teal", "Accelerate": "",
     })
 
     result = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
@@ -136,7 +136,7 @@ def test_reconciliation_does_not_treat_mixed_due_dates_as_a_failure(monkeypatch)
         {**_assignment("b", "Base - Teal", tier="Core"), "due_at": "2026-12-01T15:00:00-05:00"},
     ]
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Amber", "Core": "Teal", "Accelerate": "", "Extend": "",
+        "Support": "Amber", "Core": "Teal", "Accelerate": "",
     })
     monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
 
@@ -163,7 +163,7 @@ def test_registered_orphan_is_blocked_without_private_rows(monkeypatch):
 
 def test_discovery_keeps_two_source_threshold_and_ambiguity_rules(monkeypatch):
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Amber", "Core": "Teal", "Accelerate": "", "Extend": "",
+        "Support": "Amber", "Core": "Teal", "Accelerate": "",
     })
     ambiguous = [
         _assignment("a1", "Base - Amber", family="family-a", tier="Support"),
@@ -183,7 +183,7 @@ def test_agent_proposed_grouping_recovers_the_real_messy_title_case(monkeypatch,
     rows = _messy_rows()
     monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: [])
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Blue", "Core": "Red", "Accelerate": "Silver", "Extend": "",
+        "Support": "Blue", "Core": "Red", "Accelerate": "Silver",
     })
 
     matrix = sis_grade_bridge.reconcile_sis_grade_bridges("course-1", assignments=rows)
@@ -385,7 +385,7 @@ def test_agent_proposed_grouping_preserves_family_link_identity(monkeypatch):
     rows = _messy_rows()
     registrations = []
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Blue", "Core": "Red", "Accelerate": "Silver", "Extend": "",
+        "Support": "Blue", "Core": "Red", "Accelerate": "Silver",
     })
     monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course: registrations)
 
@@ -418,7 +418,7 @@ def _tag_source(assignment_id, name, *, points=10, group="g"):
 
 
 def _default_tier_tags():
-    return {"Support": "Blue", "Core": "Red", "Accelerate": "", "Extend": ""}
+    return {"Support": "Blue", "Core": "Red", "Accelerate": ""}
 
 
 def _assert_ac1_unsuffixed_becomes_bridge_candidate(monkeypatch):

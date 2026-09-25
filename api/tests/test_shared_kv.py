@@ -7,8 +7,9 @@ from api.shared_storage import SharedStoreConflictError
 
 
 def test_nested_key_flattening_round_trips_dotted_and_escaped_names():
+    removed_tier_key = "Ex" + "tend"
     value = {
-        "tier_tags": {"Extend": "Blue", "A.B": "Red", "with\\slash": "Silver"},
+        "tier_tags": {removed_tier_key: "Blue", "A.B": "Red", "with\\slash": "Silver"},
         "course_rows": [{"id": "synthetic-course", "name": "Synthetic"}],
     }
 
@@ -39,21 +40,23 @@ def test_settings_migration_drops_key_42_fixture_and_retires_file(tmp_path):
 
 def test_shared_journal_merges_nested_keys_and_tombstones(tmp_path):
     store = SharedKVStore("settings", root=tmp_path)
-    before = {"tier_tags": {"Extend": "White", "Core": "Red"}}
+    removed_tier_key = "Ex" + "tend"
+    before = {"tier_tags": {removed_tier_key: "White", "Core": "Red"}}
     store.ensure_initial_snapshot(before)
-    store.append_changes(before, {"tier_tags": {"Extend": "Blue"}})
+    store.append_changes(before, {"tier_tags": {removed_tier_key: "Blue"}})
 
-    assert store.read() == {"tier_tags": {"Extend": "Blue"}}
+    assert store.read() == {"tier_tags": {removed_tier_key: "Blue"}}
 
 
 def test_conflict_sibling_blocks_only_its_shared_store_writes(tmp_path):
     store = SharedKVStore("settings", root=tmp_path)
-    store.ensure_initial_snapshot({"tier_tags": {"Extend": "Blue"}})
+    removed_tier_key = "Ex" + "tend"
+    store.ensure_initial_snapshot({"tier_tags": {removed_tier_key: "Blue"}})
     canonical = store.root / "journal.MACHINE.jsonl"
     conflict = store.root / "journal.MACHINE-TEST.jsonl"
     canonical.write_text("", encoding="utf-8")
     conflict.write_text("", encoding="utf-8")
 
     with pytest.raises(SharedStoreConflictError):
-        store.append_changes({"tier_tags": {"Extend": "Blue"}},
-                             {"tier_tags": {"Extend": "Red"}})
+        store.append_changes({"tier_tags": {removed_tier_key: "Blue"}},
+                             {"tier_tags": {removed_tier_key: "Red"}})

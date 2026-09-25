@@ -218,7 +218,7 @@ def test_first_lines_disclose_preview_and_canvas_write_boundaries():
         assert "Canvas" in first_lines[name]
     assert "no Canvas write" in first_lines["stage_scoring_results"]
     assert "Canvas" in first_lines["apply_staged_scoring_results"]
-    assert "Canvas membership" in first_lines["apply_roster_student_change"]
+    assert "local roster settings" in first_lines["apply_roster_student_change"]
     assert "list_courses" in first_lines["list_courses"]
     assert "stand-ins" in first_lines["get_roster"]
     assert "Never raises" not in "\n".join(descriptions.values())

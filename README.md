@@ -26,8 +26,9 @@ Set due, unlock, and lock dates, grading category, module placement, shuffle, ti
 access code on the way out. Classic Quizzes and New Quizzes are both supported. Save a printable PDF and
 Word version of anything you build.
 
-**Differentiate** the same work four ways (Support, Core, Accelerate, Extend) and push each tier to its own
-group. The tier names stay private to you; students see only a neutral tag you choose, or nothing at all.
+**Differentiate** the same work in three tiers (Support, Core, Accelerate), each with a teacher-configured
+public Canvas tag. Canvas Expert has no student-to-tier mapping; the teacher assigns tier assignments to
+students or pods in Canvas.
 
 **Scoring Sessions** let a connected AI agent discover outstanding work across every Current course,
 report one compact student-free digest, and wait for your direction. The agent then prepares only the

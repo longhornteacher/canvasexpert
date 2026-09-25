@@ -349,8 +349,7 @@ def preview_roster_student_change(course_id: str, pseudonym: str, patch: dict) -
 @mcp.tool(structured_output=False)
 def apply_roster_student_change(course_id: str, preview: dict,
                                 preview_digest: str, expected_settings_digest: str) -> str:
-    """Apply an unchanged roster preview; a canvas_group patch changes Canvas membership.
-    All other supported fields stay local."""
+    """Apply an unchanged preview of a local roster settings change."""
     return _compact(tools.apply_roster_student_change(
         course_id, preview, preview_digest, expected_settings_digest))
 

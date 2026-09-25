@@ -57,7 +57,8 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 60 (54 tools). Version 60 adds the reviewed existing-grade adjustment
+Tool schema version 61 (54 tools). Version 61 removes the legacy group field from differentiated quiz variants
+and removes student-group data from roster settings. Version 60 adds the reviewed existing-grade adjustment
 pair. Version 59 added `verify_live`, `resume_operation`, and
 `abandon_operation`, and adds a `verify_hint` field to every successful apply
 (`apply_content_push`, `push_content_live`, `apply_assignment_update`, `apply_sis_grade_bridge`)
@@ -86,8 +87,8 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `stage_content(kind, label, content)` | Writes one authored draft and its `.done` marker into the per-kind review Inbox; refuses an existing label rather than overwriting | No |
 | `list_staged_content(kind="")` | Drafts in the local review Inbox; pass `kind` to filter or omit it for all drafts | No |
 | `preview_content_push(course_id, kind, label, published=None, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=None)` | Persists a local frozen review of one staged draft for one Current course; differentiated AssignmentForge creates unrestricted tier sources and the shared bridge; existing module IDs are exact, while module creation is explicit | No |
-| `list_groups(course_id)` | Current-course group-set and group names from the fresh local mirror, including the group set selected in Roster; no memberships or Canvas IDs | No |
-| `preview_differentiated_quiz_push(course_id, variants, published=false, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=false)` | Persists a frozen review for one staged QuizForge family; variants are tier files, legacy pod/group fields are ignored, dates are optional, and sources attach unrestricted to the selected module while the gradebook-only bridge does not | No |
+| `list_groups(course_id)` | Current-course group-set and group names from the fresh local mirror; no memberships or Canvas IDs | No |
+| `preview_differentiated_quiz_push(course_id, variants, published=false, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=false)` | Persists a frozen review for one staged QuizForge family; each variant contains only its staged `label`, dates are optional, and sources attach unrestricted to the selected module while the gradebook-only bridge does not | No |
 | `apply_content_push(operation_id, batch_id, review_digest)` | Creates the exact frozen draft in Canvas through the Operation Ledger; same claims, drift check, and receipt as the push tab | No |
 | `push_content_live(course_id, kind, label, content, published=None, module_name="", module_id="", create_module=false, assignment_group_name="", post_to_sis=None)` | The route for a teacher who asked for content in Canvas; stages the draft, freezes and drift-checks it internally, then creates it. Tiered delivery uses the reviewed family path; carries no dates: use the preview pair for those | No |
 | `preview_assignment_update(course_id, assignment_id, published=None, due_at="", unlock_at="", lock_at="")` | Persists a local frozen field-diff review against one existing Canvas assignment named by id, read live from Canvas; refuses with no Canvas call when no field is supplied | No |
@@ -95,7 +96,7 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `get_roster(course_id)` | Current mirror roster as stable one-word stand-ins and section names | Yes, pseudonymized |
 | `get_roster_student_settings(course_id, pseudonym)` | Safe local settings projection; stored nicknames are omitted | Yes, pseudonymized |
 | `preview_roster_student_change(course_id, pseudonym, patch)` | Digest-protected pseudonym-first settings preview; `next` carries the confirm-then-apply handoff | Yes, pseudonymized |
-| `apply_roster_student_change(course_id, preview, preview_digest, expected_settings_digest)` | Applies the unchanged preview; only a `canvas_group` patch reaches Canvas | Yes, pseudonymized |
+| `apply_roster_student_change(course_id, preview, preview_digest, expected_settings_digest)` | Applies the unchanged preview of local roster settings | Yes, pseudonymized |
 | `clear_roster_student_field(course_id, pseudonym, field, expected_settings_digest)` | Direct digest-protected clear for supported local settings; nickname fields are rejected | Yes, pseudonymized |
 | `get_submissions(course_id, assignment_id, include_text=true, pseudonyms="", max_text_chars=2000)` | Mirror submissions including historical rows; current_enrollment marks same-mirror roster membership; optional pseudonym narrowing and bounded text | Yes, pseudonymized |
 | `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |

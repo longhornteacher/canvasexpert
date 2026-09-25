@@ -297,7 +297,6 @@ def test_comment_follow_up_classifier_is_ordered_conservative_and_ta_aware():
 
 
 def test_roster_warning_provider_aggregates_without_writing_vault(monkeypatch):
-    monkeypatch.setattr(roster_warnings.config, "get_roster_group_scheme", lambda course_id: {"selected_group_category_id": "cat-1"})
     monkeypatch.setattr(roster_warnings.config, "get_extra_time", lambda course_id: [{"id": "u-1", "days": 0}])
     monkeypatch.setattr(roster_warnings, "_vault_context", lambda: ({}, set(), {"literary": [], "dup_first": [], "common_word": []}))
 
@@ -312,4 +311,4 @@ def test_roster_warning_provider_aggregates_without_writing_vault(monkeypatch):
     )
     kinds = {item["kind"] for item in findings}
     assert kinds == {"roster.warning"}
-    assert sum(item["counts"]["affected"] for item in findings) == 3
+    assert sum(item["counts"]["affected"] for item in findings) == 2

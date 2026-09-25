@@ -25,13 +25,13 @@ that the current agent contract deliberately does not own.
 Content authoring and delivery use three canonical Forge artifacts:
 
 - QuizForge authors quizzes, validates them, and delivers whole-class quizzes. A
-  differentiated QuizForge family has its own reviewed source/bridge workflow, configured
-  public tags, and module/due-date requirements.
+  differentiated QuizForge family has its own reviewed source/bridge workflow, three canonical
+  tiers, configured public tags, and module/due-date requirements.
 - AssignmentForge authors submitted assignments, validates them, and delivers ordinary
   assignments with their submission settings, points, dates, grading category, and SIS or
-  final-grade options. Its fixed pedagogical labels are Support, Core, Accelerate, and
-  Extend. They describe authored versions of the same target; only scaffolding, language,
-  or rigor changes.
+  final-grade options. Its fixed pedagogical labels are Support, Core, and Accelerate. They
+  describe authored versions of the same target; only scaffolding, language, or rigor changes.
+  Tier assignment to students and pods is managed directly in Canvas.
 - PageForge authors reference pages with rich text, resource placeholders, optional module
   placement, and publish state.
 
@@ -42,8 +42,9 @@ preview/apply path. QuizForge can also compile offline into a Canvas-importable 
 and printable student and answer-key DOCX/PDF files.
 
 AssignmentForge tier delivery is a reviewed differentiated family. Each used tier becomes an
-unrestricted source assignment named with the configured public tag. Tier placement is
-teacher-owned. The runtime applies final-grade/SIS safety, places only sources in the selected
+  unrestricted source assignment named with the configured public tag. Canvas Expert has no
+  student-to-tier mapping; Canvas access determines which students or pods see each source.
+  The runtime applies final-grade/SIS safety, places only sources in the selected
 module, and creates/verifies the shared bridge and family link. The assistant must not
 infer placement or expose raw membership IDs. This is the same renderer-neutral family path
 used by differentiated QuizForge delivery. QuizForge does not author ESSAY or FILEUPLOAD
@@ -58,8 +59,7 @@ it is grounded in current catalog sources; source digests and document revisions
 the teacher-confirmed record.
 
 Student and teaching operations include pseudonymized roster, submission, writing-history,
-and gradebook reads; per-student local settings; Canvas group changes through the narrow
-reviewed roster path; late policies and school-day late-work sweeps; extra-time settings;
+and gradebook reads; per-student local settings; late policies and school-day late-work sweeps; extra-time settings;
 due-date extensions; curve preview/apply/history/revert; snapshots; and private student
 reports. Bounded offline assessment observations and read-only grouping proposals are
 available. The teacher reviews and applies the change through the bounded agent contract
@@ -95,7 +95,7 @@ console when needed.
 Local authoring, staging, objectives, settings, mirror state, and scoring-session state
 are not automatically Canvas writes. Canvas-reaching lanes are limited to teacher-requested
 content delivery, exact reviewed preview/apply operations (including named assignment
-schedule changes or a reviewed roster group patch), a linked SIS bridge projection,
+schedule changes), a linked SIS bridge projection,
 and submission of results from a Scoring Session. Preview/apply and frozen operations use
 digests, revisions, drift checks, idempotency, and verification; they fail closed when
 the named state changes. A teacher request authorizes only the named course and selected

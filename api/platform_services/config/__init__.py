@@ -80,7 +80,7 @@ from .reports import (
 
 # --- Roster Console settings ---
 from .roster import (
-    ROSTER_DEFAULT_TIER_SCHEME, ROSTER_SCORE_MATRIX_DEFAULT, ROSTER_RELATIONSHIPS_DEFAULT, DEFAULT_GROUP_LABELS,
+    ROSTER_SCORE_MATRIX_DEFAULT, ROSTER_RELATIONSHIPS_DEFAULT,
     ROSTER_BASELINE_DEFAULT,
     get_roster_student_settings, set_roster_student_settings,
     update_roster_student_settings,
@@ -89,13 +89,6 @@ from .roster import (
     get_roster_score_matrix, set_roster_score_matrix,
     get_roster_relationships, set_roster_relationships,
     get_roster_baseline, set_roster_baseline,
-    _validate_tier_scheme, _normalize_tier_scheme,
-    get_roster_tier_scheme, set_roster_tier_scheme,
-    roster_tier_by_id,
-    get_roster_group_scheme, set_roster_group_scheme,
-    get_selected_group_category_id, set_selected_group_category_id,
-    get_group_label, set_group_labels,
-    compute_group_display, default_group_label,
 )
 
 # --- SIS grade bridge registrations ---

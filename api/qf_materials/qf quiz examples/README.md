@@ -11,12 +11,11 @@ student-response shapes returned by Canvas for existing New Quizzes.
 
 ## The fixtures
 
-| File | Group | Variant | Purpose |
+| File | Family | Variant | Purpose |
 |---|---|---|---|
-| `cs_loops_checkpoint_support.txt` | `cs_loops_checkpoint` | Support | Differentiation set: **same standard, the 4 product tiers** Support/Core/Accelerate/Extend. Titles and visible labels are teacher-chosen; the readiness tier also lives in `metadata.variant_label`. |
+| `cs_loops_checkpoint_support.txt` | `cs_loops_checkpoint` | Support | Differentiation set: **same standard, the three product tiers** Support/Core/Accelerate. Titles and visible labels are teacher-chosen; the readiness tier also lives in `metadata.variant_label`. |
 | `cs_loops_checkpoint_core.txt` | `cs_loops_checkpoint` | Core | Support scaffolds the *same* trace as Core (word-bank FITB and defined terms) — it does not lower the standard. |
 | `cs_loops_checkpoint_accelerate.txt` | `cs_loops_checkpoint` | Accelerate | Accelerate raises rigor on the same standard (start/step ranges, required reasoning). |
-| `cs_loops_checkpoint_extend.txt` | `cs_loops_checkpoint` | Extend | Extend pushes furthest (accumulator trace and categorization). |
 | `ela7_lantern_formA.txt` | `ela7_lantern` | Form A | Differentiation set: **same passage, two parallel forms** (anti-copying / A-B grouping). |
 | `ela7_lantern_formB.txt` | `ela7_lantern` | Form B | |
 | `all_types_sampler.txt` | `all_types_sampler` | Coverage fixture | One of every live auto-graded QF type — the transformer smoke test. |

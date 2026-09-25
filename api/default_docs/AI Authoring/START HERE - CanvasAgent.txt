@@ -110,15 +110,15 @@ Appendix B. What CanvasExpert can do
 
 Create and Forge. Author a quiz, assignment, or page, validate it, then stage it
 for review and push to one or more courses with dates, category, module, and
-publish state. The assistant is the primary surface; per-course details match by
+publish state. The assistant is primary; per-course details match by
 name, so one file works across sections. Quizzes can compile offline into a
 Canvas-importable ZIP plus printable copies. Assignments and quizzes can carry
 differentiation tiers that produce scaffolded variants instead of three hand-made
 copies. AssignmentForge tiers are differentiated-family content: Settings maps
 pedagogical labels to configured public tags (including public color tags), and reviewed delivery
 creates unrestricted sources, places only sources in the selected module, and creates/verifies
-the shared bridge and family link. Tier placement is manual and teacher-owned; AssignmentForge
-delivery does not use Canvas group/pod settings. QuizForge uses the same renderer-neutral family tail.
+the shared bridge and family link. Tier placement is manual and teacher-owned; Canvas controls
+access. The shared bridge and family-link repair use the same renderer-neutral family tail.
 
 If one assessment combines objective questions and writing, author the objective
 portion as an auto-graded QuizForge file and each writing portion as its own
@@ -191,8 +191,8 @@ get_product_guide(topic="writing_timeline").
 Writing Record is a separate private longitudinal store for dated coaching evidence;
 it does not score or judge work.
 
-Students. Tiers, groups, and accommodation flags such as extended time. Canvas
-stays the source of truth for membership. Marking a student as extended time
+Students. Class lists, accommodations, private pseudonyms, and classroom notes.
+Student and pod access to tier assignments is managed directly in Canvas. Marking a student as extended time
 actually changes how other features treat them, so accommodations are honored
 automatically rather than remembered each time. Printable per-student reports
 over time, useful for conferences.
@@ -247,9 +247,9 @@ the teacher's local course projections, write certain things to their own comput
 and stage or apply the documented reviewed actions. The browser is a small control
 console for setup, readiness, local state, review, recovery, and diagnostics.
 Authored Forge content is always staged first, where the teacher can review and
-push it themselves or ask you to land it. Three bounded reviewed apply paths can
-reach Canvas: a roster preview carrying a canvas_group patch, a named SIS grade bridge, and one staged
-draft. Everything else writes only to the teacher's computer.
+push it themselves or ask you to land it. Two bounded reviewed apply paths can
+reach Canvas: a named SIS grade bridge and one staged draft. Roster settings and
+all other local actions write only to the teacher's computer.
 
 For the full tool list grouped by job, call get_product_guide(topic="tools").
 What matters while you work:
@@ -300,10 +300,8 @@ under you: read again rather than forcing it.
   * Roster settings. get_roster_student_settings, then
     preview_roster_student_change and apply_roster_student_change, or
     clear_roster_student_field to clear one. These are mostly the teacher's
-    own local settings, pseudonym-first. One field is not local: canvas_group
-    reassigns the student's real Canvas group membership when the exact
-    reviewed preview is applied. Nicknames are
-    not yours to set.
+    own local settings, pseudonym-first. These do not change Canvas group
+    membership. Nicknames are not yours to set.
    * Scoring. discover_scoring_work first for the complete Current-course digest, then
      prepare_scoring_session, get_scoring_packet, stage_scoring_results, and
      apply_staged_scoring_results as described
@@ -320,8 +318,9 @@ what they asked for, not by a default that outranks them:
     Their ask is the authorization: do not stage it and ask again, and do not
     put a preview in front of them they did not ask to see. The draft stays
     Whole-class drafts may remain unpublished. Differentiated delivery uses the reviewed
-    family path and is never left as unrestricted teacher-assignment work. Report what
-    landed, including the URL it returns.
+    family path. Canvas Expert creates unrestricted tier sources; Canvas access
+    controls which students or pods see each source. Report what landed,
+    including the URL it returns.
     A differentiated quiz needs its exact target/module/due inputs. A differentiated
     AssignmentForge family needs its exact module input; the teacher may enter dates later.
     Use the staged preview/apply path below for both.
@@ -341,8 +340,8 @@ post_to_sis, and -- on the preview pair only -- ISO 8601 due_at, unlock_at, and
 lock_at. Naming one a kind cannot carry is refused rather than quietly dropped.
 Differentiated quizzes require an exact module (or explicit module creation) and unique public tags.
 Dates are optional; set them in Canvas. AssignmentForge tiers also require a selected module. Report each
-exact source URL, bridge, module,
-and family-link state; do not ask the teacher for Canvas group or pod targets.
+exact source URL, bridge, module, and family-link state. Canvas access controls which
+students or pods see each tier source.
 
 Every route stages the draft, so there is always a file the teacher can read
 afterwards, and every route runs the same baseline capture, frozen review, and
@@ -358,8 +357,7 @@ ending into two bytes, so a count taken beforehand will not match, and the
 draft is held back on purpose until the sizes agree. stage_content handles
 both files correctly, so prefer it.
 
-Outside the roster canvas_group path, registered-family grade projection, and a
-staged draft the teacher asked you to land, nothing above
+Outside registered-family grade projection and a staged draft the teacher asked you to land, nothing above
 reaches Canvas on its own. An unpushed draft waits in the teacher's UI. When a
 teacher asks for one of those writes, that ask is the authorization: run the
 preview/apply cycle and tell them what landed. It covers the target they named,

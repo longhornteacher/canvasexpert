@@ -339,7 +339,7 @@ def test_reconcile_preview_apply_links_a_two_theme_family(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "saved_courses", lambda: [{"id": "course-1", "name": "Synthetic Course", "active": True}])
     monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Silver", "Core": "Gold", "Accelerate": "", "Extend": "",
+        "Support": "Silver", "Core": "Gold", "Accelerate": "",
     })
     saved_bridges: dict[str, dict] = {}
     monkeypatch.setattr(
@@ -417,7 +417,7 @@ def test_two_link_only_repairs_previewed_together_both_apply(tmp_path, monkeypat
     monkeypatch.setattr(config, "saved_courses", lambda: [{"id": "course-1", "name": "Synthetic Course", "active": True}])
     monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Silver", "Core": "Gold", "Accelerate": "", "Extend": "",
+        "Support": "Silver", "Core": "Gold", "Accelerate": "",
     })
     saved_bridges: dict[str, dict] = {}
     monkeypatch.setattr(

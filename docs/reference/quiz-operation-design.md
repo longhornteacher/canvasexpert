@@ -50,10 +50,11 @@ Sources:
 - A family contains two or more ordered QuizForge files. Every file has the same exact trimmed,
   unsuffixed base title and declares one canonical pedagogical tier in `metadata.variant` or the
   supported `metadata.variant_label` alias.
-- `Support`, `Core`, `Accelerate`, and `Extend` resolve through `config.get_tier_tags()` to required,
+- `Support`, `Core`, and `Accelerate` resolve through `config.get_tier_tags()` to required,
   unique, trimmed public Canvas tags. The server appends ` - <tag>`; an authored suffix or a
   differing title is rejected.
-- Any legacy `group_name` values are ignored. CanvasExpert does not resolve pod/group membership,
+- Variant objects contain only the staged `label`; unknown keys such as `group_name` are refused.
+  CanvasExpert does not resolve pod/group membership,
   read group sets, create student/group overrides, or restrict source visibility. Student
   placement is manual in Canvas after delivery.
 - Preparation requires a selected module, equal New Quiz totals, valid public tags, and no unknown

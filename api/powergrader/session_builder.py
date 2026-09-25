@@ -32,8 +32,6 @@ def build_students(
     submitted: list[dict],
     ai_by_uid: dict,
     ai_item_by_uid: dict | None = None,
-    roster_settings: dict,
-    tier_map: dict,
     monitored: dict,
     extra_time_map: dict,
     ai_failures: dict | None = None,
@@ -45,9 +43,6 @@ def build_students(
         user = s.get("user") or {}
         real_name = user.get("name") or user.get("sortable_name") or uid
 
-        rst = roster_settings.get(uid, {})
-        tier_id = rst.get("tier_id") or ""
-        tier = tier_map.get(tier_id, {})
         mon = monitored.get(uid)
         extra_days = extra_time_map.get(uid, 0)
 
@@ -111,9 +106,6 @@ def build_students(
             "teacher_score": None,
             "teacher_feedback": "",
             "posted":        False,
-            "tier_id":       tier_id,
-            "tier_label":    tier.get("teacher_label", ""),
-            "tier_alias":    tier.get("alias", ""),
             "is_monitored":  bool(mon),
             "monitored_note": (mon or {}).get("note", ""),
             "extra_time_days": extra_days,

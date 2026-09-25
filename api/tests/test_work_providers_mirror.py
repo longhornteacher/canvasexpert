@@ -284,56 +284,8 @@ def test_grading_debt_falls_back_live_when_mirror_is_stale(monkeypatch, tmp_path
     assert findings[0]["assignment_id"] == "live-1"
 
 
-def test_roster_warnings_reads_users_from_mirror_groups_stay_live(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    _populate(str(tmp_path))
-    monkeypatch.setattr(roster_warnings.config, "get_roster_group_scheme",
-                        lambda course_id: {"selected_group_category_id": "cat-1"})
-    monkeypatch.setattr(roster_warnings.config, "get_extra_time",
-                        lambda course_id: [{"id": "900101", "days": 0}])
-    monkeypatch.setattr(roster_warnings, "_vault_context",
-                        lambda: ({}, set(), {"literary": [], "dup_first": [], "common_word": []}))
-
-    def fake_get(path, params=None, timeout=None, deadline=None):
-        if path.endswith("/users"):
-            raise AssertionError("live users read attempted; mirror should have served it")
-        return [], None  # group_categories / groups / memberships stay live and empty
-
-    reads = _reads(fake_get)
-    findings = roster_warnings.scan_course(
-        COURSE, now="2026-07-11T12:00:00+00:00", reads=reads,
-    )
-    assert {item["kind"] for item in findings} == {"roster.warning"}
-    # Both mirrored students get missing_pseudonym + group_unset;
-    # only "900101" also gets extra_time_without_days.
-    assert sum(item["counts"]["affected"] for item in findings) == 5
 
 
-def test_roster_warnings_uses_fresh_group_snapshot_without_live_group_calls(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    _populate(str(tmp_path))
-    store.write_groups(COURSE, [{
-        "category_id": "cat-1",
-        "category_name": "Teams",
-        "groups": [{
-            "id": "group-1",
-            "name": "Team 1",
-            "memberships": [{"id": "membership-1", "user_id": "900101"}],
-        }],
-    }])
-    monkeypatch.setattr(roster_warnings.config, "get_roster_group_scheme",
-                        lambda course_id: {"selected_group_category_id": "cat-1"})
-    monkeypatch.setattr(roster_warnings.config, "get_extra_time", lambda course_id: [])
-    monkeypatch.setattr(roster_warnings, "_vault_context",
-                        lambda: ({}, set(), {"literary": [], "dup_first": [], "common_word": []}))
-
-    reads = _reads(_explode)
-    findings = roster_warnings.scan_course(
-        COURSE, now="2026-07-11T12:00:00+00:00", reads=reads,
-    )
-
-    assert sorted(item["counts"]["affected"] for item in findings) == [1, 2]
-    assert all("user_id" not in item and "name" not in item for item in findings)
 
 
 def _populate_roster_only(root, users, *, fresh=True):
@@ -386,8 +338,6 @@ def test_roster_warnings_reports_added_departed_and_changed_section(monkeypatch,
             "990004": ["sec-old"],  # on the baseline, gone from the live roster now
         },
     })
-    monkeypatch.setattr(roster_warnings.config, "get_roster_group_scheme",
-                        lambda course_id: {"selected_group_category_id": ""})
     monkeypatch.setattr(roster_warnings.config, "get_extra_time", lambda course_id: [])
     monkeypatch.setattr(roster_warnings, "_vault_context",
                         lambda: ({}, set(), {"literary": [], "dup_first": [], "common_word": []}))
@@ -395,7 +345,7 @@ def test_roster_warnings_reports_added_departed_and_changed_section(monkeypatch,
     def fake_get(path, params=None, timeout=None, deadline=None):
         if path.endswith("/users"):
             raise AssertionError("live users read attempted; mirror should have served it")
-        return [], None  # group_categories / groups / memberships stay live and empty
+        return [], None
 
     reads = _reads(fake_get)
     findings = roster_warnings.scan_course(
@@ -421,8 +371,6 @@ def test_roster_warnings_reports_nothing_new_when_baseline_never_acknowledged(mo
          "short_name": "Solo", "enrollments": [{"course_section_id": "sec-a"}]},
     ]
     _populate_roster_only(str(tmp_path), users)
-    monkeypatch.setattr(roster_warnings.config, "get_roster_group_scheme",
-                        lambda course_id: {"selected_group_category_id": ""})
     monkeypatch.setattr(roster_warnings.config, "get_extra_time", lambda course_id: [])
     monkeypatch.setattr(roster_warnings, "_vault_context",
                         lambda: ({}, set(), {"literary": [], "dup_first": [], "common_word": []}))

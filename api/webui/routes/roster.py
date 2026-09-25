@@ -3,12 +3,10 @@
 Prefix: /api/roster
 
 Routes:
-    GET  /api/roster          — full roster merge (students + vault + settings + groups)
+    GET  /api/roster          — full roster merge (students + vault + settings)
     POST /api/roster/student  — update one student's settings
     POST /api/roster/bulk     — bulk action on many students
 
-V3: Canvas groups are the source of truth for tier/group assignment.
-Does NOT write local tier_id.
 """
 import json
 from datetime import datetime
@@ -17,47 +15,28 @@ from fastapi import APIRouter, Form, Query
 from fastapi.responses import JSONResponse
 
 from api import feedback_scrub
-from api import operational_log
 from api import roster_context
 from api import roster_service
 from api.mirror import store as mirror_store
 from api.platform_services import config
-from api.platform_services.canvas_client import canvas_get_all, _canvas_send
-from .courses import fetch_group_category_groups, load_group_categories
+from api.platform_services.canvas_client import canvas_get_all
 from .names import _vault
 from . import roster_changes
-from . import roster_groups
-from . import roster_canvas
 from . import roster_updates
 from .roster_helpers import (
-    _annotate_group_labels,
     _as_int,
-    _compute_canvas_group_display,
     _compute_warnings,
     _enrollment_section_ids,
-    _user_id_set_from_canvas_groups,
     _value_name,
 )
 
 router = APIRouter(prefix="/api/roster", tags=["roster"])
 
-# V3: Canvas group-backed keys only
 ALLOWED_STUDENT_PATCH_KEYS = {
     "nicknames", "pseudonym", "regenerate_pseudonym",
-    "extra_time", "monitored", "canvas_group",
-    "classroom_profile",
+    "extra_time", "monitored", "classroom_profile",
 }
 
-# Legacy keys that are rejected with clear errors
-OBSOLETE_PATCH_KEYS = {"tier_id", "tier", "planned_group"}
-
-WARNING_CODES = (
-    "missing_pseudonym", "extra_time_without_days",
-    "group_unset", "multiple_groups_in_selected_set",
-    "nickname_collision", "protected_name_collision",
-    "student_added", "student_departed", "student_changed_section",
-)
-ROSTER_MAX_AGE_HOURS = 24
 # Compatibility re-exports for focused Roster tests and existing callers.  The
 # root module is the sole shared implementation used by the Web UI and MCP.
 SCORE_MATRIX_ID_RE = roster_context.SCORE_MATRIX_ID_RE
@@ -92,108 +71,14 @@ def _load_roster_users(course_id: str) -> tuple[list[dict], dict, str | None]:
     return users, _fetch_sections(course_id), None
 
 
-def _create_canvas_group(category_id: str, name: str) -> tuple[dict | None, str | None]:
-    return roster_canvas.create_canvas_group(category_id, name, canvas_send=_canvas_send)
-
-
-def _reconcile_group_category(course_id: str, category_id: str,
-                              category_name: str | None = None) -> None:
-    """Reconcile the exact group category a write just changed.
-
-    Live-refetches only the affected category and merges it into the
-    existing groups snapshot, so every other category is served from the
-    untouched local snapshot instead of a needless whole-course re-fetch.
-    The live write is already authoritative; any failure here (targeted
-    fetch, merge, or local storage trouble) must not rewrite that result
-    into a failed Canvas mutation — it falls back to the existing
-    whole-document ``invalidate_groups`` staling instead.
-    """
-    groups, err = fetch_group_category_groups(course_id, category_id)
-    if err is None:
-        try:
-            merged = mirror_store.merge_group_category(course_id, {
-                "category_id": str(category_id),
-                "category_name": category_name,
-                "groups": groups,
-            })
-            if merged is not None:
-                return
-        except (OSError, ValueError) as exc:
-            operational_log.emit("roster.group_category_merge", "failed", error_class=type(exc))
-    try:
-        mirror_store.invalidate_groups(course_id)
-    except (OSError, ValueError) as exc:
-        operational_log.emit("roster.group_category_invalidate", "failed", error_class=type(exc))
-
-
-def _group_categories_for_roster(course_id: str) -> tuple[list[dict], str | None, str]:
-    document = mirror_store.read_groups(course_id)
-    if mirror_store.groups_are_current(document, max_age_hours=ROSTER_MAX_AGE_HOURS):
-        return mirror_store.groups_for_roster(document), None, ""
-
-    categories, group_err, group_msg = load_group_categories(course_id)
-    if group_err is None:
-        try:
-            mirror_store.write_groups(course_id, categories)
-        except (OSError, ValueError) as exc:
-            operational_log.emit("roster.group_write", "failed", error_class=type(exc))
-    return categories, group_err, group_msg
-
-
-# --------------------------------------------------------------------------
-# Canvas Group Membership Helpers (V3)
-# --------------------------------------------------------------------------
-
-def canvas_add_group_membership(group_id: str, user_id: str) -> tuple[bool, str | None]:
-    return roster_canvas.canvas_add_group_membership(
-        group_id, user_id, canvas_send=_canvas_send)
-
-
-def canvas_remove_group_membership(group_id: str, membership_id: str) -> tuple[bool, str | None]:
-    return roster_canvas.canvas_remove_group_membership(
-        group_id, membership_id, canvas_send=_canvas_send)
-
-
-def _validate_canvas_group_target(
-    course_id: str,
-    category_id: str,
-    target_group_id: str | None,
-) -> tuple[list[dict], dict | None, str | None]:
-    return roster_canvas.validate_canvas_group_target(
-        course_id,
-        category_id,
-        target_group_id,
-        load_group_categories=load_group_categories,
-    )
-
-
-def _update_student_canvas_group(
-    course_id: str,
-    user_id: str,
-    category_id: str,
-    target_group_id: str | None,
-    categories: list[dict] | None = None,
-) -> tuple[bool, str | None]:
-    return roster_canvas.update_student_canvas_group(
-        course_id,
-        user_id,
-        category_id,
-        target_group_id,
-        categories=categories,
-        validate_canvas_group_target=_validate_canvas_group_target,
-        canvas_add_group_membership=canvas_add_group_membership,
-        canvas_remove_group_membership=canvas_remove_group_membership,
-    )
-
-
 @router.get("")
 def roster_get(course_id: str = Query("")):
-    """Full roster merge for one course (V3: Canvas groups are source of truth).
+    """Full roster merge for one course.
 
     1. Fetch students from Canvas + upsert into vault.
-    2. Fetch sections and groups.
-    3. Merge vault entries, extra-time, monitored, and Canvas group assignments.
-    4. Return unified rows with counts, warnings, and group scheme.
+    2. Fetch sections.
+    3. Merge vault entries, extra-time, and monitored settings.
+    4. Return unified rows with counts and warnings.
     """
     if not course_id:
         return JSONResponse({"ok": False, "error": "course_id required."})
@@ -208,26 +93,6 @@ def roster_get(course_id: str = Query("")):
         vault_entries_list = vault.entries()
 
     enrollment_secs = _enrollment_section_ids(users)
-
-    # Groups (V3: now used for tier/group assignment)
-    categories, group_err, group_msg = _group_categories_for_roster(course_id)
-    _annotate_group_labels(course_id, categories)
-    user_groups = _user_id_set_from_canvas_groups(categories)
-
-    # Determine selected group category
-    group_scheme = config.get_roster_group_scheme(course_id)
-    selected_category_id = group_scheme.get("selected_group_category_id")
-
-    # If no saved preference, try to find a likely differentiation group set
-    if not selected_category_id and categories:
-        likely_names = ("tier", "differentiation", "diff", "level", "groups")
-        for cat in categories:
-            cat_name = cat.get("category_name", "").lower()
-            if any(name in cat_name for name in likely_names):
-                selected_category_id = cat.get("category_id")
-                break
-        if not selected_category_id and categories:
-            selected_category_id = categories[0].get("category_id")
 
     # Extra time
     extra_time_list = config.get_extra_time(course_id)
@@ -295,28 +160,6 @@ def roster_get(course_id: str = Query("")):
         monitored_flag = bool(mon)
         monitored_note = mon.get("note", "") if mon else ""
 
-        # Canvas groups (V3: source of truth)
-        canvas_groups = user_groups.get(uid, [])
-
-        # Find the student's group in the selected category
-        canvas_group_info = None
-        if selected_category_id:
-            for g in canvas_groups:
-                if g.get("category_id") == str(selected_category_id):
-                    canvas_group_info = g
-                    break
-
-        # Build canvas_group field for the row
-        canvas_group = None
-        if canvas_group_info:
-            canvas_group = _compute_canvas_group_display(
-                course_id,
-                canvas_group_info.get("group_id"),
-                canvas_group_info.get("group_name"),
-            )
-            canvas_group["category_id"] = canvas_group_info.get("category_id")
-            canvas_group["category_name"] = canvas_group_info.get("category_name")
-
         # Nicknames from vault
         nicknames = ve.get("nicknames", [])
         local_settings = raw_roster_settings.get(uid, {})
@@ -358,13 +201,11 @@ def roster_get(course_id: str = Query("")):
             "extra_time": et,
             "monitored": {"enabled": monitored_flag, "note": monitored_note},
             "classroom_profile": classroom_profile,
-            "canvas_groups": canvas_groups,
-            "canvas_group": canvas_group,
             "roster_change": roster_change,
             "warnings": [],
         }
         row["warnings"] = _compute_warnings(
-            row, vault_by_id, protected_names, collisions, selected_category_id,
+            row, vault_by_id, protected_names, collisions,
             roster_change=roster_change)
         if profile_invalid:
             row["warnings"].append("classroom_profile_invalid")
@@ -377,29 +218,12 @@ def roster_get(course_id: str = Query("")):
     total = len(students_out)
     extra_time_count = sum(1 for s in students_out if s["extra_time"]["enabled"])
     monitored_count = sum(1 for s in students_out if s["monitored"]["enabled"])
-    group_unset_count = sum(
-        1 for s in students_out
-        if selected_category_id and not (s.get("canvas_group") or {}).get("group_id")
-    )
     warning_count = sum(1 for s in students_out if s["warnings"])
 
-    # Independent problems accumulate rather than shadowing each other: an
-    # invalid classroom profile and a groups failure are unrelated, and an
-    # if/elif chain here silently hid whichever came second.
     notes = []
     if profile_warnings:
         notes.append(" ".join(profile_warnings))
-    if group_err:
-        notes.append(f"Groups: {group_err}")
-    elif group_msg:
-        notes.append(group_msg)
     note = " ".join(notes)
-
-    # Check for legacy tier assignments
-    legacy_tier_count = 0
-    for uid, local in raw_roster_settings.items():
-        if local.get("tier_id") or local.get("tier") or local.get("planned_group"):
-            legacy_tier_count += 1
 
     # Departed students have no live row above to carry a warning, so they
     # are reported here instead -- with exactly what local data is still
@@ -422,9 +246,6 @@ def roster_get(course_id: str = Query("")):
     return JSONResponse({
         "ok": True,
         "students": students_out,
-        "groups": categories,
-        "selected_group_category_id": selected_category_id,
-        "group_label_scheme": group_scheme.get("group_labels", {}),
         "score_matrix": score_matrix,
         "relationships": relationships,
         "roster_changes": {
@@ -437,11 +258,9 @@ def roster_get(course_id: str = Query("")):
             "total": total,
             "extra_time": extra_time_count,
             "monitored": monitored_count,
-            "group_unset": group_unset_count,
             "warnings": warning_count,
         },
         "note": note or None,
-        "legacy_tier_count": legacy_tier_count if legacy_tier_count > 0 else None,
     })
 
 
@@ -451,12 +270,10 @@ def roster_student_update(
     user_id: str = Form(...),
     patch: str = Form(...),
 ):
-    """Update one student's roster settings (V3: Canvas groups are source of truth).
+    """Update one student's roster settings.
 
     Accepted patch fields: nicknames, pseudonym, regenerate_pseudonym,
-    extra_time, monitored, canvas_group, classroom_profile.
-
-    Obsolete fields (rejected with clear error): tier_id, tier, planned_group.
+    extra_time, monitored, classroom_profile.
     """
     return JSONResponse(roster_updates.update_student(
         course_id,
@@ -470,11 +287,7 @@ def roster_student_update(
         update_roster_student_settings=config.update_roster_student_settings,
         validate_classroom_profile=config.validate_classroom_profile,
         as_int=_as_int,
-        validate_canvas_group_target=_validate_canvas_group_target,
-        update_student_canvas_group=_update_student_canvas_group,
-        invalidate_groups=_reconcile_group_category,
         allowed_keys=ALLOWED_STUDENT_PATCH_KEYS,
-        obsolete_keys=OBSOLETE_PATCH_KEYS,
     ))
 
 
@@ -580,12 +393,10 @@ def roster_bulk_update(
     action: str = Form(...),
     value: str = Form(""),
 ):
-    """Bulk action on many students (V3: Canvas groups are source of truth).
+    """Bulk action on many students.
 
-    V3 supported actions: set_extra_time, clear_extra_time, set_canvas_group,
-    clear_canvas_group, set_monitored, clear_monitored.
-
-    Legacy actions (rejected): set_tier, clear_tier, set_planned_group, clear_planned_group.
+    Supported actions: set_extra_time, clear_extra_time, set_monitored,
+    clear_monitored.
     """
     return JSONResponse(roster_updates.update_bulk(
         course_id,
@@ -598,94 +409,4 @@ def roster_bulk_update(
         remove_monitored_student=config.remove_monitored_student,
         as_int=_as_int,
         value_name=_value_name,
-        validate_canvas_group_target=_validate_canvas_group_target,
-        update_student_canvas_group=_update_student_canvas_group,
-        invalidate_groups=_reconcile_group_category,
-    ))
-
-
-# --------------------------------------------------------------------------
-# V3: Group set preference and group labels
-# --------------------------------------------------------------------------
-
-
-@router.post("/group-set-preference")
-def save_group_set_preference(
-    course_id: str = Form(...),
-    category_id: str = Form(""),
-):
-    """Save the preferred group set for a course."""
-    if not course_id:
-        return JSONResponse({"ok": False, "error": "course_id required."})
-    return JSONResponse(roster_groups.save_group_set_preference(
-        course_id,
-        category_id,
-        set_selected_group_category_id=config.set_selected_group_category_id,
-    ))
-
-
-@router.post("/group-set")
-def create_group_set(
-    course_id: str = Form(...),
-    name: str = Form(...),
-    group_names: str = Form("[]"),
-):
-    """Create a Canvas group set, then optionally create groups inside it."""
-    if not course_id:
-        return JSONResponse({"ok": False, "error": "course_id required."})
-    return JSONResponse(roster_groups.create_group_set(
-        course_id,
-        name,
-        group_names,
-        canvas_send=_canvas_send,
-        create_canvas_group=_create_canvas_group,
-        set_selected_group_category_id=config.set_selected_group_category_id,
-        invalidate_groups=_reconcile_group_category,
-    ))
-
-
-@router.post("/groups")
-def create_groups(
-    course_id: str = Form(...),
-    category_id: str = Form(...),
-    group_names: str = Form(...),
-):
-    """Create Canvas groups in an existing group set."""
-    if not course_id:
-        return JSONResponse({"ok": False, "error": "course_id required."})
-    if not category_id:
-        return JSONResponse({"ok": False, "error": "group set required."})
-    return JSONResponse(roster_groups.create_groups(
-        course_id,
-        category_id,
-        group_names,
-        validate_canvas_group_target=_validate_canvas_group_target,
-        create_canvas_group=_create_canvas_group,
-        invalidate_groups=_reconcile_group_category,
-    ))
-
-
-@router.get("/group-labels")
-def get_group_labels(course_id: str = Query("")):
-    """Get group labels for a course."""
-    if not course_id:
-        return JSONResponse({"ok": False, "error": "course_id required."})
-    return JSONResponse(roster_groups.get_group_labels(
-        course_id,
-        get_roster_group_scheme=config.get_roster_group_scheme,
-    ))
-
-
-@router.post("/group-labels")
-def save_group_labels(
-    course_id: str = Form(...),
-    labels: str = Form(...),
-):
-    """Save group labels for a course."""
-    if not course_id:
-        return JSONResponse({"ok": False, "error": "course_id required."})
-    return JSONResponse(roster_groups.save_group_labels(
-        course_id,
-        labels,
-        set_group_labels=config.set_group_labels,
     ))

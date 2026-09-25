@@ -143,7 +143,7 @@ Roster has backend helper splits and browser feature files.
 - Route owner: `api/webui/routes/roster.py`
 - Browser bootstrap: `api/webui/static/roster.js`
 - Browser feature files: `api/webui/static/roster/table.js`, `api/webui/static/roster/filters.js`, `api/webui/static/roster/inline_edit.js`, `api/webui/static/roster/group_state.js`, `api/webui/static/roster/bulk.js`, `api/webui/static/roster/groups.js`, `api/webui/static/roster/safety.js`
-- Helper modules: `api/webui/routes/roster_canvas.py`, `api/webui/routes/roster_helpers.py`, `api/webui/routes/roster_groups.py`
+- Helper modules: `api/webui/routes/roster_helpers.py`, `api/webui/routes/roster_updates.py`
 
 For the full ownership map and current hotspot snapshot, see `docs/reference/roster-module-map.md`.
 

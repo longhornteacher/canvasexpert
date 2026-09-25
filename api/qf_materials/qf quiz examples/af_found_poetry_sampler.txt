@@ -8,13 +8,11 @@
   "submission": { "types": ["online_text_entry", "online_upload"], "allowed_extensions": ["pdf", "docx"] },
   "description": "<h2>Found Poetry: Remix the Article</h2><p>You will turn the article we read this week into a <strong>found poem</strong> — a poem built entirely from words and phrases you select from the original text.</p><h3>Directions</h3><ol><li>Re-read the article and highlight 15–25 words or phrases that stand out to you.</li><li>Arrange your selections into a poem of at least 10 lines.</li><li>Give your poem an original title (not the article's title).</li></ol><h3>Requirements</h3><ul><li>Every word must come from the article.</li><li>At least 10 lines.</li><li>Original title.</li></ul><p>Need the rubric? {{file:Found Poetry Rubric.pdf}}</p>",
   "tiers": [
-    { "label": "Support", "group": "Support",
+    { "label": "Support",
       "scaffolding": "<div><h3>Helpful supports</h3><ul><li>Start by circling 10 <em>nouns</em> and 5 <em>verbs</em> that feel powerful.</li><li>Try this frame for your first line: \"<em>(a place or time from the article)</em>, where <em>(something happens)</em>.\"</li><li>Lines can be short — even one word.</li></ul></div>" },
-    { "label": "Core", "group": "Core" },
-    { "label": "Accelerate", "group": "Accelerate",
-      "scaffolding": "<div><h3>Go further</h3><p>Add a 3–4 sentence artist's statement explaining one deliberate choice you made about line breaks or word order.</p></div>" },
-    { "label": "Extend", "group": "Extend",
-      "scaffolding": "<div><h3>Extend</h3><p>Write a second found poem from the <em>same</em> article that takes the opposite stance, then add a short paragraph analyzing how word choice alone shifted the tone.</p></div>" }
+    { "label": "Core" },
+    { "label": "Accelerate",
+      "scaffolding": "<div><h3>Go further</h3><p>Add a 3–4 sentence artist's statement explaining one deliberate choice you made about line breaks or word order.</p></div>" }
   ]
 }
 </ASSIGNMENTFORGE_JSON>

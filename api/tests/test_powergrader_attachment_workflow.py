@@ -528,7 +528,7 @@ def test_session_builder_preserves_expected_count_and_generic_ai_failure():
         }],
         ai_by_uid={},
         ai_failures={"user-1": "No AI draft was produced; manual grading is required."},
-        roster_settings={}, tier_map={}, monitored={}, extra_time_map={},
+        monitored={}, extra_time_map={},
     )
     student = students[0]
     assert student["attachment_expected_count"] == 1

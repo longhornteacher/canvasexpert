@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-TIERS = ("Support", "Core", "Accelerate", "Extend")
+TIERS = ("Support", "Core", "Accelerate")
 
 TIER_BLANK_FRACTION = {
     "Support": 0.25,
     "Core": 0.50,
     "Accelerate": 0.90,
-    "Extend": 1.00,
 }

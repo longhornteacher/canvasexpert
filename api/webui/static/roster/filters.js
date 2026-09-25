@@ -4,7 +4,6 @@
   var roster = window.CE_ROSTER || {};
   var ready = [
     "getStudents",
-    "getGroupState",
     "setFilteredStudents",
     "renderTable",
     "hasLoadedCourse",
@@ -19,8 +18,6 @@
   var shell = document.getElementById("roster-workbench");
   var searchInput = document.getElementById("roster-search");
   var lensBtns = document.querySelectorAll(".roster-lens-btn");
-  var groupBuilder = document.getElementById("roster-group-builder");
-  var groupLabels = document.getElementById("roster-group-labels-editor");
   var safetyCard = document.getElementById("roster-safety-card");
   if (!shell || !searchInput || !lensBtns.length) {
     return;
@@ -29,7 +26,6 @@
   var lensConfig = {
     students: { filter: "all", focus: "" },
     accommodations: { filter: "extra_time", focus: "extra-time" },
-    groups: { filter: "group_unset", focus: "groups" },
     monitoring: { filter: "monitored", focus: "monitoring" },
     issues: { filter: "warnings", focus: "issues" },
     privacy: { filter: null, focus: "privacy" },
@@ -53,7 +49,6 @@
       }
       if (activeFilter === "extra_time" && !s.extra_time.enabled) continue;
       if (activeFilter === "monitored" && !s.monitored.enabled) continue;
-      if (activeFilter === "group_unset" && s.canvas_group && s.canvas_group.group_id) continue;
       if (activeFilter === "warnings" && (!s.warnings || s.warnings.length === 0)) continue;
       filtered.push(s);
     }
@@ -65,11 +60,7 @@
 
   function focusLensPanel() {
     var target = null;
-    if (activeLens === "groups") {
-      if (groupBuilder) groupBuilder.open = true;
-      if (groupLabels && !groupLabels.hidden) groupLabels.open = true;
-      target = groupBuilder;
-    } else if (activeLens === "privacy") {
+    if (activeLens === "privacy") {
       if (safetyCard && !safetyCard.hidden) safetyCard.open = true;
       target = safetyCard;
     }
@@ -111,7 +102,6 @@
     var focus = new URLSearchParams(window.location.search).get("focus") || "";
     var map = {
       "extra-time": "accommodations",
-      groups: "groups",
       monitoring: "monitoring",
       issues: "issues",
       privacy: "privacy",

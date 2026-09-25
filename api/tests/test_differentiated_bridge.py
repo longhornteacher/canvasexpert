@@ -26,13 +26,16 @@ def _base_row(**overrides):
 
 def _payload(**overrides):
     payload = {
-        "unrestricted_tiers": True,
         "base_title": "Practice",
         "bridge_description": "<p>desc</p>",
         "bridge_due_at": None,
     }
     payload.update(overrides)
     return payload
+
+
+def test_canonical_tier_list_is_exactly_three():
+    assert differentiated_bridge.CANONICAL_TIERS == ("Support", "Core", "Accelerate")
 
 
 def _install_rows(monkeypatch, rows):

@@ -176,13 +176,51 @@ stored on Extend before, enter it on Accelerate.
 
 ## Execution result
 
-_To be filled in by the executor. Include:_
-- a traffic light;
-- the commit hash;
-- the changed files;
-- the baseline and gate commands with pass/fail counts;
-- the MCP schema version change, if any;
-- any deviations and unresolved decisions.
+**Traffic light: GREEN** — pre-authored acceptance criteria hold; the focused gate and both
+full suites pass. No unresolved decisions.
+
+**Commit:** none; changes are uncommitted on `dev` for senior review.
+
+**Baseline and gates** (`py` resolves to Python 3.13 in this environment):
+
+- Preflight baseline at `5613eef2f7e903cbc1dc369c7152d4b8752a6561`:
+  `py -m pytest -p no:randomly api/tests engine/tests -q` — 2,116 passed, 5 warnings.
+- Focused named gate:
+  `py -m pytest -p no:randomly api/tests/test_differentiated_bridge.py api/tests/test_assignment_tier_operation.py api/tests/test_quiz_tier_operation.py api/tests/test_roster_config.py api/tests/test_roster_routes.py api/tests/test_roster_mcp_write.py api/tests/test_work_providers_mirror.py api/tests/test_work_discovery.py api/tests/powergrader api/tests/mcp_server engine/tests/unit/test_tier_redaction.py -q`
+  — 594 passed.
+- Full API suite: `py -m pytest -p no:randomly api/tests -q` — 1,971 passed, 5 warnings.
+- Full engine suite: `py -m pytest -p no:randomly engine/tests -q` — 109 passed.
+- Rendered-route contracts: TestClient rendered `/settings`, `/roster`, `/course`, and
+  `/course-expert`; Settings rows/placeholders and retired roster controls were asserted.
+  A temporary pytest-isolated uvicorn + Microsoft Edge Playwright check loaded all four
+  routes and asserted zero browser console/page errors — 1 passed in 7.28s. The temporary
+  test file was removed. Static search found no remaining references to removed roster
+  globals or controls in the affected templates, scripts, styles, or handlers.
+- `git diff --check` — no whitespace errors. MCP schema advanced to version 61 with
+  `api/mcp_server/tool_schema_v61.json`.
+
+**Changed files:** `README.md`; `api/content_push.py`; authoring docs `Author a Quiz
+(QuizForge).txt`, `Author an Assignment (AssignmentForge).txt`, and `START HERE -
+CanvasAgent.txt`; MCP `contract.py`, `server.py`, `tools.py`, plus new
+`tool_schema_v61.json`; `operation_ledger/adapters/differentiated_bridge.py` and deletion
+of `assignment_groups.py`; config `__init__.py`, `_io.py`, `gradebook.py`, and `roster.py`;
+PowerGrader `scoring_preparation.py` and `session_builder.py`; quiz example README and
+sampler, and deletion of `cs_loops_checkpoint_extend.txt`; `shared_kv.py`; tests covering
+MCP, PowerGrader, presentation, assignment/quiz tier operations, roster config/routes,
+shared settings, SIS bridge config, and work discovery/providers; Web UI docs, `af.py`,
+roster MCP/routes/helpers/updates, roster JS/CSS/templates, and deletion of
+`roster_canvas.py`, `roster_groups.py`, `group_state.js`, and `groups.js`; roster warning
+provider; `docs/contracts/canvas-transport-owners.json`; the required README/guide/MCP and
+roster/operation-ledger/quiz/workbench reference docs, including the adjacent retired
+route reconciliation note; and engine tier redaction source/test.
+
+**Scope and deviations:** The transport-owner registry and mutation-reconciliation note
+were updated only to remove entries for the deleted roster group-write routes, with the
+supervisor's approval. No production or test code deletes or rewrites retired roster keys,
+stored student tier values, or `tier_tags` entries; unknown historical tier tags stay stored
+while `get_tier_tags` exposes only the three canonical keys. No commits were created. The
+unrelated in-progress changes to `api/mirror/store.py`, `api/tests/mirror/test_store.py`,
+and untracked `stubbed-workspace/` were preserved unchanged.
 
 _On GREEN, the senior accepts the batch, retires this brief, and updates plan §9 to
 point at Batch 2._

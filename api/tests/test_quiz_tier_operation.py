@@ -32,10 +32,10 @@ def _plan(tier="Support", title="Reading Check", points=20):
 
 def _plans(monkeypatch, first=None, second=None):
     rows = {"a.txt": copy.deepcopy(first or _plan()),
-            "b.txt": copy.deepcopy(second or _plan("Extend"))}
+            "b.txt": copy.deepcopy(second or _plan("Accelerate"))}
     monkeypatch.setattr(quiz_module, "run_json_object", lambda args, extra_env=None: copy.deepcopy(rows[args[1]]))
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Red", "Core": "Blue", "Accelerate": "Silver", "Extend": "Gold",
+        "Support": "Red", "Core": "Blue", "Accelerate": "Silver",
     })
     monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
 
@@ -45,22 +45,22 @@ def _request(**settings):
             "assignment_group_name": "Assessments"}
     base.update(settings)
     return {"mode": "differentiated", "variants": [
-        {"path": "a.txt", "group_name": "Blue"},
-        {"path": "b.txt", "group_name": "Gold"},
+        {"path": "a.txt"},
+        {"path": "b.txt"},
     ], "settings": base}
 
 
 @pytest.mark.parametrize(
     ("first", "second", "change", "message"),
     [
-        (_plan(), _plan("Extend", title="Different"), {}, "same exact"),
-        (_plan(title="Reading Check - Red"), _plan("Extend", title="Reading Check - Red"), {}, "unsuffixed"),
-        (_plan(title="Reading Check - Bridge"), _plan("Extend", title="Reading Check - Bridge"), {}, "unsuffixed"),
-        (_plan(title="Reading Check – Bridge"), _plan("Extend", title="Reading Check – Bridge"), {}, "unsuffixed"),
-        (_plan(points=20), _plan("Extend", points=25), {}, "equal total points"),
+        (_plan(), _plan("Accelerate", title="Different"), {}, "same exact"),
+        (_plan(title="Reading Check - Red"), _plan("Accelerate", title="Reading Check - Red"), {}, "unsuffixed"),
+        (_plan(title="Reading Check - Bridge"), _plan("Accelerate", title="Reading Check - Bridge"), {}, "unsuffixed"),
+        (_plan(title="Reading Check – Bridge"), _plan("Accelerate", title="Reading Check – Bridge"), {}, "unsuffixed"),
+        (_plan(points=20), _plan("Accelerate", points=25), {}, "equal total points"),
         (_plan(), _plan("Unknown"), {}, "canonical tier"),
-        (_plan(), _plan("Extend"), {"due_at": "2026-09-14T10:00:00"}, "UTC offset"),
-        (_plan(), _plan("Extend"), {"module_name": ""}, "module_name"),
+        (_plan(), _plan("Accelerate"), {"due_at": "2026-09-14T10:00:00"}, "UTC offset"),
+        (_plan(), _plan("Accelerate"), {"module_name": ""}, "module_name"),
     ],
 )
 def test_prepare_laws_block_invalid_family(monkeypatch, first, second, change, message):
@@ -75,9 +75,9 @@ def test_prepare_normalizes_server_owned_titles_and_shapes(monkeypatch):
     assert payload["base_title"] == "Reading Check"
     assert payload["bridge_due_at"] == "2026-09-14T23:59:00-05:00"
     assert [variant["plan"]["title"] for variant in payload["variants"]] == [
-        "Reading Check - Red", "Reading Check - Gold",
+        "Reading Check - Red", "Reading Check - Silver",
     ]
-    assert [variant["tier"] for variant in payload["variants"]] == ["Support", "Extend"]
+    assert [variant["tier"] for variant in payload["variants"]] == ["Support", "Accelerate"]
     for variant in payload["variants"]:
         settings = variant["plan"]["assignment_settings"]
         assert settings["published"] is True
@@ -100,35 +100,47 @@ def test_bridge_title_is_server_owned_and_bridge_tag_is_reserved(monkeypatch):
     assert differentiated_bridge.bridge_title("Reading Check") == "Reading Check - Bridge"
     with pytest.raises(ValueError, match="unsuffixed"):
         differentiated_bridge.bridge_title("Reading Check - Bridge")
-    monkeypatch.setattr(config, "get_tier_tags", lambda: {"Support": "Bridge", "Extend": "Gold"})
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {"Support": "Bridge", "Core": "Red", "Accelerate": "Gold"})
     with pytest.raises(ValueError, match="reserved"):
-        differentiated_bridge.resolve_public_tags(["Support", "Extend"])
+        differentiated_bridge.resolve_public_tags(["Support", "Accelerate"])
 
 
 def test_quizforge_tier_tag_collision_is_a_stable_envelope_refusal(monkeypatch):
     """Contract (AC5): a tier-tag collision inside one QuizForge envelope
     refuses with a stable ``tier_tag_collision`` code, not a bare message.
-    Support/Core/Extend -> Silver/Red/Blue (all distinct) still passes."""
+    Support/Core/Accelerate -> Silver/Red/Blue (all distinct) still passes."""
     _plans(monkeypatch)
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Silver", "Core": "Red", "Accelerate": "Silver", "Extend": "Blue",
+        "Support": "Silver", "Core": "Red", "Accelerate": "Silver",
     })
     with pytest.raises(differentiated_bridge.TierTagCollisionError) as excinfo:
         differentiated_bridge.resolve_public_tags(["Support", "Accelerate"])
     assert excinfo.value.labels == ["Support", "Accelerate"]
     assert excinfo.value.tag == "Silver"
 
-    # Extend->Blue alongside Accelerate->Blue in Settings is valid; a
-    # collision exists only inside one envelope (locked decision).
-    resolved = differentiated_bridge.resolve_public_tags(["Support", "Core", "Extend"])
+    # A collision exists only inside one envelope (locked decision).
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {
+        "Support": "Silver", "Core": "Red", "Accelerate": "Blue",
+    })
+    resolved = differentiated_bridge.resolve_public_tags(["Support", "Core", "Accelerate"])
     assert [row["tag"] for row in resolved] == ["Silver", "Red", "Blue"]
+
+
+def test_removed_tier_is_refused_as_unknown_label(monkeypatch):
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {
+        "Support": "Silver", "Core": "Red", "Accelerate": "Blue",
+    })
+    historical_removed_name = "Ex" + "tend"
+    with pytest.raises(ValueError) as excinfo:
+        differentiated_bridge.resolve_public_tags(["Support", historical_removed_name])
+    assert all(tier in str(excinfo.value) for tier in ("Support", "Core", "Accelerate"))
 
 
 @pytest.mark.parametrize(
     "tags",
     [
-        {"Support": "", "Core": "Blue", "Accelerate": "Silver", "Extend": "Gold"},
-        {"Support": "Red", "Core": "Blue", "Accelerate": "Silver", "Extend": " red "},
+        {"Support": "", "Core": "Blue", "Accelerate": "Silver"},
+        {"Support": "Red", "Core": "Blue", "Accelerate": " red "},
     ],
 )
 def test_prepare_requires_unique_public_tags_for_used_quiz_tiers(monkeypatch, tags):
@@ -284,7 +296,7 @@ def test_differentiated_quiz_family_publishes_unrestricted_sources_in_module(mon
     assert result["state"] == "applied"
     bridge_name = differentiated_bridge.bridge_title("Reading Check")
     sources = [row for row in fake.assignments.values() if row["name"] != bridge_name]
-    assert [row["name"] for row in sources] == ["Reading Check - Red", "Reading Check - Gold"]
+    assert [row["name"] for row in sources] == ["Reading Check - Red", "Reading Check - Silver"]
     assert all(row["published"] and not row["only_visible_to_overrides"] and row["omit_from_final_grade"] and not row["post_to_sis"] for row in sources)
     bridge = next(row for row in fake.assignments.values() if row["name"] == bridge_name)
     assert {str(row["content_id"]) for row in fake.module_items.values()} == {row["id"] for row in sources}

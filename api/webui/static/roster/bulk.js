@@ -6,7 +6,6 @@
     "toast",
     "postForm",
     "getCurrentCourseId",
-    "getGroupState",
     "getSelectedNameMap",
     "onTableRendered",
     "reloadCourse"
@@ -20,29 +19,12 @@
   var selectAll = document.getElementById("roster-select-all");
   var bulkBar = document.getElementById("roster-bulk-bar");
   var bulkCount = document.getElementById("roster-bulk-count");
-  var bulkGroup = document.getElementById("roster-bulk-group");
   var bulkExtraDays = document.getElementById("roster-bulk-extra-days");
   var bulkActions = document.querySelector(".roster-bulk-actions");
   var tableBody = document.getElementById("roster-table-body");
 
-  if (!selectAll || !bulkBar || !bulkCount || !bulkGroup || !bulkExtraDays || !bulkActions || !tableBody) {
+  if (!selectAll || !bulkBar || !bulkCount || !bulkExtraDays || !bulkActions || !tableBody) {
     return;
-  }
-
-  function esc(s) {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-  }
-
-  function groupId(group) {
-    return String((group && (group.id || group.group_id)) || "");
-  }
-
-  function groupDisplay(group, labelScheme) {
-    var gid = groupId(group);
-    var label = (labelScheme && labelScheme[gid] && labelScheme[gid].teacher_label) || group.teacher_label || "";
-    return label && label !== group.name ? label + " / " + group.name : group.name;
   }
 
   function getSelectedIds() {
@@ -60,24 +42,7 @@
     if (ids.length > 0) bulkCount.textContent = "Bulk edit: " + ids.length + " selected";
   }
 
-  function refreshBulkGroupOptions() {
-    var state = roster.getGroupState() || {};
-    var groups = state.currentCategoryGroups || [];
-    var labelScheme = state.groupLabelScheme || {};
-    var selected = bulkGroup.value;
-
-    bulkGroup.innerHTML = '<option value="">Choose group...</option>';
-    for (var i = 0; i < groups.length; i++) {
-      var g = groups[i];
-      var gid = groupId(g);
-      var label = groupDisplay(g, labelScheme);
-      bulkGroup.innerHTML += '<option value="' + esc(gid) + '">' + esc(label) + "</option>";
-    }
-    bulkGroup.value = selected;
-  }
-
   function refreshBulkUi() {
-    refreshBulkGroupOptions();
     updateBulkBar();
   }
 
@@ -130,21 +95,6 @@
       value = { days: parseInt(bulkExtraDays.value, 10) || 2, names: roster.getSelectedNameMap() };
     } else if (action === "set_monitored") {
       value = { names: roster.getSelectedNameMap() };
-    } else if (action === "set_canvas_group") {
-      var gid = bulkGroup.value;
-      if (!gid) {
-        roster.toast("Select a group first.", true);
-        return;
-      }
-      var state = roster.getGroupState() || {};
-      value = { category_id: state.selectedGroupCategoryId, group_id: gid };
-    } else if (action === "clear_canvas_group") {
-      var stateForClear = roster.getGroupState() || {};
-      if (!stateForClear.selectedGroupCategoryId) {
-        roster.toast("Select a group set first.", true);
-        return;
-      }
-      value = { category_id: stateForClear.selectedGroupCategoryId };
     }
 
     doBulkAction(action, ids, value);

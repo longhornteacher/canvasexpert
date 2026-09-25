@@ -60,3 +60,23 @@ def test_assignmentforge_metadata_matches_exact_created_assignment_id(monkeypatc
     assert result["tier"] == "Silver"
     assert result["corrections"]["item-1"]["shared"]["answer"] == "A"
     assert assignmentforge.for_assignment("course-1", "other") == {}
+
+
+def test_historical_removed_tier_assignment_still_loads_its_corrections(monkeypatch):
+    historical_tier = "Ex" + "tend"
+    correction = {"answer": "Use the earlier method.", "why": "The saved scoring note is still available."}
+    monkeypatch.setattr(assignmentforge.operations, "list_operations", lambda: [{
+        "kind": "content.assignment", "targets": [{
+            "course_id": "course-1", "steps": [{
+                "step_key": "create_tier_assignment:0", "returned_object_id": "assignment-7",
+            }],
+        }], "normalized_payload": {
+            "tiers": [{"tier": historical_tier, "tag": historical_tier}],
+            "corrections": {"item-1": {"shared": correction, "by_tier": None}},
+        },
+    }])
+
+    metadata = assignmentforge.for_assignment("course-1", "assignment-7")
+    assert metadata["tier"] == historical_tier
+    assert metadata["corrections"]["item-1"]["shared"] == correction
+    assert corrections.correction_for_item(metadata["corrections"], "item-1", metadata["tier"]) == correction

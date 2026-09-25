@@ -8,39 +8,14 @@ import pytest
 from api.operation_ledger import batches, executor, models, operations, paths
 from api.operation_ledger.adapters import differentiated_bridge
 from api.operation_ledger.adapters.assignment import AssignmentAdapter
-from api.operation_ledger.adapters.assignment_groups import GroupResolutionError, resolve_assignment_groups
 from api.operation_ledger.adapters.module_placement import attach_assignment_type_module_item
 from api.platform_services import canvas_client, config
 
 
 TIERS = [
     {"label": "Support", "group": "Blue", "description": "support body"},
-    {"label": "Extend", "group": "Gold", "description": "extend body"},
+    {"label": "Accelerate", "group": "Gold", "description": "accelerate body"},
 ]
-
-
-def _get_all(path, params=None, timeout=30):
-    if "group_categories" in path:
-        return [{"id": 10, "name": " Blue "}, {"id": 20, "name": "GOLD"}], None
-    if "/groups/10/memberships" in path:
-        return [{"user_id": 9001}, {"user_id": 9002}], None
-    if "/groups/20/memberships" in path:
-        return [{"user_id": 9003}], None
-    if "/enrollments" in path:
-        return [{"user_id": 9001}, {"user_id": 9002}, {"user_id": 9003}], None
-    return [], None
-
-
-def _resolved():
-    return resolve_assignment_groups("42", TIERS, canvas_get_all=_get_all, selected_category_id="7")
-
-
-def test_group_resolver_safe_snapshot_and_source_order():
-    result = _resolved()
-    assert [row["label"] for row in result["safe"]["tiers"]] == ["Support", "Extend"]
-    assert [row["student_count"] for row in result["safe"]["tiers"]] == [2, 1]
-    assert result["student_ids_by_group"] == {"10": ["9001", "9002"], "20": ["9003"]}
-    assert all(value not in json.dumps(result["safe"]) for value in ("9001", "9002", "9003"))
 
 
 def test_exact_module_id_is_write_authority_even_when_display_name_differs(monkeypatch):
@@ -80,31 +55,6 @@ def test_public_module_selection_options_refuse_mixed_or_implicit_create(monkeyp
     )
     assert result["state"] == "applied"
     assert any(path.endswith("/modules") for _method, path, _body in fake.sends)
-
-
-@pytest.mark.parametrize("case", ["missing", "ambiguous", "empty", "overlap", "coverage", "read"])
-def test_group_resolution_law_fails_closed(case):
-    if case == "missing":
-        with pytest.raises(GroupResolutionError, match="Select"):
-            resolve_assignment_groups("42", TIERS, canvas_get_all=_get_all, selected_category_id="")
-        return
-
-    def getter(path, params=None, timeout=30):
-        data, error = _get_all(path, params, timeout)
-        if case == "ambiguous" and "group_categories" in path:
-            data.append({"id": 11, "name": "blue"})
-        if case == "empty" and "/groups/10/memberships" in path:
-            data = []
-        if case == "overlap" and "/groups/20/memberships" in path:
-            data = [{"user_id": 9002}, {"user_id": 9003}]
-        if case == "coverage" and "/enrollments" in path:
-            data.append({"user_id": 9004})
-        if case == "read" and "group_categories" in path:
-            return None, "HTTP 500"
-        return data, error
-
-    with pytest.raises(GroupResolutionError):
-        resolve_assignment_groups("42", TIERS, canvas_get_all=getter, selected_category_id="7")
 
 
 class Context:
@@ -215,15 +165,12 @@ def _build(monkeypatch, **request_overrides):
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.parse_file", lambda _path: (_authoring_data(), []))
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.tier_payloads", lambda data: copy.deepcopy(data["tiers"]))
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Red", "Core": "Blue", "Accelerate": "Silver", "Extend": "Gold",
+        "Support": "Red", "Core": "Blue", "Accelerate": "Silver",
     })
     monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
     request = {"path": "synthetic.txt", "due_at": "2026-09-14T15:30:00-05:00",
                "module_name": "Week 1", "assignment_group_name": "Coursework",
-               "tier_targets": [
-                   {"tier": "Support", "group_name": "Blue"},
-                   {"tier": "Extend", "group_name": "Gold"},
-               ]}
+               "tier_targets": ["Support", "Accelerate"]}
     request.update(request_overrides)
     return AssignmentAdapter().build_payload(request)
 
@@ -267,22 +214,19 @@ def test_prepare_requires_unique_public_tags(monkeypatch):
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.parse_file", lambda _path: (_authoring_data(), []))
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.tier_payloads", lambda data: copy.deepcopy(data["tiers"]))
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Red", "Core": "Blue", "Accelerate": "Silver", "Extend": " red ",
+        "Support": "Red", "Core": "Blue", "Accelerate": " red ",
     })
     with pytest.raises(ValueError, match="unique"):
         AssignmentAdapter().build_payload({
             "path": "synthetic.txt", "due_at": "2026-09-14T15:30:00-05:00",
-            "module_name": "Week 1", "tier_targets": [
-                {"tier": "Support", "group_name": "Blue"},
-                {"tier": "Extend", "group_name": "Gold"},
-            ],
+            "module_name": "Week 1", "tier_targets": ["Support", "Accelerate"],
         })
 
 
 def test_assignmentforge_tier_tag_collision_is_a_stable_envelope_refusal(monkeypatch):
     """Contract (AC5): a tier-tag collision inside one AssignmentForge
     envelope refuses with a stable ``tier_tag_collision`` code, not a bare
-    message. Support/Core/Extend -> Silver/Red/Blue (all distinct) still
+    message. Support/Core/Accelerate -> Silver/Red/Blue (all distinct) still
     passes, matching QuizForge's identical shared rule."""
     colliding_data = {
         "title": "Practice", "description": "base", "points": 10,
@@ -294,7 +238,7 @@ def test_assignmentforge_tier_tag_collision_is_a_stable_envelope_refusal(monkeyp
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.parse_file", lambda _path: (colliding_data, []))
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.tier_payloads", lambda data: copy.deepcopy(data["tiers"]))
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
-        "Support": "Silver", "Core": "Red", "Accelerate": "Silver", "Extend": "Blue",
+        "Support": "Silver", "Core": "Red", "Accelerate": "Silver",
     })
     with pytest.raises(differentiated_bridge.TierTagCollisionError) as excinfo:
         AssignmentAdapter().build_payload({
@@ -325,7 +269,7 @@ def test_differentiated_assignment_family_is_unrestricted_and_student_free(monke
     result = AssignmentAdapter().execute(payload, {"course_id": "42", "steps": []}, baseline, {}, context)
     assert result["state"] == "applied", result
     sources = [row for row in fake.assignments.values() if row["name"] not in {"Practice", "Practice - Bridge"}]
-    assert [row["name"] for row in sources] == ["Practice - Red", "Practice - Gold"]
+    assert [row["name"] for row in sources] == ["Practice - Red", "Practice - Silver"]
     assert all(row["due_at"] == "2026-09-14T15:30:00-05:00" for row in sources)
     assert all(row["unlock_at"] == "2026-09-01T08:00:00-05:00" for row in sources)
     assert all(row["lock_at"] == "2026-09-30T23:59:00-05:00" for row in sources)

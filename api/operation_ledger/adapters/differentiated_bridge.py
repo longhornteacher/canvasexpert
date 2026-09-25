@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import html
 import math
 import re
@@ -18,7 +17,7 @@ from . import adapter_support
 from .module_placement import attach_assignment_type_module_item
 
 
-CANONICAL_TIERS = ("Support", "Core", "Accelerate", "Extend")
+CANONICAL_TIERS = ("Support", "Core", "Accelerate")
 SUPPORTED_RENDERERS = ("assignment", "quiz")
 BRIDGE_SHAPE_FIELDS = (
     "name", "description", "points_possible", "assignment_group_id", "due_at",
@@ -244,7 +243,7 @@ def canonical_tier(value: object) -> str:
             return name
     raise ValueError(
         "Differentiated content must use one canonical tier: "
-        "Support, Core, Accelerate, or Extend."
+        ", ".join(CANONICAL_TIERS) + "."
     )
 
 
@@ -270,9 +269,8 @@ def resolve_public_tags(labels: list[object]) -> list[dict]:
         if tag_key in seen_tags:
             # AC5: two tiers resolving to the same public tag inside one
             # envelope is a stable, structured refusal, not a bare message.
-            # The same tag reused across different envelopes (for example
-            # Extend->Blue in one family and Accelerate->Blue in another) is
-            # not a collision; only reuse inside this one envelope is.
+            # The same tag reused in a different family is not a collision;
+            # only reuse inside this one envelope is.
             raise TierTagCollisionError(
                 "Public Canvas tags for the used tiers must be unique within the "
                 "envelope after trimming and case-folding; update them in Settings.",
@@ -788,62 +786,20 @@ def _verified_family_sources(
     rows = []
     points = []
     groups = []
-    unrestricted = payload.get("unrestricted_tiers") is True
-    safe_tiers = ((payload.get("group_snapshot") or {}).get("tiers")
-                  if isinstance(payload.get("group_snapshot"), dict) else None)
-    for index, (source_id, title) in enumerate(zip(source_ids, source_titles)):
+    for source_id, title in zip(source_ids, source_titles):
         assignment, error = adapter_support.get_assignment(course_id, str(source_id))
         if error or assignment is None:
             return {}, rows, "source_exact_id_unverified"
-        # Correction 3: after CE's own verified create, a teacher's edits in
-        # Canvas Live to an unrestricted source's title, due date, and
-        # overrides are authoritative -- recovery re-checks only the
-        # CE-owned invariants (exact id, published, grading_type,
-        # omit_from_final_grade, post_to_sis, and points/group consistency
-        # across sources, below). The restricted/group branch is unchanged.
+        # Teacher edits to source titles, due dates, and overrides are
+        # authoritative after Canvas Expert verifies its own create.
         expected = {
             "published": True,
             "omit_from_final_grade": True,
             "post_to_sis": False,
             "grading_type": "points",
         }
-        if not unrestricted:
-            # Assign To (who sees an unrestricted source, and its per-class
-            # dates) is teacher-owned tier placement, so only the restricted
-            # branch checks visibility.
-            expected["only_visible_to_overrides"] = True
-            expected["name"] = title
-            expected["due_at"] = payload.get("due_at") or None
         if not _fields_match(assignment, expected):
             return {}, rows, "source_final_shape_unverified"
-        if not unrestricted:
-            # Overrides remain a CE-owned invariant only for the
-            # restricted/group path: skip the fetch entirely for
-            # unrestricted tiers, where a teacher's own overrides are
-            # authoritative and never checked.
-            overrides, override_error = canvas_client.canvas_get_all(
-                f"/api/v1/courses/{course_id}/assignments/{source_id}/overrides",
-                {"per_page": 100},
-            )
-            if override_error:
-                return {}, rows, "source_override_unverified"
-            if not overrides:
-                return {}, rows, "source_override_unverified"
-            if safe_tiers and index < len(safe_tiers):
-                expected_group = safe_tiers[index]
-                expected_group_id = str(expected_group.get("group_id") or "")
-                actual_group_ids = {
-                    str(row.get("group_id") or "") for row in overrides
-                    if row.get("group_id") not in (None, "")
-                }
-                override_ids = _override_student_ids(overrides)
-                expected_digest = str(expected_group.get("membership_digest") or "")
-                if expected_group_id and actual_group_ids and expected_group_id not in actual_group_ids:
-                    return {}, rows, "source_group_override_unverified"
-                if expected_digest and override_ids and _membership_digest(override_ids) != expected_digest:
-                    return {}, rows, "source_group_override_unverified"
-                if expected_digest and not actual_group_ids and not override_ids:
-                    return {}, rows, "source_group_override_unverified"
         points.append(_number(assignment.get("points_possible")))
         groups.append(str(assignment.get("assignment_group_id") or ""))
         rows.append(assignment)
@@ -892,22 +848,6 @@ def _timestamps_equal(current: object, expected: object) -> bool:
     except ValueError:
         return False
     return left == right
-
-
-def _override_student_ids(overrides: list[dict]) -> list[str]:
-    values = []
-    for override in overrides or []:
-        for key in ("student_ids", "students"):
-            raw = override.get(key)
-            if isinstance(raw, dict):
-                raw = raw.keys()
-            if isinstance(raw, list):
-                values.extend(str(value) for value in raw if str(value).strip())
-    return sorted(set(values))
-
-
-def _membership_digest(student_ids: list[str]) -> str:
-    return hashlib.sha256("\n".join(sorted(student_ids)).encode("utf-8")).hexdigest()
 
 
 def _stop(
