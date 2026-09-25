@@ -153,7 +153,9 @@ def test_standard_page_render_structure():
 
 
 def test_rubric_levels_render_as_escaped_subordinate_criterion_text():
-    model = _assignment(rubric={"criteria": [{"name": "Claim", "points": 5, "levels": [{"label": "Strong", "points": 5, "description": "Specific & clear."}]}]})
+    model = _assignment(rubric={"criteria": [{"name": "Claim", "points": 5, "levels": [{"label": "Strong", "points": 5, "description": "Specific & clear."}, {"label": "Emerging", "points": 1}]}]})
     html = render_assignment(model, palette_key="default", public_tag=None, assignment_group=None, printable_link=None)
     assert "<strong>Strong</strong> - 5 pts; Specific &amp; clear." in html
-    assert "<th>Criterion</th><th" in html
+    assert "<strong>Emerging</strong> - 1 pt</small>" in html
+    assert re.search(r'<th style="[^"]*text-align:left">Criterion</th>', html)
+    assert re.search(r'<th style="[^"]*text-align:left">Total</th>', html)

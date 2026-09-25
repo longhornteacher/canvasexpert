@@ -437,18 +437,20 @@ receive contracts that describe only content.
 - An MCP tool parameter would need to change. None is expected, since
   `assignment_group_name` already exists.
 
-**Teacher smoke after merge (not an executor gate).** Push one tiered assignment and one
-page to a sandbox course. Open the boxes, and check the full width on a wide screen and a
+**Teacher smoke after merge (not an executor gate).** Push one assignment and one page
+to CS8 as unpublished `[TEST]` items. There is no sandbox course. Open the boxes, and check the full width on a wide screen and a
 narrow window.
 
-## 6. Batch 3: generated printable PDFs, one per tier
+## 6. Batch 3: generated printable PDFs and teacher attachments
 
 **Risk:** high. It adds Canvas file writes to tiered delivery and changes resume behavior.
 **Depends on:** Batch 2.
 
 **Objective.** Preparing an eligible assignment push generates a standalone printable per
 tier (contract §6). Applying it uploads each printable and links it in its own tier's
-description. This happens on both the MCP and Web UI paths, with receipts and resume.
+description. Teacher attachments (contract §6.1) upload through the same path and are
+linked in assignments and pages. This happens on both the MCP and Web UI paths, with
+receipts and resume.
 
 **Acceptance criteria**
 1. `render_assignment_printable` and `templates/assignment.html.j2` implement the
@@ -485,19 +487,39 @@ description. This happens on both the MCP and Web UI paths, with receipts and re
 7. **Law:** standalone printable (contract §7.4). **Contract:** printable variants over
    `none|short|long` and tracked/untracked. **Examples:** one PDF render with Edge
    mocked; one tiered apply with per-tier upload; one resume that reuses a recorded upload.
-8. `docs/reference/operation-ledger-module-map.md`, `engine/docs/ARCHITECTURE.md`
+8. **Attachments** (contract §6.1, added 2026-09-25):
+   - `attachments` is added to AssignmentForge and PageForge 2.0 validation: an array
+     of `{file, label}` with non-empty strings, unique file names, and allowed
+     extensions.
+   - Both adapters' `build_payload` resolve each file under the workspace
+     `To Review/Attachments/`. Reuse the `allowed_printable_roots`/
+     `validate_printable_pdf` path-confinement pattern generalized to that root. A
+     missing file blocks the preview, and file hashes are part of `source_digest`.
+   - Upload is a checkpointed step before the first content create, once per course
+     per file, to `Canvas Expert Attachments`, reused on resume. For a tiered family,
+     every tier links the same file ids.
+   - The renderer adds the Attachments line (contract §4 item 9 and §5), and the
+     printable adds the "Materials" line.
+   - The authoring contracts document the field and the "ask the teacher to place the
+     file" rule.
+   - **Tests.** A contract test parametrized over allowed and refused extensions, and
+     the law that no path outside the Attachments root is accepted, including `..` and
+     absolute paths. Examples: one assignment and one page with an attachment, apply
+     and resume.
+9. `docs/reference/operation-ledger-module-map.md`, `engine/docs/ARCHITECTURE.md`
    ("physical rendering is quiz-only" no longer true), and `engine/rendering/physical/README.md`
    are updated.
 
 **Non-goals**
 - DOCX printables.
 - Printables for pages or quizzes.
-- Hiding or locking the Printables folder.
+- Hiding or locking the Printables or Attachments folders.
+- Resolving `{{file:}}` links to files already in Canvas (§10).
 - Regenerating printables for already-pushed assignments.
 
 **Gate**
 - Focused:
-  `py -m pytest -p no:randomly engine/tests api/tests/test_printable_attach.py api/tests/test_assignment_operation.py api/tests/test_assignment_tier_operation.py api/tests/test_assignment_ordered_steps.py api/tests/mcp_server/test_content_push_tools.py`
+  `py -m pytest -p no:randomly engine/tests api/tests/test_printable_attach.py api/tests/test_assignment_operation.py api/tests/test_assignment_tier_operation.py api/tests/test_assignment_ordered_steps.py api/tests/test_page_operation.py api/tests/webui/test_af.py api/tests/webui/test_pf.py api/tests/mcp_server/test_content_push_tools.py`
 - Then the full `api/tests` suite.
 - Per AGENTS.md high risk: failure, idempotency and resume tests are required, and the
   teacher reviews the diff.
@@ -509,8 +531,10 @@ description. This happens on both the MCP and Web UI paths, with receipts and re
 - Canvas file-upload scope or folder behavior differs from `upload_course_file`'s
   assumptions.
 
-**Teacher smoke after merge.** Push one tiered assignment to a sandbox course. Open each
-tier's printable from a student-view account and print one in grayscale.
+**Teacher smoke after merge (CS8, unpublished `[TEST]` items).** Push one untiered
+assignment with an attachment, and one page with an attachment. Open the printable and
+the attachment links, and print the printable in grayscale. The teacher decided a
+tiered live test is unnecessary; tiered upload is covered by tests.
 
 ## 7. Batch 4: Canvas rubric from the payload
 
@@ -537,19 +561,24 @@ code. Locked now:
   AC5 implements this.
 - **D2: do Batch 4.** The payload rubric becomes the Canvas rubric. Between Batches 2 and
   4, the teacher attaches rubrics in Canvas by hand.
+- **D3: keep the double title.** Canvas's own title and the banner's `<h2>` both stay.
+- **D4: attachments in Batch 3.** Teacher-provided files upload and link through the
+  printable path (contract §6.1).
+- **Live testing uses CS8**, with unpublished `[TEST]` items. There is no sandbox course.
 
 ## 9. Next batch (single current pointer)
 
 **Next: Batch 3 (§6).** Read this plan's §0, §1.4, §3 (the Printable bullet), and §6;
 read the contract's §6 and §7 (laws 1, 2 and 4); and read
 `docs/reference/operation-ledger-module-map.md` plus the ordered-step and checkpoint
-sections of `docs/contracts/operation-ledger-contract.md`. There are no outstanding
+sections of `docs/contracts/operation-ledger-contract.md`. Batch 3 now includes
+attachments, so also read contract §4 item 9, §5, and §6.1. There are no outstanding
 decisions.
 
-Carried over from Batch 2: the teacher's sandbox smoke (§5) is still outstanding. It
-should pass before the Batch 3 brief is accepted, because the printable link renders
-inside the Batch 2 HTML. It also confirms that Canvas keeps the renderer's `<section>`,
-`<aside>` and `<details>` elements.
+Batch 2 live check passed on 2026-09-25 (CS8, unpublished `[TEST]` items). Canvas keeps
+`<section>`, `<aside>`, and `<details>`, and the width follows the window. Follow-up
+renderer polish is committed: auto-width direction table, left-aligned rubric headings
+with row rules, and "1 pt" singular.
 
 ## 10. Known adjacent defects (outside this plan)
 

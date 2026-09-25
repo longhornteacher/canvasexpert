@@ -32,6 +32,10 @@ def _supports_html(supports, palette) -> str:
     return "".join(chunks)
 
 
+def _points(value) -> str:
+    return f"{_e(value)} pt" if value == 1 else f"{_e(value)} pts"
+
+
 def _details(summary, body, palette) -> str:
     if not body:
         return ""
@@ -96,7 +100,8 @@ def _extras_html(extras, palette, *, page=False):
 def _rubric_html(rubric, palette):
     if not isinstance(rubric, dict) or not rubric.get("criteria"):
         return ""
-    rows = [f'<tr style="background-color:{palette["tint"]}"><th>Criterion</th><th style="text-align:right">Points</th></tr>']
+    cell = f'padding:6px 8px;border-bottom:1px solid {NEUTRALS["rule"]}'
+    rows = [f'<tr style="background-color:{palette["tint"]}"><th style="{cell};text-align:left">Criterion</th><th style="{cell};text-align:right">Points</th></tr>']
     total = 0
     for criterion in rubric["criteria"]:
         points = criterion.get("points", 0)
@@ -106,12 +111,12 @@ def _rubric_html(rubric, palette):
         if description:
             text += f"<br><small>{_e(description)}</small>"
         for level in criterion.get("levels") or []:
-            level_text = f"<br><small><strong>{_e(level.get('label', ''))}</strong> - {_e(level.get('points', 0))} pts"
+            level_text = f"<br><small><strong>{_e(level.get('label', ''))}</strong> - {_points(level.get('points', 0))}"
             if level.get("description"):
                 level_text += f"; {_e(level['description'])}"
             text += level_text + "</small>"
-        rows.append(f'<tr><td>{text}</td><td style="text-align:right">{_e(points)}</td></tr>')
-    rows.append(f'<tr><th>Total</th><th style="text-align:right">{_e(total)}</th></tr>')
+        rows.append(f'<tr><td style="{cell};vertical-align:top">{text}</td><td style="{cell};text-align:right;vertical-align:top">{_e(points)}</td></tr>')
+    rows.append(f'<tr><th style="padding:6px 8px;text-align:left">Total</th><th style="padding:6px 8px;text-align:right">{_e(total)}</th></tr>')
     return f'<table style="width:100%;max-width:100%;border-collapse:collapse">{"".join(rows)}</table>'
 
 
@@ -123,7 +128,7 @@ def render_assignment(model: dict, *, palette_key: str, public_tag: str | None,
     unit_eyebrow, unit_body = _unit_parts(model.get("unit_info"))
     eyebrow = " · ".join(part for part in (_e(public_tag) if public_tag else "", unit_eyebrow) if part)
     out = [_banner(title, eyebrow, palette)]
-    header = [f'{_e(model.get("points"))} pts', _e(assignment_group) if assignment_group else "", _e(submission_wording(model.get("submission")))]
+    header = [_points(model.get("points")), _e(assignment_group) if assignment_group else "", _e(submission_wording(model.get("submission")))]
     out.append(f'<p style="margin:0 0 14px;color:{NEUTRALS["muted"]}">{" · ".join(part for part in header if part)}</p>')
     if model.get("overview"):
         out.append(_fragment(model["overview"]))
@@ -133,10 +138,11 @@ def render_assignment(model: dict, *, palette_key: str, public_tag: str | None,
         for index, direction in enumerate(directions, 1):
             rows.append(
                 '<tr>'
-                f'<td style="vertical-align:top;border:0;padding:8px 10px 8px 0"><span style="display:inline-block;padding:3px 7px;border-radius:16px;background-color:{palette["dark"]};color:{NEUTRALS["badge_text"]};text-align:center;font-weight:bold">{index}</span></td>'
+                f'<td style="vertical-align:top;border:0;padding:8px 12px 8px 0;white-space:nowrap"><span style="display:inline-block;padding:3px 7px;border-radius:16px;background-color:{palette["dark"]};color:{NEUTRALS["badge_text"]};text-align:center;font-weight:bold">{index}</span></td>'
                 f'<td style="border:0;padding:8px 0">{_fragment(direction.get("html", ""))}</td></tr>'
             )
-        out.append(f'<table style="width:100%;max-width:100%;border-collapse:collapse"><tbody>{"".join(rows)}</tbody></table>')
+        # No width: an auto-width table keeps the badge column as narrow as the badge.
+        out.append(f'<table style="max-width:100%;border-collapse:collapse"><tbody>{"".join(rows)}</tbody></table>')
     out.append(_section_html(model.get("sections"), palette))
     rubric = _rubric_html(model.get("rubric"), palette)
     if rubric:

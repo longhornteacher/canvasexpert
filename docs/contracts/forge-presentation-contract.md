@@ -91,6 +91,8 @@ renders in this fixed order:
 8. **Extras** (collapsed, zero or more). Authored non-essential help, each with its own
    summary line.
 9. **Printable link.** A tint-shaded line: **Printable:** `<Title> - Printable (PDF)`.
+   It is followed, when the payload has attachments, by an **Attachments** line listing
+   each attachment's label as a link (§6.1).
 10. **Unit info** (collapsed). Unit, TEKS codes, subject, and grade, as a small two-column
     table.
 
@@ -120,7 +122,8 @@ A page's default look mirrors an assignment's.
   2. Overview.
   3. Sections. A section may have `kind: "collapsed"` to render as a `<details>` box.
   4. Extras.
-  5. Unit info (collapsed).
+  5. Attachments line, when present (§6.1).
+  6. Unit info (collapsed).
 
   A page has no header line and no rubric.
 - **Layout `freeform`** (override): the author supplies a full body. Inline `style` is
@@ -156,6 +159,24 @@ A page's default look mirrors an assignment's.
   through Playwright, and nothing is downloaded.
 - **Failure is visible, not fatal.** If Edge is unavailable or generation fails, the
   preview says so and the assignment pushes without a printable.
+
+### 6.1 Attachments (teacher files)
+
+- **What it is.** An assignment or page payload may list `attachments`: files the
+  teacher provides, such as a handout PDF or a slide deck, that Canvas Expert uploads to
+  the course and links in the rendered HTML. Each entry is
+  `{ "file": "<file name>", "label": "<link text>" }`.
+- **Where the files come from.** Files come only from the workspace folder
+  `To Review/Attachments/`, matched by exact file name. No other path is accepted.
+  Allowed types are `pdf`, `docx`, `pptx`, `xlsx`, `png`, `jpg`, and `jpeg`. An agent
+  that cannot place files there asks the teacher to do it.
+- **Missing files block the push.** A missing, disallowed, or duplicate attachment
+  blocks the preview with the file name. This is unlike a printable, whose failure only
+  warns, because a missing attachment means authored content is broken.
+- **Upload.** Files upload at apply time to the course folder `Canvas Expert
+  Attachments`, once per course. Every tier of a family links the same uploaded file.
+- **On paper.** The printable lists the attachment labels under a "Materials" line, as
+  text, so the paper copy still says what else the student needs.
 
 ## 7. Laws (tested directly, once each)
 
