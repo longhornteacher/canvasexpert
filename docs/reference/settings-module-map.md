@@ -18,6 +18,7 @@ changes again.
 - Browser owner: `api/webui/static/settings.js`
 - Feature files: `api/webui/static/settings/*.js`
 - Settings route owner: `api/webui/routes/settings.py`
+- Forge tier tags and color routes: `api/webui/routes/gradebook_extra_time.py`
 - AI Authoring file/rebuild routes: `api/webui/ai_ta.py` and `api/webui/routes/library.py`
 - Persistence facade: `api/platform_services/config/__init__.py`
 - Persistence modules: `api/platform_services/config/*.py`
@@ -34,6 +35,7 @@ reports; this map intentionally does not maintain line-count snapshots.
 `settings.js` + feature files currently own:
 
 - Canvas base/token reveal, save, and connection test flow
+- Forge public tier tags and fixed swatch colors, saved in synced settings; color choices apply to future pushes only
 - Canvas course browser plus Current/Previous and removal actions
 - download root, workspace folder open, and AI Authoring folder/rebuild actions
 - checking for, downloading, and applying an in-app update (teacher-initiated

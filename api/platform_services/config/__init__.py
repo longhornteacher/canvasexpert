@@ -41,6 +41,7 @@ from .gradebook import (
     TIER_NAMES,
     get_extra_time, set_extra_time,
     get_tier_tags, set_tier_tags,
+    get_tier_colors, set_tier_colors,
 )
 
 # --- Feedback tools personas and teacher-authored contracts ---

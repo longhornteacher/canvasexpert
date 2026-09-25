@@ -41,7 +41,8 @@ class PageAdapter:
         title = normalize_student_text(data.get("title") or "").strip()
         model = {key: normalize_author_model(data[key]) for key in _RENDER_FIELDS if key in data}
         model["title"] = title
-        body = render_page(model)
+        tier_colors = config.get_tier_colors()
+        body = render_page(model, palette_key=tier_colors["untiered"])
         published = bool(prepare_request.get("published"))
         module_name = prepare_request.get("module_name") or None
         if module_name:

@@ -55,3 +55,19 @@ def save_tier_tags(tags: str = Form(...)):
     except json.JSONDecodeError as e:
         return JSONResponse({"ok": False, "error": f"bad request: {e}"})
     return JSONResponse({"ok": True, "tier_tags": config.get_tier_tags()})
+
+
+@router.get("/api/tier-colors")
+def get_tier_colors_route():
+    return JSONResponse({"ok": True, "tier_colors": config.get_tier_colors()})
+
+
+@router.post("/api/tier-colors")
+def save_tier_colors(colors: str = Form(...)):
+    try:
+        config.set_tier_colors(json.loads(colors))
+    except json.JSONDecodeError as e:
+        return JSONResponse({"ok": False, "error": f"bad request: {e}"})
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    return JSONResponse({"ok": True, "tier_colors": config.get_tier_colors()})

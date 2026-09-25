@@ -82,6 +82,8 @@ EXPECTED = [
     ('/api/temp-upload', ('POST',)),
     ('/api/tier-tags', ('GET',)),
     ('/api/tier-tags', ('POST',)),
+    ('/api/tier-colors', ('GET',)),
+    ('/api/tier-colors', ('POST',)),
     ('/api/update/apply', ('POST',)),
     ('/api/update/cancel', ('POST',)),
     ('/api/update/download', ('POST',)),

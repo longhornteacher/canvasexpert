@@ -17,6 +17,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from api.platform_services import config, workspace
+from engine.rendering.forge.palette import PALETTES
 from .. import deps
 from api import operational_log, runtime_paths
 from ..local_request_guard import csrf_token
@@ -256,6 +257,8 @@ def settings_page(request: Request):
         ],
         "computer_name": os.environ.get("COMPUTERNAME", "this PC"),
         "tier_tags": config.get_tier_tags(),
+        "tier_colors": config.get_tier_colors(),
+        "tier_palettes": PALETTES,
         "workspace_status": (root or "no OneDrive found — using local folders"),
         "workspace_is_local": not bool(root),
     })

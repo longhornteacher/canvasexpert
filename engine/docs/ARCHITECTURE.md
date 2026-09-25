@@ -27,9 +27,12 @@ AssignmentForge and PageForge use a separate plain-dictionary path. The API pars
 and validates their `2.0-json` envelopes, normalizes author text, and passes the
 result to `engine/rendering/forge/` for Canvas HTML. This package owns the shared
 palette, author-HTML allowlist and decoration, assignment/page layouts, and
-submission wording. It has no `api` imports, Canvas token, network access, or
-student data. The adapters freeze the rendered HTML into the reviewed operation
-payload, so its source digest covers the actual Canvas content.
+submission wording. Its fixed swatches and canonical default tier colors live in
+`engine/rendering/forge/palette.py`; the teacher's synced color choices are read by
+the operation adapters while preparing an assignment or page. It has no `api`
+imports, Canvas token, network access, or student data. The adapters freeze the
+rendered HTML into the reviewed operation payload, so its source digest covers the
+actual Canvas content.
 
 ## Main Layers
 

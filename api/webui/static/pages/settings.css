@@ -21,6 +21,7 @@
 .ce-settings-label { font-size: 13px; }
 .ce-settings-compact-hint { margin: var(--ce-space-1) 0 var(--ce-space-2); }
 .ce-settings-tier-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ce-tier-settings-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ce-space-2); }
 .ce-settings-section-gap { margin-top: var(--ce-space-3); }
 .ce-settings-list { margin: var(--ce-space-2) 0 0; padding-left: 18px; }
 .ce-settings-course-actions { margin-top: var(--ce-space-4); }
@@ -59,6 +60,7 @@
 .danger { border-color: var(--ce-danger); color: var(--ce-danger); }
 @media (max-width: 760px) {
   .ce-settings-tier-grid { grid-template-columns: minmax(0, 1fr); }
+  .ce-tier-settings-row { grid-template-columns: minmax(0, 1fr); }
   .url-row, .token-row, .ce-settings-input-row { align-items: stretch; flex-wrap: wrap; }
   .url-static, .ce-settings-url-input, .ce-settings-input-row input { width: 100%; }
   .profiles, .profiles tbody, .profiles tr, .profiles td { display: block; width: 100%; }

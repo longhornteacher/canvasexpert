@@ -25,7 +25,7 @@ DOWNLOAD_ROOT_DEFAULT = os.path.join(os.path.expanduser("~"), "Desktop", "Canvas
 # self-update mirrors wholesale -- see runtime_paths.migrate_legacy_file().
 LEGACY_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.json")
 CONFIG_PATH = str(runtime_paths.local_app_dir() / "config.json")
-SYNCED_KEYS = ("saved_courses", "extra_time", "late_sweep", "tier_tags",
+SYNCED_KEYS = ("saved_courses", "extra_time", "late_sweep", "tier_tags", "tier_colors",
                "ai_ta_persona", "roster_student_settings",
                # Retired tier/group schemes remain registered as inert stored state.
                "roster_tier_schemes", "roster_group_schemes",

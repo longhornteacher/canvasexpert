@@ -120,7 +120,7 @@ def _rubric_html(rubric, palette):
     return f'<table style="width:100%;max-width:100%;border-collapse:collapse">{"".join(rows)}</table>'
 
 
-def render_assignment(model: dict, *, palette_key: str, public_tag: str | None,
+def render_assignment(model: dict, *, palette_key: str, tier: str | None, public_tag: str | None,
                       assignment_group: str | None, printable_link: str | None) -> str:
     """Render the §4 student-facing assignment description in its locked order."""
     palette = palette_for(palette_key)
@@ -150,7 +150,7 @@ def render_assignment(model: dict, *, palette_key: str, public_tag: str | None,
     support_parts = [_supports_html(model.get("supports"), palette), _supports_html(model.get("tier_supports"), palette)]
     support_body = "".join(support_parts)
     if support_body:
-        out.append(_details("Go further" if palette_key == "blue" else "Supports", support_body, palette))
+        out.append(_details("Go further" if tier == "Accelerate" else "Supports", support_body, palette))
     out.append(_extras_html(model.get("extras"), palette))
     if printable_link:
         link = _e(printable_link)
@@ -160,10 +160,10 @@ def render_assignment(model: dict, *, palette_key: str, public_tag: str | None,
     return "".join(out)
 
 
-def render_page(model: dict) -> str:
+def render_page(model: dict, *, palette_key: str) -> str:
     """Render standard or freeform PageForge page HTML."""
     layout = model.get("layout", "standard")
-    palette = palette_for("default")
+    palette = palette_for(palette_key)
     unit_eyebrow, unit_body = _unit_parts(model.get("unit_info"))
     out = []
     if layout == "freeform":

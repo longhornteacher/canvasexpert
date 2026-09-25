@@ -247,17 +247,37 @@
   <form id="tier-tags-form">
     <div class="settings-grid ce-settings-tier-grid">
       {% for name in ["Support", "Core", "Accelerate"] %}
-      <label>{{ name }} tag <small class="lbl-hint">(required when used)</small>
-        <input type="text" class="tier-tag-input" data-tier="{{ name }}"
-               value="{{ tier_tags[name] }}" placeholder="e.g. {{ {'Support':'Silver','Core':'Red','Accelerate':'Blue'}[name] }}"
-               autocomplete="off">
-      </label>
+      <div class="ce-tier-settings-row">
+        <label>{{ name }} tag <small class="lbl-hint">(required when used)</small>
+          <input type="text" class="tier-tag-input" data-tier="{{ name }}"
+                 value="{{ tier_tags[name] }}" placeholder="e.g. {{ {'Support':'Silver','Core':'Red','Accelerate':'Blue'}[name] }}"
+                 autocomplete="off">
+        </label>
+        <label>{{ name }} color
+          <select class="tier-color-input" data-tier="{{ name }}" style="border-left:10px solid {{ tier_palettes[tier_colors[name]].dark }}">
+            {% for key, palette in tier_palettes.items() %}
+            <option value="{{ key }}" data-dark="{{ palette.dark }}" style="background-color:{{ palette.dark }};color:#fff" {% if tier_colors[name] == key %}selected{% endif %}>■ {{ key }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
       {% endfor %}
+      <div class="ce-tier-settings-row">
+        <span></span>
+        <label>Untiered and pages color
+          <select class="tier-color-input" data-tier="untiered" style="border-left:10px solid {{ tier_palettes[tier_colors.untiered].dark }}">
+            {% for key, palette in tier_palettes.items() %}
+            <option value="{{ key }}" data-dark="{{ palette.dark }}" style="background-color:{{ palette.dark }};color:#fff" {% if tier_colors.untiered == key %}selected{% endif %}>■ {{ key }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
     </div>
     <div class="ce-actions">
-      <button type="submit" class="primary">Save tags</button>
+      <button type="submit" class="primary">Save tags and colors</button>
     </div>
-    <p id="tier-tags-status" class="status"></p>
+    <p id="tier-tags-status" class="status" role="status" aria-live="polite"></p>
+    <p class="ce-hint">Color choices apply to future pushes only. Existing Canvas content keeps its current colors.</p>
   </form>
 </section>
 
@@ -452,6 +472,13 @@
 <script>
 (function () {
   var form = document.getElementById("tier-tags-form");
+  document.querySelectorAll(".tier-color-input").forEach(function (select) {
+    function showSwatch() {
+      var option = select.options[select.selectedIndex];
+      if (option) select.style.borderLeftColor = option.dataset.dark;
+    }
+    select.addEventListener("change", showSwatch);
+  });
   if (!form) return;
   form.addEventListener("submit", function (e) {
     e.preventDefault();
@@ -459,12 +486,24 @@
     document.querySelectorAll(".tier-tag-input").forEach(function (inp) {
       tags[inp.dataset.tier] = inp.value.trim();
     });
+    var colors = {};
+    document.querySelectorAll(".tier-color-input").forEach(function (inp) {
+      colors[inp.dataset.tier] = inp.value;
+    });
     var status = document.getElementById("tier-tags-status");
     status.textContent = "Saving…";
-    fetch("/api/tier-tags", { method: "POST",
-      body: new URLSearchParams({ tags: JSON.stringify(tags) }) })
+    fetch("/api/tier-colors", { method: "POST",
+      body: new URLSearchParams({ colors: JSON.stringify(colors) }) })
       .then(function (r) { return r.json(); })
-      .then(function (d) { status.textContent = d.ok ? "Saved." : ("Error: " + (d.error || "failed")); })
+      .then(function (d) {
+        if (!d.ok) throw new Error(d.error || "failed");
+        return fetch("/api/tier-tags", { method: "POST",
+          body: new URLSearchParams({ tags: JSON.stringify(tags) }) });
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        status.textContent = d.ok ? "Saved." : ("Error: " + (d.error || "failed"));
+      })
       .catch(function (e) { status.textContent = "Error: " + e; });
   });
 })();

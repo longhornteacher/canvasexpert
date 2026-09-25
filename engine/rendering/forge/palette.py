@@ -6,9 +6,18 @@ PALETTES = {
     "silver": {"dark": "#4f5b66", "tint": "#f1f3f5"},
     "red": {"dark": "#a63a2f", "tint": "#fbefed"},
     "blue": {"dark": "#1f5a96", "tint": "#edf3fa"},
-    "default": {"dark": "#1e6f6a", "tint": "#e7f3f1"},
+    "teal": {"dark": "#1e6f6a", "tint": "#e7f3f1"},
+    "green": {"dark": "#2e6b34", "tint": "#edf5ee"},
+    "gold": {"dark": "#80600f", "tint": "#fbf5e3"},
+    "purple": {"dark": "#63428f", "tint": "#f3eff9"},
+    "orange": {"dark": "#a44a12", "tint": "#fcf0e8"},
 }
-TIER_PALETTE_KEYS = {"Support": "silver", "Core": "red", "Accelerate": "blue"}
+DEFAULT_TIER_COLORS = {
+    "Support": "silver",
+    "Core": "red",
+    "Accelerate": "blue",
+    "untiered": "teal",
+}
 NEUTRALS = {
     "ink": "#2d3b45",
     "muted": "#5b6770",

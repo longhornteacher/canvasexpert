@@ -189,6 +189,40 @@ def test_payload_build_accepts_tiers(tmp_path, monkeypatch):
     assert all("<p>Hi</p>" in row["description"] for row in payload["tiers"])
 
 
+def test_tier_colors_are_resolved_during_prepare_and_frozen_in_payload(tmp_path, monkeypatch):
+    from api.platform_services import config
+
+    af_file = tmp_path / "colored.assignmentforge.json"
+    af_file.write_text(
+        """<ASSIGNMENTFORGE_JSON>
+{"version":"2.0-json","type":"ASSIGNMENT","title":"Colored","points":10,
+ "overview":"<p>Hi</p>","directions":[{"html":"<p>Work.</p>","response":"none"}],
+ "supports":{"sentence_frames":["I can ___"]},
+ "tiers":[{"label":"Support"},{"label":"Core"},{"label":"Accelerate"}]}
+</ASSIGNMENTFORGE_JSON>""",
+        encoding="utf-8",
+    )
+    colors = {"Support": "purple", "Core": "red", "Accelerate": "blue", "untiered": "teal"}
+    monkeypatch.setattr(config, "get_tier_colors", lambda: dict(colors))
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {
+        "Support": "Silver", "Core": "Red", "Accelerate": "Blue",
+    })
+    request = {"path": str(af_file)}
+    payload = AssignmentAdapter().build_payload(request)
+    support = payload["tiers"][0]["description"]
+    accelerate = payload["tiers"][2]["description"]
+    assert "#63428f" in support
+    assert "Go further" in accelerate
+    digest = AssignmentAdapter().source_digest(payload)
+
+    colors["Support"] = "orange"
+    assert "#63428f" in payload["tiers"][0]["description"]
+    assert digest == AssignmentAdapter().source_digest(payload)
+    updated = AssignmentAdapter().build_payload(request)
+    assert "#a44a12" in updated["tiers"][0]["description"]
+    assert AssignmentAdapter().source_digest(updated) != digest
+
+
 def test_payload_keeps_supports_and_corrections_private_to_the_operation(tmp_path, monkeypatch):
     af_file = tmp_path / "tiered.assignmentforge.txt"
     af_file.write_text(

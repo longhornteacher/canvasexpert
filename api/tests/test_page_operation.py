@@ -123,6 +123,25 @@ def test_prepare_with_valid_file(tmp_path, monkeypatch):
     digest = adapter.source_digest(payload)
     assert len(digest) == 64  # SHA-256 hex
 
+
+def test_page_uses_untiered_color_during_prepare_and_freezes_it(tmp_path, monkeypatch):
+    _root(tmp_path, monkeypatch)
+    _mock_active_courses(monkeypatch)
+    path = _write_pageforge(tmp_path)
+    colors = {"Support": "silver", "Core": "red", "Accelerate": "blue", "untiered": "purple"}
+    monkeypatch.setattr(config, "get_tier_colors", lambda: dict(colors))
+    adapter = PageAdapter()
+    request = {"path": path}
+    payload = adapter.build_payload(request)
+    assert "#63428f" in payload["body"]
+    digest = adapter.source_digest(payload)
+    colors["untiered"] = "orange"
+    assert "#63428f" in payload["body"]
+    assert digest == adapter.source_digest(payload)
+    updated = adapter.build_payload(request)
+    assert "#a44a12" in updated["body"]
+    assert adapter.source_digest(updated) != digest
+
     targets = adapter.verify_targets(payload, [{"course_id": "101"}, {"course_id": "102"}])
     assert len(targets) == 2
     assert targets[0]["target_key"] != targets[1]["target_key"]

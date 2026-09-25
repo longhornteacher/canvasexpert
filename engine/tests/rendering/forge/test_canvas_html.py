@@ -4,7 +4,7 @@ import pytest
 
 from engine.rendering.forge.author_html import validate_author_html
 from engine.rendering.forge.canvas_html import render_assignment, render_page
-from engine.rendering.forge.palette import ALLOWED_COLORS, PALETTES, TIER_PALETTE_KEYS
+from engine.rendering.forge.palette import ALLOWED_COLORS, DEFAULT_TIER_COLORS, PALETTES, NEUTRALS
 from engine.rendering.forge.submission_wording import submission_wording
 
 
@@ -30,22 +30,23 @@ def _assignment(**updates):
 
 
 def test_width_law_renderer_emits_only_fluid_widths():
-    html = render_assignment(_assignment(), palette_key="red", public_tag="Ruby", assignment_group=None, printable_link=None)
-    html += render_page({"title": "Unit", "layout": "standard", "overview": "<p>Intro</p>"})
+    html = render_assignment(_assignment(), palette_key="red", tier="Core", public_tag="Ruby", assignment_group=None, printable_link=None)
+    html += render_page({"title": "Unit", "layout": "standard", "overview": "<p>Intro</p>"}, palette_key="teal")
     assert not re.search(r"\b(?:width|height)\s*=", html, re.I)
     for match in re.finditer(r"(?:^|;)\s*(width|min-width|max-width)\s*:\s*([^;]+)", html, re.I):
         assert match.group(2).strip().lower() == "100%"
 
 
 def test_palette_law_renderer_uses_only_contract_colors():
-    html = render_assignment(_assignment(), palette_key="silver", public_tag="Silver", assignment_group="Daily", printable_link="/files/1")
-    html += render_page({"title": "Unit", "layout": "standard", "sections": [{"heading": "Week", "html": "<p>Plan</p>"}]})
+    html = render_assignment(_assignment(), palette_key="silver", tier="Support", public_tag="Silver", assignment_group="Daily", printable_link="/files/1")
+    html += render_page({"title": "Unit", "layout": "standard", "sections": [{"heading": "Week", "html": "<p>Plan</p>"}]}, palette_key="teal")
     assert _colors(html) <= ALLOWED_COLORS
-    assert set(PALETTES) == {"silver", "red", "blue", "default"}
+    assert set(PALETTES) == {"silver", "red", "blue", "teal", "green", "gold", "purple", "orange"}
+    assert DEFAULT_TIER_COLORS == {"Support": "silver", "Core": "red", "Accelerate": "blue", "untiered": "teal"}
 
 
 def test_label_privacy_law_does_not_render_canonical_label():
-    html = render_assignment(_assignment(), palette_key=TIER_PALETTE_KEYS["Support"], public_tag="Moon", assignment_group=None, printable_link=None)
+    html = render_assignment(_assignment(), palette_key="silver", tier="Support", public_tag="Moon", assignment_group=None, printable_link=None)
     assert "Moon" in html
     assert not re.search(r"\bSupport\b", re.sub(r"<[^>]+>", " ", html))
 
@@ -103,7 +104,7 @@ def test_submission_wording_contract(types, allowed_extensions, expected):
 
 @pytest.mark.parametrize(("tier", "expected"), [("Support", "Supports"), ("Core", "Supports"), ("Accelerate", "Go further")])
 def test_supports_summary_contract(tier, expected):
-    html = render_assignment(_assignment(), palette_key=TIER_PALETTE_KEYS[tier], public_tag="Student label", assignment_group=None, printable_link=None)
+    html = render_assignment(_assignment(), palette_key=DEFAULT_TIER_COLORS[tier], tier=tier, public_tag="Student label", assignment_group=None, printable_link=None)
     assert f"<summary" in html and f">{expected}</summary>" in html
 
 
@@ -129,7 +130,7 @@ def test_assignment_omits_empty_optional_blocks(block):
         "unit_info": {"unit": "OMIT_UNIT"},
     }[block]
     model[block] = [] if block in {"directions", "sections", "extras"} else None
-    html = render_assignment(model, palette_key="default", public_tag=None, assignment_group=None, printable_link=None)
+    html = render_assignment(model, palette_key="teal", tier=None, public_tag=None, assignment_group=None, printable_link=None)
     assert html
     assert sentinels[block] not in html
     assert not re.search(r"<details[^>]*>\s*</details>", html)
@@ -137,7 +138,7 @@ def test_assignment_omits_empty_optional_blocks(block):
 
 def test_tiered_assignment_render_structure():
     model = _assignment(tier_supports={"word_bank": ["evidence", "reasoning"]})
-    html = render_assignment(model, palette_key="blue", public_tag="Ocean", assignment_group="Daily", printable_link="https://canvas/files/7")
+    html = render_assignment(model, palette_key="blue", tier="Accelerate", public_tag="Ocean", assignment_group="Daily", printable_link="https://canvas/files/7")
     assert "<h2" in html and "Argument Paragraph" in html
     assert "Ocean · Unit 2" in html
     assert "Go further" in html and "evidence, reasoning" in html
@@ -146,7 +147,7 @@ def test_tiered_assignment_render_structure():
 
 
 def test_standard_page_render_structure():
-    html = render_page({"title": "Unit 2", "layout": "standard", "overview": "<p>Opening.</p>", "sections": [{"heading": "This week", "html": "<table><tr><td>Read</td></tr></table>", "kind": "section"}], "unit_info": {"unit": "Unit 2"}})
+    html = render_page({"title": "Unit 2", "layout": "standard", "overview": "<p>Opening.</p>", "sections": [{"heading": "This week", "html": "<table><tr><td>Read</td></tr></table>", "kind": "section"}], "unit_info": {"unit": "Unit 2"}}, palette_key="teal")
     assert "<h2" in html and "Unit 2" in html
     assert "<table" in html and "width:100%" in html
     assert "This week" in html and "<details" in html and "Unit info" in html
@@ -154,8 +155,38 @@ def test_standard_page_render_structure():
 
 def test_rubric_levels_render_as_escaped_subordinate_criterion_text():
     model = _assignment(rubric={"criteria": [{"name": "Claim", "points": 5, "levels": [{"label": "Strong", "points": 5, "description": "Specific & clear."}, {"label": "Emerging", "points": 1}]}]})
-    html = render_assignment(model, palette_key="default", public_tag=None, assignment_group=None, printable_link=None)
+    html = render_assignment(model, palette_key="teal", tier=None, public_tag=None, assignment_group=None, printable_link=None)
     assert "<strong>Strong</strong> - 5 pts; Specific &amp; clear." in html
     assert "<strong>Emerging</strong> - 1 pt</small>" in html
     assert re.search(r'<th style="[^"]*text-align:left">Criterion</th>', html)
     assert re.search(r'<th style="[^"]*text-align:left">Total</th>', html)
+
+
+
+def _luminance(color):
+    channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+    linear = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
+    return sum(weight * channel for weight, channel in zip((0.2126, 0.7152, 0.0722), linear))
+
+
+def _contrast(first, second):
+    light, dark = sorted((_luminance(first), _luminance(second)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
+def test_each_palette_meets_wcag_aa_for_required_text_pairs():
+    for palette in PALETTES.values():
+        dark, tint = palette["dark"], palette["tint"]
+        assert _contrast(dark, "#ffffff") >= 4.5
+        assert _contrast(dark, tint) >= 4.5
+        assert _contrast(NEUTRALS["ink"], tint) >= 4.5
+        assert _contrast("#ffffff", dark) >= 4.5
+
+
+def test_tier_color_is_independent_of_accelerate_support_label():
+    html = render_assignment(
+        _assignment(), palette_key="purple", tier="Accelerate", public_tag="Ocean",
+        assignment_group=None, printable_link=None,
+    )
+    assert PALETTES["purple"]["dark"] in html
+    assert ">Go further</summary>" in html

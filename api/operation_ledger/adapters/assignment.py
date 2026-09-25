@@ -9,7 +9,6 @@ Excluded from this adapter:
 import requests
 
 from engine.rendering.forge.canvas_html import render_assignment
-from engine.rendering.forge.palette import TIER_PALETTE_KEYS
 
 from .. import models
 from . import assignment_tiered, assignment_whole, differentiated_bridge
@@ -63,6 +62,7 @@ class AssignmentAdapter:
             raise ValueError("Printable attachments are not supported for tiered assignments")
 
         model = _render_model(data)
+        tier_colors = config.get_tier_colors()
         model["title"] = name
         assignment_group = str(prepare_request.get("assignment_group_name") or "").strip()
         tiers = []
@@ -84,7 +84,8 @@ class AssignmentAdapter:
                     "title": differentiated_bridge.source_title(base_title, resolved["tag"]),
                     "description": render_assignment(
                         tier_model,
-                        palette_key=TIER_PALETTE_KEYS[resolved["tier"]],
+                        palette_key=tier_colors[resolved["tier"]],
+                        tier=resolved["tier"],
                         public_tag=resolved["tag"],
                         assignment_group=assignment_group,
                         printable_link=None,
@@ -94,7 +95,8 @@ class AssignmentAdapter:
         else:
             description = render_assignment(
                 model,
-                palette_key="default",
+                palette_key=tier_colors["untiered"],
+                tier=None,
                 public_tag="",
                 assignment_group=assignment_group,
                 printable_link=None,

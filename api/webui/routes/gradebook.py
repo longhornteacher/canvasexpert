@@ -15,10 +15,12 @@ from .gradebook_common import (
 from .gradebook_extra_time import (
     get_extra_time,
     get_tier_tags_route,
+    get_tier_colors_route,
     list_students,
     router as _extra_time_router,
     save_extra_time,
     save_tier_tags,
+    save_tier_colors,
 )
 from .gradebook_policy import (
     apply_late_policy,
@@ -41,7 +43,9 @@ __all__ = [
     "get_extra_time",
     "save_extra_time",
     "get_tier_tags_route",
+    "get_tier_colors_route",
     "save_tier_tags",
+    "save_tier_colors",
     "_assignment",
     "_assignment_submissions",
     "_course_assignments",
