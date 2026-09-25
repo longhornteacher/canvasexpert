@@ -20,8 +20,9 @@ this file wins, and the authoring contract is the one that gets fixed.
    "Printable" PDF, uploaded to Canvas and linked in the assignment. The Canvas page itself
    does not need to print well.
 3. **White and quiet, with color for meaning.** White backgrounds, very light tints, and
-   one accent color. The accent comes from the assignment's tier. Colors never go beyond
-   the fixed palette.
+   one accent color. The teacher chooses each tier's color, and the untiered default,
+   from a fixed set of swatches in synced Settings (§2). Colors never go beyond those
+   swatches.
 4. **Width follows the container.** Nothing rendered or authored has a fixed width. Only
    `width:100%` and `max-width:100%` are allowed.
 5. **Non-essential help is collapsed.** The rubric, supports, extra help, and unit info
@@ -30,17 +31,26 @@ this file wins, and the authoring contract is the one that gets fixed.
 
 ## 2. Tier model: three tiers, no student knowledge
 
-| Canonical tier | Readiness | Public tag (teacher Settings) | Palette key |
+| Canonical tier | Readiness | Public tag (teacher Settings) | Color (teacher Settings, default) |
 |---|---|---|---|
 | Support | below level | Silver | `silver` |
 | Core | on level | Red | `red` |
 | Accelerate | above level | Blue | `blue` |
+| (untiered assignments and all pages) | n/a | n/a | `teal` |
 
 - **"Extend" is removed** from every Forge, every setting, and all code. Accelerate is the
   highest tier. There is no fourth tier and no alias for one.
-- **Colors belong to the canonical tier, not to the tag text.** The palette key is fixed per
-  tier as shown above. Renaming a public tag in Settings does not change its color. There
-  is no color setting.
+- **Colors are a teacher preference.** They live in synced state, like `tier_tags`,
+  under the key `tier_colors`. It holds one swatch key per canonical tier plus
+  `untiered`. The defaults are shown above.
+  - **Allowed values:** each value must be a §3 swatch key. Free hex colors are not
+    allowed.
+  - **No shared colors:** the three tiers must use three different swatches.
+    `untiered` may match one of them.
+  - **Independent of tags:** renaming a public tag does not change its color, and
+    changing a color does not change its tag.
+  - **Layout is not a preference:** section order, collapsed boxes, and widths are
+    product-owned.
 - **The label stays private.** Student-visible text (Canvas HTML and the printable) shows
   the public tag, never the canonical label. A Support student sees "Silver", never
   "Support".
@@ -48,19 +58,27 @@ this file wins, and the authoring contract is the one that gets fixed.
   tier scheme, no per-student tier, no group set chosen as a tier source, no tier data in
   scoring session rows. The teacher assigns each tier's Canvas assignment to students or
   pods in Canvas. Only assigned students see a tier assignment.
-- An untiered assignment and every page use the `default` palette key.
+- An untiered assignment and every page use the `untiered` color.
+- **The review freezes the color.** The push resolves colors when it prepares, and the
+  frozen review keeps them. A Settings change after preview does not alter an apply.
 
-## 3. Palette
+## 3. Palette (fixed swatches)
 
 Every color in rendered output comes from this table. Ink `#2d3b45` is the Canvas body
-text color. Contrast ratios were measured against WCAG 2.x and all meet AA.
+text color. Contrast ratios were measured against WCAG 2.x, and all meet AA for normal
+text, including white badge text on the dark shade. A new swatch needs the same
+measurements before it is added.
 
 | Key | Dark (headings, borders, badges) | Tint (shading) | Dark on white | Dark on tint |
 |---|---|---|---|---|
 | `silver` | `#4f5b66` | `#f1f3f5` | 6.95 | 6.25 |
 | `red` | `#a63a2f` | `#fbefed` | 6.43 | 5.71 |
 | `blue` | `#1f5a96` | `#edf3fa` | 7.09 | 6.35 |
-| `default` | `#1e6f6a` | `#e7f3f1` | 5.94 | 5.23 |
+| `teal` | `#1e6f6a` | `#e7f3f1` | 5.94 | 5.23 |
+| `green` | `#2e6b34` | `#edf5ee` | 6.42 | 5.78 |
+| `gold` | `#80600f` | `#fbf5e3` | 5.84 | 5.36 |
+| `purple` | `#63428f` | `#f3eff9` | 7.76 | 6.84 |
+| `orange` | `#a44a12` | `#fcf0e8` | 5.89 | 5.26 |
 
 Shared neutrals: ink `#2d3b45`, muted `#5b6770`, rule `#d9dee2`, surface `#ffffff`, and
 `#ffffff` text on a dark badge.
@@ -118,7 +136,7 @@ When there are several types, the wordings are joined with " or ".
 A page's default look mirrors an assignment's.
 
 - **Layout `standard`** (default):
-  1. Banner. The eyebrow is the unit and the palette is `default`.
+  1. Banner. The eyebrow is the unit and the color is the teacher's `untiered` color.
   2. Overview.
   3. Sections. A section may have `kind: "collapsed"` to render as a `<details>` box.
   4. Extras.
@@ -213,7 +231,8 @@ bodies.
 
 - Printing directly from the Canvas page.
 - Canvas mobile app fidelity.
-- Per-teacher colors or palette settings.
+- Free hex colors, or visual preferences other than swatch choice (layout stays
+  product-owned).
 - Emoji or icon decoration.
 - Due dates in student-visible text.
 - A fourth tier.

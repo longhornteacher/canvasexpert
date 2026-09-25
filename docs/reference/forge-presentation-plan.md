@@ -441,10 +441,103 @@ receive contracts that describe only content.
 to CS8 as unpublished `[TEST]` items. There is no sandbox course. Open the boxes, and check the full width on a wide screen and a
 narrow window.
 
+## 5b. Batch 2b: teacher-chosen tier colors (synced)
+
+**Risk:** medium (settings plus the rendered HTML of reversible content operations).
+**Depends on:** Batch 2. Batch 3 depends on this batch.
+
+**Objective.** The teacher chooses each tier's color, and the untiered color, from the
+contract's fixed swatches (contract §2 and §3). The choice lives in synced state, and
+every push renders with it.
+
+**Seams (at commit `8bbe531`)**
+- **Engine palette.** `engine/rendering/forge/palette.py` has `PALETTES` (four keys,
+  including `"default"`) and `TIER_PALETTE_KEYS`.
+- **Renderer.** `engine/rendering/forge/canvas_html.py`:
+  - `render_assignment(... palette_key ...)` chooses the Supports summary with
+    `palette_key == "blue"`, which is wrong once colors are configurable;
+  - `render_page` hard-codes `palette_for("default")`.
+- **Adapters.**
+  - `api/operation_ledger/adapters/assignment.py`: `TIER_PALETTE_KEYS[resolved["tier"]]`
+    at ~:87, and `palette_key="default"` at ~:97.
+  - `api/operation_ledger/adapters/page.py` `build_payload` calls `render_page(model)`.
+- **Synced config.** `api/platform_services/config/gradebook.py` has `get_tier_tags`/
+  `set_tier_tags` (~:20–27), with key registration in `config/_io.py` and re-exports in
+  `config/__init__.py`.
+- **Settings UI.**
+  - Routes: `GET/POST /api/tier-tags` in `api/webui/routes/gradebook_extra_time.py`
+    (~:47–57), re-exported by `routes/gradebook.py`.
+  - Template: `api/webui/templates/settings.html`, tier rows ~:241–252 and save JS
+    ~:454–464. Template data comes from `routes/pages.py` ~:258.
+
+**Acceptance criteria**
+1. **Engine swatches.** `PALETTES` holds exactly the eight swatches in contract §3, with
+   `"default"` renamed to `"teal"`. `TIER_PALETTE_KEYS` is replaced by exported defaults
+   `DEFAULT_TIER_COLORS = {"Support": "silver", "Core": "red", "Accelerate": "blue",
+   "untiered": "teal"}`, and the engine does no other tier→color mapping.
+2. **Renderer.**
+   - `render_assignment` takes `palette_key` plus a separate `tier` argument, the
+     canonical tier or `None`. "Go further" is chosen by `tier == "Accelerate"`, never
+     by color.
+   - `render_page` takes `palette_key`.
+   - The printable in Batch 3 will use the same keys.
+3. **Synced setting.** `config.get_tier_colors()` and `config.set_tier_colors(mapping)`
+   use the synced key `tier_colors`, registered like `tier_tags`.
+   - `get_tier_colors` returns all four entries, filling each missing or invalid entry
+     from `DEFAULT_TIER_COLORS`.
+   - `set_tier_colors` refuses any value outside the swatch keys, and any duplicate among
+     the three tiers, with a specific message. Nothing is saved on refusal.
+   - Stored data is never rewritten by `get`.
+4. **Adapters.** The assignment and page adapters resolve colors through
+   `config.get_tier_colors()` inside `build_payload`, so the frozen review and
+   `source_digest` carry the rendered colors. Apply never re-reads Settings.
+5. **Settings UI.**
+   - Beside each tier's tag field there is a swatch picker: a select of the eight keys,
+     each showing its dark-shade chip.
+   - There is also an "Untiered and pages" picker.
+   - Saving calls a new `GET/POST /api/tier-colors` route next to `/api/tier-tags`, and
+     a refusal shows the server's message.
+   - The Settings copy says colors apply to future pushes only.
+6. **No MCP change.** The runtime reads the setting; agents never pass colors. If an
+   agent-facing read would benefit from knowing colors, that is out of scope.
+7. **Tests.**
+   - **Law** (one test at `palette.py`): every swatch meets WCAG AA (≥ 4.5) for dark on
+     white, dark on tint, ink on tint, and white on dark, computed in the test from the
+     table. This makes a future swatch that fails contrast fail the suite.
+   - **Law:** the existing palette law still holds, with the allowed colors derived from
+     `PALETTES`.
+   - **Contract:** `set_tier_colors` parametrized over every swatch key (accepted) plus
+     an invalid key and a duplicate (refused).
+   - **Example:** one tiered render with a non-default mapping (e.g. Support→purple)
+     shows purple's dark color and still labels Accelerate "Go further".
+8. **Docs.** Contract §2/§3 (already updated at plan time), `docs/reference/settings-module-map.md`,
+   and `engine/docs/ARCHITECTURE.md` if it names the palette.
+
+**Non-goals**
+- Free hex colors.
+- Layout preferences.
+- Per-course colors.
+- Re-rendering already-pushed Canvas content.
+- Printables (Batch 3).
+- Any MCP tool parameter.
+
+**Gate**
+- Focused:
+  `py -m pytest -p no:randomly engine/tests api/tests/test_assignment_operation.py api/tests/test_assignment_tier_operation.py api/tests/test_page_operation.py api/tests/webui api/tests/test_shared_kv.py api/tests/test_route_contract.py`
+- Render `/settings` in the pytest-isolated app. Confirm the pickers are present and
+  saving works through the route, with zero new console errors.
+
+**Stop conditions**
+- `shared_kv` sync cannot register a new key without changing its contract.
+- Any consumer outside the two adapters and the renderer needs tier colors.
+
+**Teacher smoke after merge (CS8, unpublished `[TEST]` item).** Change the untiered color
+in Settings, push one `[TEST]` assignment, and confirm the new color. Then set it back.
+
 ## 6. Batch 3: generated printable PDFs and teacher attachments
 
 **Risk:** high. It adds Canvas file writes to tiered delivery and changes resume behavior.
-**Depends on:** Batch 2.
+**Depends on:** Batch 2b.
 
 **Objective.** Preparing an eligible assignment push generates a standalone printable per
 tier (contract §6). Applying it uploads each printable and links it in its own tier's
@@ -565,15 +658,19 @@ code. Locked now:
 - **D4: attachments in Batch 3.** Teacher-provided files upload and link through the
   printable path (contract §6.1).
 - **Live testing uses CS8**, with unpublished `[TEST]` items. There is no sandbox course.
+- **D5: colors are a synced teacher preference** chosen from fixed swatches (contract
+  §2 and §3). Layout is not a preference. This is implemented by Batch 2b.
 
 ## 9. Next batch (single current pointer)
 
-**Next: Batch 3 (§6).** Read this plan's §0, §1.4, §3 (the Printable bullet), and §6;
-read the contract's §6 and §7 (laws 1, 2 and 4); and read
-`docs/reference/operation-ledger-module-map.md` plus the ordered-step and checkpoint
-sections of `docs/contracts/operation-ledger-contract.md`. Batch 3 now includes
-attachments, so also read contract §4 item 9, §5, and §6.1. There are no outstanding
+**Next: Batch 2b (§5b).** Read this plan's §0, §3, and §5b, the contract's §2, §3 and §7
+(law 2), and `docs/reference/settings-module-map.md`. There are no outstanding
 decisions.
+
+**After it: Batch 3 (§6).** Read this plan's §0, §1.4, §3 (the Printable bullet), and §6;
+the contract's §4 item 9, §5, §6, §6.1, and §7 (laws 1, 2 and 4); and
+`docs/reference/operation-ledger-module-map.md` plus the ordered-step and checkpoint
+sections of `docs/contracts/operation-ledger-contract.md`.
 
 Batch 2 live check passed on 2026-09-25 (CS8, unpublished `[TEST]` items). Canvas keeps
 `<section>`, `<aside>`, and `<details>`, and the width follows the window. Follow-up
