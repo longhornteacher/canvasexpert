@@ -16,20 +16,28 @@ results.
   compatibility seams for `_autoscore_queue`, `_validate_printable_pdf`,
   `_upload_course_file`, `_allowed_printable_roots`, and
   `requests`.
+- Assignment preparation freezes generated printable hashes and teacher attachment
+  names, labels, private paths, and hashes. Attachment files are resolved only under
+  the configured workspace `To Review/Attachments/` root. The adapter's rendered
+  Canvas HTML contains specific attachment/printable link slots; after review, apply
+  may fill only those slots from checkpointed Canvas file IDs. The final outbound
+  content request is write-ahead recorded after URL binding.
 - `api/operation_ledger/adapters/quiz.py` — `QuizAdapter` payload build, digest,
   target verification, baseline/drift, review shaping, and retry/reversal.
-- `api/operation_ledger/adapters/page.py` — page create/reconcile facade; still owns
-  Page-specific module-item behavior because Canvas page module attachment semantics
-  differ from Assignment-type items.
+- `api/operation_ledger/adapters/page.py` — page payload, teacher attachment upload
+  steps and links, page create/reconcile, and Page-specific module-item behavior
+  because Canvas page module attachment semantics differ from Assignment-type items.
 - `api/operation_ledger/adapters/quick_assignment.py` — quick-assignment create/reconcile facade.
 
 ## Execution Owners
 
 - `api/operation_ledger/adapters/assignment_whole.py` — whole-class assignment create,
-  printable upload, module attachment, autoscore scheduling, and whole reconcile.
+  printable and attachment upload steps, module attachment, autoscore scheduling, and
+  whole reconcile.
 - `api/operation_ledger/adapters/assignment_tiered.py` — differentiated family source
-  assignment-draft creation and exact-ID tiered reconcile. It performs no roster/group,
-  override, module, or family-tail work.
+  assignment-draft creation, shared attachment uploads, each tier's printable upload,
+  and exact-ID tiered reconcile. It performs no roster/group, override, module, or
+  family-tail work.
 - `api/operation_ledger/adapters/quiz_whole.py` — whole-class quiz coordinator and reconcile.
 - `api/operation_ledger/adapters/quiz_differentiated.py` — differentiated quiz
   coordinator, extra-time bucket handling, variant failure-state policy, shared
@@ -52,7 +60,9 @@ results.
 - `api/operation_ledger/adapters/adapter_support.py` — shared content-adapter step/result
   primitives: ordered projection for explicit orders, prepend/ensure/replace helpers,
   module-id recovery, outbound-marker detection, scalar-to-list normalization,
-  uncertain transport classification, and standard result shaping.
+  uncertain transport classification, and standard result shaping. File upload steps
+  use these ordered write-ahead/checkpoint primitives; confirmed exact file IDs are
+  checkpointed before the next Canvas call.
 - `api/operation_ledger/adapters/module_placement.py` — shared Canvas Assignment-type
   module find/create/attach behavior for Assignment and Quiz flows only.
 - `api/operation_ledger/adapters/differentiated_bridge.py` — one shared owner for
@@ -65,6 +75,10 @@ results.
 - Do not change step keys, checkpoint timing, `before_send` ordering, request digests,
   failure classification, or returned result keys without updating the durable contract
   and the high-risk adapter tests together.
+- Attachment and printable upload steps stop in Attention on uncertain outcomes or
+  missing exact file IDs. Resume may reuse an applied upload only after exact-ID Canvas
+  verification; filename or approximate match never proves completion, and uploads are
+  not automatically deleted.
 - Keep Assignment/Page module-item behavior separate. `module_placement.py` is only for
   Canvas Assignment-type module items.
 - The shared differentiated-family helper is the only differentiated owner allowed to

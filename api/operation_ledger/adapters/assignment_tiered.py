@@ -32,11 +32,20 @@ def execute(
     *,
     ordered_steps,
     find_assignment_group,
+    prepare_tier,
 ) -> dict:
     course_id = target["course_id"]
     tiers = payload["tiers"]
     steps = ordered_steps(target)
     for index, tier in enumerate(tiers):
+        description, printable_failure = prepare_tier(
+            tier=tier, tier_index=index, payload=payload,
+            course_id=course_id, steps=steps, context=context,
+        )
+        if printable_failure is not None:
+            return printable_failure
+        tier = {**tier, "description": description}
+        steps = ordered_steps({"steps": steps})
         assignment_key = f"create_tier_assignment:{index}"
         assignment_step = ensure_step(steps, assignment_key)
         assignment_id = assignment_step.get("returned_object_id")

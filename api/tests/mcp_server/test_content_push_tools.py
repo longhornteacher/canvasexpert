@@ -637,14 +637,14 @@ def test_a_real_pageforge_draft_freezes_through_the_real_adapter(_ledger):
         "course-x", "page", "welcome", published=True, module_name="Unit 3")
 
     assert result["ok"] is True
-    assert result["preview"] == {
-        "course_name": "Invented Course",
-        "page_title": "Welcome to Unit 3",
-        "published": True,
-        "module_name": "Unit 3",
-        "baseline_has_existing_page": False,
-        "baseline_page_url": None,
-    }
+    assert result["preview"]["course_name"] == "Invented Course"
+    assert result["preview"]["page_title"] == "Welcome to Unit 3"
+    assert result["preview"]["published"] is True
+    assert result["preview"]["module_name"] == "Unit 3"
+    assert result["preview"]["baseline_has_existing_page"] is False
+    assert result["preview"]["baseline_page_url"] is None
+    assert "Read this first." in result["preview"]["body"]
+    assert result["preview"]["attachments"] == []
 
 
 def test_mcp_differentiated_quiz_requires_dated_module_family(monkeypatch):

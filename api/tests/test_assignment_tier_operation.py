@@ -125,6 +125,9 @@ class FakeCanvas:
 
     def get(self, path, params=None, timeout=20):
         self.reads.append(path)
+        if "/files/" in path:
+            file_id = path.rsplit("/", 1)[-1]
+            return {"id": file_id, "display_name": "Printable"}, None
         if "/modules/" in path and "/items/" in path:
             module_id, item_id = path.split("/modules/")[1].split("/items/")
             return copy.deepcopy(self.module_items.get((module_id, item_id))), None
@@ -163,8 +166,27 @@ def _authoring_data():
             "tiers": copy.deepcopy(TIERS)}
 
 
-def _build(monkeypatch, **request_overrides):
-    monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.parse_file", lambda _path: (_authoring_data(), []))
+def _build(monkeypatch, authoring_data=None, **request_overrides):
+    from pathlib import Path
+    from api.operation_ledger.adapters import assignment as assignment_adapter
+
+    def fake_pdf(_html, _css, out_path):
+        Path(out_path).write_bytes(b"%PDF test printable")
+        return out_path
+
+    uploads = []
+
+    def fake_upload(course_id, file_path, *, folder="Canvas Expert Printables"):
+        file_id = str(len(uploads) + 1000)
+        uploads.append((course_id, Path(file_path).name, folder, file_id))
+        return {"id": file_id, "display_name": Path(file_path).name}, None
+
+    monkeypatch.setattr(assignment_adapter, "html_to_pdf", fake_pdf)
+    monkeypatch.setattr(assignment_adapter, "_upload_course_file", fake_upload)
+    monkeypatch.setattr(
+        "api.operation_ledger.adapters.assignment.af.parse_file",
+        lambda _path: (authoring_data or _authoring_data(), []),
+    )
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
         "Support": "Red", "Core": "Blue", "Accelerate": "Silver",
     })

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+@page { size: Letter; margin: 0.75in; }
+* { box-sizing: border-box; }
+body { color: {{ neutrals.ink }}; font-family: Calibri, Carlito, Arial, sans-serif; font-size: 11pt; line-height: 1.3; }
+.identity { margin: 0 0 16pt; font-size: 10pt; }
+.banner { margin: 0 0 12pt; padding: 12pt 14pt; background: {{ palette.tint }}; border-top: 5pt solid {{ palette.dark }}; }
+.eyebrow { margin: 0 0 4pt; color: {{ palette.dark }}; font-weight: bold; }
+h1 { margin: 0; color: {{ palette.dark }}; font-size: 19pt; }
+.submission { margin: 0 0 14pt; color: {{ neutrals.muted }}; font-weight: bold; }
+.direction { margin: 0 0 14pt; page-break-inside: avoid; }
+.direction-number { color: {{ palette.dark }}; font-weight: bold; margin-right: 5pt; }
+.answer-lines { margin: 8pt 0 0 18pt; }
+.answer-line { height: 22pt; border-bottom: 1pt solid {{ neutrals.rule }}; }
+.notebook-note { margin: 8pt 0 0 18pt; padding: 6pt 8pt; border: 1pt solid {{ neutrals.rule }}; font-style: italic; }
+.section-callout { margin: 10pt 0; padding: 8pt 10pt; background: {{ palette.tint }}; border-left: 3pt solid {{ palette.dark }}; }
+h2, h3, h4 { color: {{ palette.dark }}; }
+table { border-collapse: collapse; max-width: 100%; }
+th, td { padding: 5pt 7pt; border-bottom: 1pt solid {{ neutrals.rule }}; vertical-align: top; }
+.rubric-block th { background: {{ palette.tint }}; text-align: left; }
+.rubric-block th:last-child, .rubric-block td:last-child { text-align: right; }
+.support, .extra { margin: 10pt 0; }
+.extra-title { color: {{ palette.dark }}; font-weight: bold; }
+.materials { margin: 12pt 0; padding: 7pt 9pt; background: {{ palette.tint }}; }
+.unit-footer { margin-top: 18pt; padding-top: 7pt; border-top: 1pt solid {{ neutrals.rule }}; font-size: 9pt; }
+  </style>
+</head>
+<body>
+<p class="identity">Name: ______________________________ &nbsp;&nbsp; Date: ______________ &nbsp;&nbsp; Period: ______</p>
+<header class="banner">
+  {% if eyebrow %}<p class="eyebrow">{{ eyebrow | safe }}</p>{% endif %}
+  <h1>{{ title }}</h1>
+</header>
+<p class="submission">{{ submission_line }}</p>
+{% if overview %}<section class="overview">{{ overview | safe }}</section>{% endif %}
+{% for direction in directions %}
+<section class="direction">
+  <span class="direction-number">{{ direction.number }}.</span>{{ direction.html | safe }}
+  {{ direction.answer_space | safe }}
+</section>
+{% endfor %}
+{% if sections %}<section class="sections">{{ sections | safe }}</section>{% endif %}
+{% if rubric %}<section class="rubric-block"><h2>Rubric</h2>{{ rubric | safe }}</section>{% endif %}
+{% if supports %}<section class="support"><h2>Supports</h2>{{ supports | safe }}</section>{% endif %}
+{% if extras %}<section class="extras"><h2>Extra help</h2>{{ extras | safe }}</section>{% endif %}
+{% if attachment_labels %}<p class="materials"><strong>Materials:</strong> {{ attachment_labels | join(", ") }}</p>{% endif %}
+{% if unit_info %}<footer class="unit-footer"><strong>Unit information</strong>{{ unit_info | safe }}</footer>{% endif %}
+</body>
+</html>

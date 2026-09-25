@@ -33,6 +33,7 @@ quotes inside strings. Set `version` to `2.0-json` and `type` to `PAGE`. Version
     { "html": "<p>Bring your notes to class.</p>", "kind": "callout" }
   ],
   "extras": [ { "summary": "More practice", "html": "<p>Try another short comparison.</p>" } ],
+  "attachments": [ { "file": "Poetry Terms.pdf", "label": "Poetry terms handout" } ],
   "unit_info": { "unit": "Unit 2", "teks": ["8.10A"], "subject": "ELA", "grade": "8" }
 }
 ```
@@ -44,6 +45,14 @@ quotes inside strings. Set `version` to `2.0-json` and `type` to `PAGE`. Version
 - `sections`: optional array of `{ "heading", "html", "kind" }`. `kind` is
   `section` (default), `callout`, or `collapsed`. Omit the heading for a callout.
 - `extras`: optional non-essential help blocks, each with a `summary` and `html`.
+- `attachments`: optional array of `{ "file", "label" }` entries for teacher-provided
+  files students need. `file` is the exact bare file name and must be unique
+  (case-insensitively); `label` is the link text students see. Allowed types are PDF,
+  DOCX, PPTX, XLSX, PNG, JPG, and JPEG. Ask the teacher to place each exact file in the
+  Canvas Expert workspace folder
+  `To Review/Attachments/` before returning the payload. Do not put a local path in the
+  JSON. If the teacher cannot place the file there, ask them to do so before preparing
+  the page. Missing or duplicate files prevent preparation.
 - `unit_info`: optional student-facing `unit`, `teks` (string array), `subject`,
   and `grade`.
 - `metadata`: optional private notes; it is ignored and not shown to students.
@@ -79,7 +88,8 @@ validation error rather than being silently removed. See
 `docs/contracts/forge-presentation-contract.md` section 8 for allowed tags and
 attributes. For standard pages, Canvas Expert renders the title banner, fixed
 layout, section and callout boxes, collapsed sections and extras, and unit
-information. Its palette and presentation stay consistent across pages.
+information. Its palette and presentation stay consistent across pages. Canvas Expert
+also adds a link for each listed attachment after the page content.
 
 Pages are for reference and learning content such as unit hubs, directions, and
 resource collections. If students must submit work, author an AssignmentForge
@@ -91,6 +101,7 @@ assignment for that work.
 3. Freeform pages have a body and omit overview and sections.
 4. Every HTML fragment follows the allowlist. Standard pages have no style attributes;
    freeform styles follow the width and palette laws. No placeholders.
+5. Every listed attachment has a label and its exact file is in `To Review/Attachments/`.
 
 ## 7. FULL EXAMPLE
 ```text

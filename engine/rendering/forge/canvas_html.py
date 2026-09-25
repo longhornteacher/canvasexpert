@@ -121,7 +121,8 @@ def _rubric_html(rubric, palette):
 
 
 def render_assignment(model: dict, *, palette_key: str, tier: str | None, public_tag: str | None,
-                      assignment_group: str | None, printable_link: str | None) -> str:
+                      assignment_group: str | None, printable_link: str | None,
+                      attachment_slots: list[dict] | None = None) -> str:
     """Render the §4 student-facing assignment description in its locked order."""
     palette = palette_for(palette_key)
     title = model.get("title", "")
@@ -155,12 +156,18 @@ def render_assignment(model: dict, *, palette_key: str, tier: str | None, public
     if printable_link:
         link = _e(printable_link)
         out.append(f'<p style="margin:14px 0;padding:10px;background-color:{palette["tint"]}"><strong>Printable:</strong> <a href="{link}">{_e(title)} - Printable (PDF)</a></p>')
+    if attachment_slots:
+        links = " ".join(
+            f'<a href="{_e(slot["href"])}">{_e(slot["label"])}</a>'
+            for slot in attachment_slots
+        )
+        out.append(f'<p style="margin:14px 0;padding:10px;background-color:{palette["tint"]}"><strong>Attachments:</strong> {links}</p>')
     if unit_body:
         out.append(_details("Unit info", unit_body, palette))
     return "".join(out)
 
 
-def render_page(model: dict, *, palette_key: str) -> str:
+def render_page(model: dict, *, palette_key: str, attachment_slots: list[dict] | None = None) -> str:
     """Render standard or freeform PageForge page HTML."""
     layout = model.get("layout", "standard")
     palette = palette_for(palette_key)
@@ -177,6 +184,12 @@ def render_page(model: dict, *, palette_key: str) -> str:
             out.append(_fragment(model["overview"], page=True))
         out.append(_section_html(model.get("sections"), palette, page=True))
         out.append(_extras_html(model.get("extras"), palette, page=True))
+    if attachment_slots:
+        links = " ".join(
+            f'<a href="{_e(slot["href"])}">{_e(slot["label"])}</a>'
+            for slot in attachment_slots
+        )
+        out.append(f'<p style="margin:14px 0;padding:10px;background-color:{palette["tint"]}"><strong>Attachments:</strong> {links}</p>')
     if unit_body:
         out.append(_details("Unit info", unit_body, palette))
     return "".join(out)

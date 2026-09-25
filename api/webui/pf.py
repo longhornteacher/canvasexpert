@@ -3,6 +3,7 @@ import json
 import re
 
 from engine.rendering.forge.author_html import validate_author_html
+from .attachment_validation import validate_attachments
 
 ENVELOPE_RE = re.compile(
     r"<PAGEFORGE_JSON>\s*(\{.*\})\s*</PAGEFORGE_JSON>", re.S)
@@ -132,7 +133,7 @@ def validate(d):
     layout = d.get("layout", "standard")
     if layout not in {"standard", "freeform"}:
         problems.append("layout must be standard or freeform")
-    allowed = {"version", "type", "title", "layout", "overview", "sections", "extras", "unit_info", "metadata"}
+    allowed = {"version", "type", "title", "layout", "overview", "sections", "extras", "unit_info", "metadata", "attachments"}
     if layout == "freeform":
         allowed |= {"body", "banner"}
     _unknown_fields(d, allowed, "payload", problems)
@@ -172,4 +173,5 @@ def validate(d):
     if "extras" in d:
         _extras(d["extras"], problems)
     _unit_info(d.get("unit_info"), problems)
+    validate_attachments(d.get("attachments"), problems)
     return problems

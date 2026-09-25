@@ -5,6 +5,8 @@ from __future__ import annotations
 import mimetypes
 import os
 from pathlib import Path
+from urllib.parse import urljoin, urlsplit
+import re
 
 import requests
 
@@ -17,8 +19,8 @@ from .adapter_support import (
     is_uncertain as _is_uncertain,
     module_id_from_steps,
     normalize,
-    prepend_step,
     replace_step,
+    ensure_step,
 )
 from .module_placement import attach_assignment_type_module_item
 from api import operational_log
@@ -34,14 +36,14 @@ def execute(
     *,
     ordered_steps,
     upload_course_file,
-    file_link_html,
     find_assignment_group,
     read_modules,
+    prepare_description,
 ) -> dict:
     course_id = target["course_id"]
     name = normalize_student_text(payload.get("name", "Untitled assignment"))
     steps = ordered_steps(target)
-    step = prepend_step(steps, "create_assignment")
+    step = ensure_step(steps, "create_assignment")
     assignment_id = target.get("returned_object_id") or step.get("returned_object_id")
     assignment_url = target.get("returned_object_url") or step.get("returned_object_url")
 
@@ -64,8 +66,8 @@ def execute(
             context=context,
             ordered_steps=ordered_steps,
             upload_course_file=upload_course_file,
-            file_link_html=file_link_html,
             find_assignment_group=find_assignment_group,
+            prepare_description=prepare_description,
         )
         if result is not None:
             return result
@@ -145,22 +147,16 @@ def _create_assignment(
     context,
     ordered_steps,
     upload_course_file,
-    file_link_html,
     find_assignment_group,
+    prepare_description,
 ) -> tuple[str | None, str | None, dict | None]:
-    printable_path = payload.get("printable_path")
     description = str(payload.get("description") or "")
-    if printable_path:
-        uploaded, upload_err = upload_course_file(course_id, printable_path)
-        if upload_err:
-            return None, None, build_result(
-                "failed",
-                steps=steps,
-                error_code="printable_upload_failed",
-                private_diagnostic=upload_err,
-            )
-        file_link = file_link_html(uploaded)
-        description = "\n".join(part for part in (description, file_link) if part)
+    description, upload_failure = prepare_description(
+        payload=payload, course_id=course_id, steps=steps, context=context,
+    )
+    steps[:] = ordered_steps({"steps": steps})
+    if upload_failure is not None:
+        return None, None, upload_failure
 
     assignment_data = {"name": name, "submission_types": payload.get("submission_types", ["online_text_entry"])}
     if description:
@@ -231,9 +227,13 @@ def _create_assignment(
 def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
     course_id = target["course_id"]
     steps = ordered_steps(target)
-    step = prepend_step(steps, "create_assignment")
+    step = ensure_step(steps, "create_assignment")
     assignment_id = target.get("returned_object_id") or step.get("returned_object_id")
-    has_marker = has_outbound_marker(steps)
+    has_marker = any(
+        step.get("outbound_started_at")
+        and not str(step.get("step_key", "")).startswith(("upload_attachment:", "upload_printable"))
+        for step in steps
+    )
 
     if not assignment_id:
         name = payload.get("name", "")
@@ -312,7 +312,7 @@ def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
 
 def validate_printable_pdf(pdf_path: str, *, allowed_roots=None) -> tuple:
     if not pdf_path:
-        return None, "printable_path is required"
+        return None, "printable file is required"
     candidate = os.path.realpath(pdf_path)
     if not os.path.isfile(candidate):
         return None, "printable PDF not found"
@@ -345,17 +345,26 @@ def allowed_printable_roots():
     return roots
 
 
-def upload_course_file(course_id: str, pdf_path: Path, *, allowed_roots=None):
-    pdf, error = validate_printable_pdf(str(pdf_path), allowed_roots=allowed_roots)
-    if error:
-        return None, error
-    filename = pdf.name
+def upload_course_file(course_id: str, pdf_path: Path, *, allowed_roots=None,
+                       folder="Canvas Expert Printables", validate_pdf=True):
+    if validate_pdf:
+        source, error = validate_printable_pdf(str(pdf_path), allowed_roots=allowed_roots)
+        if error:
+            return None, error
+    else:
+        source = Path(pdf_path).resolve()
+        if not source.is_file():
+            return None, "upload file is missing"
+        roots = allowed_printable_roots() if allowed_roots is None else allowed_roots()
+        if not _path_below_roots(source, roots):
+            return None, "upload file is outside approved workspace folders"
+    filename = source.name
     content_type = mimetypes.guess_type(filename)[0] or "application/pdf"
     init_payload = {
         "name": filename,
-        "size": pdf.stat().st_size,
+        "size": source.stat().st_size,
         "content_type": content_type,
-        "parent_folder_path": "Canvas Expert Printables",
+        "parent_folder_path": folder,
         "on_duplicate": "rename",
     }
     init, error = canvas_client._canvas_send("POST", f"/api/v1/courses/{course_id}/files", init_payload)
@@ -366,32 +375,63 @@ def upload_course_file(course_id: str, pdf_path: Path, *, allowed_roots=None):
     if not upload_url:
         return None, "Canvas did not return a file upload URL"
     try:
-        with pdf.open("rb") as handle:
+        with source.open("rb") as handle:
             response = requests.post(
                 upload_url,
                 data=upload_params,
                 files={"file": (filename, handle, content_type)},
                 timeout=60,
+                allow_redirects=False,
             )
     except requests.RequestException as exc:
-        return None, str(exc)
+        return None, f"Canvas file upload transport failed ({type(exc).__name__})"
+    if 300 <= response.status_code < 400:
+        location = response.headers.get("Location")
+        if not location:
+            return None, "Canvas file upload completion location is missing"
+        return _complete_canvas_file_upload(location)
     if response.status_code not in (200, 201):
         return None, f"Canvas file upload failed: HTTP {response.status_code}: {response.text[:300]}"
     try:
-        return response.json(), None
+        uploaded = response.json()
     except ValueError:
-        return None, "Canvas file upload returned a non-JSON response"
+        uploaded = None
+    if response.status_code == 201 and response.headers.get("Location"):
+        return _complete_canvas_file_upload(response.headers["Location"])
+    if isinstance(uploaded, dict) and uploaded.get("id") is not None:
+        return uploaded, None
+    if response.headers.get("Location"):
+        return _complete_canvas_file_upload(response.headers["Location"])
+    return None, "Canvas file upload returned no file id"
 
 
-def file_link_html(uploaded_file: dict) -> str:
-    import html as _html
+def _path_below_roots(path: Path, roots) -> bool:
+    candidate = os.path.realpath(path)
+    for root in roots:
+        try:
+            if os.path.commonpath([candidate, os.path.realpath(root)]) == os.path.realpath(root):
+                return True
+        except ValueError:
+            continue
+    return False
 
-    label = _html.escape(uploaded_file.get("display_name") or uploaded_file.get("filename") or "Printable PDF")
-    url = uploaded_file.get("url") or uploaded_file.get("html_url") or ""
-    if not url and uploaded_file.get("id"):
-        url = f"/files/{uploaded_file['id']}/download?download_frd=1"
-    if not url:
-        return f"<p><strong>{label}</strong> uploaded to course files.</p>"
-    return f'<p><a href="{_html.escape(str(url), quote=True)}">{label}</a></p>'
 
-
+def _complete_canvas_file_upload(location: str):
+    """Retrieve Canvas's exact file JSON without sending a token off-origin."""
+    _headers, base = canvas_client.canvas_headers()
+    if not base:
+        return None, "Canvas base URL is unavailable for upload completion"
+    resolved = urlsplit(urljoin(str(base).rstrip("/") + "/", location))
+    configured = urlsplit(str(base))
+    if (resolved.scheme.casefold(), resolved.netloc.casefold()) != (
+        configured.scheme.casefold(), configured.netloc.casefold()
+    ):
+        return None, "Canvas upload completion location is outside the configured Canvas origin"
+    match = re.fullmatch(r"/api/v1/files/(\d+)(?:/create_success)?/?", resolved.path)
+    if not match:
+        return None, "Canvas upload completion location is not an exact Canvas file endpoint"
+    file_info, error = canvas_client.canvas_get(resolved.path + ("?" + resolved.query if resolved.query else ""))
+    if (error or not isinstance(file_info, dict) or file_info.get("id") is None
+            or str(file_info.get("id")) != match.group(1)):
+        return None, "Canvas upload completion did not return an exact file id"
+    return file_info, None

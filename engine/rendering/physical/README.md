@@ -8,6 +8,7 @@ content model.
 - Quiz student DOCX and PDF
 - Quiz answer-key DOCX and PDF
 - Rationale sheets and physical render logs
+- AssignmentForge standalone printable PDF
 
 ## Pipeline
 
@@ -16,6 +17,14 @@ print CSS. The same HTML substrate feeds both final formats:
 
 - PDF: `emit_pdf.py` launches the installed Microsoft Edge through Playwright.
 - DOCX: `emit_docx.py` uses `pypandoc-binary`, which bundles Pandoc.
+
+AssignmentForge printables use the normalized, validated plain-dictionary model and
+the template in `engine/rendering/physical/templates/assignment.html.j2`, rendered by
+`engine/rendering/forge/`. They do not pass through `PrintDoc` or the quiz/key
+`html_renderer.render_html` entry point. Assignment adapters generate the PDF during
+prepare using the same installed Edge PDF emitter; the API uploads it only during
+reviewed apply. Teacher attachment paths are resolved and uploaded by the API and do
+not enter the physical renderer. The printable lists attachment labels as materials.
 
 The PDF path intentionally uses the system Edge install instead of Playwright's
 downloaded Chromium because district-managed PCs may block browser downloads.
@@ -39,6 +48,7 @@ browser.
 
 - `engine.packagers.physical_handler.generate_physical_outputs(quiz, output_folder)`
 - `engine.rendering.physical.html_renderer.render_html(printdoc, variant=...)`
+- `engine.rendering.forge.canvas_html.render_assignment_printable(model, *, palette_key, public_tag, tracked)`
 - `engine.rendering.physical.emit_pdf.html_to_pdf(html, css_path, out_path)`
 - `engine.rendering.physical.emit_docx.html_to_docx(html, reference_docx, out_path)`
 

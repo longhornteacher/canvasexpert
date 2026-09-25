@@ -801,12 +801,7 @@ def _result_projection(operation: dict, result: dict) -> dict:
 
 
 def _scrub_paths(value):
-    """Drop any local filesystem path a frozen review carries.
-
-    No option this boundary accepts sets one today (printable attachments are
-    web-UI only), so this is a guard against a future adapter field, not a
-    known leak.
-    """
+    """Drop any local filesystem path a frozen review carries."""
     if isinstance(value, dict):
         return {key: _scrub_paths(item) for key, item in value.items()
                 if not str(key).endswith("path")}

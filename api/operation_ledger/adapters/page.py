@@ -1,10 +1,13 @@
 """PageForge adapter for the crash-safe ``content.page`` operation kind."""
 
-import json
+from pathlib import Path
+
+import requests
 
 from engine.rendering.forge.canvas_html import render_page
 
 from .. import models
+from . import forge_files
 from .adapter_support import (
     as_list as _as_list,
     build_result as _build_result,
@@ -41,8 +44,14 @@ class PageAdapter:
         title = normalize_student_text(data.get("title") or "").strip()
         model = {key: normalize_author_model(data[key]) for key in _RENDER_FIELDS if key in data}
         model["title"] = title
+        attachments = forge_files.resolve_attachments(data.get("attachments") or [])
+        attachment_slots = [
+            {"href": forge_files.link_slot("attachment", index), "label": row["label"]}
+            for index, row in enumerate(attachments)
+        ]
         tier_colors = config.get_tier_colors()
-        body = render_page(model, palette_key=tier_colors["untiered"])
+        body = render_page(model, palette_key=tier_colors["untiered"],
+                           attachment_slots=attachment_slots)
         published = bool(prepare_request.get("published"))
         module_name = prepare_request.get("module_name") or None
         if module_name:
@@ -53,6 +62,7 @@ class PageAdapter:
             "published": published,
             "module_name": module_name,
             "source_path": path,
+            "attachments": attachments,
         }
 
     def source_digest(self, payload: dict) -> str:
@@ -61,6 +71,7 @@ class PageAdapter:
             "body": payload.get("body"),
             "published": payload.get("published"),
             "module_name": payload.get("module_name"),
+            "attachments": payload.get("attachments"),
         })
 
     def verify_targets(self, payload: dict, targets: list[dict]) -> list[dict]:
@@ -120,13 +131,20 @@ class PageAdapter:
         return {
             "course_name": course_name,
             "page_title": payload.get("title"),
+            "body": payload.get("body"),
             "published": payload.get("published"),
             "module_name": payload.get("module_name"),
             "baseline_has_existing_page": existing is not None,
             "baseline_page_url": existing.get("url") if existing else None,
+            "attachments": [{"file": row.get("file"), "label": row.get("label"),
+                             "sha256": row.get("sha256")}
+                            for row in payload.get("attachments", [])],
         }
 
     def check_drift(self, payload: dict, target: dict, baseline: dict) -> bool:
+        for record in payload.get("attachments", []):
+            if not _frozen_file_matches(record):
+                return True
         if baseline is None:
             return False
         if "canvas_error" in baseline:
@@ -155,7 +173,28 @@ class PageAdapter:
         published = bool(payload.get("published"))
         module_name = payload.get("module_name")
         steps = _ordered_steps(target)
-        page_step = _step(steps, "create_page")
+        attachment_infos = []
+        for index, record in enumerate(payload.get("attachments", [])):
+            file_info, failure = forge_files.ensure_uploaded_file(
+                record={**record, "filename": record.get("file")},
+                step_key=f"upload_attachment:{index}",
+                folder="Canvas Expert Attachments", course_id=course_id,
+                steps=steps, context=context, upload_file=_upload_course_file,
+                get_file=_get_course_file,
+            )
+            if failure:
+                return _build_result(
+                    failure["state"], steps=steps,
+                    error_code=failure.get("error_code"),
+                    private_diagnostic=failure.get("private_diagnostic"),
+                )
+            attachment_infos.append(file_info)
+        if attachment_infos:
+            page_body = forge_files.bind_link_slots(page_body, "attachment", attachment_infos)
+        target = {**target, "steps": _ordered_steps({"steps": steps})}
+        page_step = _ensure_step(steps, "create_page")
+        steps = _ordered_steps({"steps": steps})
+        page_step = _find_step(steps, "create_page")
         page_slug = target.get("returned_object_id") or page_step.get("returned_object_id")
         page_url = target.get("returned_object_url") or page_step.get("returned_object_url")
 
@@ -372,9 +411,24 @@ class PageAdapter:
     def reconcile(self, payload: dict, target: dict, baseline: dict) -> dict:
         course_id = target["course_id"]
         steps = _ordered_steps(target)
+        for upload_step in steps:
+            if not str(upload_step.get("step_key", "")).startswith("upload_attachment:"):
+                continue
+            file_id = upload_step.get("returned_object_id")
+            if not file_id:
+                if upload_step.get("outbound_started_at"):
+                    return {"state": "sent_unknown", "error_code": "file_upload_unresolved"}
+                continue
+            file_info, file_error = _get_course_file(course_id, str(file_id))
+            if file_error or not isinstance(file_info, dict) or str(file_info.get("id")) != str(file_id):
+                return {"state": "sent_unknown", "error_code": "file_exact_id_unverified"}
         page_step = _find_step(steps, "create_page")
         page_slug = target.get("returned_object_id") or page_step.get("returned_object_id")
-        has_marker = _has_outbound_marker(steps)
+        has_marker = any(
+            step.get("outbound_started_at")
+            and not str(step.get("step_key", "")).startswith("upload_attachment:")
+            for step in steps
+        )
 
         if not page_slug:
             title = payload.get("title", "")
@@ -451,7 +505,37 @@ def _read_modules(course_id: str):
 
 
 def _ordered_steps(target: dict) -> list[dict]:
-    return _ordered_steps_from_order(
-        target,
-        ("create_page", "create_module", "attach_module"),
+    existing = {step.get("step_key"): step for step in target.get("steps", [])}
+    uploads = sorted(
+        (key for key in existing if str(key).startswith("upload_attachment:")),
+        key=lambda key: int(str(key).split(":")[-1]) if str(key).split(":")[-1].isdigit() else 999999,
     )
+    order = (*uploads, "create_page", "create_module", "attach_module")
+    return [existing[key] for key in order if key in existing]
+
+
+def _get_course_file(course_id: str, file_id: str):
+    return canvas_client.canvas_get(f"/api/v1/courses/{course_id}/files/{file_id}")
+
+
+def _upload_course_file(course_id: str, file_path, *, folder):
+    from api import runtime_paths
+    from . import assignment_whole
+
+    assignment_whole.requests = requests
+    roots = [root for root in (runtime_paths.workspace_root(), runtime_paths.printables_dir()) if root]
+    return assignment_whole.upload_course_file(
+        course_id, file_path,
+        allowed_roots=lambda: roots,
+        folder=folder,
+        validate_pdf=False,
+    )
+
+
+def _frozen_file_matches(record: dict) -> bool:
+    if not forge_files.verify_private_record_path(record, attachments=True):
+        return False
+    try:
+        return forge_files.sha256_file(Path(record["path"])) == record.get("sha256")
+    except OSError:
+        return False

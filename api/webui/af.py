@@ -9,6 +9,7 @@ import math
 import re
 
 from engine.rendering.forge.author_html import validate_author_html
+from .attachment_validation import validate_attachments
 
 ENVELOPE_RE = re.compile(
     r"<ASSIGNMENTFORGE_JSON>\s*(\{.*\})\s*</ASSIGNMENTFORGE_JSON>", re.S)
@@ -328,7 +329,7 @@ def validate(d):
             problems.append(f'version must be "2.0-json" (got {d.get("version")!r})')
     if d.get("type") != "ASSIGNMENT":
         problems.append(f"type must be ASSIGNMENT (got {d.get('type')!r}) — pages use PageForge")
-    _unknown_fields(d, {"version", "type", "title", "points", "submission", "overview", "directions", "sections", "rubric", "supports", "extras", "unit_info", "tiers", "corrections", "metadata"}, "payload", problems)
+    _unknown_fields(d, {"version", "type", "title", "points", "submission", "overview", "directions", "sections", "rubric", "supports", "extras", "unit_info", "tiers", "corrections", "metadata", "attachments"}, "payload", problems)
     _required_text(d.get("title"), "title", problems)
     points = d.get("points")
     if not _is_nonnegative_number(points):
@@ -343,6 +344,7 @@ def validate(d):
     _validate_unit_info(d.get("unit_info"), "unit_info", problems)
     _validate_tiers(d.get("tiers"), problems)
     _validate_corrections(d.get("corrections"), problems)
+    validate_attachments(d.get("attachments"), problems)
     return problems
 
 

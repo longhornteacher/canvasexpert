@@ -53,6 +53,40 @@ current Canvas/local baselines, freezes normalized summaries, and returns an opa
 batch ID plus a digest over the ordered frozen reviews. Apply requires both values.
 Any payload, source, setting, target, or baseline change invalidates review.
 
+### Reviewed file slots and ordered uploads
+
+For AssignmentForge and PageForge operations, review freezes attachment names, labels,
+private source paths, SHA-256 hashes, printable availability, tier mapping, and the
+specific rendered HTML link slots. Local paths and raw Canvas upload responses stay
+private. A source or attachment hash change invalidates review; apply rechecks the
+frozen attachment hashes before upload.
+
+Canvas file IDs do not exist at review. During apply, Canvas Expert may fill only a
+frozen attachment or printable link slot with a URL derived from that slot's exact,
+checkpointed Canvas file ID. It cannot change the authored wording, labels, ordering,
+or layout. The final content-create request, including derived URLs, has its own
+write-ahead payload digest before that request is sent. This rule is limited to these
+file link slots and does not authorize other post-review payload edits.
+
+Each attachment upload is an ordered step before the first content create; a teacher
+file is uploaded once per course target and its checkpointed ID is shared by the
+assignment's tiers. Each printable upload is an ordered step immediately before its
+corresponding assignment create. Before every upload mutation, call `before_send` and
+flush its outbound marker. After confirmed completion, checkpoint the exact Canvas file
+ID before making another Canvas call.
+
+Canvas's file-upload completion may return a redirect or `201 Location`; the completion
+GET yields the exact file ID. Follow only a validated Canvas-origin completion URL, and
+send the bearer token only to that validated Canvas origin. A completion with no exact
+file ID is not a successful checkpoint.
+
+An uncertain initiation or upload result, or a completion without an exact file ID,
+is checkpointed as `sent_unknown` and stops the operation in Attention. Never resend a
+step with an outbound marker but no proved ID. On resume, reuse an `applied` upload only
+after exact-ID Canvas verification. A filename or approximate match cannot resolve an
+ambiguous upload; when exact proof is unavailable, keep it in Attention for teacher
+recovery. Uploaded files are not automatically deleted.
+
 For every target, apply must:
 
 1. acquire the claim and persist `claimed`, attempt ID, payload digest, and baseline;
