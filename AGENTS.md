@@ -79,6 +79,7 @@ Use only the row relevant to the active handoff.
 | Area | Start here | Boundary to preserve |
 |---|---|---|
 | Create / Course Expert | `docs/reference/course-expert-module-map.md` | Forge contracts are canonical; live content writes use the reviewed operation path. |
+| Forge presentation / tiers | `docs/contracts/forge-presentation-contract.md`; batch plan `docs/reference/forge-presentation-plan.md` (senior only, section-routed) | Agents author content only; Canvas Expert renders the look, palette, and printables. Three tiers; no student-to-tier knowledge. |
 | Settings | `docs/reference/settings-module-map.md` | Secrets stay in the credential store; district configuration stays outside the repo. |
 | Connections / diagnostics | `api/README.md`, then the exact owners named by the handoff | Read-only diagnostics; never edit client config, install software, change `PATH`, elevate, or start tunnels. |
 | Gradebook | `docs/reference/gradebook-module-map.md` | Grade/status operations and roster context are private; write work is high risk. |
