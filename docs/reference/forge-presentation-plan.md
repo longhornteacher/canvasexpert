@@ -629,6 +629,109 @@ assignment with an attachment, and one page with an attachment. Open the printab
 the attachment links, and print the printable in grayscale. The teacher decided a
 tiered live test is unnecessary; tiered upload is covered by tests.
 
+## 6b. Batch 3b: attachments from Canvas Files and from chat
+
+**Risk:** medium-high. It adds a new MCP tool, local file intake, and live Canvas reads
+at preview. The upload and resume machinery is reused unchanged from Batch 3. **Depends
+on:** Batch 3.
+
+**Objective.** The teacher never touches a folder. An agent links a file already in the
+course's Canvas Files by name, or hands Canvas Expert a file the teacher posted in chat
+(contract §6.1).
+
+**Seams (at commit `fce35fe`)**
+- **Validation.** `api/webui/attachment_validation.py` `validate_attachments` accepts
+  only `{file, label}`, and is shared by `af.py` and `pf.py`.
+- **File resolution.**
+  - `api/operation_ledger/adapters/forge_files.py`: `resolve_attachments` resolves
+    staged names under `To Review/Attachments`, and `verify_private_record_path`
+    confines them there.
+  - `ensure_uploaded_file` handles the checkpointed upload, and `bind_link_slots` /
+    `canvas_file_url` bind links.
+- **Adapters.** The assignment adapter reaches `_get_course_file` at ~:492 and ~:625,
+  and the page adapter at ~:183. Both resolve attachments inside `build_payload`.
+- **MCP.**
+  - Tools: `api/mcp_server/server.py` registrations (for example `stage_content`
+    ~:497) delegating to `tools.py`.
+  - Schema: `TOOL_SCHEMA_VERSION = 61` plus the §1.6 sync points.
+  - Instructions: `api/mcp_server/` server instructions and their tests.
+- **Private-store roots.** `api/runtime_paths.py` (for example `workspace_root`,
+  `printables_dir`), plus the config, credential, and Identity Vault owners. The
+  executor must find their single definitions, not duplicate them.
+
+**Acceptance criteria**
+1. **Validation.** Each `attachments[]` entry has `label` and exactly one of `file` or
+   `canvas_file`. `folder` is optional and only valid with `canvas_file`. Both sources
+   share the extension allowlist and case-insensitive duplicate checks: duplicate
+   `file` names, duplicate `canvas_file` + `folder` pairs.
+2. **Canvas lookup at preview.**
+   - Each `canvas_file` is resolved in `build_payload` with a live Canvas files search on
+     the name (`GET /api/v1/courses/:id/files?search_term=…`, paginated, through the
+     existing Canvas read owner). A match is an exact display name, ignoring case,
+     narrowed by `folder` when given.
+   - One match freezes the file ID, size, and `updated_at` into the payload, and the
+     digest covers them.
+   - Zero or several matches block the preview with `attachment_not_found` or
+     `attachment_ambiguous`. The error returns at most 10 candidate `{name, folder}`
+     pairs and no IDs.
+   - A hidden or locked match links, with the warning `attachment_not_student_visible`.
+   - There is no listing tool, and no path returns non-matching file names.
+3. **Canvas files at apply.** Before content creation the exact frozen ID is verified
+   with the existing `get_file`. A missing file becomes `blocked` with `file_drift`.
+   Nothing is uploaded, and links bind through the same frozen link slots.
+4. **`stage_attachment(source_path)` MCP tool.** It is thin in `server.py` and
+   `tools.py`, with the logic in `forge_files.py` or a sibling service. It copies into
+   `To Review/Attachments/` and returns `{ok, file, size_bytes}` and no private path.
+   It refuses:
+   - a folder, symlink, or junction;
+   - a file over 25 MB;
+   - a disallowed extension;
+   - a path inside any private-store root;
+   - the same name with different bytes (the same name with the same bytes is reused).
+
+   The MCP sync points in §1.6 are updated, with the schema moving 61 → 62.
+5. **Instructions.** The MCP server instructions and both authoring contracts describe
+   the two sources:
+   - an agent never lists course files and never passes bytes through tool arguments;
+   - when its host exposes no local path for a posted file, it says so and suggests
+     uploading to Canvas Files;
+   - it asks the teacher to choose when the preview returns candidates.
+
+   The "teacher places the file in the folder" wording from Batch 3 is removed.
+6. **Placeholders.** `{{file:…}}` is permanently refused with a message pointing to
+   `canvas_file`. §10's placeholder item narrows to `{{page:…}}`.
+7. **Tests.**
+   - **Law:** `stage_attachment` never reads a path inside a private-store root, or
+     through a symlink or junction. Test it once, directly.
+   - **Contract:** attachment-entry validation parametrized over both sources and each
+     refusal; lookup outcomes parametrized over 0, 1, and several matches, plus hidden
+     or locked.
+   - **Examples:** one assignment linking a `canvas_file` through apply; one staged file
+     via `stage_attachment` through apply and resume.
+
+**Non-goals**
+- A course-file listing or browsing tool.
+- Resolving `{{page:}}` links.
+- Deduplicating a staged upload against an identical existing Canvas file.
+- Accepting file bytes over MCP.
+- Any Web UI attachment control.
+
+**Gate**
+- Focused:
+  `py -m pytest -p no:randomly engine/tests api/tests/test_printable_attach.py api/tests/test_assignment_operation.py api/tests/test_assignment_tier_operation.py api/tests/test_page_operation.py api/tests/webui api/tests/mcp_server`
+- Then the full `api/tests` suite, because this changes the MCP schema.
+
+**Stop conditions**
+- Private-store roots are not centrally defined.
+- The Canvas files search needs a scope or token change.
+- Preview-time live reads violate the review-freeze or drift rules.
+- A host-neutrality conflict: the tool must not assume any particular agent host.
+
+**Teacher smoke after merge (CS8, unpublished `[TEST]` items).** In chat, ask for an
+assignment that links an existing CS8 file by name, and a page with a file you post in
+chat. Check both links, the printable's Materials line, and that an ambiguous name
+makes the agent ask which file.
+
 ## 7. Batch 4: Canvas rubric from the payload
 
 **Risk:** high, since it is a new Canvas write. **Depends on:** Batch 2. D2 = yes.
@@ -660,10 +763,19 @@ code. Locked now:
 - **Live testing uses CS8**, with unpublished `[TEST]` items. There is no sandbox course.
 - **D5: colors are a synced teacher preference** chosen from fixed swatches (contract
   §2 and §3). Layout is not a preference. This is implemented by Batch 2b.
+- **D6: attachments come from Canvas Files or from chat, never from a teacher-managed
+  folder.** Existing Canvas files are found by name lookup only, with no listing tool.
+  Chat-posted files come through `stage_attachment`, capped at 25 MB (contract §6.1).
+  This is implemented by Batch 3b.
 
 ## 9. Next batch (single current pointer)
 
-**Next: Batch 4 (§7).** Read this plan's §0, §1.1 (authoring and assembly), §1.5
+**Next: Batch 3b (§6b).** Read this plan's §0, §1.6, §6b, and §8 (D6); the contract's §6.1
+and §7; and `docs/mcp-server.md` for the tool-schema sync rules. There are no
+outstanding teacher decisions. The live check for Batches 2b and 3 in CS8 is still
+outstanding; do it together with the Batch 3b check.
+
+**After it: Batch 4 (§7).** Read this plan's §0, §1.1 (authoring and assembly), §1.5
 (rubrics), §7, and §8 (D2); the contract's §2, §4 item 6, §6 (rubric in the
 printable), and §7 law 4. Also read `docs/reference/operation-ledger-module-map.md`,
 `docs/contracts/operation-ledger-contract.md`, and the "slice 11c1" exclusion
@@ -674,8 +786,8 @@ and resume path before delegation.
 
 ## 10. Known adjacent defects (outside this plan)
 
-- `{{file:…}}` and `{{page:…}}` placeholders are never resolved (§1.5). Batch 2 makes the
-  contracts truthful by refusing them. Resolution is separate work.
+- `{{page:…}}` placeholders are never resolved (§1.5). They are refused until page links
+  are designed. `{{file:…}}` is superseded by `canvas_file` attachments (Batch 3b).
 - `PageAdapter.build_payload` silently drops `module_id` and `create_module`, which
   `content_push._KIND_OPTIONS["page"]` accepts. That contradicts the rule that unsupported
   options are refused, not dropped.

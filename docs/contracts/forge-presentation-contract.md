@@ -178,23 +178,61 @@ A page's default look mirrors an assignment's.
 - **Failure is visible, not fatal.** If Edge is unavailable or generation fails, the
   preview says so and the assignment pushes without a printable.
 
-### 6.1 Attachments (teacher files)
+### 6.1 Attachments
 
-- **What it is.** An assignment or page payload may list `attachments`: files the
-  teacher provides, such as a handout PDF or a slide deck, that Canvas Expert uploads to
-  the course and links in the rendered HTML. Each entry is
-  `{ "file": "<file name>", "label": "<link text>" }`.
-- **Where the files come from.** Files come only from the workspace folder
-  `To Review/Attachments/`, matched by exact file name. No other path is accepted.
-  Allowed types are `pdf`, `docx`, `pptx`, `xlsx`, `png`, `jpg`, and `jpeg`. An agent
-  that cannot place files there asks the teacher to do it.
+The teacher never manages files by hand. The agent and Canvas Expert handle them. An
+assignment or page payload may list `attachments`, and each entry has **exactly one**
+source:
+
+| Entry | Source | What happens |
+|---|---|---|
+| `{ "canvas_file": "<name>", "label": "<link text>" }` | A file already in that course's Canvas Files | Linked; nothing is uploaded. |
+| `{ "file": "<name>", "label": "<link text>" }` | A file the teacher posted in chat, handed to Canvas Expert with `stage_attachment` | Uploaded at apply time, then linked. |
+
+Allowed types for both are `pdf`, `docx`, `pptx`, `xlsx`, `png`, `jpg`, and `jpeg`.
+
+- **Existing Canvas files: name lookup only (locked 2026-09-25).**
+  - **Lookup.** Canvas Expert resolves `canvas_file` at preview with a live Canvas files
+    search on that name. An optional `"folder"` narrows it to a Canvas folder path. A
+    match is an exact display name, ignoring case.
+  - **One match.** It is frozen into the review by Canvas file ID and linked. Nothing is
+    uploaded.
+  - **No match, or several.** The preview is blocked and returns only the matching
+    candidates' names and folder paths, never IDs and at most 10. The agent then asks
+    the teacher which one they meant.
+  - **Hidden or locked files.** A match that is hidden or locked links anyway, with the
+    preview warning `attachment_not_student_visible`.
+  - **No listing.** There is **no** agent tool that lists course files, because file
+    names can contain student names. Only names matching the teacher's own words are
+    ever returned.
+  - **At apply,** the exact file ID is verified again. A deleted file blocks with
+    `file_drift`.
+- **Files posted in chat: `stage_attachment(source_path)`.**
+  - **The tool.** It copies a local file the agent's host saved to disk into Canvas
+    Expert's internal landing folder, `To Review/Attachments/`. That folder is not a
+    teacher task.
+  - **Refused sources:**
+    - a folder, shortcut, symlink, or junction;
+    - a file over **25 MB**;
+    - a disallowed type;
+    - anything inside Canvas Expert's private stores (application data, config,
+      credentials, the Identity Vault, `api/.env`).
+  - **Name collisions.** The same name with the same bytes is reused. The same name with
+    different bytes is refused, and the agent renames or asks the teacher.
+  - **When a host can't hand over a file** (it exposes no local path), the agent says so
+    plainly and suggests the teacher upload it to the course's Canvas Files, which then
+    becomes a `canvas_file` entry. An agent never attempts to pass file bytes through a
+    tool argument.
+  - **Before upload,** the preview shows each staged file's name and size.
 - **Missing files block the push.** A missing, disallowed, or duplicate attachment
-  blocks the preview with the file name. This is unlike a printable, whose failure only
-  warns, because a missing attachment means authored content is broken.
-- **Upload.** Files upload at apply time to the course folder `Canvas Expert
-  Attachments`, once per course. Every tier of a family links the same uploaded file.
+  blocks the preview with its name. This is unlike a printable, whose failure only warns,
+  because a missing attachment means authored content is broken.
+- **Upload.** Staged files upload at apply time to the course folder `Canvas Expert
+  Attachments`, once per course. Every tier of a family links the same file.
 - **On paper.** The printable lists the attachment labels under a "Materials" line, as
   text, so the paper copy still says what else the student needs.
+- **Placeholders are retired.** `{{file:…}}` is replaced by `canvas_file` and is
+  permanently refused. `{{page:…}}` stays refused until page links are designed.
 
 ## 7. Laws (tested directly, once each)
 
