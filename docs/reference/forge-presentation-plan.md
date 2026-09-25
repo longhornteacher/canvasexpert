@@ -663,17 +663,14 @@ code. Locked now:
 
 ## 9. Next batch (single current pointer)
 
-**Next: Batch 3 (§6).** Read this plan's §0, §1.4, §3 (the Printable bullet), and §6;
-the contract's §4 item 9, §5, §6, §6.1, and §7 (laws 1, 2 and 4); and
-`docs/reference/operation-ledger-module-map.md` plus the ordered-step and checkpoint
-sections of `docs/contracts/operation-ledger-contract.md`. There are no outstanding
-teacher decisions. The senior must lock the upload-step and post-review URL-binding
-policy in the direct brief before implementation; §6's stop conditions still apply.
-
-Batch 2 live check passed on 2026-09-25 (CS8, unpublished `[TEST]` items). Canvas keeps
-`<section>`, `<aside>`, and `<details>`, and the width follows the window. Follow-up
-renderer polish is committed: auto-width direction table, left-aligned rubric headings
-with row rules, and "1 pt" singular.
+**Next: Batch 4 (§7).** Read this plan's §0, §1.1 (authoring and assembly), §1.5
+(rubrics), §7, and §8 (D2); the contract's §2, §4 item 6, §6 (rubric in the
+printable), and §7 law 4. Also read `docs/reference/operation-ledger-module-map.md`,
+`docs/contracts/operation-ledger-contract.md`, and the "slice 11c1" exclusion
+history (`git log -S "11c1"`) before writing the direct brief. There are no
+outstanding teacher decisions. The senior must write Batch 4 acceptance criteria
+against the current code and lock the rubric create/associate, verification, receipt,
+and resume path before delegation.
 
 ## 10. Known adjacent defects (outside this plan)
 
