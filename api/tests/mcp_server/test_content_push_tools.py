@@ -628,8 +628,8 @@ def _ledger(monkeypatch, tmp_path):
 
 def test_a_real_pageforge_draft_freezes_through_the_real_adapter(_ledger):
     _stage("page", "welcome", body=(
-        '<PAGEFORGE_JSON>{"version":"1.0-json","type":"PAGE",'
-        '"title":"Welcome to Unit 3","body":"<p>Read this first.</p>"}'
+        '<PAGEFORGE_JSON>{"version":"2.0-json","type":"PAGE",'
+        '"title":"Welcome to Unit 3","overview":"<p>Read this first.</p>"}'
         '</PAGEFORGE_JSON>'
     ))
 
@@ -669,8 +669,8 @@ def test_mcp_differentiated_quiz_requires_dated_module_family(monkeypatch):
 
 def test_a_real_assignmentforge_draft_carries_its_schedule(_ledger):
     _stage("assignment", "essay-1", body=(
-        '<ASSIGNMENTFORGE_JSON>{"version":"1.0-json","type":"ASSIGNMENT",'
-        '"title":"Essay 1","description":"<p>Write the thing.</p>","points":100}'
+        '<ASSIGNMENTFORGE_JSON>{"version":"2.0-json","type":"ASSIGNMENT",'
+        '"title":"Essay 1","overview":"<p>Write the thing.</p>","directions":[{"html":"<p>Submit it.</p>","response":"none"}],"points":100}'
         '</ASSIGNMENTFORGE_JSON>'
     ))
 
@@ -690,8 +690,9 @@ def test_a_real_tiered_assignmentforge_preview_allows_teacher_owned_dates(
     _ledger, monkeypatch,
 ):
     _stage("assignment", "tiered-essay", body=(
-        '<ASSIGNMENTFORGE_JSON>{"version":"1.0-json","type":"ASSIGNMENT",'
-        '"title":"Tiered Essay","description":"<p>Write the thing.</p>",'
+        '<ASSIGNMENTFORGE_JSON>{"version":"2.0-json","type":"ASSIGNMENT",'
+        '"title":"Tiered Essay","overview":"<p>Write the thing.</p>",'
+        '"directions":[{"html":"<p>Submit it.</p>","response":"none"}],'
         '"points":100,"tiers":[{"label":"Support"},{"label":"Core"}]}'
         '</ASSIGNMENTFORGE_JSON>'
     ))
@@ -725,8 +726,8 @@ def test_a_malformed_draft_is_refused_with_the_validator_problem(_ledger):
 
 def test_the_whole_chain_answers_one_text_block_over_the_protocol(_ledger):
     _stage("page", "welcome", body=(
-        '<PAGEFORGE_JSON>{"version":"1.0-json","type":"PAGE",'
-        '"title":"Welcome","body":"<p>Hi.</p>"}</PAGEFORGE_JSON>'
+        '<PAGEFORGE_JSON>{"version":"2.0-json","type":"PAGE",'
+        '"title":"Welcome","overview":"<p>Hi.</p>"}</PAGEFORGE_JSON>'
     ))
 
     content = asyncio.run(server.mcp.call_tool("preview_content_push", {
@@ -747,8 +748,8 @@ def test_the_frozen_operation_is_visible_to_the_teacher_and_applies_once(_ledger
     from api.operation_ledger import operations
 
     _stage("page", "welcome", body=(
-        '<PAGEFORGE_JSON>{"version":"1.0-json","type":"PAGE",'
-        '"title":"Welcome","body":"<p>Hi.</p>"}</PAGEFORGE_JSON>'
+        '<PAGEFORGE_JSON>{"version":"2.0-json","type":"PAGE",'
+        '"title":"Welcome","overview":"<p>Hi.</p>"}</PAGEFORGE_JSON>'
     ))
     preview = content_push.preview_content_push("course-x", "page", "welcome")
 

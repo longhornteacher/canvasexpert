@@ -13,8 +13,8 @@ from api.platform_services import canvas_client, config
 
 
 TIERS = [
-    {"label": "Support", "group": "Blue", "description": "support body"},
-    {"label": "Accelerate", "group": "Gold", "description": "accelerate body"},
+    {"label": "Support", "overview": "<p>Support body</p>"},
+    {"label": "Accelerate", "overview": "<p>Accelerate body</p>"},
 ]
 
 
@@ -158,12 +158,13 @@ class FakeCanvas:
 
 
 def _authoring_data():
-    return {"title": "Practice", "description": "base", "points": 10, "tiers": copy.deepcopy(TIERS)}
+    return {"title": "Practice", "overview": "<p>Base</p>", "points": 10,
+            "directions": [{"html": "<p>Answer.</p>", "response": "none"}],
+            "tiers": copy.deepcopy(TIERS)}
 
 
 def _build(monkeypatch, **request_overrides):
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.parse_file", lambda _path: (_authoring_data(), []))
-    monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.tier_payloads", lambda data: copy.deepcopy(data["tiers"]))
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
         "Support": "Red", "Core": "Blue", "Accelerate": "Silver",
     })
@@ -212,7 +213,6 @@ def test_prepare_preserves_ordinary_dates_for_each_tier(monkeypatch):
 
 def test_prepare_requires_unique_public_tags(monkeypatch):
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.parse_file", lambda _path: (_authoring_data(), []))
-    monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.tier_payloads", lambda data: copy.deepcopy(data["tiers"]))
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
         "Support": "Red", "Core": "Blue", "Accelerate": " red ",
     })
@@ -229,14 +229,14 @@ def test_assignmentforge_tier_tag_collision_is_a_stable_envelope_refusal(monkeyp
     message. Support/Core/Accelerate -> Silver/Red/Blue (all distinct) still
     passes, matching QuizForge's identical shared rule."""
     colliding_data = {
-        "title": "Practice", "description": "base", "points": 10,
+        "title": "Practice", "overview": "<p>Base</p>", "points": 10,
+        "directions": [{"html": "<p>Answer.</p>", "response": "none"}],
         "tiers": [
-            {"label": "Support", "group": "Blue", "description": "support body"},
-            {"label": "Accelerate", "group": "Gold", "description": "accelerate body"},
+            {"label": "Support", "overview": "<p>Support body</p>"},
+            {"label": "Accelerate", "overview": "<p>Accelerate body</p>"},
         ],
     }
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.parse_file", lambda _path: (colliding_data, []))
-    monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.tier_payloads", lambda data: copy.deepcopy(data["tiers"]))
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
         "Support": "Silver", "Core": "Red", "Accelerate": "Silver",
     })
@@ -592,20 +592,17 @@ def test_source_shape_matching_tolerates_canvas_html_normalization():
     assert _source_shape_matches(actual, expected, published=False)
 
 
-def test_source_shape_matching_tolerates_a_sanitized_scaffolding_panel(monkeypatch):
-    """Correction 1: the composed base + scaffolding-panel description (a
-    real tag, attributes, and entities -- not just plain text) still
-    verifies after a Canvas-shaped sanitization round trip, but a changed
-    visible sentence inside it still does not."""
+def test_source_shape_matching_tolerates_sanitized_collapsed_supports(monkeypatch):
+    """Rendered details and summary survive Canvas markup sanitization."""
     from api.operation_ledger.adapters.assignment_tiered import _source_shape_matches
 
     expected = {
         "name": "Practice - Silver",
         "description": (
             '<p>Read the passage and respond.</p>'
-            '<div class="scaffold" style="border:1px solid #000;" data-tier="Accelerate">'
-            '<p>Extension &mdash; cite two sources &middot; use a &quot;so what&quot; closer.</p>'
-            '</div>'
+                '<details class="supports"><summary>Supports</summary>'
+                '<p>Extension - cite two sources &middot; use a &quot;so what&quot; closer.</p>'
+                '</details>'
         ),
         "submission_types": ["online_text_entry"],
         "grading_type": "points",
@@ -619,9 +616,10 @@ def test_source_shape_matching_tolerates_a_sanitized_scaffolding_panel(monkeypat
         **expected,
         "description": (
             '<p>Read the passage and respond.</p>'
-            '<div data-tier="Accelerate"   style="border:1px solid #000;"    class="scaffold">'
-            '  <p>Extension &#8212; cite two sources &#183; use a &#34;so what&#34; closer.</p>  '
-            '</div>'
+                '<details data-layout="collapsed" class="supports">'
+                '<summary>Supports</summary>'
+                '  <p>Extension - cite two sources &#183; use a &#34;so what&#34; closer.</p>  '
+                '</details>'
         ),
     }
     assert _source_shape_matches(sanitized, expected, published=False)
@@ -630,24 +628,19 @@ def test_source_shape_matching_tolerates_a_sanitized_scaffolding_panel(monkeypat
         "cite two sources", "cite three sources")}
     assert not _source_shape_matches(changed, expected, published=False)
 
-    # CE sends normalize_student_text(description): Canvas holds " - " where
-    # the draft had an em dash, and that must still verify (Issue #11).
-    dash_normalized = {**sanitized, "description": sanitized["description"].replace(
-        " &#8212; ", " - ")}
-    assert _source_shape_matches(dash_normalized, expected, published=False)
-
     # Canvas's sanitizer may add structure and drop attributes; only visible
     # text is compared (Issue #11 live run).
     restructured = {**expected, "description": (
-        '<p>Read the passage and respond.</p><div>'
-        '<p>Extension - cite two sources · use a "so what" closer.</p></div>')}
+        '<p>Read the passage and respond.</p><details>'
+        '<summary>Supports</summary>'
+        '<p>Extension - cite two sources · use a "so what" closer.</p></details>')}
     assert _source_shape_matches(restructured, expected, published=False)
 
 
 def test_whole_class_payload_has_no_bridge(monkeypatch):
-    data = {"title": "Whole", "description": "body", "points": 10}
+    data = {"title": "Whole", "overview": "<p>Body</p>", "points": 10,
+            "directions": [{"html": "<p>Answer.</p>", "response": "none"}]}
     monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.parse_file", lambda _path: (data, []))
-    monkeypatch.setattr("api.operation_ledger.adapters.assignment.af.tier_payloads", lambda _data: [])
     payload = AssignmentAdapter().build_payload({"path": "whole.txt"})
     assert "tiers" not in payload
     assert "bridge_due_at" not in payload

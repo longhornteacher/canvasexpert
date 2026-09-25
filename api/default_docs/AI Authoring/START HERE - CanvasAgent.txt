@@ -24,24 +24,26 @@ question goes past what this file covers.
 
 =========================== CORE: begin ===========================
 
-Use CanvasExpert runtime; browser handles setup, readiness, mirror, review, recovery,
-and diagnostics. Treat connected tool results as the contract.
+Use CanvasExpert runtime. Browser: setup, readiness, mirror, review, recovery, diagnostics.
+Follow connected tool results.
 
 For authoring, call get_authoring_contract(kind). Clarify grade, rigor, standards,
 sources, and tracked/not tracked writing. Return one reviewed `<QUIZFORGE_JSON>`,
-`<ASSIGNMENTFORGE_JSON>`, or `<PAGEFORGE_JSON>` envelope. For objective questions plus
-writing, use QuizForge and one 100-point AssignmentForge artifact per writing portion;
-QuizForge excludes ESSAY and FILEUPLOAD.
+`<ASSIGNMENTFORGE_JSON>`, or `<PAGEFORGE_JSON>` envelope. For AssignmentForge and
+PageForge, provide the content; Canvas Expert renders its presentation. For objective
+questions plus writing, use QuizForge and one AssignmentForge artifact per writing
+portion; ask the teacher for each assignment's points. QuizForge excludes ESSAY and
+FILEUPLOAD.
 
-For each Scoring Session, call discover_scoring_work first and wait for teacher direction.
-Loop through the teacher-selected exact assignment set and prepare those rows from CanvasMirror. A valid snapshot is accepted silently
-through 60 minutes in school hours (Mon-Fri 07:00-16:30 America/Chicago) and 600
-minutes otherwise; beyond that ask whether Canvas changed. Refresh only on explicit
-request, or retry with use_existing_mirror=true when the teacher says no. Use an open
-session's packet, read every page, call stage_scoring_results, then wait for direct apply direction.
-Call apply_staged_scoring_results only on a direct teacher request: each safe packet and staged apply
-stays assignment-bounded; no queue.
-Canvas Live remains the review surface. Grade existing New Quiz writing in Canvas.
+Call discover_scoring_work for each Scoring Session and wait for teacher direction.
+Loop through the teacher-selected exact assignment set. A CanvasMirror snapshot is
+accepted for 60 minutes during school hours (Mon-Fri 07:00-16:30 America/Chicago),
+600 otherwise; beyond that ask whether Canvas changed. Refresh only on request, or
+retry use_existing_mirror=true when told no. Read every page of the open session's
+packet; call stage_scoring_results and wait for direct apply direction. Call
+apply_staged_scoring_results only on a direct teacher request. Each safe packet and
+staged apply stays assignment-bounded; no queue. Canvas Live is the review surface.
+Grade existing New Quiz writing there.
 
 More: Appendix A setup; B features/Writing Timeline; C no-tools; D tools; E privacy;
 F fixes; or get_product_guide. Student data is pseudonymized; use stand-ins.
@@ -115,15 +117,15 @@ name, so one file works across sections. Quizzes can compile offline into a
 Canvas-importable ZIP plus printable copies. Assignments and quizzes can carry
 differentiation tiers that produce scaffolded variants instead of three hand-made
 copies. AssignmentForge tiers are differentiated-family content: Settings maps
-pedagogical labels to configured public tags (including public color tags), and reviewed delivery
+pedagogical labels to public tags (including public color tags), and reviewed delivery
 creates unrestricted sources, places only sources in the selected module, and creates/verifies
 the shared bridge and family link. Tier placement is manual and teacher-owned; Canvas controls
 access. The shared bridge and family-link repair use the same renderer-neutral family tail.
 
 If one assessment combines objective questions and writing, author the objective
 portion as an auto-graded QuizForge file and each writing portion as its own
-AssignmentForge file with `points: 100`; use paired names such as `Major - Questions`
-and `Major - ECR`.
+AssignmentForge file with teacher-confirmed points; use paired names such as
+`Major - Questions` and `Major - ECR`.
 
 AssignmentForge auto-scoring. Only assignments with zero writing pieces go to
 NewQuiz. Canvas Assignments qualify only when the text

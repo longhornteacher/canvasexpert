@@ -32,10 +32,11 @@ def _fake_courses():
 
 SAMPLE_AF_JSON = """<ASSIGNMENTFORGE_JSON>
 {
-  "version": "1.0-json",
+  "version": "2.0-json",
   "type": "ASSIGNMENT",
   "title": "Found Poetry",
-  "description": "<h2>Found Poetry</h2><p>Create a poem.</p>",
+  "overview": "<p>Create a poem.</p>",
+  "directions": [{"html": "<p>Choose your words.</p>", "response": "none"}],
   "points": 100,
   "submission": {
     "types": ["online_text_entry", "online_upload"],
@@ -100,10 +101,12 @@ def test_assignment_canvas_text_contains_no_em_dashes(tmp_path, monkeypatch):
     af_file = tmp_path / "student-facing.assignmentforge.txt"
     af_file.write_text(
         """<ASSIGNMENTFORGE_JSON>
-{"version":"1.0-json","type":"ASSIGNMENT",
- "title":"Argument \u2014 draft","description":"<p>Read \u2014 respond.</p>",
- "tiers":[{"label":"Support","description":"<p>Use \u2014 evidence.</p>"},
-          {"label":"Core","description":"<p>Explain \u2014 evidence.</p>"}]}
+{"version":"2.0-json","type":"ASSIGNMENT",
+ "title":"Argument \u2014 draft","points":10,
+ "overview":"<p>Read \u2014 respond.</p>",
+ "directions":[{"html":"<p>Use \u2014 evidence.</p>","response":"none"}],
+ "tiers":[{"label":"Support"},
+          {"label":"Core","overview":"<p>Explain \u2014 evidence.</p>"}]}
 </ASSIGNMENTFORGE_JSON>""",
         encoding="utf-8",
     )
@@ -160,7 +163,7 @@ def test_payload_build_accepts_tiers(tmp_path, monkeypatch):
     af_file = tmp_path / "tiered.assignmentforge.json"
     af_file.write_text(
         """<ASSIGNMENTFORGE_JSON>
-{"version":"1.0-json","type":"ASSIGNMENT","title":"Tiered","description":"<p>Hi</p>","tiers":[{"label":"Support"},{"label":"Core"}]}
+{"version":"2.0-json","type":"ASSIGNMENT","title":"Tiered","points":10,"overview":"<p>Hi</p>","directions":[{"html":"<p>Work.</p>","response":"none"}],"tiers":[{"label":"Support"},{"label":"Core"}]}
 </ASSIGNMENTFORGE_JSON>""",
         encoding="utf-8",
     )
@@ -179,26 +182,21 @@ def test_payload_build_accepts_tiers(tmp_path, monkeypatch):
             {"tier": "Core", "group_name": "Gold"},
         ],
     })
-    assert payload["tiers"] == [{
-        "label": "Support", "tier": "Support",
-        "tag": "Red", "title": "Tiered - Red",
-        "description": "<p>Hi</p>",
-    }, {
-        "label": "Core", "tier": "Core",
-        "tag": "Blue", "title": "Tiered - Blue",
-        "description": "<p>Hi</p>",
-    }]
+    assert [(row["label"], row["tag"], row["title"]) for row in payload["tiers"]] == [
+        ("Support", "Red", "Tiered - Red"),
+        ("Core", "Blue", "Tiered - Blue"),
+    ]
+    assert all("<p>Hi</p>" in row["description"] for row in payload["tiers"])
 
 
 def test_payload_keeps_supports_and_corrections_private_to_the_operation(tmp_path, monkeypatch):
     af_file = tmp_path / "tiered.assignmentforge.txt"
     af_file.write_text(
         """<ASSIGNMENTFORGE_JSON>
-{"version":"1.0-json","type":"ASSIGNMENT","title":"Tiered","description":"<p>Hi</p>",
+{"version":"2.0-json","type":"ASSIGNMENT","title":"Tiered","points":10,"overview":"<p>Hi</p>",
+ "directions":[{"html":"<p>Work.</p>","response":"none"}],
  "tiers":[{"label":"Support"},{"label":"Core"},{"label":"Accelerate"}],
- "supports":{"silver":{"stem_frame":["The author reveals ___."]},
-              "red":{"scaffold":"bullet","verb_bank":["reveals"]},
-              "blue":{"verb_bank":["synthesize"]}},
+ "supports":{"sentence_frames":["The author reveals ___."],"word_bank":["reveals"]},
  "corrections":{"item-1":{"shared":{"answer":"Use walk.","why":"Present tense."},"by_tier":null}}}
 </ASSIGNMENTFORGE_JSON>""",
         encoding="utf-8",
@@ -218,12 +216,10 @@ def test_payload_keeps_supports_and_corrections_private_to_the_operation(tmp_pat
         ],
     })
 
-    assert payload["supports"]["silver"]["stem_frame"]
+    assert "supports" not in payload
     assert payload["corrections"]["item-1"]["shared"]["answer"] == "Use walk."
-    assert "Complete the sentence:" in payload["tiers"][0]["description"]
-    assert "Word bank:" in payload["tiers"][1]["description"]
-    assert "Push your analysis with verbs like:" in payload["tiers"][2]["description"]
-    assert "<details>" not in "".join(row["description"] for row in payload["tiers"])
+    assert all("The author reveals ___." in row["description"] for row in payload["tiers"])
+    assert all("<details" in row["description"] for row in payload["tiers"])
 
     from api.operation_ledger.adapters.assignment_tiered import _assignment_data
     canvas_body = _assignment_data(
@@ -238,7 +234,7 @@ def test_payload_build_raises_on_placeholders(tmp_path, monkeypatch):
     af_file = tmp_path / "placeholder.assignmentforge.json"
     af_file.write_text(
         """<ASSIGNMENTFORGE_JSON>
-{"version":"1.0-json","type":"ASSIGNMENT","title":"With Placeholder","description":"<p>See {{file:Rubric.pdf}}</p>"}
+{"version":"2.0-json","type":"ASSIGNMENT","title":"With Placeholder","points":10,"overview":"<p>See {{file:Rubric.pdf}}</p>","directions":[{"html":"<p>Work.</p>","response":"none"}]}
 </ASSIGNMENTFORGE_JSON>""",
         encoding="utf-8",
     )
@@ -255,6 +251,11 @@ def test_source_digest_is_deterministic():
     d1 = adapter.source_digest(payload)
     d2 = adapter.source_digest(payload)
     assert d1 == d2
+    assert d1 != adapter.source_digest({**payload, "description": "<p>Changed</p>"})
+    tiered = {**payload, "tiers": [{"description": "<p>Silver body</p>"}]}
+    assert adapter.source_digest(tiered) != adapter.source_digest({
+        **tiered, "tiers": [{"description": "<p>Revised Silver body</p>"}],
+    })
 
 
 # ── Target verification ─────────────────────────────────────────────────
@@ -376,7 +377,7 @@ def test_execute_creates_assignment(tmp_path, monkeypatch):
     )
 
     adapter = AssignmentAdapter()
-    payload = {"name": "Found \u2014 Poetry", "description": "<h2>Found Poetry</h2><p>Create \u2014 a poem.</p>",
+    payload = {"name": "Found \u2014 Poetry", "description": "<h2>Found Poetry</h2><p>Create - a poem.</p>",
                "points": 100, "submission_types": ["online_text_entry"],
                "published": True, "post_to_sis": False}
 

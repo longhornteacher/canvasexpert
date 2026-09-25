@@ -8,6 +8,9 @@ Excluded from this adapter:
 """
 import requests
 
+from engine.rendering.forge.canvas_html import render_assignment
+from engine.rendering.forge.palette import TIER_PALETTE_KEYS
+
 from .. import models
 from . import assignment_tiered, assignment_whole, differentiated_bridge
 from .adapter_support import (
@@ -23,11 +26,20 @@ from .adapter_support import (
     replace_step as _replace_local_step,
 )
 from api.platform_services import canvas_client, config
-from api.student_text import normalize_student_text
+from api.student_text import normalize_author_model, normalize_student_text
 from api.webui import af
 
 
 KIND = "content.assignment"
+
+_RENDER_FIELDS = (
+    "title", "points", "submission", "overview", "directions", "sections",
+    "rubric", "supports", "extras", "unit_info",
+)
+
+
+def _render_model(data: dict) -> dict:
+    return {key: normalize_author_model(data[key]) for key in _RENDER_FIELDS if key in data}
 
 
 class AssignmentAdapter:
@@ -46,52 +58,54 @@ class AssignmentAdapter:
         if not name:
             raise ValueError("AssignmentForge file must have a title")
 
-        tier_rows = af.tier_payloads(data)
-        tiers = [] if not data.get("tiers") else [{
-            "label": str(row.get("label") or "").strip(),
-            "description": str(row.get("description") or ""),
-        } for row in tier_rows]
-        if tiers and prepare_request.get("printable_path"):
+        authored_tiers = data.get("tiers") or []
+        if authored_tiers and prepare_request.get("printable_path"):
             raise ValueError("Printable attachments are not supported for tiered assignments")
 
-        if tiers:
+        model = _render_model(data)
+        model["title"] = name
+        assignment_group = str(prepare_request.get("assignment_group_name") or "").strip()
+        tiers = []
+        if authored_tiers:
             tags = differentiated_bridge.resolve_public_tags(
-                [row["label"] for row in tiers]
+                [row["label"] for row in authored_tiers]
             )
-            tiers = [
-                {
-                    **row,
-                    **resolved,
-                }
-                for row, resolved in zip(
-                    af.add_supports(tiers, data.get("supports"), tags), tags
-                )
-            ]
             base_title = differentiated_bridge.normalize_base_title(name)
-            for row in tiers:
-                row["title"] = differentiated_bridge.source_title(
-                    base_title, row["tag"]
-                )
-
-        description = normalize_student_text(data.get("description") or "")
-        if af.PLACEHOLDER_RE.search(description):
-            raise ValueError(
-                "Course-resource placeholders ({{file:...}} / {{page:...}}) "
-                "are not supported through this push path yet."
+            for authored, resolved in zip(authored_tiers, tags):
+                tier_model = normalize_author_model(model)
+                for field in ("overview", "directions"):
+                    if field in authored:
+                        tier_model[field] = normalize_author_model(authored[field])
+                if "supports" in authored:
+                    tier_model["tier_supports"] = normalize_author_model(authored["supports"])
+                tiers.append({
+                    "label": resolved["tier"],
+                    **resolved,
+                    "title": differentiated_bridge.source_title(base_title, resolved["tag"]),
+                    "description": render_assignment(
+                        tier_model,
+                        palette_key=TIER_PALETTE_KEYS[resolved["tier"]],
+                        public_tag=resolved["tag"],
+                        assignment_group=assignment_group,
+                        printable_link=None,
+                    ),
+                })
+            description = tiers[0]["description"]
+        else:
+            description = render_assignment(
+                model,
+                palette_key="default",
+                public_tag="",
+                assignment_group=assignment_group,
+                printable_link=None,
             )
 
         sub_fields = af.submission_fields(data)
-        if sub_fields.get("_annotatable_file_name"):
-            raise ValueError(
-                "Student annotation files require per-course resolution "
-                "and are not supported through this push path yet."
-            )
-
         points = data.get("points")
         payload = {
             "name": name,
             "description": description,
-            "points": float(points) if points is not None else None,
+            "points": float(points),
             "submission_types": sub_fields.get("submission_types", ["online_text_entry"]),
             "published": bool(prepare_request.get("published")),
             "post_to_sis": bool(prepare_request.get("post_to_sis")),
@@ -105,8 +119,6 @@ class AssignmentAdapter:
                 raise ValueError(
                     "tiered AssignmentForge sources are SIS-disabled; omit post_to_sis"
                 )
-        if data.get("supports"):
-            payload["supports"] = data["supports"]
         if data.get("corrections"):
             payload["corrections"] = data["corrections"]
         if sub_fields.get("allowed_extensions"):
@@ -119,9 +131,8 @@ class AssignmentAdapter:
             if val:
                 payload[key] = str(val).strip()
 
-        ag_name = prepare_request.get("assignment_group_name")
-        if ag_name:
-            payload["assignment_group_name"] = str(ag_name).strip()
+        if assignment_group:
+            payload["assignment_group_name"] = assignment_group
 
         # Printable PDF attachment
         printable = prepare_request.get("printable_path")
@@ -161,7 +172,6 @@ class AssignmentAdapter:
             "create_module": payload.get("create_module"),
             "tiers": payload.get("tiers"),
             "base_title": payload.get("base_title"),
-            "supports": payload.get("supports"),
             "corrections": payload.get("corrections"),
             "unrestricted_tiers": payload.get("unrestricted_tiers"),
         }

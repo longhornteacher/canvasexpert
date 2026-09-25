@@ -12,7 +12,7 @@ Instructions (upload or paste):
 Knowledge: none — the contract is embedded in the Instructions file.
 
 Customize (suggested starting text):
-  My class pages use the following heading style: [describe style].
+  My class pages are for [purpose] and should explain [key content].
   My course is [course name] for [grade level] students.
 
 Build steps:

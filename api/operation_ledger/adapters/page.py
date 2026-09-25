@@ -2,6 +2,8 @@
 
 import json
 
+from engine.rendering.forge.canvas_html import render_page
+
 from .. import models
 from .adapter_support import (
     as_list as _as_list,
@@ -17,10 +19,13 @@ from .adapter_support import (
     replace_step as _replace_local_step,
 )
 from api.platform_services import canvas_client, config
+from api.student_text import normalize_author_model, normalize_student_text
 from api.webui import pf
 
 
 KIND = "content.page"
+
+_RENDER_FIELDS = ("title", "layout", "overview", "sections", "extras", "unit_info", "body", "banner")
 
 
 class PageAdapter:
@@ -33,8 +38,10 @@ class PageAdapter:
         data, problems = pf.parse_file(path)
         if data is None or problems:
             raise ValueError("; ".join(problems or ["unreadable file"]))
-        title = str(data.get("title") or "").strip()
-        body = str(data.get("body") or "")
+        title = normalize_student_text(data.get("title") or "").strip()
+        model = {key: normalize_author_model(data[key]) for key in _RENDER_FIELDS if key in data}
+        model["title"] = title
+        body = render_page(model)
         published = bool(prepare_request.get("published"))
         module_name = prepare_request.get("module_name") or None
         if module_name:

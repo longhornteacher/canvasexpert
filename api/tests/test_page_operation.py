@@ -21,19 +21,20 @@ from api.webui import pf
 
 PAGEFORGE_VALID = """<PAGEFORGE_JSON>
 {
-  "version": "1.0-json",
+  "version": "2.0-json",
   "type": "PAGE",
   "title": "Test Page",
-  "body": "<p>Hello world</p>"
+  "layout": "standard",
+  "overview": "<p>Hello world</p>"
 }
 </PAGEFORGE_JSON>"""
 
 PAGEFORGE_INVALID = """<PAGEFORGE_JSON>
 {
-  "version": "1.0-json",
+  "version": "2.0-json",
   "type": "PAGE",
   "title": "",
-  "body": ""
+  "overview": ""
 }
 </PAGEFORGE_JSON>"""
 
@@ -115,7 +116,7 @@ def test_prepare_with_valid_file(tmp_path, monkeypatch):
     adapter = PageAdapter()
     payload = adapter.build_payload({"path": path, "published": True})
     assert payload["title"] == "Test Page"
-    assert payload["body"] == "<p>Hello world</p>"
+    assert "<p>Hello world</p>" in payload["body"]
     assert payload["published"] is True
     assert payload["source_path"] == path
 

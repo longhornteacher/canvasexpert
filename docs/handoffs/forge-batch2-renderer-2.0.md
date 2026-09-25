@@ -1,7 +1,8 @@
 # Brief: Forge Batch 2 — renderer, 2.0 payloads, and authoring contracts
 
 Status: **current**, ready for execution. Senior: the 2026-09-25 planning session.
-Branch: `dev`. Base commit: `6394b659ef5560d18f34d7b6bc528524ba74ff64`.
+Branch: `dev`. Base code commit: `6394b659ef5560d18f34d7b6bc528524ba74ff64`;
+the current brief-only commit is `fb87bb3adc03840ed458db0bbc8c64cdeb3b2efc`.
 
 ## Required reading (only these)
 
@@ -50,7 +51,8 @@ Canvas Expert owns the student-facing presentation.
 
 ## Preflight (before writing; stop if false)
 
-1. Confirm `dev` at the base commit and that `git status` shows only unrelated
+1. Confirm `dev` at the brief-only commit above, with the base code commit as
+   its parent, and that `git status` shows only unrelated
    in-progress changes in `api/mirror/store.py`,
    `api/tests/mirror/test_store.py`, and `stubbed-workspace/`. Preserve them.
 2. Confirm the §1.1 insertion points still exist: `af.validate`, `pf.validate`,
@@ -157,5 +159,11 @@ and inspect width in a wide and a narrow window.
 
 ## Execution result
 
-_To be filled in by the executor. On GREEN, the senior accepts and retires
-this brief, then updates plan §9 to the next batch's single pointer._
+**GREEN — executor complete; awaiting senior acceptance.** No commit was made.
+
+- Changed files: `engine/rendering/forge/{__init__,palette,author_html,canvas_html,submission_wording}.py`, `engine/tests/rendering/forge/test_canvas_html.py`, `engine/tests/rendering/{__init__.py,forge/__init__.py}`; `api/webui/{af,pf}.py`, `api/operation_ledger/adapters/{assignment,assignment_tiered,assignment_whole,page}.py`, `api/student_text.py`, `api/powergrader/assignmentforge.py`, `api/webui/routes/push_validation.py`, `api/webui/static/push/{assignment,page}.js`, `api/webui/templates/course_expert.html`; focused API tests in `api/tests/{webui,mcp_server}/` and the assignment, page, inbox, and authoring-instruction tests; the two canonical Forge authoring files, `START HERE - CanvasAgent.txt`, MagicSchool Page Author SETUP, `docs/reference/{course-expert-module-map,assignment-differentiation-design}.md`, and `engine/docs/ARCHITECTURE.md`. This brief's base-commit wording was corrected to distinguish the brief-only commit from its code parent.
+- Named focused gate: `py -m pytest -p no:randomly engine/tests api/tests/webui/test_af.py api/tests/webui/test_pf.py api/tests/test_assignment_operation.py api/tests/test_assignment_tier_operation.py api/tests/test_page_operation.py api/tests/mcp_server/test_content_push_tools.py api/tests/test_canvasagent_instructions.py api/tests/powergrader/test_corrections.py` — **343 passed**.
+- Full API gate: `py -m pytest -p no:randomly api/tests` — **1,983 passed, 5 warnings**. An earlier run found an authoring-guide size limit (7,204 vs. 7,200 characters); the guide was shortened and the full rerun passed.
+- A temporary pytest-isolated app and headless Edge check loaded `/course-expert`, validated synthetic 2.0 AssignmentForge and PageForge drafts, and observed both valid with zero new page/console errors — **1 passed**. The temporary test was removed.
+- `git diff --check` passed. Self-review found no MCP parameter change or `api` import in the engine package. The pre-existing `api/mirror/store.py`, `api/tests/mirror/test_store.py`, and `stubbed-workspace/` changes were preserved.
+- Deviations from locked design: none. Unresolved decisions: none. Teacher sandbox smoke remains the post-merge check named above.

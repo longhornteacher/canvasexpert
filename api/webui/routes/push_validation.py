@@ -132,22 +132,25 @@ def register_validation_routes(
         """Validate an <ASSIGNMENTFORGE_JSON> file and summarize what it would push."""
         data, problems = af.parse_file(path)
         summary = None
-        if data is not None:
-            tiers = data.get("tiers") or []
+        if isinstance(data, dict):
+            tiers = data.get("tiers") if isinstance(data.get("tiers"), list) else []
+            directions = data.get("directions") if isinstance(data.get("directions"), list) else []
+            sections = data.get("sections") if isinstance(data.get("sections"), list) else []
+            submission = data.get("submission") if isinstance(data.get("submission"), dict) else {}
             summary = {
+                "version": data.get("version"),
                 "type": data.get("type"),
                 "title": data.get("title"),
-                "points": data.get("points", 100),
-                "submission_types": (data.get("submission") or {}).get(
-                    "types", ["online_text_entry"]),
-                "tiers": [{"label": t.get("label"),
-                           "scaffolded": bool(t.get("scaffolding") or t.get("description"))}
-                          for t in tiers],
-                "placeholders": sorted(set(
-                    f"{k}:{v.strip()}" for k, v in
-                    af.PLACEHOLDER_RE.findall(str(data.get("description", "")) + "".join(
-                        str(t.get("description") or "") + str(t.get("scaffolding") or "")
-                        for t in tiers)))),
+                "points": data.get("points"),
+                "submission_types": submission.get("types", ["online_text_entry"]),
+                "directions": len(directions),
+                "sections": len(sections),
+                "rubric": bool(data.get("rubric")),
+                "supports": bool(data.get("supports")),
+                "tiers": [{"label": tier.get("label"),
+                           "overrides": sorted(set(tier) & {"overview", "directions"}),
+                           "supports": bool(tier.get("supports"))}
+                          for tier in tiers if isinstance(tier, dict)],
             }
         return JSONResponse({"ok": data is not None and not problems,
                              "problems": problems, "summary": summary})
@@ -156,13 +159,16 @@ def register_validation_routes(
         """Validate a <PAGEFORGE_JSON> file and summarize what it would push."""
         data, problems = pf.parse_file(path)
         summary = None
-        if data is not None:
+        if isinstance(data, dict):
+            sections = data.get("sections") if isinstance(data.get("sections"), list) else []
+            extras = data.get("extras") if isinstance(data.get("extras"), list) else []
             summary = {
+                "version": data.get("version"),
                 "type": data.get("type"),
                 "title": data.get("title"),
-                "placeholders": sorted(set(
-                    f"{k}:{v.strip()}" for k, v in
-                    pf.PLACEHOLDER_RE.findall(str(data.get("body", ""))))),
+                "layout": data.get("layout", "standard"),
+                "sections": len(sections),
+                "extras": len(extras),
             }
         return JSONResponse({"ok": data is not None and not problems,
                              "problems": problems, "summary": summary})

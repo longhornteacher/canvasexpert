@@ -39,19 +39,20 @@
       if (d.problems?.length) d.problems.forEach(function (p) { log("✗ " + p); });
       var s = d.summary;
       if (s) {
-        log((d.ok ? "✓ VALID" : "✗ INVALID") + " — " + s.type + ': "' + s.title + '" (' + s.points + " pts)");
-        log("  submission: " + s.submission_types.join(", "));
+        var points = s.points == null ? "points required" : s.points + " pts";
+        log((d.ok ? "✓ VALID" : "✗ INVALID") + " — " + s.type + ': "' + s.title + '" (' + points + ")");
+        log("  submission: " + (s.submission_types || []).join(", "));
+        log("  directions: " + s.directions + "; sections: " + s.sections +
+            (s.rubric ? "; rubric" : "") + (s.supports ? "; supports" : ""));
         if (s.tiers.length) {
           s.tiers.forEach(function (t) {
             log("  tier " + t.label + " (content variant)" +
-              (t.scaffolded ? " (scaffolded)" : ""));
+              (t.overrides && t.overrides.length ? " (overrides " + t.overrides.join(", ") + ")" : "") +
+              (t.supports ? " (tier supports)" : ""));
           });
         } else {
           log("  whole-class (no tiers)");
         }
-        (s.placeholders || []).forEach(function (p) {
-          log("  placeholder {{" + p + "}} — resolved per course at push");
-        });
       }
     }).catch(function (e) { log("ERROR: " + e); });
   });

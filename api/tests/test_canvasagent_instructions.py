@@ -107,6 +107,45 @@ def test_core_names_every_envelope_tag(core):
         assert tag in core, f"CORE does not name {tag}"
 
 
+def test_assignment_and_page_contracts_are_2_0_content_only():
+    """Forge agents provide content; the renderer owns student-facing layout."""
+    root = Path(REPO_ROOT)
+    assignment = (root / "api" / "default_docs" / "AI Authoring" /
+                  "Author an Assignment (AssignmentForge).txt").read_text(encoding="utf-8")
+    page = (root / "api" / "default_docs" / "AI Authoring" /
+            "Author a Page (PageForge).txt").read_text(encoding="utf-8")
+    for body, tag in ((assignment, "ASSIGNMENTFORGE_JSON"),
+                      (page, "PAGEFORGE_JSON")):
+        assert "2.0-json" in body
+        assert "1.0-json` is retired" in body
+        assert f"<{tag}>" in body
+        assert "Author content" in body
+        assert "Canvas Expert" in body and "palette" in body
+        assert "style attributes" in body
+        assert "{{file:" in body and "{{page:" in body
+        assert "resolved per course at push time" not in body
+    assert '"response": "short"' in assignment
+    assert '"lines": 3' in assignment
+    assert "missing rubric" in assignment.lower() and "teacher" in assignment.lower()
+    assert '"layout": "standard"' in page
+    assert '"layout": "freeform"' in page
+
+
+def test_canvasagent_and_magicschool_setup_do_not_request_forge_styling():
+    root = Path(REPO_ROOT)
+    ai_authoring = root / "api" / "default_docs" / "AI Authoring"
+    start_here = (ai_authoring / "START HERE - CanvasAgent.txt").read_text(encoding="utf-8")
+    assert "Canvas Expert renders its presentation" in start_here
+    setup_paths = (
+        ai_authoring / "MagicSchool Toolkit" / "Assignment Author — SETUP.txt",
+        ai_authoring / "MagicSchool Toolkit" / "Page Author — SETUP.txt",
+        ai_authoring / "MagicSchool Toolkit" / "Quiz Author — SETUP.txt",
+    )
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in setup_paths).casefold()
+    assert "heading style" not in combined
+    assert "describe style" not in combined
+
+
 def test_every_envelope_tag_claimed_is_one_the_code_actually_reads(text):
     """Guards against the doc naming a tag the parsers do not accept."""
     claimed = set(re.findall(r"<([A-Z]+FORGE_JSON)>", text))

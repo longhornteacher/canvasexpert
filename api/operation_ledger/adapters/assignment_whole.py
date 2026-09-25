@@ -149,7 +149,7 @@ def _create_assignment(
     find_assignment_group,
 ) -> tuple[str | None, str | None, dict | None]:
     printable_path = payload.get("printable_path")
-    description = normalize_student_text(payload.get("description"))
+    description = str(payload.get("description") or "")
     if printable_path:
         uploaded, upload_err = upload_course_file(course_id, printable_path)
         if upload_err:
@@ -160,9 +160,7 @@ def _create_assignment(
                 private_diagnostic=upload_err,
             )
         file_link = file_link_html(uploaded)
-        description = normalize_student_text(
-            "\n".join(part for part in (description, file_link) if part)
-        )
+        description = "\n".join(part for part in (description, file_link) if part)
 
     assignment_data = {"name": name, "submission_types": payload.get("submission_types", ["online_text_entry"])}
     if description:

@@ -95,6 +95,14 @@ Expert loads that bundle first, then the shared push cards, then the page-specif
   Differentiated writes must use the reviewed Operation Ledger family path.
 - Assignment/Page printable path ownership lives in `api/operation_ledger/adapters/assignment.py`.
 
+AssignmentForge and PageForge payloads are parsed and validated by
+`api/webui/af.py` and `api/webui/pf.py`. The Assignment and Page adapters normalize
+their authored text, then use the offline `engine/rendering/forge/` package to render
+Canvas HTML before the reviewed operation freezes its payload and digest. The package
+owns the palette, author-HTML allowlist/decorations, Canvas layouts, and submission
+wording; authoring contracts supply content rather than presentation. Printable
+generation remains a separate later batch.
+
 ## First Places To Look By Symptom
 
 - Create tab deep-linking / shell glue: `course_expert/tabs.js`

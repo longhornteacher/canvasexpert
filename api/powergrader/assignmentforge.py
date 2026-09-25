@@ -1,9 +1,9 @@
 """Private AssignmentForge metadata associated with pushed assignments.
 
-AssignmentForge supports and corrections never travel through Canvas. The
-Operation Ledger retains the authored envelope privately; this module resolves
-that record by the exact assignment ID created by the ledger so ScoringSession
-can use teacher-authored corrections without inventing a second source of truth.
+Rendered supports appear in the Canvas assignment description, while scoring
+corrections stay private in the Operation Ledger. This module resolves the
+record by the exact assignment ID created by the ledger so ScoringSession can
+use teacher-authored corrections without inventing a second source of truth.
 """
 
 from __future__ import annotations

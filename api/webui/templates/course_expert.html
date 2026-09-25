@@ -301,9 +301,9 @@
         <h2 class="ce-u-mb-2">From AssignmentForge file</h2>
         <p class="hint ce-u-mb-3">
           Push an LLM-authored <code>&lt;ASSIGNMENTFORGE_JSON&gt;</code> file to every checked
-          course — HTML description, submission settings, and differentiation tiers come from the file.
-          Tiered files create one unpublished, unrestricted assignment draft per tier; assign and
-          publish those drafts in Canvas after delivery.
+          course. The file supplies content, submission settings, and optional tiers;
+          Canvas Expert renders the description. Reviewed tiered delivery creates published,
+          unrestricted source assignments. Assign students to those sources in Canvas.
         </p>
         <div class="inbox-pending" hidden data-inbox-kind="assignment" data-inbox-select="af-file">
           <div class="inbox-pending-head">
@@ -378,8 +378,8 @@
         <h2 class="ce-u-mb-2">From PageForge file</h2>
         <p class="hint ce-u-mb-3">
           Push an LLM-authored <code>&lt;PAGEFORGE_JSON&gt;</code> file to every checked
-          course — title and HTML body come from the file;
-          <code>{{ '{{file:…}}' }}</code> and <code>{{ '{{page:…}}' }}</code> placeholders resolve per course.
+          course. The file supplies content and layout; Canvas Expert renders the page.
+          Course-resource placeholders are not supported yet.
         </p>
         <div class="inbox-pending" hidden data-inbox-kind="page" data-inbox-select="pf-file">
           <div class="inbox-pending-head">

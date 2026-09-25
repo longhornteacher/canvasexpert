@@ -358,7 +358,7 @@ def _assignment_data(
         "published": False,
     }
     if description:
-        data["description"] = normalize_student_text(description)
+        data["description"] = description
     if payload.get("points") is not None:
         data["points_possible"] = float(payload["points"])
     for key in ("allowed_extensions", "external_tool_tag_attributes"):
@@ -411,11 +411,8 @@ def _shape_mismatches(actual: dict, expected: dict, *, published: bool) -> list[
 
 def _shape_value_matches(key: str, actual: object, expected: object) -> bool:
     if key == "description":
-        # The create sends normalize_student_text(description), and Canvas's
-        # sanitizer rewrites markup, so compare normalized visible text only
-        # (Issue #11 live root cause).
-        return (canonical_text(normalize_student_text(actual))
-                == canonical_text(normalize_student_text(expected)))
+        # Canvas may rewrite markup while preserving the rendered visible text.
+        return canonical_text(actual) == canonical_text(expected)
     if key == "submission_types":
         return sorted(actual or []) == sorted(expected or [])
     return actual == expected

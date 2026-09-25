@@ -21,6 +21,12 @@ two unique tiers. The teacher must also choose the due date, module placement, a
 intent. A module is either an exact existing `module_id` or an explicit
 `create_module` request with a name; the runtime never guesses.
 
+AssignmentForge uses the `2.0-json` contract. Its canonical tier label selects the
+fixed presentation palette; the teacher-configured public tag supplies the
+student-visible title suffix. The offline `engine/rendering/forge/` renderer builds
+each source description from normalized content before review freezes the payload.
+The canonical label is not displayed to students and never maps students to a tier.
+
 Canvas group and pod settings are intentionally ignored. Tier placement is manual and
 teacher-owned after delivery.
 

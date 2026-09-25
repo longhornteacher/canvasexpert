@@ -46,19 +46,19 @@ def _drop(kind: str, name: str, body: str):
 
 PAGEFORGE_VALID = """<PAGEFORGE_JSON>
 {
-  "version": "1.0-json",
+  "version": "2.0-json",
   "type": "PAGE",
   "title": "Test Page",
-  "body": "<p>Hello world</p>"
+  "overview": "<p>Hello world</p>"
 }
 </PAGEFORGE_JSON>"""
 
 PAGEFORGE_INVALID = """<PAGEFORGE_JSON>
 {
-  "version": "1.0-json",
+  "version": "2.0-json",
   "type": "PAGE",
   "title": "",
-  "body": ""
+  "overview": ""
 }
 </PAGEFORGE_JSON>"""
 

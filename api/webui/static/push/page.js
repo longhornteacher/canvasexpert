@@ -35,9 +35,8 @@
         var s = d.summary;
         if (s) {
           log((d.ok ? "✓ VALID" : "✗ INVALID") + ' — ' + s.type + ': "' + s.title + '"');
-          (s.placeholders || []).forEach(function (p) {
-            log("  placeholder {{" + p + "}} — resolved per course at push");
-          });
+          log("  layout: " + s.layout + "; sections: " + s.sections +
+              "; extras: " + s.extras);
         }
       })
       .catch(function (e) { if (log) log("ERROR: " + e); });
