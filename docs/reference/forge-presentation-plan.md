@@ -540,11 +540,8 @@ code. Locked now:
 
 ## 9. Next batch (single current pointer)
 
-**Next: Batch 1 (§4).** The brief routes the executor to §1.2, §1.3, §4, and contract §2
-only. There are no outstanding decisions.
-
-When a batch closes GREEN, the senior replaces this section with the next batch's pointer.
-This section is never a log.
+**Next: Batch 2 (§5).** Read this plan's §0, §1.1, §1.4–§1.6, §2, §3, and §5;
+read the contract's §1–§5, §7, and §8. There are no outstanding decisions.
 
 ## 10. Known adjacent defects (outside this plan)
 
