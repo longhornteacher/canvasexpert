@@ -22,6 +22,8 @@
 .ce-settings-compact-hint { margin: var(--ce-space-1) 0 var(--ce-space-2); }
 .ce-settings-tier-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .ce-tier-settings-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ce-space-2); }
+.tier-color-input { border-left: 10px solid transparent; }
+.tier-color-input option { color: var(--ce-on-accent); }
 .ce-settings-section-gap { margin-top: var(--ce-space-3); }
 .ce-settings-list { margin: var(--ce-space-2) 0 0; padding-left: 18px; }
 .ce-settings-course-actions { margin-top: var(--ce-space-4); }

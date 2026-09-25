@@ -254,9 +254,9 @@
                  autocomplete="off">
         </label>
         <label>{{ name }} color
-          <select class="tier-color-input" data-tier="{{ name }}" style="border-left:10px solid {{ tier_palettes[tier_colors[name]].dark }}">
+          <select class="tier-color-input" data-tier="{{ name }}">
             {% for key, palette in tier_palettes.items() %}
-            <option value="{{ key }}" data-dark="{{ palette.dark }}" style="background-color:{{ palette.dark }};color:#fff" {% if tier_colors[name] == key %}selected{% endif %}>■ {{ key }}</option>
+            <option value="{{ key }}" data-dark="{{ palette.dark }}" {% if tier_colors[name] == key %}selected{% endif %}>■ {{ key }}</option>
             {% endfor %}
           </select>
         </label>
@@ -265,9 +265,9 @@
       <div class="ce-tier-settings-row">
         <span></span>
         <label>Untiered and pages color
-          <select class="tier-color-input" data-tier="untiered" style="border-left:10px solid {{ tier_palettes[tier_colors.untiered].dark }}">
+          <select class="tier-color-input" data-tier="untiered">
             {% for key, palette in tier_palettes.items() %}
-            <option value="{{ key }}" data-dark="{{ palette.dark }}" style="background-color:{{ palette.dark }};color:#fff" {% if tier_colors.untiered == key %}selected{% endif %}>■ {{ key }}</option>
+            <option value="{{ key }}" data-dark="{{ palette.dark }}" {% if tier_colors.untiered == key %}selected{% endif %}>■ {{ key }}</option>
             {% endfor %}
           </select>
         </label>
@@ -473,11 +473,16 @@
 (function () {
   var form = document.getElementById("tier-tags-form");
   document.querySelectorAll(".tier-color-input").forEach(function (select) {
+    // Swatch colors come from data-dark; templates carry no inline styles.
+    Array.prototype.forEach.call(select.options, function (option) {
+      option.style.backgroundColor = option.dataset.dark;
+    });
     function showSwatch() {
       var option = select.options[select.selectedIndex];
       if (option) select.style.borderLeftColor = option.dataset.dark;
     }
     select.addEventListener("change", showSwatch);
+    showSwatch();
   });
   if (!form) return;
   form.addEventListener("submit", function (e) {
