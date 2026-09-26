@@ -145,8 +145,9 @@ _NEXT_STEPS = {
         "a direct teacher request to post this exact stage before applying it."
     ),
     "apply_staged_scoring_results": (
-        "Wait for a direct teacher instruction to post this exact stage before calling "
-        "this tool. It accepts only the unchanged stage digest."
+        "The stage was posted. Report the counts; Canvas Live is where the teacher "
+        "reviews it, and grades are not read back. Report any transport_unknown row for "
+        "the teacher to check in Canvas; never retry it."
     ),
     "prepare_scoring_session": (
         "When status is ready, call get_scoring_packet with scoring_session_id. "
