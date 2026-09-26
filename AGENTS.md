@@ -72,6 +72,12 @@ both `origin/dev` and `origin/main`. A temporary PR branch must target `dev` and
 after closure. Never merge histories or delete branches without checking unmerged commits
 and confirming the target.
 
+Parallel sessions share `dev`, so shared counters are settled at integration, not at
+authoring: the MCP `TOOL_SCHEMA_VERSION` and its snapshot, and the tool-listing budget in
+`api/tests/mcp_server/test_server_instructions.py`. An executor takes the next free number;
+whoever rebases onto a newer `dev` renumbers if it was taken, regenerates the snapshot under
+pytest, and re-measures the budget.
+
 ## Lazy routing index
 
 Use only the row relevant to the active handoff.
@@ -126,6 +132,8 @@ Use only the row relevant to the active handoff.
 
 The senior/orchestrator owns architecture, scope, and acceptance. One implementation
 executor performs the bounded handoff. The distinction is about the size/cost of the model of the agent.
+Only the executor writes for a brief. Read-only helpers (preflight, test baselines, research
+fan-out) may run alongside it on smaller models; they report, they do not edit.
 
 ### Senior responsibilities
 
