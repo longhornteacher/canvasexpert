@@ -1,9 +1,12 @@
 # Grading policy contract
 
-Status: decided 2026-09-26, not built. Canvas behavior below comes from the Canvas API docs
-and canvas-lms source (master `1c9f0bb`), not a live test; the teacher chose to build without
-one. When built, this amends `feedback-scoring-contract.md` ("Session consumption and write
-safety") and `canvas-transport-owners.json`; until then those describe shipped behavior.
+Status: current. Decided and built 2026-09-26 in three briefs (curve entered score `5890925`,
+Scoring Session effort credit and late days `e7de3cb`, missing sweep in the commit that
+retired its brief). Canvas behavior below comes from the Canvas API docs and canvas-lms source
+(master `1c9f0bb`), not a live test; the teacher chose to build without one, so each path's
+first real use is its first live run. `feedback-scoring-contract.md`,
+`grade-adjustment-contract.md`, and `canvas-transport-owners.json` carry the matching
+amendments.
 
 ## 1. Purpose
 
@@ -131,27 +134,46 @@ writes. The fix:
 ## 6. Missing sweep
 
 A new Operation Ledger kind, `gradebook.missing_fill`, separate from grade adjustment (whose
-numeric-score model, revert, and verification don't fit blank rows). One operation per course;
-entries per assignment and student. The retired `gradebook.sweep` adapter at `406486b^` is a
-useful reference for a course-scoped, crash-safe ledger kind.
+numeric-score model, revert, and verification don't fit blank rows). One operation per course,
+one target per course, one step per row named `fill:{assignment_id}:{user_id}`, following grade
+adjustment's `initial_steps` / per-step `sent_unknown` reconcile pattern. The retired
+`gradebook.sweep` adapter at `406486b^` is a useful reference for a course-scoped, crash-safe
+ledger kind, not a template to copy.
 
-Eligible assignment: published, points-graded, has a due date, submission types other than
-none / on paper / external tool (New Quizzes excepted), and not a group assignment unless
-students are graded individually.
+Eligible assignment: published, `grading_type == "points"`, `points_possible > 0`, submission
+types other than none / on paper / external tool (New Quizzes excepted via
+`is_quiz_lti_assignment`), not a group assignment unless students are graded individually
+(`grade_group_students_individually`), and not `in_closed_grading_period` when Canvas reports
+it. Assignment facts are not in the mirror, so they come from one live GET per *candidate*
+assignment at baseline capture (both preview and apply/retry), not a mirror schema change.
+Candidates are pre-filtered from the mirror (published, has a due date, at least one
+eligible-looking row), so a course with many assignments does not cost a live read of every
+one. Each exclusion is a counted skip reason.
 
 Eligible row, from a mirror within freshness policy: current enrollment, not excused,
-`workflow_state` unsubmitted, no score, Canvas `missing` true, and school days since
-`cached_due_date` of at least 15 plus the student's grace days.
+`workflow_state` unsubmitted, no score, Canvas `missing` true, `cached_due_date` present, and
+school days since `cached_due_date` of at least `sweep_after_school_days` plus the student's
+grace days. No policy for the course refuses with `no_grading_policy`.
 
-Write, per row, after a live GET confirms the row is still eligible and has no custom grade
-status: `posted_grade` = the missing value and `late_policy_status = "missing"` in one request.
-Canvas keeps an explicit missing status with a score. Verify by reading back score and status.
+Write, per row, after a live GET confirms the row still has no submission, score, excuse,
+custom grade status, or extended late status (else skipped as `changed_since_preview`):
+`posted_grade` = the missing value and `late_policy_status = "missing"` in one request. Canvas
+keeps an explicit missing status with a score. Verify by reading back `entered_score` and
+`late_policy_status`.
 
-Undo is a new preview from the receipt: `posted_grade = ""` and `late_policy_status =
-"missing"`, which returns the row to blank with the Missing label kept. (Clearing to null would
-drop the label for good, because a recorded grader stops automatic missing.)
+Failures: a definite Canvas HTTP rejection marks that one row failed and the sweep continues
+with the next row (one closed grading period must not stop a course sweep); the target ends
+`partial`. A transport-unknown error stops the operation as `sent_unknown`, exactly like grade
+adjustment, and resume reconciles that one step by live GET.
 
-Surface: `preview_missing_sweep` (course, or a revert of a receipt) and `apply_missing_sweep`,
+Undo is a new preview from the receipt: a live GET must still show the swept value and
+`late_policy_status == "missing"` (else skipped as `changed_since_sweep`), then writes
+`posted_grade = ""` and `late_policy_status = "missing"`, which returns the row to blank with
+the Missing label kept. (Clearing to null would drop the label for good, because a recorded
+grader stops automatic missing.)
+
+Surface: `preview_missing_sweep(course_id, revert_operation_id="")` (a course sweep, or a
+revert of a completed one) and `apply_missing_sweep(operation_id, batch_id, review_digest)`,
 applied only on direct teacher instruction. Teacher-triggered; never scheduled.
 
 ## 7. Laws

@@ -38,7 +38,7 @@ import re
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
-from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, grading_policy, gradebook_queries, learning_objectives, live_verify, operational_log, roster_context, roster_service, sis_grade_bridge
+from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, grading_policy, gradebook_queries, learning_objectives, live_verify, missing_sweep, operational_log, roster_context, roster_service, sis_grade_bridge
 from api.operation_ledger import claims as operation_claims
 from api.operation_ledger.adapters import forge_files
 from api.operation_ledger import executor as operation_executor
@@ -166,6 +166,11 @@ _NEXT_STEPS = {
         "Summarize the pseudonymized before/after review and get teacher confirmation, "
         "then call apply_grade_adjustment with operation_id, batch_id, and review_digest "
         "unchanged."
+    ),
+    "preview_missing_sweep": (
+        "Summarize the pseudonymized per-assignment review and get teacher confirmation, "
+        "then call apply_missing_sweep with operation_id, batch_id, and review_digest "
+        "unchanged. Apply only on the teacher's direct instruction."
     ),
     "preview_learning_objective": (
         "Summarize the preview and get teacher confirmation, then call "
@@ -325,6 +330,24 @@ def apply_grade_adjustment(
 ) -> dict:
     """Apply only the opaque, digest-protected grade adjustment review."""
     return grade_adjustment.apply_grade_adjustment(
+        operation_id, batch_id, review_digest
+    )
+
+
+def preview_missing_sweep(course_id: str, revert_operation_id: str = "") -> dict:
+    """Prepare one exact, pseudonymized course-wide missing-work sweep review,
+    or an undo of a completed one when revert_operation_id is given."""
+    return _with_next(
+        "preview_missing_sweep",
+        missing_sweep.preview_missing_sweep(course_id, revert_operation_id),
+    )
+
+
+def apply_missing_sweep(
+    operation_id: str, batch_id: str, review_digest: str
+) -> dict:
+    """Apply only the opaque, digest-protected missing-sweep review."""
+    return missing_sweep.apply_missing_sweep(
         operation_id, batch_id, review_digest
     )
 
@@ -1361,6 +1384,8 @@ _TOOL_GROUPS = {
         "get_gradebook_snapshot",
         "preview_grade_adjustment",
         "apply_grade_adjustment",
+        "preview_missing_sweep",
+        "apply_missing_sweep",
     ),
     "SIS Grade Bridges": (
         "list_sis_grade_bridges",

@@ -56,27 +56,10 @@ def _assignment_digest(assignment: dict) -> str:
 
 
 def _freshness_attention(roster: dict, assignments: dict, submissions: dict) -> dict:
-    timestamps = [
-        str(scope.get("last_success_at") or "")
-        for scope in (roster, assignments, submissions)
-    ]
-    synced_at = min(timestamps) if timestamps and all(timestamps) else ""
-    state = "stale" if any(scope.get("state") == "stale"
-                            for scope in (roster, assignments, submissions)) else "current"
-    freshness = freshness_policy.freshness_envelope(
-        "mirror", "submissions", state, synced_at)
-    if (freshness.get("state") in {"current", "stale"}
-            and freshness.get("within_policy")):
-        return {}
-    attention = {
-        "action": "ask_teacher_confirmation",
-        "reason": (
-            "This local Canvas snapshot is outside the configured freshness window. "
-            "Ask the teacher before relying on it; do not refresh automatically."
-        ),
-    }
-    return {"blocking_error": "freshness_attention", "freshness": freshness,
-            "attention": attention}
+    # Shared with the missing-sweep adapter -- see adapter_support for the
+    # actual behavior (grading-policy-contract.md section 6). Kept as a
+    # module-level name here so existing direct callers/tests are unaffected.
+    return adapter_support.mirror_freshness_attention(roster, assignments, submissions)
 
 
 def _mirror_baseline(payload: dict, target: dict) -> dict:

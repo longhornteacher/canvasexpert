@@ -254,6 +254,22 @@ def apply_grade_adjustment(
 
 
 @mcp.tool(structured_output=False)
+def preview_missing_sweep(course_id: str, revert_operation_id: str = "") -> str:
+    """Prepare a pseudonymized course-wide missing-work-fill review, or its undo."""
+    return _compact(tools.preview_missing_sweep(course_id, revert_operation_id))
+
+
+@mcp.tool(structured_output=False)
+def apply_missing_sweep(
+    operation_id: str, batch_id: str, review_digest: str
+) -> str:
+    """Write the exact frozen missing-sweep review to Canvas."""
+    return _compact(tools.apply_missing_sweep(
+        operation_id, batch_id, review_digest
+    ))
+
+
+@mcp.tool(structured_output=False)
 def preview_workspace_reset() -> str:
     """Dry-run the explicitly authorized local assignment/evidence workspace reset."""
     return _compact(tools.preview_workspace_reset())

@@ -536,6 +536,19 @@
       ],
       "reconciliation": "targeted",
       "reason": "The reviewed grade-adjustment adapter verifies each successful write, then requests the same narrow per-course submissions refresh used by other grade writes."
+    },
+    {
+      "path": "api/operation_ledger/adapters/missing_fill.py",
+      "symbol": "MissingFillAdapter.execute",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(\"PUT\", <submission_path>, request)",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "private.submissions"
+      ],
+      "reconciliation": "targeted",
+      "reason": "The reviewed missing-sweep adapter verifies each successful fill or undo write by readback, then requests the same narrow per-course submissions refresh used by other grade writes."
     }
   ]
 }

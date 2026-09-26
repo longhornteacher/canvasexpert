@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 
+from api import freshness_policy
 from api.platform_services import canvas_client
 
 from .. import models
@@ -111,6 +112,39 @@ def is_uncertain(error: str) -> bool:
             "read timed out",
         )
     )
+
+
+def mirror_freshness_attention(roster: dict, assignments: dict, submissions: dict) -> dict:
+    """Shared freshness gate for adapters that read a full course-scoped mirror
+    triple (roster, assignments, submissions) at baseline capture.
+
+    Returns ``{}`` when the mirror is inside the freshness policy window
+    (current or stale-but-within-policy), else a ``blocking_error`` envelope
+    naming ``freshness_attention``. Moved out of the grade-adjustment adapter
+    so the missing-sweep adapter shares the exact same behavior rather than a
+    second copy (grading-policy-contract.md section 6).
+    """
+    timestamps = [
+        str(scope.get("last_success_at") or "")
+        for scope in (roster, assignments, submissions)
+    ]
+    synced_at = min(timestamps) if timestamps and all(timestamps) else ""
+    state = "stale" if any(scope.get("state") == "stale"
+                            for scope in (roster, assignments, submissions)) else "current"
+    freshness = freshness_policy.freshness_envelope(
+        "mirror", "submissions", state, synced_at)
+    if (freshness.get("state") in {"current", "stale"}
+            and freshness.get("within_policy")):
+        return {}
+    attention = {
+        "action": "ask_teacher_confirmation",
+        "reason": (
+            "This local Canvas snapshot is outside the configured freshness window. "
+            "Ask the teacher before relying on it; do not refresh automatically."
+        ),
+    }
+    return {"blocking_error": "freshness_attention", "freshness": freshness,
+            "attention": attention}
 
 
 def get_assignment(course_id: str, assignment_id: str) -> tuple[dict | None, str | None]:

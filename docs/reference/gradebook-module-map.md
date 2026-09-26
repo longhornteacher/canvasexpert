@@ -55,6 +55,12 @@ Existing-grade adjustments are agent-facing: `api/grade_adjustment.py` owns the
 mirror-backed preview, receipt-backed apply projection, and revert preview. The
 Operation Ledger adapter performs the reviewed Canvas writes.
 
+The course-wide missing-work sweep is a separate agent-facing lane: `api/missing_sweep.py`
+owns the preview/apply/undo service, and `api/operation_ledger/adapters/missing_fill.py`
+(kind `gradebook.missing_fill`) performs the live per-candidate-assignment discovery and the
+reviewed per-row Canvas writes. It exists because grade adjustment's numeric-score model,
+revert, and verification do not fit a blank missing row.
+
 Assistant-operated SIS grade bridges do not belong to this control-console facade. Start with the
 [SIS Grade Bridges guide](../guides/sis-grade-bridges.md), then follow its exact contract and
 Operation Ledger routing for preview, apply, recurring updates, or Attention recovery.
@@ -92,6 +98,9 @@ Namespace seams:
 - grade-adjustment problems:
   - `api/grade_adjustment.py`
   - `api/operation_ledger/adapters/grade_adjustment.py`
+- missing-sweep problems:
+  - `api/missing_sweep.py`
+  - `api/operation_ledger/adapters/missing_fill.py`
 - summary snapshot problems:
   - `gradebook_snapshot.py`
   - `gradebook_common.py`
