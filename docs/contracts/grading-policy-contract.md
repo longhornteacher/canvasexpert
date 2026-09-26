@@ -67,9 +67,11 @@ Web UI panel.
   plain one-sentence message naming the exact problem -- it never falls back to
   no-policy behavior.
 - `Library/Calendars/Holidays.csv`: each row is `start` or `start,end` or
-  `start,end,name` (ISO dates; `end` blank or absent means one day; `name` is ignored).
-  A header row, or any row whose first cell is not an ISO date, is skipped. A range
-  expands to every date from `start` to `end` inclusive.
+  `start,end,name` (`end` blank or absent means one day; `name` is ignored). A date cell
+  is ISO `YYYY-MM-DD` or US `M/D/YYYY` -- Excel rewrites an ISO date column to the US form
+  on save, so a file the teacher opened and saved in Excel, BOM and all, reads the same as
+  one written by hand. A header row, or any row whose first cell parses as neither form,
+  is skipped. A range expands to every date from `start` to `end` inclusive.
 
 Both files are read fresh on every use (`api/grading_policy.py`'s `load_policy` and
 `load_no_school_dates`); nothing is cached. No `Grading Policy.txt` means today's behavior

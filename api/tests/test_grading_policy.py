@@ -4,9 +4,13 @@ is passed in, so these are tested directly, once, at the law.
 """
 from __future__ import annotations
 
+import codecs
+import os
+
 import pytest
 
 from api import grading_policy
+from api.platform_services import workspace
 
 
 # --- mark() --------------------------------------------------------------
@@ -123,6 +127,23 @@ def test_load_no_school_dates_expands_ranges_skips_header_and_junk_rows(grading_
         ["not-a-date", "2026-12-22"],  # junk first cell, whole row skipped
         [],  # blank row, skipped
     ])
+    assert grading_policy.load_no_school_dates() == [
+        "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27",
+        "2026-12-21",
+    ]
+
+    # Excel-saved variant of the same calendar: a UTF-8 BOM on the first row
+    # (no header this time) and US M/D/YYYY dates, including a range -- both
+    # must read the same as the hand-written ISO file above.
+    path = os.path.join(
+        workspace.library_folder(grading_policy.HOLIDAYS_SUBFOLDER),
+        grading_policy.HOLIDAYS_FILENAME)
+    with open(path, "wb") as handle:
+        handle.write(codecs.BOM_UTF8)
+        handle.write(
+            b"11/23/2026,11/27/2026,Thanksgiving\r\n"
+            b"12/21/2026\r\n"
+        )
     assert grading_policy.load_no_school_dates() == [
         "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27",
         "2026-12-21",

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -20,6 +21,7 @@ HOLIDAYS_SUBFOLDER = "Calendars"
 HOLIDAYS_FILENAME = "Holidays.csv"
 
 _POLICY_KEYS = ("floor_percent", "missing_percent", "sweep_after_school_days")
+_US_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
 
 
 class GradingPolicyFileError(ValueError):
@@ -56,7 +58,9 @@ def load_policy(root=None) -> dict | None:
     if not path or not os.path.isfile(path):
         return None
     values: dict[str, str] = {}
-    with open(path, encoding="utf-8") as handle:
+    # utf-8-sig strips a leading BOM transparently (Excel and Notepad both
+    # sometimes save one) and reads a plain utf-8 file identically otherwise.
+    with open(path, encoding="utf-8-sig") as handle:
         for line in handle:
             line = line.split("#", 1)[0].strip()
             if not line or ":" not in line:
@@ -90,34 +94,53 @@ def load_policy(root=None) -> dict | None:
     return parsed
 
 
+def _parse_date(text) -> date | None:
+    """Parse one CSV date cell as ISO ``YYYY-MM-DD`` or US ``M/D/YYYY``
+    (one or two digit month and day, four digit year -- the form Excel
+    rewrites an ISO date column to on save). ``None`` when neither matches.
+    """
+    text = str(text or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        pass
+    match = _US_DATE.match(text)
+    if not match:
+        return None
+    month, day, year = (int(part) for part in match.groups())
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
 def load_no_school_dates(root=None) -> list[str]:
     """Read ``Library/Calendars/Holidays.csv``, or ``[]`` when it is absent.
 
-    Each row is ``start`` or ``start,end`` or ``start,end,name`` (ISO dates;
-    ``name`` is ignored). A header row or any row whose first cell is not an
-    ISO date is skipped. A range expands to every date from ``start`` to
-    ``end`` inclusive. Returns sorted, deduplicated ISO dates. The file is
-    read fresh every call; nothing is cached.
+    Each row is ``start`` or ``start,end`` or ``start,end,name`` -- a date
+    cell is ISO ``YYYY-MM-DD`` or US ``M/D/YYYY`` (``name`` is ignored). A
+    header row or any row whose first cell parses as neither form is
+    skipped. A range expands to every date from ``start`` to ``end``
+    inclusive. Returns sorted, deduplicated ISO dates. A leading UTF-8 BOM
+    (Excel sometimes saves one) is read transparently, so a file a teacher
+    opened and saved in Excel works the same as one written by hand. The
+    file is read fresh every call; nothing is cached.
     """
     path = _holidays_path(root)
     if not path or not os.path.isfile(path):
         return []
     dates: set[str] = set()
-    with open(path, encoding="utf-8", newline="") as handle:
+    with open(path, encoding="utf-8-sig", newline="") as handle:
         for row in csv.reader(handle):
             if not row:
                 continue
-            try:
-                start = date.fromisoformat(str(row[0]).strip())
-            except ValueError:
+            start = _parse_date(row[0])
+            if start is None:
                 continue
-            end_text = str(row[1]).strip() if len(row) > 1 else ""
-            if end_text:
-                try:
-                    end = date.fromisoformat(end_text)
-                except ValueError:
-                    end = start
-            else:
+            end = _parse_date(row[1]) if len(row) > 1 else None
+            if end is None:
                 end = start
             if end < start:
                 start, end = end, start
