@@ -47,6 +47,7 @@ vault.json
 workspace/
 
 # Non-PII calendar and test fixtures that are intentionally tracked
+!docs/guides/Holidays.csv
 !api/default_docs/Calendars/*.csv
 !api/tests/fixtures/class_schedule/*.csv
 !api/tests/fixtures/student_analysis_sample.csv
