@@ -161,9 +161,8 @@ The Home-attention provider reads submission comments only during the explicit d
 request. It reduces them immediately to assignment-scoped counts; it never returns,
 logs, hashes, caches, or persists comment text, author identity, or per-student state.
 Its definite follow-up signal requires an ordered latest student-authored response. A
-trailing Canvas Expert Teaching Assistant marker does not resolve that signal. A later
-non-student response with unprovable staff origin is a separate aggregate staff-response
-check, not a claim that a human response is awaiting.
+later non-student response with unprovable staff origin is a separate aggregate
+staff-response check, not a claim that a human response is awaiting.
 
 ## Ignore and snooze
 

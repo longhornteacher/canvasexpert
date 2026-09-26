@@ -441,11 +441,12 @@ def prepare_scoring_session(
         )
     authoritative_guidance = guidance if provenance in {"", "teacher_authored"} else ""
 
-    # A contract governs judgment and feedback shape. Explicit workspace files
-    # win; conversational guidance is the body when no file id was selected;
-    # otherwise use the marker-gated seeded default. Oversized conversational
-    # guidance uses the deterministic transport projection while the complete
-    # text remains private in the session's guidance field below.
+    # The base Glows/Grows shape is product-owned (api/feedback_contract.py)
+    # and always present; it is never selected here. An explicit workspace
+    # file is an optional layer on top of it, under the TEACHER GUIDANCE
+    # heading. Conversational scoring guidance is not a second layer here: it
+    # already layers onto the scoring basis, further down, as the existing
+    # TEACHER DIRECTIVE block. It is never a substitute feedback contract.
     contract_id = str(feedback_contract_id or "").strip()
     contract_source = ""
     contract_name = ""
@@ -461,28 +462,6 @@ def prepare_scoring_session(
                 assignment_name=assignment_name,
             )
         contract_source = "file"
-        contract_name = str(selected_contract.get("name") or contract_id)
-        contract_filename = os.path.basename(str(selected_contract.get("path") or ""))
-        contract_body = str(selected_contract.get("body") or "")
-    elif guidance:
-        contract_source = "conversation"
-        contract_id = "conversation"
-        contract_name = "Conversational teacher contract"
-        contract_body, _contract_projection = project_teacher_scoring_guidance(guidance)
-    else:
-        selected_contract = next(
-            (item for item in config.list_feedback_contracts() if item.get("id") == "basic"),
-            None,
-        )
-        if not selected_contract:
-            return _typed_failure(
-                "feedback_contract_unavailable", "contract", retryable=True,
-                user_action="Create or restore a feedback contract in the private workspace, then retry.",
-                error="No feedback contract is available in the private workspace.",
-                assignment_name=assignment_name,
-            )
-        contract_source = "seeded_default"
-        contract_id = str(selected_contract.get("id") or "basic")
         contract_name = str(selected_contract.get("name") or contract_id)
         contract_filename = os.path.basename(str(selected_contract.get("path") or ""))
         contract_body = str(selected_contract.get("body") or "")
@@ -568,11 +547,10 @@ def prepare_scoring_session(
     session = session_builder.build_session(
         session_id=session_id, course_id=course_id, assignment_id=assignment_id,
         assignment_name=assignment_name, points_possible=points_possible, mode="packet",
-        rubric_name=rubric_name, persona_id="", selected_model="",
+        rubric_name=rubric_name, selected_model="",
         assignment_description=assignment_description, response_kind="scr",
         privacy_steps=privacy_steps, privacy_artifacts=privacy_artifacts,
         students=students, mode_label=session_store.mode_label("packet"),
-        copilot_packet=ai_result.get("copilot_packet"),
         late_watch={
             "enabled": False, "supported": False,
             "reason": "A Scoring Session is a snapshot; prepare a new exact assignment for later work.",

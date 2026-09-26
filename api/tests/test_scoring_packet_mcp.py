@@ -79,15 +79,6 @@ def _fake_session(session_id: str, course_id: str, people: list[dict] | None = N
     }
 
 
-@pytest.fixture(autouse=True)
-def _stub_declared_context(monkeypatch):
-    monkeypatch.setattr(
-        tools.config,
-        "get_persona",
-        lambda _persona_id: {"name": "Test TA", "signoff_policy": "none"},
-    )
-
-
 def _fake_safe_bundle(people: list[dict], items: int = 2) -> dict:
     students_list = []
     for person in people:
@@ -180,7 +171,8 @@ def test_build_packet_happy_path():
     assert "next_offset" not in result
     assert result["included_context"] is True
     assert "contract" in result
-    assert "Glows & Grows" in result["contract"]
+    assert "glows" in result["contract"] and "grows" in result["contract"]
+    assert "&" not in result["contract"]
     assert "Autofeedback from an automated assistant" not in result["contract"]
     assert "Drafted by Sage" not in result["contract"]
     assert len(result["items"]) == 2
@@ -666,12 +658,10 @@ def test_session_builder_keeps_rubric_read_time_only():
         points_possible=10,
         mode="packet",
         rubric_name="Test Rubric",
-        persona_id="test-persona",
         selected_model="",
     )
 
     assert session["rubric_name"] == "Test Rubric"
-    assert session["persona_id"] == "test-persona"
     assert "rubric_text" not in session
 
 

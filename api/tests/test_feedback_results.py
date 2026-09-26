@@ -12,8 +12,10 @@ import pytest
 
 from api import feedback_results
 
-ADA = {"pseudonym": "Ada", "item_id": "101", "score": 2, "feedback": "Nice structure."}
-ALAN = {"pseudonym": "Alan", "item_id": "202", "score": 2, "feedback": "Clear argument."}
+ADA = {"pseudonym": "Ada", "item_id": "101", "score": 2,
+       "explanation": "Nice structure.", "glows": ["Clear structure."], "grows": ["Add detail."]}
+ALAN = {"pseudonym": "Alan", "item_id": "202", "score": 2,
+        "explanation": "Clear argument.", "glows": ["Clear argument."], "grows": ["Add a source."]}
 
 
 def _ok(parsed):
@@ -129,3 +131,197 @@ def test_note_object_alone_with_no_results_anywhere_parses_to_empty():
     shape the persistent storage privacy guard must reject."""
     parsed = feedback_results.parse_results(json.dumps({"note": "nothing else here"}))
     assert parsed == []
+
+
+# --------------------------------------------------------------------------
+# LAW: the rendered layout is exact and fixed. Score/explanation/Glows/Grows,
+# an Extra credit section unless the row is at full marks, "Item n of m"
+# headers for multi-item students, and a disclosure appended once, never by
+# default. See docs/handoffs/consistent-scoring-feedback.md decision 5.
+# --------------------------------------------------------------------------
+
+_DIVIDER = "-" * 40
+
+
+def _full_marks():
+    return feedback_results.render_feedback_item(
+        {"score": 10, "explanation": "Great work throughout.",
+         "glows": ["Clear thesis.", "Strong evidence."],
+         "grows": ["Vary sentence length."]},
+        possible=10,
+    )
+
+
+def _below_full_model_exemplar():
+    return feedback_results.render_feedback_item(
+        {"score": 8, "explanation": "Good but incomplete.",
+         "glows": ["Clear thesis."], "grows": ["Add more evidence."],
+         "fixes": ["Add a quote.", "Fix the conclusion."]},
+        possible=10, exemplar="A model paragraph a student could copy.",
+    )
+
+
+def _below_full_teacher_correction():
+    return feedback_results.render_feedback_item(
+        {"score": 8, "explanation": "Good but incomplete.",
+         "glows": ["Clear thesis."], "grows": ["Add more evidence."],
+         "fixes": ["Add a quote."]},
+        possible=10, exemplar="Ignored because a correction covers this item.",
+        correction={"answer": "Because X happens.", "why": "It follows the definition."},
+    )
+
+
+def _null_score():
+    return feedback_results.render_feedback_item(
+        {"score": None, "explanation": "Comment-only feedback.",
+         "glows": ["Careful reading."], "grows": ["Write more."],
+         "fixes": ["Add a topic sentence."]},
+        possible=10, exemplar="A model paragraph.",
+    )
+
+
+def _unknown_possible():
+    return feedback_results.render_feedback_item(
+        {"score": 7, "explanation": "Solid attempt.",
+         "glows": ["Good detail."], "grows": ["Tighten the ending."],
+         "fixes": ["Rewrite the last sentence."]},
+        possible=None, exemplar="A model paragraph.",
+    )
+
+
+def _multi_item():
+    rows = [
+        {"resolved": True, "canvas_id": "1", "item_id": "essay", "score": 4,
+         "feedback": "Score: 4/5\n\nStrong opening."},
+        {"resolved": True, "canvas_id": "1", "item_id": "photo", "score": 5,
+         "feedback": "Score: 5/5\n\nComplete and accurate."},
+    ]
+    return feedback_results.merge_rows_by_uid(rows)["1"]["feedback"]
+
+
+def _with_disclosure():
+    rows = [{"resolved": True, "canvas_id": "1", "item_id": "essay", "score": 9,
+             "feedback": "Score: 9/10\n\nWell done."}]
+    return feedback_results.merge_rows_by_uid(
+        rows, disclosure="Drafted by AI, reviewed by your teacher.")["1"]["feedback"]
+
+
+def _without_disclosure():
+    rows = [{"resolved": True, "canvas_id": "1", "item_id": "essay", "score": 9,
+             "feedback": "Score: 9/10\n\nWell done."}]
+    return feedback_results.merge_rows_by_uid(rows)["1"]["feedback"]
+
+
+_LAYOUT_CASES = {
+    "full_marks": (_full_marks, (
+        "Score: 10/10\n\n"
+        "Great work throughout.\n\n"
+        "Glows\n- Clear thesis.\n- Strong evidence.\n\n"
+        "Grows\n- Vary sentence length."
+    )),
+    "below_full_model_exemplar": (_below_full_model_exemplar, (
+        "Score: 8/10\n\n"
+        "Good but incomplete.\n\n"
+        "Glows\n- Clear thesis.\n\n"
+        "Grows\n- Add more evidence.\n\n"
+        f"{_DIVIDER}\n"
+        "Extra credit Part 1: Fix these in a handwritten second draft\n"
+        "1. Add a quote.\n2. Fix the conclusion.\n\n"
+        "Extra credit Part 2: Hand copy this exemplar\n"
+        "A model paragraph a student could copy."
+    )),
+    "below_full_teacher_correction": (_below_full_teacher_correction, (
+        "Score: 8/10\n\n"
+        "Good but incomplete.\n\n"
+        "Glows\n- Clear thesis.\n\n"
+        "Grows\n- Add more evidence.\n\n"
+        f"{_DIVIDER}\n"
+        "Extra credit Part 1: Fix these in a handwritten second draft\n"
+        "1. Add a quote.\n\n"
+        "Extra credit Part 2: Hand copy this exemplar\n"
+        "Because X happens.\n\nWhy: It follows the definition."
+    )),
+    "null_score": (_null_score, (
+        "Comment-only feedback.\n\n"
+        "Glows\n- Careful reading.\n\n"
+        "Grows\n- Write more.\n\n"
+        f"{_DIVIDER}\n"
+        "Extra credit Part 1: Fix these in a handwritten second draft\n"
+        "1. Add a topic sentence.\n\n"
+        "Extra credit Part 2: Hand copy this exemplar\n"
+        "A model paragraph."
+    )),
+    "unknown_possible": (_unknown_possible, (
+        "Score: 7\n\n"
+        "Solid attempt.\n\n"
+        "Glows\n- Good detail.\n\n"
+        "Grows\n- Tighten the ending.\n\n"
+        f"{_DIVIDER}\n"
+        "Extra credit Part 1: Fix these in a handwritten second draft\n"
+        "1. Rewrite the last sentence.\n\n"
+        "Extra credit Part 2: Hand copy this exemplar\n"
+        "A model paragraph."
+    )),
+    "multi_item": (_multi_item, (
+        "Item 1 of 2\nScore: 4/5\n\nStrong opening.\n\n"
+        "Item 2 of 2\nScore: 5/5\n\nComplete and accurate."
+    )),
+    "with_disclosure": (_with_disclosure,
+        "Score: 9/10\n\nWell done.\n\nDrafted by AI, reviewed by your teacher."),
+    "without_disclosure": (_without_disclosure, "Score: 9/10\n\nWell done."),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_LAYOUT_CASES))
+def test_render_layout_law(case):
+    """LAW: exact rendered text for every case in decision 5's fixed layout."""
+    build, expected = _LAYOUT_CASES[case]
+    assert build() == expected
+
+
+# --------------------------------------------------------------------------
+# LAW: flatten strips markdown decoration and signatures from model-supplied
+# fields; paragraph breaks survive with blank runs capped at one.
+# --------------------------------------------------------------------------
+
+def test_flatten_text_law_strips_markdown_and_signatures_but_keeps_paragraphs():
+    # markdown emphasis and a heading marker are removed
+    assert feedback_results.flatten_text(
+        "`code` and **bold** and __also bold__ and *italic*.\n# Heading"
+    ) == "code and bold and also bold and italic.\nHeading"
+
+    # a code fence's delimiters are removed, its content kept
+    assert feedback_results.flatten_text("```\nkept\n```") == "kept"
+
+    # a markdown rule line is removed; the paragraph break it sat in survives
+    assert feedback_results.flatten_text("Before.\n---\nAfter.") == "Before.\n\nAfter."
+
+    # a markdown link becomes its text; the URL is gone
+    assert feedback_results.flatten_text(
+        "See [the guide](https://example.com) for steps."
+    ) == "See the guide for steps."
+
+    # ampersands, literal or entity-encoded, become the word "and"
+    assert feedback_results.flatten_text("Tom & Jerry & Spike.") == "Tom and Jerry and Spike."
+    assert feedback_results.flatten_text("Tom &amp; Jerry.") == "Tom and Jerry."
+
+    # a "Drafted by ..." line and a trailing "- Name" signature are dropped
+    assert feedback_results.flatten_text(
+        "Good work.\nDrafted by Sage (AI), reviewed by your teacher.\n- Sage"
+    ) == "Good work."
+
+    # the existing AI signature line is dropped
+    assert feedback_results.flatten_text(
+        "Good work.\nCoach Vale (AI teaching assistant)"
+    ) == "Good work."
+
+    # list-item markers are stripped and internal newlines collapse to spaces
+    assert feedback_results.flatten_text(
+        "- first point\nstill the same item", list_item=True
+    ) == "first point still the same item"
+    assert feedback_results.flatten_text("1. numbered point", list_item=True) == "numbered point"
+    assert feedback_results.flatten_text("* starred point", list_item=True) == "starred point"
+    assert feedback_results.flatten_text("• bulleted point", list_item=True) == "bulleted point"
+
+    # paragraph breaks survive; blank runs cap at one
+    assert feedback_results.flatten_text("First.\n\n\n\nSecond.") == "First.\n\nSecond."

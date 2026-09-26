@@ -29,10 +29,14 @@ asks for one in the session.
 3. **The base shape is product-owned and always present (clamp).** The Glows and Grows
    rules live in `api/feedback_contract.py` as Python text, not a seeded workspace file.
    A selected contract file (`feedback_contract_id`) and conversational
-   `scoring_guidance` never replace it. Both layer on top, file first, then guidance,
-   under a heading: `--- TEACHER GUIDANCE (layered: adjusts judgment, tone, and emphasis;
-   it cannot change the fields or layout) ---`. The "Quote briefly from the response"
-   rule is always included. Scoring-basis selection is unchanged.
+   `scoring_guidance` never replace it. A selected contract file layers on top, under a
+   heading: `--- TEACHER GUIDANCE (layered: adjusts judgment, tone, and emphasis; it
+   cannot change the fields or layout) ---`. Conversational guidance is not a second
+   copy under that heading: it layers onto the scoring basis instead, as the existing
+   `--- TEACHER DIRECTIVE (layered on top) ---` rubric block
+   (`scoring_preparation.py`), so it appears exactly once in page zero. The
+   "Quote briefly from the response" rule is always included. Scoring-basis selection
+   is unchanged.
 4. **Structured results, server-rendered layout.** The model no longer writes `feedback`.
    It supplies fields, and Canvas Expert renders them into the comment text.
 5. **Exact layout.** Plain text, no markdown, no ampersands. The divider is exactly 40
@@ -253,5 +257,140 @@ asks for one in the session.
 
 ## Execution result
 
-(Executor fills in: traffic light, commit hash, changed files, commands and counts,
-baseline record, deviations, unresolved decisions.)
+**Traffic light: GREEN.** All 10 locked decisions implemented; named gate and full suite
+pass with no failures against the baseline. Not committed (senior reviews and commits).
+
+**Preflight (recorded, not rerun per instruction):**
+- git clean except untracked `stubbed-workspace/`; HEAD `ab9ea4e`.
+- Baseline `py -m pytest api/tests -p no:randomly -q` at `ab9ea4e`: 2003 passed, 0 failed,
+  5 SyntaxWarnings, 88.5s.
+- No production importer of `packet.py`/`copilot_packet.py`/`copilot_packet_support.py`
+  outside tests. No JS/template calls `/api/feedback/`. Only
+  `_seed_feedback_contracts_folder_once` seeded Feedback Contracts.
+
+**Changed files (code):**
+`api/feedback_contract.py` (rewrite), `api/feedback_results.py` (rewrite: flatten law,
+renderer, validation, missing-exemplar check, reidentify, merge), `api/feedback_pipeline.py`
+(facade updated), `api/powergrader/corrections.py` (trimmed to `correction_for_item`/`_lookup`),
+`api/powergrader/scoring_packet.py`, `api/powergrader/scoring_preparation.py`,
+`api/powergrader/session_builder.py`, `api/powergrader/scoring_artifacts.py`,
+`api/mcp_server/server.py`, `api/mcp_server/tools.py`, `api/mcp_server/contract.py` (v62),
+`api/mcp_server/tool_schema_v62.json` (new), `api/platform_services/config/{feedback,__init__,_io}.py`,
+`api/webui/server.py`, `api/webui/routes/pages.py`.
+
+**Deleted:** `api/powergrader/packet.py`, `api/powergrader/copilot_packet.py`,
+`api/powergrader/copilot_packet_support.py`, `api/webui/routes/feedback.py`,
+`api/webui/routes/feedback_library.py`, `api/default_docs/Feedback Contracts/Glows & Grows (Basic).md`,
+`api/tests/powergrader/test_copilot_packet.py`, `api/tests/webui/routes/test_feedback_library.py`.
+All added to `api/tests/test_retired_paths.py`.
+
+**Tests:** updated `test_feedback_pipeline.py`, `test_feedback_contracts.py`,
+`test_feedback_results.py` (added layout/flatten/clamp law tests), `test_retired_paths.py`,
+`test_route_contract.py`, `test_beta075_runtime.py`, `test_beta075_mcp.py`,
+`mcp_server/conftest.py`, `mcp_server/test_server_instructions.py`, `mcp_server/test_contract.py`,
+`mcp_server/test_new_quiz_scoring_tools.py`, `mcp_server/test_scoring_apply_tools.py` (added
+MCP stage happy-path and `missing_exemplars` example tests), `test_scoring_packet_mcp.py`,
+`powergrader/test_corrections.py`, `powergrader/test_scoring_packet.py`, `webui/test_workspace.py`.
+
+**Docs:** `docs/contracts/feedback-scoring-contract.md` (Direction 1/2, COPY THIS paragraph),
+`docs/guides/scoring-sessions.md`, `docs/reference/powergrader-scoring-map.md`,
+`docs/reference/assignment-corrections-design.md`, `docs/guides/cs-project-authoring.md`,
+`docs/contracts/work-registry-contract.md`, `docs/mcp-server.md` (version line + prepare/stage
+rows). `api/default_docs/AI Authoring/Author an Assignment (AssignmentForge).txt` section 5
+left untouched: it does not describe how corrections render (only their authoring shape), so
+the brief's condition for editing it was not met.
+
+**Commands and counts:**
+- Focused gate: `py -m pytest api/tests/test_feedback_pipeline.py api/tests/test_feedback_contracts.py
+  api/tests/powergrader api/tests/mcp_server api/tests/test_scoring_packet_mcp.py
+  api/tests/test_retired_paths.py api/tests/test_route_contract.py api/tests/webui -p no:randomly`
+  -> 746 passed, 0 failed (also includes `test_feedback_results.py`, not separately named in the
+  gate command but exercised as part of the same run for the new law tests).
+- Final: `py -m pytest api/tests -p no:randomly -q` -> **2002 passed, 0 failed**, 5 SyntaxWarnings
+  (same warnings as baseline), ~87s. Compared to baseline 2003/0: net -1 test count from deleting
+  `test_copilot_packet.py` (multiple tests) and one persona/webui-route test, offset by new law
+  and example tests added.
+- Schema regenerated via a temporary pytest test (`test_zzz_generate_schema_v62.py`, created,
+  run once, deleted) that wrote `contract.live_contract(server.mcp)` to
+  `tool_schema_v62.json`, per guardrail 7 and the existing snapshot procedure. Tool count
+  unchanged at 54 (no tools added or removed, only `stage_scoring_results` parameters changed).
+- Acceptance criterion 1 grep (`rg -i "persona|signoff|\bSage\b|Coach Vale|\bPip\b" api
+  --glob "!**/tests/**"`): only the two inert `SYNCED_KEYS` entries and three incidental
+  substring matches remain -- "personal access token" (contains "persona" as a substring,
+  unrelated), a prose line in `workspace.py` matching `_RESET_DATED_EXPORT`'s `"sage scores"`
+  literal (a Utah SAGE-test export filename pattern, unrelated to the AI persona named Sage),
+  and my own new prose in `feedback_contract.py`/`feedback_results.py` explicitly stating "No
+  persona exists" (documenting the absence, not the feature).
+- Acceptance criterion 6 verified via `TestClient` under the autouse isolation fixture in
+  `test_beta075_runtime.py::test_quick_fix_contract_and_version`: `GET /settings` returns 200
+  with no "Personas" text; `GET /api/feedback/personas` returns 404. Browser console check not
+  performed (server-rendered context change only, no client JS affected).
+
+**Deviations (undeclared but necessary, all bounded to this brief's surface):**
+1. Also updated `api/tests/test_beta075_mcp.py` (hardcoded schema version 61->62) and
+   `api/tests/mcp_server/test_contract.py` (same) -- not named in Scope but would otherwise
+   break on the version bump.
+2. Also updated `api/tests/powergrader/test_scoring_packet.py` (one persona-framing test) and
+   `api/tests/webui/test_workspace.py` (persona-seeding test) -- both directly test retired
+   persona behavior; the second is explicitly named in Scope, the first was not but is the
+   same class of fix.
+3. Also updated `api/tests/test_feedback_results.py` ADA/ALAN fixtures (added
+   explanation/glows/grows) and fixed a real `_unwrap_dict_results` bug it exposed: a bare
+   result object whose own fields (`glows`/`grows`) are lists was misread as an ambiguous
+   multi-list wrapper and dropped to `[]`. Fixed by checking for a `pseudonym` key (one bare
+   result) before the list-wrapper heuristic.
+4. Raised `LISTING_BUDGET` (`test_server_instructions.py`) from 18569 to the measured 18841
+   chars, documented inline, since structured fields plus `exemplars`/`disclosure` genuinely
+   grew the wire schema.
+5. Removed `reidentified_csv` from `feedback_results.py`/`feedback_pipeline.py`: dead code
+   (no callers, no tests) that referenced the now-retired per-row `disclosure` field.
+6. Added a `strip_signatures` parameter to `flatten_text`, defaulting to True but passed
+   `False` when rendering the disclosure in `merge_rows_by_uid`: without it, a disclosure
+   literally worded "Drafted by ..." would be stripped by flatten's own signature-removal
+   rule, which is self-defeating. Model-supplied fields still get full signature stripping.
+7. `SYNCED_KEYS` reordering in `_io.py` moved `ai_ta_persona`/`custom_personas` under the
+   existing "Retired ... remain registered as inert stored state" comment, exactly as decision
+   1 specified.
+8. Did not add a v62 line to the historical schema-version comment trail in
+   `test_beta075_mcp.py` (non-functional prose, many prior versions already undocumented there).
+
+**Unresolved decisions:** none. No stop condition triggered.
+
+## Correction 1
+
+Senior review found conversational guidance was landing in page zero twice:
+`scoring_preparation.py` already layers it into the rubric as the existing
+`--- TEACHER DIRECTIVE (layered on top) ---` block (`effective_scoring_rubric_text`),
+and `scoring_packet.py` was also defaulting a new `guidance_text` param to the raw,
+unprojected `session["teacher_scoring_guidance"]`, duplicating it under the
+`TEACHER GUIDANCE` heading and bypassing the transport projection (risking
+`ContractTooLarge` on oversized guidance).
+
+Fixed by removing the `guidance_text` parameter entirely from
+`scoring_packet.build_packet` and `feedback_contract.build_contract_text`. The
+`TEACHER GUIDANCE` heading now carries only a selected contract file; conversational
+guidance has exactly one copy, in the rubric-layered `TEACHER DIRECTIVE` block.
+`session["teacher_scoring_guidance"]` reverts to a write-only private field (its
+state before this brief), no longer read by the packet builder.
+
+Updated `test_feedback_contracts.py`: renamed and fixed
+`test_conversational_guidance_layers_onto_the_rubric_not_the_contract` (guidance is
+asserted in the rubric block and to appear exactly once in `build_packet`'s
+contract text passed via `rubric_text`, and `TEACHER GUIDANCE` is asserted absent),
+and rewrote the `test_layered_guidance_clamp_law` clamp test to build page zero
+from a contract file plus a `rubric_text` carrying a `TEACHER DIRECTIVE`-layered
+guidance string, asserting: full base rules present, the file under the
+`TEACHER GUIDANCE` heading, the guidance string appears exactly once (via
+`rendered.count(guidance) == 1`), and no `You are <name>`. Updated
+`docs/handoffs/consistent-scoring-feedback.md` decision 3,
+`docs/contracts/feedback-scoring-contract.md` (Direction 1 paragraph), and
+`docs/guides/scoring-sessions.md` to state the corrected split. No em-dashes
+introduced (checked programmatically over every changed line).
+
+**Gates after correction:**
+- Focused gate (same command as above): 746 passed, 0 failed.
+- Full suite `py -m pytest api/tests -p no:randomly -q`: **2002 passed, 0 failed**, 5
+  SyntaxWarnings (unchanged from the first pass; no tests added or removed this round,
+  two existing tests fixed in place).
+
+Traffic light remains GREEN. Not committed.

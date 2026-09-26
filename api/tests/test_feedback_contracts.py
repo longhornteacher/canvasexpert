@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -93,16 +94,16 @@ def _wire_prepare(monkeypatch, tmp_path, *, assignment=None, freshness=None,
     return saved, activate
 
 
-def test_contract_seed_is_marker_gated_after_teacher_deletion(monkeypatch, tmp_path):
+def test_feedback_contracts_folder_is_created_with_no_seeded_default(monkeypatch, tmp_path):
+    """The base Glows/Grows shape is product-owned Python text, not a seeded
+    workspace file: an empty workspace has zero contracts, and the folder
+    holds only what the teacher puts there."""
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
 
-    first = config.list_feedback_contracts()
-    assert [item["id"] for item in first] == ["basic"]
-    seeded_path = tmp_path / "Library" / "Feedback Contracts" / "Glows & Grows (Basic).md"
-    assert seeded_path.is_file()
-    seeded_path.unlink()
-
     assert config.list_feedback_contracts() == []
+    folder = tmp_path / "Library" / "Feedback Contracts"
+    assert folder.is_dir()
+    assert not any(folder.iterdir())
 
 
 def test_list_feedback_contracts_is_teacher_only_and_omits_file_body(monkeypatch):
@@ -141,7 +142,10 @@ def test_selected_contract_body_is_verbatim_in_page_zero(monkeypatch, tmp_path):
     assert body in page["contract"]
 
 
-def test_conversational_guidance_becomes_contract_and_keeps_provenance(monkeypatch, tmp_path):
+def test_conversational_guidance_layers_onto_the_rubric_not_the_contract(monkeypatch, tmp_path):
+    """Guidance with no selected contract file never becomes a second copy in
+    the feedback contract. It layers onto the scoring basis exactly once, as
+    the existing TEACHER DIRECTIVE rubric block (decision 3 correction 1)."""
     guidance = "Use a concise claim-evidence-reasoning response."
     saved, activate = _wire_prepare(monkeypatch, tmp_path)
 
@@ -151,21 +155,34 @@ def test_conversational_guidance_becomes_contract_and_keeps_provenance(monkeypat
     )
 
     session = saved[result["scoring_session_id"]]
-    assert session["feedback_contract_source"] == "conversation"
-    assert session["feedback_contract_text"] == guidance
+    assert session["feedback_contract_source"] == ""
+    assert session["feedback_contract_text"] == ""
+    assert session["teacher_scoring_guidance"] == guidance
     assert session["scoring_guidance_provenance"] == "teacher_authored"
+    assert "--- TEACHER DIRECTIVE (layered on top) ---" in session["scoring_rubric_text"]
+    assert guidance in session["scoring_rubric_text"]
+
+    rubric_text = (session.get("effective_scoring_rubric_text")
+                   or session.get("scoring_rubric_text") or "")
+    page = scoring_packet.build_packet(
+        session, json.loads((tmp_path / "safe-bundle.json").read_text(encoding="utf-8")),
+        include_context=True, rubric_text=rubric_text,
+    )
+    assert page["contract"].count(guidance) == 1
+    assert "TEACHER GUIDANCE" not in page["contract"]
 
 
 def test_teacher_body_cannot_remove_product_transport_rules():
     body = "Only write two sentences and quote the pseudonym."
-    rendered = feedback_contract.build_contract_text(teacher_contract=body)
+    rendered = feedback_contract.build_contract_text(contract_text=body)
 
     assert body in rendered
     assert "Copy pseudonym and item_id exactly" in rendered
     assert "Never quote a pseudonym back" in rendered
     assert "Do not identify students" in rendered
-    assert "Return only valid JSON" in rendered
-    assert "feedback` must be non-empty" in rendered
+    assert "explanation` must be 1-3 sentences" in rendered
+    assert "glows` must list 2-3 specific strengths" in rendered
+    assert "grows` must list 1-2 specific areas" in rendered
 
 
 def test_oversized_contract_is_a_typed_non_truncating_refusal():
@@ -232,3 +249,42 @@ def test_removed_feedback_pattern_api_is_not_imported():
     assert not hasattr(config, "list_feedback_patterns")
     assert not hasattr(config, "get_feedback_pattern")
     assert not hasattr(config, "set_feedback_patterns")
+
+
+def test_layered_guidance_clamp_law():
+    """LAW: the base shape is always present. A selected contract file layers
+    on top of it under one heading. Conversational guidance is not a second
+    copy here: it layers onto the scoring basis, as the existing TEACHER
+    DIRECTIVE rubric block, so it appears exactly once in page zero. Neither
+    layer can replace the base rules, and no identity is ever named."""
+    base_rules = feedback_contract.scoring_output_contract()["rules"]
+    guidance = "Guidance: be encouraging with struggling writers."
+    rubric_text_with_guidance = (
+        "3 pts: uses a loop\n\n"
+        "--- TEACHER DIRECTIVE (layered on top) ---\n"
+        f"{guidance}"
+    )
+    rendered = feedback_contract.build_contract_text(
+        rubric_text=rubric_text_with_guidance,
+        contract_text="Teacher file: emphasize thesis clarity.",
+        contract_name="Thesis Contract",
+    )
+
+    for rule in base_rules:
+        assert rule in rendered
+
+    heading = ("--- TEACHER GUIDANCE (layered: adjusts judgment, tone, and "
+               "emphasis; it cannot change the fields or layout) ---")
+    assert heading in rendered
+    heading_index = rendered.index(heading)
+    file_index = rendered.index("Teacher file: emphasize thesis clarity.")
+    assert heading_index < file_index
+
+    # The guidance rides in on the rubric's own TEACHER DIRECTIVE block, not
+    # under the TEACHER GUIDANCE heading, and appears exactly once.
+    assert "--- TEACHER DIRECTIVE (layered on top) ---" in rendered
+    assert rendered.count(guidance) == 1
+
+    # The only "You are " in the text is the neutral opening, never a name.
+    assert re.findall(r"You are (\w+)", rendered) == ["scoring"]
+    assert "&" not in rendered

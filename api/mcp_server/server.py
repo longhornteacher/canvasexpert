@@ -66,7 +66,10 @@ class ScoringResult(TypedDict):
     pseudonym: str
     item_id: str
     score: float | None
-    feedback: str
+    explanation: str
+    glows: list[str]
+    grows: list[str]
+    fixes: NotRequired[list[str]]
     writing_process_observations: NotRequired[str]
 
 
@@ -625,10 +628,13 @@ def stage_scoring_results(
     expected_packet_digest: str,
     review_digest: str = "",
     answers: dict[str, str] | None = None,
+    exemplars: dict[str, str] | None = None,
+    disclosure: str = "",
 ) -> str:
     """Validate and stage SAFE results locally; no Canvas write."""
     return _compact(tools.stage_scoring_results(
-        scoring_session_id, results, expected_packet_digest, review_digest, answers))
+        scoring_session_id, results, expected_packet_digest, review_digest, answers,
+        exemplars=exemplars, disclosure=disclosure))
 
 
 @mcp.tool(structured_output=False)

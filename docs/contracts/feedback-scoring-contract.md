@@ -37,12 +37,16 @@ size. `prepare_scoring_session(course_id, assignment_id, scoring_guidance="",
 use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")`
 requires one exact Current course and assignment and prepares it from valid
 local projections. It performs no refresh, Canvas write, or direct Canvas read.
-An explicit `feedback_contract_id` selects one workspace contract. Without an id,
-non-empty `scoring_guidance` becomes this session's conversational contract body;
-otherwise the seeded default contract is used. The selected body is carried
-verbatim in page zero and is bound to the private session by a digest. Contract
-files are teacher-owned prose: transport/privacy rules remain product-owned,
-while judgment, feedback shape, tone, and quoting guidance are overridable.
+The base feedback shape (required fields, minimums, and the rendered layout) is
+product-owned Python text in `api/feedback_contract.py` and is always present in
+page zero; no selection ever replaces it. An explicit `feedback_contract_id`
+selects one workspace contract file, which layers on top of the base shape under
+one heading: judgment, tone, and emphasis are overridable, the fields and layout
+are not. The selected body is carried verbatim in page zero and is bound to the
+private session by a digest. Non-empty `scoring_guidance` is not a second copy
+under that heading: it layers onto the scoring basis instead, as the existing
+teacher-directive rubric block described below, so it appears exactly once in
+page zero.
 Non-empty assignment content is authoritative. A Canvas assignment rubric is used
 only when assignment content is empty. Teacher-authored directives layer on top of
 that basis; inherited, defaulted, or unknown guidance never overrides it. Teacher
@@ -88,22 +92,41 @@ authors future writing portions as separate 100-point AssignmentForge assignment
 
 The agent stages one result per `(pseudonym, item_id)` supplied by the packet, using
 `stage_scoring_results(scoring_session_id, results, expected_packet_digest,
-review_digest="", answers=None)`. A separate
+review_digest="", answers=None, exemplars=None, disclosure="")`. A separate
 `apply_staged_scoring_results(scoring_session_id, expected_stage_digest,
 idempotency_key="")` applies only the unchanged private stage after a direct,
 contemporaneous teacher request to post it.
+
+The model no longer writes plain-text feedback. It supplies structured fields, and
+Canvas Expert renders them into one fixed plain-text layout (score, explanation,
+Glows, Grows, and, unless the row is at full marks, an Extra credit section with
+numbered fixes and a hand-copy exemplar). No persona and no AI identity or
+disclosure line is ever invented; `disclosure` is appended once, as the final
+line, only when the teacher asked for one this session.
 
 | Field | Required | Shape and meaning |
 |---|---:|---|
 | `pseudonym` | yes | Exact stand-in from the SAFE packet. |
 | `item_id` | yes | Exact response item from that pseudonym's packet rows. |
 | `score` | yes | Number or `null`. On ordinary assignments, `null` may permit comment-only posting after explicit teacher confirmation. |
-| `feedback` | yes | Plain text Canvas feedback. Do not label it as AI-provided unless the teacher asked. Default shape is Glows & Grows. |
+| `explanation` | yes | 1-3 sentences explaining the score. |
+| `glows` | yes | 2-3 specific strengths, at least one non-empty string. |
+| `grows` | yes | 1-2 specific areas to improve, at least one non-empty string. |
+| `fixes` | required when the row is not at full marks | 2-4 concrete changes doable by hand in a second draft. |
 | `writing_process_observations` | no | Separate, teacher-only local observation; never student feedback or a score input. |
 
+`exemplars` is a separate `{item_id: text}` argument to `stage_scoring_results`,
+not a per-result field: one shared model answer per item, written once and used
+for every student, required for any item where a row is not at full marks unless
+a teacher AssignmentForge correction already covers that item. A missing exemplar
+fails closed with typed code `missing_exemplars` and the affected item ids only --
+no response content or identity.
+
 Duplicates, unknown pseudonyms/items, malformed values, and stale packet digests fail
-closed. The complete result set is validated before re-identification. Out-of-range
-scores and other judgment conditions do not receive implicit defaults.
+closed. The complete result set is validated before re-identification. A field-shape
+failure returns count-only `errors`/`warnings` plus a `fields` list naming the
+offending fields. Out-of-range scores and other judgment conditions do not receive
+implicit defaults.
 
 If a safe ordinary-assignment plan has no questions, Canvas Expert freezes it locally
 without a Canvas call. When teacher judgment is required (for example, overwriting a score,
@@ -152,15 +175,14 @@ call. Activation and final apply are serialized by one deterministic course/assi
 scope lock, and the lock order is scope, then session.
 
 AssignmentForge corrections are a private, teacher-authored scoring aid. When a
-submitted result is below the packet item's met/full-credit threshold and the
-private authored envelope contains an exact `item_id` correction, Canvas Expert
-appends one plain-text `📋 COPY THIS:` block containing `Answer` and `Why` to the
-existing feedback before it reaches Canvas `comment[text_comment]`. Shared
-corrections are used for prompt-identical parts; tier-specific corrections are
-selected from the exact AssignmentForge tier/tag associated with the created
-assignment. Missing corrections, full-credit results, and CREATE/open-ended
-parts retain the submitted Glows & Grows text unchanged. The correction library
-never enters the SAFE packet or MCP response.
+row is not at full marks and the private authored envelope contains an exact
+`item_id` correction, the renderer uses it as Extra credit Part 2 instead of the
+model's exemplar: the correction's `answer`, a blank line, then `Why: {why}`.
+Shared corrections are used for prompt-identical parts; tier-specific corrections
+are selected from the exact AssignmentForge tier/tag associated with the created
+assignment. Missing corrections fall back to the model's own exemplar for that
+item; full-credit results render no Extra credit section at all. The correction
+library never enters the SAFE packet or MCP response.
 
 Teacher guidance remains available privately in full for the session record. When oversized,
 its effective model and packet projection carries the compaction marker and counts above;

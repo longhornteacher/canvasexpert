@@ -131,7 +131,6 @@ def build_scoring_artifacts(
                 "shared_context_excluded": shared_excluded,
             },
             "ai_by_uid": {}, "ai_item_by_uid": {}, "ai_failures": failures,
-            "copilot_packet": None,
         }
     except PseudonymProvisionalError:
         return {"ok": False, "code": "pseudonym_provisional", "privacy_steps": steps}

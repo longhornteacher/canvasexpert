@@ -241,8 +241,6 @@ def settings_page(request: Request):
         "workspace_root": root,
         "workspace_files": [
             {"name": "Library / AI Authoring", "path": ai_authoring_folder},
-            {"name": "Library / AI Authoring / Personas",
-             "path": os.path.join(ai_authoring_folder, "Personas") if ai_authoring_folder else None},
             {"name": "Library / Feedback Contracts", "path": workspace.library_folder("Feedback Contracts")},
             {"name": "Library / Quizzes", "path": workspace.library_folder("Quizzes")},
             {"name": "Assignments", "path": workspace.assignments_root()},

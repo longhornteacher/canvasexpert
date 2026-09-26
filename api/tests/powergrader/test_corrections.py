@@ -1,46 +1,28 @@
 from api.powergrader import assignmentforge, corrections
 
 
-def test_shared_correction_is_added_only_for_a_missed_item():
-    bundle = {"students": [{"pseudonym": "Pikachu", "responses": [
-        {"item_id": "grammar", "possible": 10},
-    ]}]}
+def test_correction_for_item_prefers_shared_over_tier():
     library = {"grammar": {
         "shared": {"answer": "Use walk.", "why": "The sentence is in present tense."},
-        "by_tier": None,
+        "by_tier": {"red": {"answer": "Never used.", "why": "Shared wins."}},
     }}
 
-    missed = corrections.inject([{
-        "pseudonym": "Pikachu", "item_id": "grammar", "score": 7,
-        "feedback": "Review the verb.",
-    }], bundle, corrections=library)
-    met = corrections.inject([{
-        "pseudonym": "Pikachu", "item_id": "grammar", "score": 10,
-        "feedback": "Strong work.",
-    }], bundle, corrections=library)
+    resolved = corrections.correction_for_item(library, "grammar", "Red")
 
-    assert "📋 COPY THIS:" in missed[0]["feedback"]
-    assert "Answer: Use walk." in missed[0]["feedback"]
-    assert met[0]["feedback"] == "Strong work."
+    assert resolved == {"answer": "Use walk.", "why": "The sentence is in present tense."}
 
 
-def test_tier_specific_correction_and_create_without_entry():
-    bundle = {"students": [{"pseudonym": "Pikachu", "responses": [
-        {"item_id": "evidence", "possible": 10},
-        {"item_id": "create", "possible": 10},
-    ]}]}
+def test_correction_for_item_falls_back_to_tier_and_is_none_without_entry():
     library = {
         "evidence": {"shared": None, "by_tier": {
             "red": {"answer": "Name the strongest quote.", "why": "Red's prompt asks for one checkable quote."},
         }},
     }
-    rows = corrections.inject([
-        {"pseudonym": "Pikachu", "item_id": "evidence", "score": 5, "feedback": "Add evidence."},
-        {"pseudonym": "Pikachu", "item_id": "create", "score": 5, "feedback": "Develop the idea."},
-    ], bundle, corrections=library, tier="Red")
 
-    assert "Name the strongest quote." in rows[0]["feedback"]
-    assert rows[1]["feedback"] == "Develop the idea."
+    assert corrections.correction_for_item(library, "evidence", "Red") == {
+        "answer": "Name the strongest quote.", "why": "Red's prompt asks for one checkable quote."}
+    assert corrections.correction_for_item(library, "evidence", "Blue") is None
+    assert corrections.correction_for_item(library, "create", "Red") is None
 
 
 def test_assignmentforge_metadata_matches_exact_created_assignment_id(monkeypatch):

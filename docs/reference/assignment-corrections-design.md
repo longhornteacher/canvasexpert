@@ -12,11 +12,12 @@ packet `item_id`. Each entry contains either one shared `{answer, why}` correcti
 `by_tier` map using a canonical tier label or configured public tag.
 
 During scoring preparation, the private Operation Ledger record is associated with the exact
-course-and-assignment ID returned by the AssignmentForge create step. At submission, a numeric or
-explicitly below-met result receives one teacher-authored correction block when an exact correction
-exists. The block is appended to the existing Glows & Grows feedback before the normal Canvas
-`comment[text_comment]` write. The teacher awards any credit recovery manually; Canvas Expert does
-not alter the score automatically.
+course-and-assignment ID returned by the AssignmentForge create step. At submission, a row that is
+not at full marks renders as Extra credit Part 2 using the teacher-authored correction when an
+exact correction exists, in place of the model's own exemplar: the correction's `answer`, a blank
+line, then `Why: {why}`. This lands inside Canvas Expert's one rendered Glows and Grows layout
+before the normal Canvas `comment[text_comment]` write. The teacher awards any credit recovery
+manually; Canvas Expert does not alter the score automatically.
 
 Rationales are teacher-authored content, not model output, and are not derived from student work.
 They never enter the SAFE packet or MCP response.
@@ -34,12 +35,12 @@ use title matching or a standalone correction file.
 
 ## Current constraints
 
-- **Plain text only.** Feedback is plain-text Canvas feedback. The correction block uses line breaks,
-  `Answer`, and `Why`; it does not rely on HTML or Markdown rendering.
-- **Existing feedback is preserved.** The correction is additional to the default Glows & Grows
-  text and is added at most once.
-- **Bounded scoring only.** Full-credit results, missing corrections, non-numeric/unresolved
-  outcomes, and CREATE/open-ended parts keep the submitted feedback unchanged.
+- **Plain text only.** Feedback is plain-text Canvas feedback. The rendered correction uses line
+  breaks and a `Why:` label; it does not rely on HTML or Markdown rendering.
+- **One Extra credit Part 2 per row.** The correction replaces the model's own exemplar for that
+  item; it never appears twice.
+- **Bounded scoring only.** Full-credit results render no Extra credit section at all. A missing
+  correction falls back to the model's own exemplar for that item.
 - **Privacy boundary.** The correction library remains private teacher content and is never copied
   into SAFE evidence, packet pages, or external assistant-visible responses.
 - **No point value in student text.** Credit recovery is a teacher decision applied by hand in

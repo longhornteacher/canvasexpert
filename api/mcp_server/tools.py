@@ -2693,7 +2693,6 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
                    or session.get("scoring_rubric_text")
                    or session.get("rubric_text")
                    or "")
-    persona = config.get_persona(str(session.get("persona_id") or ""))
     contract_text = session.get("feedback_contract_text")
     contract_name = str(
         session.get("feedback_contract_filename")
@@ -2709,7 +2708,6 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
             limit=limit,
             include_context=include_context,
             rubric_text=rubric_text,
-            persona=persona,
             contract_text=contract_text,
             contract_name=contract_name,
         )
@@ -2758,13 +2756,17 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
 
 def stage_scoring_results(scoring_session_id: str, results: list,
                           expected_packet_digest: str, review_digest: str = "",
-                          answers: dict | None = None) -> dict:
+                          answers: dict | None = None,
+                          exemplars: dict | None = None,
+                          disclosure: str = "") -> dict:
     """Validate and freeze one exact scoring result set without Canvas I/O.
 
-    One {pseudonym, item_id, score, feedback} result per packet row. If the tool
-    returns needs_teacher_input, ask the flagged questions and resubmit unchanged
-    with answers filled in. A successful call stores the private write plan for
-    a later explicit apply."""
+    One {pseudonym, item_id, score, explanation, glows, grows} result per
+    packet row. ``exemplars`` maps item_id to one shared model answer, needed
+    for any item where a student scored below full marks or received a null
+    score. If the tool returns needs_teacher_input, ask the flagged questions
+    and resubmit unchanged with answers filled in. A successful call stores
+    the private write plan for a later explicit apply."""
     from api.powergrader import session_store
 
     lease_error = _scoring_work_lease_refusal(scoring_session_id)
@@ -2782,13 +2784,16 @@ def stage_scoring_results(scoring_session_id: str, results: list,
                                   session.get("assignment_id")):
         return _stage_scoring_results_locked(
             scoring_session_id, results, expected_packet_digest,
-            review_digest=review_digest, answers=answers)
+            review_digest=review_digest, answers=answers,
+            exemplars=exemplars, disclosure=disclosure)
 
 
 def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                                   expected_packet_digest: str,
                                   review_digest: str = "",
-                                  answers: dict | None = None) -> dict:
+                                  answers: dict | None = None,
+                                  exemplars: dict | None = None,
+                                  disclosure: str = "") -> dict:
     """Validate SAFE results, ask bounded risk questions, then freeze locally.
 
     The Canvas transport stays below this MCP boundary and is never reached.
@@ -2838,19 +2843,36 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
         return {"ok": False, "code": "invalid_results",
                 "error": "Results must match the supplied pseudonyms and item ids and contain valid feedback.",
                 "validation": {"errors": len(verdict.get("errors") or []),
-                               "warnings": len(verdict.get("warnings") or [])}}
-    results = corrections.inject(
-        results,
-        safe_bundle,
-        corrections=session.get("assignmentforge_corrections") or {},
-        tier=str(session.get("assignmentforge_tier") or ""),
+                               "warnings": len(verdict.get("warnings") or []),
+                               "fields": verdict.get("fields") or []}}
+
+    tier = str(session.get("assignmentforge_tier") or "")
+    corrections_by_item = {
+        item_id: corrections.correction_for_item(
+            session.get("assignmentforge_corrections") or {}, item_id, tier)
+        for item_id in {str(r.get("item_id") or "") for r in results}
+    }
+    exemplars = {str(k): str(v) for k, v in (exemplars or {}).items()}
+    missing = fp.missing_exemplar_item_ids(
+        results, bundle=safe_bundle, exemplars=exemplars,
+        corrections_by_item=corrections_by_item,
+    )
+    if missing:
+        return {"ok": False, "code": "missing_exemplars",
+                "error": "Every item where a student scored below full marks or "
+                         "received a null score needs a shared exemplar.",
+                "item_ids": missing}
+
+    rendered = fp.render_results(
+        results, bundle=safe_bundle, exemplars=exemplars,
+        corrections_by_item=corrections_by_item,
     )
     try:
-        rows = fp.reidentify(results, vault)
+        rows = fp.reidentify(rendered, vault)
     except Exception:
         return {"ok": False, "code": "invalid_results", "error": "Results could not be safely matched to this session."}
     for index, row in enumerate(rows):
-        row["pseudonym"] = str((results[index] or {}).get("pseudonym") or "")
+        row["pseudonym"] = str((rendered[index] or {}).get("pseudonym") or "")
     if any(not row.get("resolved") for row in rows):
         return {"ok": False, "code": "invalid_results", "error": "Every result must match a supplied pseudonym."}
 
@@ -2861,7 +2883,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
         if label:
             names[str(entry.get("canvas_id"))] = label
             every_pseudonym.append(label)
-    by_uid = fp.merge_rows_by_uid(rows)
+    by_uid = fp.merge_rows_by_uid(rows, disclosure=disclosure)
     item_by_uid = fp.item_rows_by_uid(rows)
     candidate = copy.deepcopy(session)
     students_by_uid = {str(st.get("user_id")): st for st in candidate.get("students") or []}

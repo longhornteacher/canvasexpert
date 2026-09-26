@@ -43,8 +43,8 @@ the guided flow travels to your LLM automatically — no separate attach step. F
 - Write criteria as **observable code facts**, not vibes: *"Uses a loop instead of repeated
   lines,"* *"Variable names describe their contents,"* *"Image tag has an `alt` attribute"* —
   not *"good style."* Observable criteria score far more consistently.
-- Keep the point scale small (the shipped Glows & Grows pattern expects a single rubric
-  score). Per-criterion scoring is a future extension.
+- Keep the point scale small (the product-owned Glows and Grows shape expects a single
+  rubric score). Per-criterion scoring is a future extension.
 
 ## Submission type: paste or upload — both work
 

@@ -291,7 +291,6 @@ def build_packet(
     limit: int = 10,
     include_context: bool = True,
     rubric_text: str = "",
-    persona: dict | None = None,
     contract_text: str | None = None,
     contract_name: str = "",
 ) -> dict:
@@ -381,9 +380,7 @@ def build_packet(
     students_without_responses = len(bundle_pseudonyms - responding_pseudonyms)
 
     contract = feedback_contract.build_contract_text(
-        ai_ta_name=str((persona or {}).get("name") or ""),
         rubric_text=rubric_text,
-        persona=persona,
         contract_text=(
             contract_text if contract_text is not None
             else session.get("feedback_contract_text")

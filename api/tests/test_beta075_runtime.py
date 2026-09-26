@@ -143,7 +143,7 @@ def test_quick_fix_contract_and_version(monkeypatch, tmp_path):
         "api.webui.routes." + "feedback_" + "push",
     ):
         assert importlib.util.find_spec(module_name) is None
-    assert any(route.path == "/api/feedback/personas" for route in server.app.routes)
+    assert not any(route.path.startswith("/api/feedback/") for route in server.app.routes)
 
     class CountingVault:
         def __init__(self):
@@ -182,3 +182,12 @@ def test_quick_fix_contract_and_version(monkeypatch, tmp_path):
     assert __version__ in response.text
     assert "every assignment currently needing scoring" in response.text
     assert "one pseudonymized assignment packet at a time" in response.text
+
+    # Consistent scoring feedback: personas are removed entirely. /settings
+    # renders with no Personas row, and the retired /api/feedback/* routes
+    # are gone (404), never rendered against the real workspace.
+    settings_response = TestClient(server.app).get("/settings")
+    assert settings_response.status_code == 200
+    assert "Personas" not in settings_response.text
+    personas_response = TestClient(server.app).get("/api/feedback/personas")
+    assert personas_response.status_code == 404

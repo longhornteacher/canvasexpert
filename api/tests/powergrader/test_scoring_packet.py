@@ -5,9 +5,13 @@ from api import feedback_contract
 from api.powergrader.scoring_packet import build_packet, validate_safe_bundle
 
 
-def test_default_packet_persona_is_teacher_assistant_not_your_assistant():
+def test_default_packet_opening_is_neutral_with_no_persona():
     contract = feedback_contract.build_contract_text()
-    assert contract.startswith("You are a teaching assistant helping a real teacher")
+    assert contract.startswith(
+        "You are scoring student work and drafting feedback that the teacher "
+        "will send in their own voice."
+    )
+    assert "a teaching assistant helping a real teacher" not in contract
     assert "your teaching assistant" not in contract
 
 

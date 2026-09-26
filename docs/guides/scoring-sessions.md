@@ -23,12 +23,14 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
 
 ## Agent workflow
 
-1. If the teacher wants to choose a saved judgment/feedback shape, call
-   `list_feedback_contracts()` first. After the teacher selects an exact row,
-   call `prepare_scoring_session(course_id, assignment_id, scoring_guidance="",
-   feedback_contract_id="")`. An explicit contract id wins; otherwise non-empty
-   conversational guidance becomes the session contract body, and the seeded
-   default is used when neither is supplied.
+1. The base Glows and Grows feedback shape is always in effect; no selection
+   replaces it. If the teacher wants to add a saved judgment/feedback contract,
+   call `list_feedback_contracts()` first. After the teacher selects an exact
+   row, call `prepare_scoring_session(course_id, assignment_id,
+   scoring_guidance="", feedback_contract_id="")`. An explicit contract id layers
+   on top of the base shape; neither is required. Non-empty conversational
+   guidance is not a second copy there: it layers onto the scoring basis instead,
+   as the existing teacher-directive rubric block, so it appears exactly once.
    Preparation consumes only valid local `current` roster, assignment, and
    submission projections. Non-empty assignment content is authoritative; a Canvas
    rubric is used only when assignment content is empty. Otherwise missing norms return

@@ -190,11 +190,6 @@ def _on_disk_scoring_session(tmp_path, monkeypatch):
             tools.config, "active_courses",
             lambda: [{"id": course_id, "name": f"Course {course_id}"}],
         )
-        monkeypatch.setattr(
-            tools.config, "get_persona",
-            lambda _persona_id: {"name": "Test TA", "signoff_policy": "none"},
-        )
-
         vault = Vault(str(tmp_path / "vault.json"))
         vault.get_or_assign(canvas_id, real_name="Real Student")
         vault.set_pseudonym(canvas_id, pseudonym_value)
@@ -227,7 +222,6 @@ def _on_disk_scoring_session(tmp_path, monkeypatch):
             "created": "2026-01-01T08:00:00",
             "mode": "packet",
             "rubric_name": "",
-            "persona_id": "test-persona",
             "students": [{"user_id": canvas_id, "status": "pending"}],
             "privacy_artifacts": {"safe_bundle": str(bundle_path)},
         })

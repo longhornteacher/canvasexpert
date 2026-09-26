@@ -50,7 +50,13 @@ def _wire(monkeypatch, tmp_path, _set_active_courses):
 
 def _result(score=8):
     return [{"pseudonym": PSEUDONYM, "item_id": "item-1", "score": score,
-             "feedback": "Clear reasoning."}]
+             "explanation": "Clear reasoning throughout the response.",
+             "glows": ["Strong topic sentence.", "Concrete supporting detail."],
+             "grows": ["Add a closing sentence."],
+             "fixes": ["Add one more supporting detail.", "Write a closing sentence."]}]
+
+
+EXEMPLARS = {"item-1": "A short model answer a student could hand copy."}
 
 
 def _digest(bundle):
@@ -58,9 +64,11 @@ def _digest(bundle):
         course_id="course-1", assignment_id="assignment-1")
 
 
-def _stage_then_apply(session_id, results, packet_digest, *, review_digest="", answers=None):
+def _stage_then_apply(session_id, results, packet_digest, *, review_digest="", answers=None,
+                      exemplars=EXEMPLARS):
     staged = tools.stage_scoring_results(session_id, results, packet_digest,
-                                         review_digest=review_digest, answers=answers)
+                                         review_digest=review_digest, answers=answers,
+                                         exemplars=exemplars)
     if staged.get("status") != "staged":
         return staged
     return tools.apply_staged_scoring_results(session_id, staged["stage_digest"])
@@ -80,7 +88,8 @@ def test_stage_is_local_and_apply_is_the_only_canvas_lane(monkeypatch, tmp_path,
     monkeypatch.setattr(scoring_apply, "apply_plan", lambda **_kw: (
         writes.append(True) or ({"ok": True, "pushed": [REAL_ID],
         "results": [{"user_id": REAL_ID, "status": "pushed"}]}, 200)))
-    staged = tools.stage_scoring_results("session-1", _result(), _digest(bundle))
+    staged = tools.stage_scoring_results("session-1", _result(), _digest(bundle),
+                                         exemplars=EXEMPLARS)
     assert staged["status"] == "staged"
     assert writes == []
     assert sessions["session-1"]["status"] == "staged"
@@ -102,7 +111,9 @@ def test_staging_injects_private_assignmentforge_correction(monkeypatch, tmp_pat
         {"ok": True, "pushed": [REAL_ID], "results": [{"user_id": REAL_ID, "status": "pushed"}]}, 200))
     result = _stage_then_apply("session-1", _result(), _digest(bundle))
     assert result["counts"]["finalized"] == 1
-    assert "COPY THIS:" in session["students"][0]["ai_feedback"]
+    feedback = session["students"][0]["ai_feedback"]
+    assert "Extra credit Part 2: Hand copy this exemplar" in feedback
+    assert "Use walk." in feedback and "Why: Present tense." in feedback
 
 
 def test_questions_block_stage_then_matching_digest_allows_apply(monkeypatch, tmp_path, _set_active_courses):
@@ -135,7 +146,7 @@ def test_stale_stage_digest_and_malformed_results_fail_closed(monkeypatch, tmp_p
         "ok": True, "candidate_ids": [REAL_ID], "questions": [],
         "digest": "frozen-review", "notes": []})
     digest = _digest(bundle)
-    staged = tools.stage_scoring_results("session-1", _result(), digest)
+    staged = tools.stage_scoring_results("session-1", _result(), digest, exemplars=EXEMPLARS)
     assert tools.apply_staged_scoring_results("session-1", "wrong")["code"] == "stage_changed"
     assert tools.stage_scoring_results("session-1", [{"pseudonym": PSEUDONYM}], digest)["code"] == "invalid_results"
     assert staged["stage_digest"] != "wrong"
@@ -165,3 +176,55 @@ def test_transport_unknown_is_projected_without_grade_facts(monkeypatch, tmp_pat
     assert result["code"] == "write_transport_unknown"
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
     assert "grade" not in _blob(result)
+
+
+def test_stage_scoring_results_example_renders_structured_fields_onto_the_session(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """EXAMPLE: structured results in, one rendered plain-text layout out."""
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+
+    staged = tools.stage_scoring_results(
+        "session-1", _result(8), _digest(bundle), exemplars=EXEMPLARS,
+        disclosure="Drafted by AI, reviewed by your teacher.",
+    )
+
+    assert staged["status"] == "staged"
+    feedback = session["students"][0]["ai_feedback"]
+    assert feedback == (
+        "Score: 8/10\n\n"
+        "Clear reasoning throughout the response.\n\n"
+        "Glows\n- Strong topic sentence.\n- Concrete supporting detail.\n\n"
+        "Grows\n- Add a closing sentence.\n\n"
+        f"{'-' * 40}\n"
+        "Extra credit Part 1: Fix these in a handwritten second draft\n"
+        "1. Add one more supporting detail.\n2. Write a closing sentence.\n\n"
+        "Extra credit Part 2: Hand copy this exemplar\n"
+        "A short model answer a student could hand copy.\n\n"
+        "Drafted by AI, reviewed by your teacher."
+    )
+    assert session["students"][0]["ai_score"] == 8
+
+    # The posted comment text is exactly the rendered layout: no AI label, no
+    # persona name, no disclosure beyond the one explicitly staged above. The
+    # plan digest already covers these bytes (scoring_apply.py's
+    # _projected_payload mirrors what approve_rows copies before posting).
+    from api.powergrader import scoring_apply
+    payload = scoring_apply._projected_payload(session["students"][0])
+    assert payload["comment"]["text_comment"] == feedback
+
+
+def test_stage_scoring_results_missing_exemplar_refuses_with_item_ids_only(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """EXAMPLE: a below-full-marks item with no exemplar and no correction
+    fails closed. No response content or identity is returned."""
+    _session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+
+    result = tools.stage_scoring_results("session-1", _result(8), _digest(bundle))
+
+    assert result["ok"] is False
+    assert result["code"] == "missing_exemplars"
+    assert result["item_ids"] == ["item-1"]
+    assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
+    assert "Clear reasoning" not in _blob(result)

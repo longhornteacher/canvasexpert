@@ -43,7 +43,11 @@ INSTRUCTION_BUDGET = 2200
 # masking this one: shared work-item handoff (85ce67a, 4 tools, +982), push
 # verification and tiered recovery (149c2a4, 3 tools, +1,097), and reviewed
 # grade adjustment (23f32c9, 2 tools, +652). Held at 15,950 through b2f28b7.
-LISTING_BUDGET = 18569
+# Raised again to the measured 18,841 for consistent scoring feedback: the
+# model now supplies structured fields (explanation, glows, grows, fixes)
+# instead of one free-text feedback string, and stage_scoring_results gained
+# exemplars/disclosure. No persona field survives to offset the cost.
+LISTING_BUDGET = 18841
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
@@ -283,11 +287,6 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
     monkeypatch.setattr(tools, "_open_vault", lambda: (vault, None))
     monkeypatch.setattr(
         tools.config, "active_courses", lambda: [{"id": "111", "name": "Course"}]
-    )
-    monkeypatch.setattr(
-        tools.config,
-        "get_persona",
-        lambda _persona_id: {"name": "Test TA", "signoff_policy": "none"},
     )
 
     session = {

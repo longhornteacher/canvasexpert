@@ -46,12 +46,15 @@ def test_stage_scoring_results_schema_names_the_canvas_score_row():
 
     assert schema["properties"]["results"]["items"] == {"$ref": "#/$defs/ScoringResult"}
     assert set(result.get("required") or []) == {
-        "pseudonym", "item_id", "score", "feedback",
+        "pseudonym", "item_id", "score", "explanation", "glows", "grows",
     }
     assert properties["pseudonym"]["type"] == "string"
     assert properties["item_id"]["type"] == "string"
-    assert properties["feedback"]["type"] == "string"
+    assert properties["explanation"]["type"] == "string"
+    assert properties["glows"]["type"] == "array"
+    assert properties["grows"]["type"] == "array"
     assert properties["score"]["anyOf"] == [{"type": "number"}, {"type": "null"}]
+    assert "fixes" in properties
     assert "writing_process_observations" in properties
     assert "title" not in result
     assert all("title" not in (prop or {}) for prop in properties.values())

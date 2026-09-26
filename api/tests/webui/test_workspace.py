@@ -159,28 +159,6 @@ def test_adding_a_saved_previous_course_makes_it_current(tmp_path, monkeypatch):
     }]
 
 
-def test_personas_seed_once_then_follow_folder_changes(tmp_path, monkeypatch):
-    root = tmp_path / "CanvasExpert"
-    root.mkdir()
-    monkeypatch.setattr(workspace, "library_folder", lambda name, _root=None, _base=root: str(_base / name))
-    monkeypatch.setattr(config._io, "_synced_state", lambda: {})
-
-    first = config.list_personas()
-    persona_dir = root / "AI Authoring" / "Personas"
-    assert any(p["id"] == "sage" for p in first)
-    assert (persona_dir / "Sage.json").exists()
-
-    (persona_dir / "Sage.json").unlink()
-    second = config.list_personas()
-
-    assert not any(p["id"] == "sage" for p in second)
-    assert any(p["id"] == "coach_vale" for p in second)
-
-    for path in persona_dir.glob("*.json"):
-        path.unlink()
-    assert config.list_personas() == []
-
-
 def test_workspace_migration_is_idempotent(tmp_path, monkeypatch):
     machine_config = tmp_path / "config.json"
     workspace_root = tmp_path / "OneDrive" / "CanvasExpert"

@@ -57,7 +57,10 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 62 (55 tools). Version 62 adds `stage_attachment(source_path)` for safely
+Tool schema version 63 (55 tools). Version 63 replaces free-text scoring feedback with structured fields
+(`explanation`, `glows`, `grows`, `fixes`) that Canvas Expert renders into one fixed layout, and adds
+`exemplars` and `disclosure` to `stage_scoring_results`; no persona selection remains anywhere in the
+contract. Version 62 adds `stage_attachment(source_path)` for safely
 staging teacher-posted files from chat into the private Forge attachment inbox. Version 61 removes the legacy group field from differentiated quiz variants
 and removes student-group data from roster settings. Version 60 adds the reviewed existing-grade adjustment
 pair. Version 59 added `verify_live`, `resume_operation`, and
@@ -113,14 +116,14 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `verify_live(course_id, kind, id="", title="")` | The one Live Canvas read an agent makes after a push: confirms one `assignment`/`page`/`quiz` by exact id or exact title. One Canvas call, or two only when `module_ids` isn't already on the object; writes nothing | No |
 | `resume_operation(operation_id)` | Continues one existing, teacher-approved operation from its last recorded step through the same executor retry path; refuses an operation that already applied, was abandoned, or is held by another attempt | No |
 | `abandon_operation(operation_id)` | Marks one existing, teacher-approved operation abandoned with no Canvas call; blocks later `resume_operation`/apply and returns a `repair_plan` of what was already created from recorded steps | No |
-| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input; a selected contract travels in page zero | No |
+| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input; the product-owned base feedback shape is always in page zero, with a selected contract file and any scoring guidance layered on top | No |
 | `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
 | `list_work_items()` | Shared work-item holders, sync progress, and orphan counts without private session contents | No |
 | `get_work_item(work_id)` | One shared work item's holder and sync status | No |
 | `handoff_work_item(work_id)` | Release this device's lease so another device can resume after sync | No |
 | `take_over_work_item(work_id, confirm_stale=false)` | Acquire a released item after sync, or explicitly confirm takeover after a stale lease | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
-| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None)` | Validate and freeze valid SAFE-packet results locally; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |
+| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, exemplars=None, disclosure="")` | Validate structured results (`explanation`, `glows`, `grows`, optional `fixes`), render Canvas Expert's one fixed feedback layout, and freeze locally; `exemplars` supplies one shared model answer per item below full marks or null-scored; refuses `missing_exemplars` by item id alone; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |
 | `apply_staged_scoring_results(scoring_session_id, expected_stage_digest, idempotency_key="")` | Post only the unchanged private stage after a direct teacher instruction; preserves narrow transport and idempotency safeguards | Yes, pseudonymized |
 
 `get_course_assignments` and `get_modules` only read the local course catalog written by

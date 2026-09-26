@@ -160,6 +160,14 @@ RETIRED_PATHS = (
     ("api/webui/static/gradebook/curves.js", "(none)", "Retire the console curve controls in favor of the reviewed MCP grade-adjustment lane"),
     ("api/webui/gradebook_service.py", "(none)", "Retire the curve-event store after moving grade adjustment math to the shared service"),
     ("api/tests/test_curve_event_storage.py", "(none)", "Retire the curve-event store and its storage tests"),
+    ("api/powergrader/packet.py", "(none)", "Consistent scoring feedback: no persona, one rendered layout; only tests imported it"),
+    ("api/powergrader/copilot_packet.py", "(none)", "Consistent scoring feedback: no persona, one rendered layout; only tests imported it"),
+    ("api/powergrader/copilot_packet_support.py", "(none)", "Consistent scoring feedback: no persona, one rendered layout; only tests imported it"),
+    ("api/tests/powergrader/test_copilot_packet.py", "(none)", "Consistent scoring feedback: retired module, retired test"),
+    ("api/webui/routes/feedback.py", "(none)", "Consistent scoring feedback: personas removed entirely, /api/feedback/* is gone"),
+    ("api/webui/routes/feedback_library.py", "(none)", "Consistent scoring feedback: personas removed entirely, /api/feedback/* is gone"),
+    ("api/tests/webui/routes/test_feedback_library.py", "(none)", "Consistent scoring feedback: retired persona route, retired test"),
+    ("api/default_docs/Feedback Contracts/Glows & Grows (Basic).md", "(none)", "Consistent scoring feedback: base shape is product-owned Python text, not a seeded workspace file"),
 )
 
 
