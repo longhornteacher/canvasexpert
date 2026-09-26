@@ -770,19 +770,15 @@ code. Locked now:
 
 ## 9. Next batch (single current pointer)
 
-**Next: Batch 3b (§6b).** Read this plan's §0, §1.6, §6b, and §8 (D6); the contract's §6.1
-and §7; and `docs/mcp-server.md` for the tool-schema sync rules. There are no
-outstanding teacher decisions. The live check for Batches 2b and 3 in CS8 is still
-outstanding; do it together with the Batch 3b check.
-
-**After it: Batch 4 (§7).** Read this plan's §0, §1.1 (authoring and assembly), §1.5
+**Next: Batch 4 (§7).** Read this plan's §0, §1.1 (authoring and assembly), §1.5
 (rubrics), §7, and §8 (D2); the contract's §2, §4 item 6, §6 (rubric in the
 printable), and §7 law 4. Also read `docs/reference/operation-ledger-module-map.md`,
 `docs/contracts/operation-ledger-contract.md`, and the "slice 11c1" exclusion
 history (`git log -S "11c1"`) before writing the direct brief. There are no
 outstanding teacher decisions. The senior must write Batch 4 acceptance criteria
 against the current code and lock the rubric create/associate, verification, receipt,
-and resume path before delegation.
+and resume path before delegation. The CS8 live check for Batches 2b, 3, and 3b
+remains outstanding; use unpublished `[TEST]` items and the smoke path in §6b.
 
 ## 10. Known adjacent defects (outside this plan)
 
