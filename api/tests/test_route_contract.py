@@ -11,9 +11,7 @@ that's the whole point: a surface change must be a deliberate, reviewed edit.
 The snapshot protects retained browser/control-console behavior; it is not a mandate
 to add browser routes for capabilities that belong in the agent runtime.
 
-The gradebook student-list endpoint is at `/api/students/list` (returns id+name for
-the extra-time panel). The reports endpoint is at `/api/students` (returns id+name+monitored).
-These were previously both at `/api/students` causing a shadow; the gradebook one was renamed.
+The reports endpoint is at `/api/students` (returns id+name+monitored).
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -44,14 +42,9 @@ EXPECTED = [
     ('/api/dailywriting/ingest-canvas', ('POST',)),
     ('/api/download-contract', ('GET',)),
     ('/api/download-root', ('GET',)),
-    ('/api/extra-time', ('GET',)),
-    ('/api/extra-time', ('POST',)),
     ('/api/files', ('GET',)),
-    ('/api/gradebook', ('GET',)),
     ('/api/groups', ('GET',)),
     ('/api/inbox-files', ('GET',)),
-    ('/api/late-policy', ('GET',)),
-    ('/api/late-policy/apply', ('POST',)),
     ('/api/modules', ('GET',)),
     ('/api/operations', ('GET',)),
     ('/api/operations/{kind}/prepare', ('POST',)),
@@ -75,7 +68,6 @@ EXPECTED = [
     ('/api/routines/save', ('POST',)),
     ('/api/student-packet/stream', ('GET',)),
     ('/api/students', ('GET',)),
-    ('/api/students/list', ('GET',)),
     ('/api/students/monitor', ('POST',)),
     ('/api/students/monitored', ('GET',)),
     ('/api/support-bundle', ('POST',)),
@@ -93,7 +85,6 @@ EXPECTED = [
     ('/course-expert', ('GET',)),
     ('/docs', ('GET',)),
     ('/docs/oauth2-redirect', ('GET',)),
-    ('/gradebook', ('GET',)),
     ('/openapi.json', ('GET',)),
     ('/redoc', ('GET',)),
     ('/routines', ('GET',)),

@@ -284,8 +284,6 @@ def generic_description(kind: str) -> str:
     """
     if kind == "grade.debt":
         return "Grading debt"
-    if kind == "late.work":
-        return "Late work"
     if kind == "roster.warning":
         return "Roster warning"
     if kind == "operation_receipt":

@@ -510,8 +510,6 @@ def test_writers_raise_without_workspace(monkeypatch):
         lambda: store.begin_refresh(COURSE, operation_id="op-synthetic"),
         lambda: store.finish_refresh(COURSE, operation_id="op-synthetic", ok=True),
         lambda: store.record_course_context(COURSE, ok=True),
-        lambda: store.write_late_policy(COURSE, {}),
-        lambda: store.invalidate_late_policy(COURSE),
         lambda: store.write_new_quiz_capability(
             COURSE, capability="unknown", last_probe_at="2026-09-24T00:00:00Z"),
         lambda: store.record_pass(COURSE, "full", ok=True),

@@ -25,7 +25,6 @@ the suite.
   `catalog.assignments` 9, `none` 7, `catalog.modules` 6,
   `focused_evidence` 6, `new_quiz.metadata` 5, `private.assignments` 5,
   `private.groups` 5, `catalog.pages` 2, `private.submission_comments` 2,
-  `gradebook.late_policy` 1,
   `new_quiz.responses` 1. `catalog.assignment_groups`, `private.roster`, and
   `unknown` are currently unused (no live mutation touches them).
 
@@ -148,16 +147,10 @@ write routes were retired in Forge Batch 1 (three tiers, no student-to-tier know
 
 ### 5. Gradebook configuration (`gradebook.late_policy`)
 
-**Covered (invalidate):** `webui/routes/gradebook_policy.py
-apply_late_policy` calls `mirror_store.invalidate_late_policy` after a
-verified apply — a whole-scope stale-mark, not a precise merge, hence
-reconciliation state `invalidate` rather than `targeted`.
-
-**Duplicate implementation — retired 2026-07-19 (Batch 8):** the
-ledger adapter `operation_ledger/adapters/late_policy.py LatePolicyAdapter`
-(`gradebook.late_policy` KIND) was **dead** — no non-test producer emitted that
-KIND. The live path is the direct route above, which already reconciles via
-`invalidate`. The dead adapter file and its contract and test entries have been removed.
+The former `api/webui/routes/gradebook_policy.py apply_late_policy` owner and its
+`gradebook.late_policy` scope were retired with the unlinked Gradebook console page.
+Canvas owns late-policy settings directly; no Canvas Expert mutation owner or
+reconciliation entry remains for this scope.
 
 ### 6. New Quiz responses (`new_quiz.responses`, `focused_evidence`)
 

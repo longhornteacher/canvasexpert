@@ -46,7 +46,7 @@ Useful starting references for new debugging and refactor sessions:
 - `docs/reference/settings-module-map.md` - Settings route/script/config ownership map.
 - `docs/reference/powergrader-scoring-map.md` - internal/private Scoring Session packet, privacy, and guarded-write implementation map (legacy filename).
 - `docs/reference/powergrader-module-map.md` - internal/private Scoring Session backend module map (legacy filename); no teacher-facing scoring UI remains.
-- `docs/reference/gradebook-module-map.md` - Gradebook route/script ownership and feature routing map.
+- `docs/reference/gradebook-module-map.md` - Remaining Gradebook services and runtime routing map.
 - `docs/reference/roster-module-map.md` - Roster route/script ownership and current hotspot map.
 - `docs/reference/assignment-corrections-design.md` - accepted private correction behavior for
   AssignmentForge results, its exact-ID association, and the remaining bounded constraints.

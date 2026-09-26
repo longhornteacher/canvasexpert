@@ -18,7 +18,6 @@ their own conversation and preview presentation from Canvas Expert's host-neutra
 |---|---|---|---|---|---|---|---|
 | 1 | **CanvasAgent** – local connection and service health | `/` | `canvasagent.html` (`layouts/workspace.html`, `full`) | `canvasagent.js` | `routes/connections.py`, `api/connections.py`, `api/diagnostics.py`, `readiness.py`, `mirror_service.py` | `mcp-server.md`, `settings-module-map.md` | Local stdio MCP; Canvas readiness probe; read-only CanvasMirror status and explicit read-only refresh; no work-card scan. |
 | 2 | **Course content creation & delivery** | `/course-expert` | `course_expert.html` (`layouts/workspace.html`, `three`) | `push.js` + `push/*.js` + `course_expert/*.js` | `routes/push.py`, `routes/push_validation.py`, `routes/operations.py`, `operation_ledger/adapters/` | `course-expert-module-map.md`, `operation-ledger-module-map.md` | Typed operation-ledger prepare/review/apply; no generic push fallback; teacher review gate before Canvas writes |
-| 3 | **Gradebook actions** | `/gradebook` | `gradebook.html` (`layouts/workspace.html`, `left-main`) | `gradebook.js` + `gradebook/*.js` | `routes/gradebook.py` (facade) + `routes/gradebook_*.py` | `gradebook-module-map.md` | Single-course scope; late-policy writes remain in the console, while existing-grade adjustments use the reviewed MCP operation; extra-time reads from Roster config |
 | 4 | **Roster & student settings** | `/roster` | `roster.html` (`layouts/workspace.html`, `left-main`) | `roster.js` + `roster/*.js` | `routes/roster.py` + `routes/roster_*.py`, `routes/names.py` | `roster-module-map.md` | No student-group controls or student-to-tier mapping; local roster data and vault are PRIVATE |
 | 5 | **Student reports** | `/students/reports` | `student_reports.html` (`layouts/document.html`, `wide`) | `course_expert/student_reports.js`, `course_expert/portfolio.js` | `routes/pages.py::student_reports_page`, `routes/reports.py` | `roster-module-map.md` | Private report roots, monitored-student data, CSV handling, and portfolio behavior remain owned by the existing report routes; no data migration or new Canvas write path. |
 | 6 | **Scoring Sessions** – agent-assisted scoring | MCP `discover_scoring_work` → teacher direction → `prepare_scoring_session` → `get_scoring_packet` → `stage_scoring_results` → direct teacher apply → `apply_staged_scoring_results` | No Canvas Expert scoring page | MCP server and private scoring engine | `api/mcp_server/`, `api/powergrader/` | `powergrader-scoring-map.md`, `feedback-scoring-contract.md` | Discovery is cross-course, student-free, local-mirror-only, and read-only. Each selected assignment then gets its own SAFE packet, frozen stage, and narrow apply boundary with per-student review, idempotency, verification, and receipts. Canvas Live is review/edit surface. |
@@ -29,7 +28,6 @@ their own conversation and preview presentation from Canvas Expert's host-neutra
 
 | Alternate path | Canonical replacement | Reason retained |
 |---|---|---|
-| Gradebook extra-time tab (`/gradebook?tab=extra-time`) | Roster extra-time lens (`/roster?focus=extra-time`) | Convenience view within gradebook context; reads same config; no independent write path |
 | `/powergrader`, `/feedback-expert`, `/api/powergrader/**` | Scoring Sessions over MCP; review/edit in Canvas Live | Retired without a redirect, compatibility page, or local approval/import surface |
 | `/course` (Course Info detail page) | N/A – distinct outcome | Read-only course inspection; not a duplicate of any other surface |
 | `/ai-expert` (AI helper files) | N/A – distinct outcome | Paste-ready LLM skill files; not a duplicate |
@@ -83,8 +81,7 @@ No additional grading UI retirement candidates are queued.
 
 | Surface | Why not a candidate |
 |---|---|
-| `GET/POST /api/tier-tags` | Active Settings consumer: `settings.html` lines 155-177 render a tier-tags form; inline JS at line 392-402 calls `fetch("/api/tier-tags", { method: "POST", ... })` on save. `pages.py` line 254 supplies `tier_tags` template data via `config.get_tier_tags()`. This is a live Settings feature, not legacy overlap. |
-| Gradebook extra-time tab | Active convenience view within gradebook; has live JS callers (`gradebook/extra_time.js`); reads same config as Roster |
+| `GET/POST /api/tier-tags` | Active Settings consumer owned by `routes/settings.py`: `settings.html` lines 155-177 render a tier-tags form; inline JS at line 392-402 calls `fetch("/api/tier-tags", { method: "POST", ... })` on save. `pages.py` line 254 supplies `tier_tags` template data via `config.get_tier_tags()`. This is a live Settings feature, not legacy overlap. |
 | `push/core.js` legacy globals | Still consumed by `push/quiz.js`, `push/assignment.js`, `push/page.js`, and `course_expert/quick_assignment.js` |
 | `/api/push/preview` (dry-run POST) | Still called by `push/quiz.js` for QuizForge dry-run preview |
 | Legacy curve-event store | Retired data, not a surface; no teacher-visible migration behavior |
@@ -97,7 +94,7 @@ No additional grading UI retirement candidates are queued.
 | Template | Extends | Used by |
 |---|---|---|
 | `base.html` | – | Private root; extended only by the three layouts |
-| `layouts/workspace.html` | `base.html` | CanvasAgent, Create, Gradebook, Roster, Settings |
+| `layouts/workspace.html` | `base.html` | CanvasAgent, Create, Roster, Settings |
 | `layouts/document.html` | `base.html` | Routines, Student Reports, Course Info, About, AI Expert |
 | `layouts/wizard.html` | `base.html` | Welcome |
 

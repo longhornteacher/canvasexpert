@@ -18,7 +18,7 @@ changes again.
 - Browser owner: `api/webui/static/settings.js`
 - Feature files: `api/webui/static/settings/*.js`
 - Settings route owner: `api/webui/routes/settings.py`
-- Forge tier tags and color routes: `api/webui/routes/gradebook_extra_time.py`
+- Forge tier tags and color routes: `api/webui/routes/settings.py`
 - AI Authoring file/rebuild routes: `api/webui/ai_ta.py` and `api/webui/routes/library.py`
 - Persistence facade: `api/platform_services/config/__init__.py`
 - Persistence modules: `api/platform_services/config/*.py`

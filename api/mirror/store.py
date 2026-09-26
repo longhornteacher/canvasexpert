@@ -102,20 +102,6 @@ _CAPABILITY_KEYS = {"schema_version", "course_id", "capability", "last_probe_at"
 _EVIDENCE_KEYS = {"category", "consecutive_failures"}
 _EVIDENCE_CATEGORIES = {"", "forbidden", "unauthorized"}
 
-# Late-policy display projection (1.0beta-04a). Student-free: a course's
-# Canvas late-policy settings, allowlisted down to exactly the fields
-# Gradebook's policy panel displays/edits. Kept as its own small file (same
-# course_dir/course_lock/atomic-write conventions as the rest of this module,
-# same lean shape as new_quiz_capability above) rather than inside the wider
-# gradebook-config scope the vision names — that scope needs a Course Catalog
-# contract bump this slice does not make. Envelope is deliberately
-# state/source/synced_at (not the richer collection envelope above): there is
-# no cadence job, so the only two writers are a live seed (source="canvas")
-# and a post-apply invalidate (state -> "stale") — see gradebook_policy.py.
-LATE_POLICY_VERSION = 1
-LATE_POLICY_FILENAME = "late_policy.v1.json"
-LATE_POLICY_STATES = {"current", "stale", "unavailable"}
-
 # Submission comments freshness sidecar (1.0beta Batch 6 / 01). Kept as its
 # own separate file rather than inside _sync.v1.json because comment freshness
 # has a different cadence and boundary than pass envelopes: only the
@@ -129,21 +115,6 @@ SUBMISSION_COMMENTS_STATE_KEYS = {
     "last_success_at", "last_attempt_at", "error_code",
 }
 SUBMISSION_COMMENTS_STATES = {"current", "stale", "unavailable"}
-LATE_POLICY_ALLOWED_FIELDS = {
-    "late_submission_deduction_enabled",
-    "late_submission_deduction",
-    "late_submission_interval",
-    "late_submission_minimum_percent_enabled",
-    "late_submission_minimum_percent",
-    "missing_submission_deduction_enabled",
-    "missing_submission_deduction",
-}
-# Recognized Canvas late_policy fields this projection deliberately drops
-# (object identity/timestamps a student-free display projection never needs).
-_LATE_POLICY_DROPPED_FIELDS = {"id", "course_id", "created_at", "updated_at"}
-_LATE_POLICY_KEYS = {"schema_version", "course_id", "policy", "state", "source", "synced_at"}
-
-
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -220,11 +191,6 @@ def submission_path(course_id, assignment_id, root=None):
 def new_quiz_capability_path(course_id, root=None):
     directory = course_dir(course_id)
     return os.path.join(directory, NEW_QUIZ_CAPABILITY_FILENAME) if directory else None
-
-
-def late_policy_path(course_id, root=None):
-    directory = course_dir(course_id)
-    return os.path.join(directory, LATE_POLICY_FILENAME) if directory else None
 
 
 def course_context_path(course_id, root=None):
@@ -545,40 +511,6 @@ def validate_course_context(document: dict, course_id) -> dict:
             or any(state not in ENROLLMENT_STATES for state in enrollment_states)
             or len(set(enrollment_states)) != len(enrollment_states)):
         raise ValueError("course context enrollment_states are invalid")
-    return document
-
-
-def normalize_late_policy(raw: dict) -> dict:
-    """Allowlist-only projection of a Canvas ``late_policy`` row (locked
-    design item, 1.0beta-04a): keep exactly the seven display fields
-    Gradebook uses, silently drop Canvas's own id/course_id/created_at/
-    updated_at, and reject (raise) any other field — a genuinely new Canvas
-    field must widen the allowlist deliberately and is never persisted
-    silently. Never receives student data; this projection is course-scoped
-    configuration only."""
-    if not isinstance(raw, dict):
-        raise ValueError("late policy is invalid")
-    unknown = set(raw) - LATE_POLICY_ALLOWED_FIELDS - _LATE_POLICY_DROPPED_FIELDS
-    if unknown:
-        raise ValueError(f"late policy has unknown keys: {sorted(unknown)}")
-    return {key: raw[key] for key in LATE_POLICY_ALLOWED_FIELDS if key in raw}
-
-
-def validate_late_policy(document: dict, course_id) -> dict:
-    _require_exact_keys(document, _LATE_POLICY_KEYS, "late policy")
-    if document.get("schema_version") != LATE_POLICY_VERSION:
-        raise ValueError("late policy schema_version is unsupported")
-    if str(document.get("course_id")) != str(course_id):
-        raise ValueError("late policy course_id mismatch")
-    if document.get("state") not in LATE_POLICY_STATES:
-        raise ValueError("late policy state is invalid")
-    if document.get("source") != "canvas":
-        raise ValueError("late policy source is invalid")
-    if not _valid_iso_z(document.get("synced_at")):
-        raise ValueError("late policy synced_at is invalid")
-    policy = document.get("policy")
-    if not isinstance(policy, dict) or set(policy) - LATE_POLICY_ALLOWED_FIELDS:
-        raise ValueError("late policy fields are invalid")
     return document
 
 
@@ -1365,64 +1297,6 @@ def record_course_context(course_id, *, ok: bool, attempted_at: str | None = Non
             document["error_code"] = error_code or "connection"
         return _write_document(course_context_path(course_id, root),
                                validate_course_context(document, course_id))
-
-
-def write_late_policy(course_id, raw_policy: dict, *, root=None,
-                      attempted_at: str | None = None) -> dict:
-    """Seed/refresh the student-free late-policy projection after a live
-    Canvas read (acquire-on-read; no cadence job). Reuses the same
-    atomic-write + course-lock machinery as ``write_groups``. Raises
-    ``ValueError`` if ``raw_policy`` carries any field outside the locked
-    allowlist — callers must not persist on that error (matching the
-    ``list_groups`` try/except-and-skip precedent), only skip the write."""
-    _require_dir(course_id, root)
-    attempted_at = attempted_at or now_iso()
-    policy = normalize_late_policy(raw_policy)
-    document = {
-        "schema_version": LATE_POLICY_VERSION,
-        "course_id": str(course_id),
-        "policy": policy,
-        "state": "current",
-        "source": "canvas",
-        "synced_at": attempted_at,
-    }
-    with course_lock(course_id):
-        return _write_document(late_policy_path(course_id, root),
-                               validate_late_policy(document, course_id))
-
-
-def read_late_policy(course_id, *, root=None) -> dict | None:
-    return _read_document(late_policy_path(course_id, root),
-                          lambda d: validate_late_policy(d, course_id))
-
-
-def late_policy_is_current(document: dict | None) -> bool:
-    """The late-policy projection is display-only and usable only while its
-    own envelope says so. Unlike ``groups_are_current`` there is no age/TTL
-    check: this scope has no cadence job to silently age it out, so the only
-    way it becomes non-current is an explicit post-apply invalidate (state ->
-    "stale") — the same honest-staleness contract as ``invalidate_groups``."""
-    return bool(document) and document.get("state") == "current"
-
-
-def invalidate_late_policy(course_id, *, root=None,
-                           attempted_at: str | None = None) -> dict | None:
-    """Mark an existing late-policy projection stale after a verified Canvas
-    apply (the post-apply reconcile boundary). Mirrors ``invalidate_groups``:
-    a missing projection is a no-op (nothing to falsely mark current), and
-    this function never writes ``state: "current"`` — so a reconcile that
-    itself fails to write (propagates OSError/ValueError to its caller)
-    simply leaves whatever was on disk before, never a false "current"."""
-    _require_dir(course_id, root)
-    attempted_at = attempted_at or now_iso()
-    with course_lock(course_id):
-        document = read_late_policy(course_id, root=root)
-        if document is None:
-            return None
-        document["state"] = "stale"
-        document["synced_at"] = attempted_at
-        return _write_document(late_policy_path(course_id, root),
-                               validate_late_policy(document, course_id))
 
 
 def default_new_quiz_capability(course_id) -> dict:

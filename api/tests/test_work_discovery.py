@@ -23,7 +23,7 @@ def _job(kind="grade.debt", course_id="course-1", assignment_id="assignment-1"):
         latest_submitted_at="2026-07-11T11:00:00+00:00",
         latest_attempt_number=1,
         due_at="2026-07-10T11:00:00+00:00",
-        resumable_url="/gradebook",
+        resumable_url="/course?course_id=course-1",
     )
 
 

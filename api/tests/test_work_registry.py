@@ -36,7 +36,7 @@ def _job(status="attention", origin="detected"):
         "course_ids": courses,
         "focused_course_id": "course-1",
         "assignment_id": assignment,
-        "resumable_url": "/gradebook",
+        "resumable_url": "/course?course_id=course-1",
         "source_ref": source,
         "counts": {"total": 1, "pending": 1, "affected": 0},
         "attention_reason": "Work needs attention" if status == "attention" else "",

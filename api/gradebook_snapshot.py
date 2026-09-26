@@ -1,10 +1,5 @@
-"""Pure gradebook aggregation plus the shared Canvas snapshot loader."""
+"""Pure gradebook aggregation shared by the runtime and retained tools."""
 from __future__ import annotations
-
-from types import SimpleNamespace
-
-from api import gradebook_queries
-
 
 def needs_grading(submission: dict) -> bool:
     """Return whether Canvas still marks a submitted row for teacher grading."""
@@ -136,44 +131,3 @@ def build_snapshot(students, assignments, subs, *, family_links=()) -> dict:
         "assignments": out_assignments,
         "students": out_students,
     }
-
-
-def load_snapshot(course_id: str, *, queries=None) -> tuple[dict | None, str | None]:
-    """Load the three gradebook datasets in the established order.
-
-    Mirror-first (design law #4: freshness visible, never silent): when no
-    explicit ``queries`` override is given and the CanvasMirror is fresh
-    enough to serve, read from it — otherwise fall back to live Canvas. The
-    snapshot is labeled with ``source`` ("mirror" | "canvas") and
-    ``synced_at`` ("" when live) either way.
-    """
-    source, synced_at = "canvas", ""
-    if queries is None:
-        from api.mirror import queries as mirror_queries
-        mirror, synced_at = mirror_queries.snapshot_queries(course_id)
-        if mirror is not None:
-            queries, source = mirror, "mirror"
-        else:
-            synced_at = ""
-    queries = queries or SimpleNamespace(
-        course_students=gradebook_queries.course_students,
-        course_assignments=gradebook_queries.course_assignments,
-        course_submissions=gradebook_queries.course_submissions,
-    )
-    students, error = queries.course_students(course_id)
-    if error:
-        return None, error
-    assignments, error = queries.course_assignments(course_id)
-    if error:
-        return None, error
-    subs, error = queries.course_submissions(course_id)
-    if error:
-        return None, error
-    from api.platform_services import config
-    snapshot = build_snapshot(
-        students, assignments, subs,
-        family_links=config.list_sis_grade_bridges(course_id),
-    )
-    snapshot["source"] = source
-    snapshot["synced_at"] = synced_at
-    return snapshot, None

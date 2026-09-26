@@ -10,7 +10,6 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 
-from api import gradebook_queries, gradebook_snapshot
 from api import freshness_policy, grading_policy
 from api.mirror import queries, store
 from api.mcp_server import tools
@@ -65,14 +64,6 @@ def _populate(root, *, fresh=True, stamp=None):
                             attempted_at=stamp, replace=True)
     for pass_name in ("full", "roster"):
         store.record_pass(COURSE, pass_name, ok=True, attempted_at=stamp, root=root)
-
-
-def _raise_if_live(monkeypatch):
-    def _explode(*_args, **_kwargs):
-        raise AssertionError("live Canvas read attempted")
-    for name in ("course_students", "course_assignments", "course_submissions",
-                 "assignment", "assignment_submissions"):
-        monkeypatch.setattr(gradebook_queries, name, _explode)
 
 
 # --- queries provider ----------------------------------------------------------
@@ -132,86 +123,6 @@ def test_assignment_submissions_filters_orphan_not_in_index(tmp_path):
     os.remove(store.assignments_path(COURSE, str(tmp_path)))
     data, err = queries.assignment_submissions(COURSE, ORPHAN_ASSIGNMENT_ID, root=str(tmp_path))
     assert err is None and len(data) == 1
-
-
-def test_snapshot_queries_requires_fresh_and_complete_mirror(tmp_path):
-    namespace, synced = queries.snapshot_queries(COURSE, root=str(tmp_path))
-    assert namespace is None and synced == ""
-    _populate(str(tmp_path))
-    namespace, synced = queries.snapshot_queries(COURSE, root=str(tmp_path))
-    assert namespace is not None and synced != ""
-
-
-def test_snapshot_queries_refuses_a_stale_roster_behind_fresh_submissions(tmp_path):
-    """data_freshness reads the submissions envelope, which a delta pass keeps
-    current, while only a full or roster pass rewrites the roster. The roster
-    can therefore age past the serve window on its own, and this namespace has
-    to catch that here: load_snapshot has no live fallback once it commits,
-    so a roster refused mid-snapshot would surface as a hard error."""
-    root = str(tmp_path)
-    _populate(root)
-    assert queries.snapshot_queries(COURSE, root=root)[0] is not None
-    store.write_roster(COURSE, USERS, SECTIONS, root=root,
-                       attempted_at="2026-01-01T00:00:00Z")
-    namespace, synced = queries.snapshot_queries(COURSE, root=root)
-    assert namespace is None and synced == ""
-
-
-# --- mirror-first shared snapshot loader --------------------------------------------
-
-def test_load_snapshot_prefers_fresh_mirror(monkeypatch, tmp_path):
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    _populate(str(tmp_path))
-    _raise_if_live(monkeypatch)  # would explode if the live path were taken
-    snapshot, error = gradebook_snapshot.load_snapshot(COURSE)
-    assert error is None
-    assert snapshot["source"] == "mirror"
-    assert snapshot["synced_at"] != ""
-    assert snapshot["student_count"] == 2
-    assert snapshot["total_missing"] == 1
-    assert snapshot["assignments"][0]["name"] == "Essay 1"
-
-
-def test_load_snapshot_falls_back_to_live_when_stale(monkeypatch, tmp_path):
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    _populate(str(tmp_path), fresh=False)
-    monkeypatch.setattr(gradebook_queries, "course_students", lambda cid: ([], None))
-    monkeypatch.setattr(gradebook_queries, "course_assignments", lambda cid: ([], None))
-    monkeypatch.setattr(gradebook_queries, "course_submissions", lambda cid: ([], None))
-    snapshot, error = gradebook_snapshot.load_snapshot(COURSE)
-    assert error is None
-    assert snapshot["source"] == "canvas"
-    assert snapshot["synced_at"] == ""
-
-
-def test_load_snapshot_falls_back_to_live_when_only_the_roster_is_stale(monkeypatch, tmp_path):
-    """The teacher gets live Canvas, never a hard error, when submissions are
-    current but the roster is not. Reachable whenever roster passes keep
-    failing while deltas keep succeeding, which is exactly what happens when
-    Canvas is answering with a roster the wipe guard refuses to commit."""
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    _populate(str(tmp_path))
-    store.write_roster(COURSE, USERS, SECTIONS, root=str(tmp_path),
-                       attempted_at="2026-01-01T00:00:00Z")
-    monkeypatch.setattr(gradebook_queries, "course_students", lambda cid: ([], None))
-    monkeypatch.setattr(gradebook_queries, "course_assignments", lambda cid: ([], None))
-    monkeypatch.setattr(gradebook_queries, "course_submissions", lambda cid: ([], None))
-    snapshot, error = gradebook_snapshot.load_snapshot(COURSE)
-    assert error is None
-    assert snapshot["source"] == "canvas"
-    assert snapshot["synced_at"] == ""
-
-
-def test_load_snapshot_explicit_queries_override_skips_mirror(monkeypatch, tmp_path):
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    _populate(str(tmp_path))
-    from types import SimpleNamespace
-    override = SimpleNamespace(course_students=lambda cid: ([], None),
-                               course_assignments=lambda cid: ([], None),
-                               course_submissions=lambda cid: ([], None))
-    snapshot, _ = gradebook_snapshot.load_snapshot(COURSE, queries=override)
-    assert snapshot["source"] == "canvas"
-    assert snapshot["student_count"] == 0
 
 
 # --- MCP tools: mirror paths ------------------------------------------------------

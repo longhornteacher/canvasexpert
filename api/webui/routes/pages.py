@@ -4,7 +4,7 @@ One APIRouter; all 9 GET page routes + the /api/open-path utility POST.
 Imported by server.py via app.include_router(router).
 
 Routes: GET /, /about, /ai-expert, /course, /course-expert,
-        /gradebook, /roster, /routines, /settings
+        /roster, /routines, /settings
         POST /api/open-path
 """
 import glob
@@ -144,18 +144,6 @@ def course_page(request: Request, course_id: str = ""):
         "saved_courses":  config.active_courses(),
         "selected_id":    course_id,
         "history":        recent_pushes(),
-    })
-
-
-@router.get("/gradebook", response_class=HTMLResponse)
-def gradebook_page(request: Request):
-    return templates.TemplateResponse(request, "gradebook.html", {
-        "nav_section":          "grade",
-        "csrf_token":           csrf_token(),
-        "token_is_set":         config.token_is_set(),
-        "canvas_base":          config.get_canvas_base(),
-        "saved_courses":        config.active_courses(),
-        **_routines_template_context(),
     })
 
 

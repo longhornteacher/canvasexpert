@@ -17,10 +17,6 @@ retained control console, so its teacher-in-the-loop diagnostics and decision su
 may use the explicitly documented live fallback; that exception must not leak into MCP
 results or become a generic browser-first architecture.
 
-- **The retained control console's gradebook snapshot route** (`gradebook_snapshot.load_snapshot`,
-  used by CanvasExpert's own grading screens) falls back to a live Canvas
-  fetch, visibly labeled `source: "canvas"` — the teacher is in the loop and
-  reads there can feed a write decision, so staleness should never block them.
 - **The AI-facing MCP tools** (`get_roster`, `get_submissions`,
   `get_gradebook_snapshot`) never fall back to live Canvas. This is the strict
   mirror-only law: the AI's whole path to Canvas must stay indirect — through
@@ -173,17 +169,6 @@ Course Info's assignments, students, and group sets each read their local projec
 current/fresh, independently falling back to its own existing live Canvas call otherwise —
 email stays a removed, live-only-if-ever-added field; modules stay live.
 
-Gradebook's late-policy panel reads a small student-free `late_policy.v1.json` projection
-(1.0beta-04a; seven allowlisted Canvas `late_policy` fields only, via
-`api/mirror/store.py`'s `read_late_policy`/`write_late_policy`/`late_policy_is_current`,
-its own file rather than widening the Course Catalog contract) with acquire-on-read
-semantics (mirroring `list_groups`): serve it when its own `state` is `current`, otherwise
-live-fetch and seed it. Applying a late policy stays fully live and, after a verified
-success, invalidates only that course's projection (never blind-refreshes from the
-submitted payload) so a failed reconcile leaves the scope stale rather than falsely
-current. The extra-time student list (`GET /api/students/list`) reads the same roster
-mirror as Course Info's student list, live only when the roster is not `current`.
-
 **Attempt history is append-only** within a living submission: students who
 resubmit accumulate `attempts` keyed by attempt number, which survive full-
 pass rewrites. This is the substrate for regrade queues, revision chains, and
@@ -293,15 +278,11 @@ observable without exposing course names.
 Implements the `gradebook_queries` interface (`course_students`,
 `course_assignments`, `course_submissions`, `assignment`,
 `assignment_submissions` — each returning `(data, error)`) from the store.
-Consumers flipped in v1:
-
-- `gradebook_snapshot.load_snapshot` — mirror-first when fresh, live
-  fallback; snapshot carries `source` + `synced_at` either way. This is the
-  control-console gradebook route's own loader.
-- MCP `get_roster` / `get_submissions` / `get_gradebook_snapshot` — served
+The MCP `get_roster` / `get_submissions` / `get_gradebook_snapshot` tools are
+served
   from the mirror when fresh (zero Canvas calls, works offline),
   pseudonymized and gated exactly as before; payloads carry `source` +
-  `synced_at`. Unlike the control-console route above, these three tools call
+  `synced_at`. These tools call
   `mirror_queries` directly and refuse (a structured `{"ok": false, "error":
   ...}`) rather than falling through to a live fetch when the mirror can't
   serve — see "MCP reads and the refresh tool" below.

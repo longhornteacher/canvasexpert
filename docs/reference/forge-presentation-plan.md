@@ -74,7 +74,7 @@ Established by read-only survey. The executor re-verifies the seams its batch na
     `redact.py`. Only tests call it.
   - `api/webui/af.py:229` has the set `{"blue","accelerate","extend"}`.
 - **Tags.** Synced key `tier_tags`, through `config/gradebook.py:20–27` and
-  `GET/POST /api/tier-tags` (`routes/gradebook_extra_time.py:47–57`). The four-name UI is
+  `GET/POST /api/tier-tags` (`routes/settings.py`). The four-name UI is
   in `templates/settings.html:241–252` and `:454–464`. No colors are stored.
 - **Documents naming four tiers or Extend.**
   - QuizForge contract: :42–44, :119–124, :234–238.
@@ -465,8 +465,7 @@ every push renders with it.
   `set_tier_tags` (~:20–27), with key registration in `config/_io.py` and re-exports in
   `config/__init__.py`.
 - **Settings UI.**
-  - Routes: `GET/POST /api/tier-tags` in `api/webui/routes/gradebook_extra_time.py`
-    (~:47–57), re-exported by `routes/gradebook.py`.
+  - Routes: `GET/POST /api/tier-tags` in `api/webui/routes/settings.py`.
   - Template: `api/webui/templates/settings.html`, tier rows ~:241–252 and save JS
     ~:454–464. Template data comes from `routes/pages.py` ~:258.
 

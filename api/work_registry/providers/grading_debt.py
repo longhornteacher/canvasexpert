@@ -82,7 +82,7 @@ def scan_course(course_id: str, *, now, reads: WorkCourseReads) -> list[dict]:
             latest_submitted_at=row["latest_submitted_at"],
             latest_attempt_number=row["latest_attempt_number"],
             due_at=row["due_at"],
-            resumable_url="/gradebook",
+            resumable_url=f"/course?course_id={course_id}",
         ))
     return output
 

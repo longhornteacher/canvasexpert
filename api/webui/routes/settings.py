@@ -1,7 +1,6 @@
 """Settings routes for Canvas Expert.
 
-One APIRouter; all 6 POST settings routes (Canvas account, course bookmarks,
-download root, connection test). All are thin pass-throughs to config.*.
+One APIRouter; all settings routes are thin pass-throughs to config.*.
 
 Routes: POST /settings/canvas
         POST /settings/courses/bookmark
@@ -9,7 +8,10 @@ Routes: POST /settings/canvas
         POST /settings/courses/{course_id}/set-active
         POST /settings/download-root
         POST /settings/test-connection
+        GET/POST /api/tier-tags
+        GET/POST /api/tier-colors
 """
+import json
 import requests
 
 from fastapi import APIRouter, Form
@@ -130,3 +132,33 @@ def test_connection(base_url: str = Form(...), token: str = Form("")):
     d = r.json()
     return JSONResponse({"ok": True,
                          "display_name": d.get("name", d.get("short_name", "Unknown"))})
+
+
+@router.get("/api/tier-tags")
+def get_tier_tags_route():
+    return JSONResponse({"ok": True, "tier_tags": config.get_tier_tags()})
+
+
+@router.post("/api/tier-tags")
+def save_tier_tags(tags: str = Form(...)):
+    try:
+        config.set_tier_tags(json.loads(tags))
+    except json.JSONDecodeError as e:
+        return JSONResponse({"ok": False, "error": f"bad request: {e}"})
+    return JSONResponse({"ok": True, "tier_tags": config.get_tier_tags()})
+
+
+@router.get("/api/tier-colors")
+def get_tier_colors_route():
+    return JSONResponse({"ok": True, "tier_colors": config.get_tier_colors()})
+
+
+@router.post("/api/tier-colors")
+def save_tier_colors(colors: str = Form(...)):
+    try:
+        config.set_tier_colors(json.loads(colors))
+    except json.JSONDecodeError as e:
+        return JSONResponse({"ok": False, "error": f"bad request: {e}"})
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    return JSONResponse({"ok": True, "tier_colors": config.get_tier_colors()})

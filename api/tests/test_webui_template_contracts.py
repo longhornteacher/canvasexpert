@@ -201,7 +201,6 @@ def test_current_courses_are_the_only_operational_picker_scope():
     settings = _slurp("api/webui/templates/settings.html")
     canvasagent = _slurp("api/webui/templates/canvasagent.html")
     canvasagent_js = _slurp("api/webui/static/canvasagent.js")
-    gradebook = _slurp("api/webui/static/gradebook.js")
     course_picker = _slurp("api/webui/static/push/course_picker.js")
 
     for heading in ("Current courses", "Previous courses", "Add courses from Canvas"):
@@ -213,7 +212,6 @@ def test_current_courses_are_the_only_operational_picker_scope():
     assert "/api/mirror/sync-now" in canvasagent_js
     assert "authoritative: true" in course_picker
     assert 'fetch("/api/courses")' not in course_picker
-    assert 'fetch("/api/courses")' not in gradebook
 
 
 def test_canvasagent_surface_has_only_local_stdio_and_shared_buttons():

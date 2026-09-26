@@ -4,12 +4,11 @@ import re
 import sys
 from pathlib import Path
 
-from api import course_scope, gradebook_queries, gradebook_snapshot
+from api import course_scope, gradebook_queries
 from api.feedback_vault import Vault
 from api.mcp_server import contract, pseudonym, tools
 from api.mirror import store as mirror_store
 from api.platform_services import workspace
-from api.webui.routes import gradebook_snapshot as gradebook_route
 
 
 def _explode_live(*_args, **_kwargs):
@@ -237,7 +236,7 @@ def test_v11_glass_pane_assets_property_is_an_array():
     assert pane_tool["properties"]["assets"] == "array"
 
 
-def test_http_and_mcp_share_use_cases_and_student_outputs_stay_green(tmp_path, monkeypatch):
+def test_mcp_mirror_gradebook_snapshot_stays_pseudonymized(tmp_path, monkeypatch):
     api_dir = str(Path(__file__).resolve().parents[1])
     if api_dir not in sys.path:
         sys.path.insert(0, api_dir)
@@ -266,7 +265,7 @@ def test_http_and_mcp_share_use_cases_and_student_outputs_stay_green(tmp_path, m
     }]
 
     # Seed a real machine-local cache instead of monkeypatching live Canvas
-    # reads: both the HTTP route and the MCP tool must read that projection.
+    # reads: the MCP tools must read that projection.
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
     mirror_store.write_roster("current", users, {"800001": "Period 1"})
     mirror_store.write_assignments("current", assignments)
@@ -289,13 +288,6 @@ def test_http_and_mcp_share_use_cases_and_student_outputs_stay_green(tmp_path, m
     ])
     monkeypatch.setattr(tools, "_vault_factory", lambda: Vault(str(tmp_path / "vault.json")))
 
-    real_http_loader = gradebook_snapshot.load_snapshot
-    http_loader_calls = []
-
-    def counted_http_loader(course_id, **kwargs):
-        http_loader_calls.append(course_id)
-        return real_http_loader(course_id, **kwargs)
-
     real_mcp_loader = tools.scoring_local.load_scoring_snapshot
     mcp_loader_calls = []
 
@@ -303,19 +295,11 @@ def test_http_and_mcp_share_use_cases_and_student_outputs_stay_green(tmp_path, m
         mcp_loader_calls.append(course_id)
         return real_mcp_loader(course_id, **kwargs)
 
-    monkeypatch.setattr(gradebook_snapshot, "load_snapshot", counted_http_loader)
     monkeypatch.setattr(tools.scoring_local, "load_scoring_snapshot", counted_mcp_loader)
-    http_result = gradebook_route.api_gradebook("current")
-    assert http_result.body
-    http_payload = json.loads(http_result.body)
     mcp_gradebook = tools.get_gradebook_snapshot("current")
-    # The HTTP gradebook and MCP scoring snapshot use their separate shared
-    # application services; both read the same local mirror without Canvas.
-    assert http_loader_calls == ["current"]
+    # The MCP scoring snapshot reads the local mirror without Canvas.
     assert mcp_loader_calls == ["current"]
-    assert http_payload["source"] == "mirror"
     assert mcp_gradebook["source"] == "mirror"
-    assert "user_id" not in http_payload["students"][0]
     assert mcp_gradebook["students"]["columns"] == [
         "pseudonym", "missing", "late", "ungraded", "pct"]
     assert len(mcp_gradebook["students"]["rows"]) == 1

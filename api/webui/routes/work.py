@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api", tags=["work"])
 # relabeled with the real assignment name (resolved from the local mirror), and
 # hidden entirely when no name can be resolved — a card with no specifics is
 # just "go look at Canvas", which we deliberately do not surface.
-_NAMED_FINDING_KINDS = {"grade.debt", "grade.followup", "grade.staff_check", "late.work"}
+_NAMED_FINDING_KINDS = {"grade.debt", "grade.followup", "grade.staff_check"}
 
 
 def _now() -> str:
@@ -159,25 +159,22 @@ def _aggregate_summary(job: dict) -> tuple[str, str, str]:
         return (
             "Grading needed",
             f"{count} {_plural(count, 'submission')} awaiting grading",
-            "Open Gradebook",
+            "Open course",
         )
     if kind == "grade.followup":
         count = affected
         return (
             "Student follow-up",
             f"{count} {_plural(count, 'response')} {'needs' if count == 1 else 'need'} a human check",
-            "Open Gradebook",
+            "Open course",
         )
     if kind == "grade.staff_check":
         count = affected
         return (
             "Staff response check",
             f"{count} {_plural(count, 'response')} needs a staff response check",
-            "Open Gradebook",
+            "Open course",
         )
-    if kind == "late.work":
-        count = affected
-        return "Late work", f"{count} late {_plural(count, 'submission')}", "Open Gradebook"
     if kind == "roster.warning":
         count = affected
         return (

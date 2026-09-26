@@ -28,7 +28,6 @@
     "private.submission_comments",
     "private.roster",
     "private.groups",
-    "gradebook.late_policy",
     "new_quiz.metadata",
     "new_quiz.responses",
     "focused_evidence",
@@ -365,19 +364,6 @@
       ],
       "reconciliation": "invalidate",
       "reason": "The central operation-ledger post-apply hook invalidates catalog.modules after the confirmed operation succeeds."
-    },
-    {
-      "path": "api/webui/routes/gradebook_policy.py",
-      "symbol": "apply_late_policy",
-      "detector": "name:_canvas_send",
-      "call_index": 1,
-      "call_form": "_canvas_send(method, \"/api/v1/courses/<course_id>/late_policy\", ...)",
-      "classification": "canvas_mutation",
-      "scopes": [
-        "gradebook.late_policy"
-      ],
-      "reconciliation": "invalidate",
-      "reason": "mirror_store.invalidate_late_policy(cid) is called immediately after a verified apply. This whole-scope stale-mark (not a precise merge) is why the state is 'invalidate' rather than 'targeted'."
     },
     {
       "path": "api/powergrader/session_actions.py",

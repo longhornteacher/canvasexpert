@@ -4,7 +4,7 @@
 trust, review, recovery, diagnostics, and genuinely local-only surfaces.
 **Implementation:** `api/webui/server.py` (FastAPI), `api/webui/templates/` (Jinja2),
 `api/webui/static/` (`push.js` + `push/*.js`, `course_expert/*.js`,
-`gradebook.js` + `gradebook/*.js`, `roster.js` + `roster/*.js`,
+`roster.js` + `roster/*.js`,
 `feedback/*.js`, `course_info.js`,
 `settings.js`, `ui/*.css`, and page-owned feature CSS).
 
@@ -55,7 +55,6 @@ Source tests never substitute for rendered verification.
 | `/` | **CanvasAgent** — local MCP, Canvas account, CanvasMirror, and privacy health | `canvasagent.html` + `canvasagent.js` |
 | `/course-expert` | **Create** — quiz, assignment, page, and quick-column tools | `push.js` + `push/*.js`, `course_expert/*.js` |
 | `/students/reports` | **Student reports** — packet and portfolio tools under Students | `student_reports.html` + `course_expert/student_reports.js` + `course_expert/portfolio.js` |
-| `/gradebook` | **Gradebook tools** — single-course grade operations | `gradebook.js` + `gradebook/*.js` |
 | `/roster` | **Rosters** — student-level Canvas-group and local settings console | `roster.js`, `roster/*.js` |
 | Scoring Sessions | MCP only; cross-course discovery followed by teacher-selected assignment-bounded packets. No Canvas Expert scoring page or browser assets; review and edit posted results in Canvas Live. | `docs/reference/powergrader-scoring-map.md` |
 | `/ai-expert` | **AI helper files** — paste-ready LLM skill files | inline |
@@ -123,17 +122,6 @@ scores and comments use the reviewed write lane; New Quiz writing stops with
 `new_quiz_writing_requires_assignment` and is graded in Canvas. Canvas Live is the only
 review/edit surface. See
 `docs/guides/scoring-sessions.md` and `docs/reference/powergrader-scoring-map.md`.
-
-### Gradebook module routing
-
-Gradebook is also intentionally split for low-token debugging.
-
-- Route facade: `api/webui/routes/gradebook.py`
-- Route feature files: `routes/gradebook_policy.py`, `routes/gradebook_extra_time.py`, `routes/gradebook_snapshot.py`
-- Shared browser bootstrap: `gradebook.js`
-- Feature files: `gradebook/policy.js`, `gradebook/extra_time.js`, `gradebook/snapshot.js`
-
-For the full ownership map and current source-size report, see `docs/reference/gradebook-module-map.md`.
 
 ### Roster module routing
 
@@ -223,7 +211,7 @@ Routine state is stored **machine-locally** (`api/webui/config.json`, `routines`
 — NOT synced via the workspace. The synced workspace must not make one machine think
 another machine's run satisfied it.
 
-Routines are available at `/routines` and from the **Gradebooks** navigation menu:
+Routines are available at `/routines`:
 a "how it works" strip, a card per routine with inline-editable params, and a "Build
 your own" panel that shows the `custom_routines/` folder path and the files found in
 it. Each routine's params are editable inline on its card. Every run lands in the
@@ -375,49 +363,6 @@ path. New Quiz scores still appear in the Submissions API and are reported in th
 
 ---
 
-## Gradebook Tools (`/gradebook`)
-
-Standalone page (burnt-orange header). Manipulates the gradebook for a single
-selected course via five tabs.
-
-### Tab 1 — Policy & Sweep
-**Course-wide late policy**: %/day deduction, grade floor, missing-work score.
-Auto-loads when a course is selected. Writes via Canvas native late-policy API.
-
-**Grading policy** (`docs/contracts/grading-policy-contract.md`): the Scoring Session
-effort-credit and teacher-confirmed late-day policy, plus the workspace-wide no-school-dates
-list, are two plain files the teacher edits directly in the synced workspace
-(`Library/Grading Policy.txt`, `Library/Calendars/Holidays.csv`). No Web UI panel or route
-owns them.
-
-**Late-work sweep**: user picks a date range (grading-period chips default to
-current/next period). The sweep counts *school days* late — every no-count date from
-the canonical Calendar (`/calendar`) + Rosters extra-time settings — then sets Canvas's
-`seconds_late_override`. No grade math here; Canvas applies its own policy. Re-running
-is safe; preview before writing. An unconfigured Calendar refuses the sweep rather than
-silently treating weekends as school days.
-
-Grading-period chips are labeled by `code` from the Calendar (P1–P8 progress,
-T1–T4 terms for PISD) with year suffix when multi-year (e.g. `T1 (25-26)`).
-
-### Tab 2 — Extra-time
-Compatibility view for standing extra-time settings. The primary management home is
-**Rosters** (`/roster?focus=extra-time`); sweep and extensions reference those settings
-automatically.
-
-### Tab 3 — Extensions
-Give selected students +N school days on one assignment via a Canvas assignment
-override — their due date actually moves.
-
-### Tab 4 — Curves
-Four curve models: flat bump, target average, proportional, floor/cap.
-Preview only; writes via Canvas grade passback.
-
-### Tab 5 — Snapshot
-Read-only grade distribution view.
-
----
-
 ## Scoring Sessions (MCP)
 
 Canvas Expert has no local scoring queue, result-import panel, or hosted grader. The
@@ -457,9 +402,8 @@ modules, assignments, Canvas quick-links, download folder path.
 Quiz planning may delegate to the existing CLI helpers as a subprocess. Live writes
 run through the Operation Ledger adapters. Assignment evidence refreshes are focused
 reads used by the private Scoring Session packet builder.
-Assignment / page / quick-assignment creation plus gradebook and
-course-info reads are direct Canvas REST calls through split Web UI routes
-(`/api/gradebook`, `/api/course-detail`).
+Assignment / page / quick-assignment creation plus course-info reads are direct
+Canvas REST calls through the split Web UI routes (`/api/course-detail`).
 
 Push routes are split by role: `routes/push.py` keeps the shared router, Canvas
 module/group lookup, and generic content push; `routes/push_validation.py` owns

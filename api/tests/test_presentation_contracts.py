@@ -26,7 +26,6 @@ TEMPLATES = ROOT / "api" / "webui" / "templates"
 EXPECTED_PRESENTATION = {
     "/": ("canvasagent.html", "workspace", "full", 0),
     "/course-expert": ("course_expert.html", "workspace", "three", 2),
-    "/gradebook": ("gradebook.html", "workspace", "left-main", 1),
     "/roster": ("roster.html", "workspace", "left-main", 1),
     "/settings": ("settings.html", "workspace", "left-main", 1),
     # Routines sits on the workspace layout so its title shares a left edge
@@ -40,7 +39,6 @@ EXPECTED_PRESENTATION = {
 FEATURE_CSS = (
     "api/webui/static/pages/canvasagent.css",
     "api/webui/static/pages/course_expert.css",
-    "api/webui/static/pages/gradebook.css",
     "api/webui/static/roster_workbench.css",
     "api/webui/static/pages/settings.css",
     "api/webui/static/pages/routines.css",
@@ -119,7 +117,7 @@ def _configure_fictional(monkeypatch):
 
 
 def test_registry_is_the_full_program_route_map():
-    assert len(EXPECTED_PRESENTATION) == 10
+    assert len(EXPECTED_PRESENTATION) == 9
 
 
 def test_all_live_templates_use_layouts_and_no_inline_styles():
@@ -128,7 +126,7 @@ def test_all_live_templates_use_layouts_and_no_inline_styles():
         assert f'{{% extends "layouts/{layout}.html" %}}' in text
         assert "stylesheet_bundle" not in text
         assert 'style="' not in text
-        if template == "gradebook.html" or template == "routines.html":
+        if template == "routines.html":
             assert 'style="' not in (TEMPLATES / "_routines_panel.html").read_text(encoding="utf-8")
 
     for layout in ("workspace.html", "document.html", "wizard.html", "display.html"):
@@ -175,7 +173,6 @@ def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_pat
     routes = {
         "/": "/",
         "/course-expert": "/course-expert",
-        "/gradebook": "/gradebook",
         "/roster": "/roster",
         "/settings": "/settings",
         "/routines": "/routines",

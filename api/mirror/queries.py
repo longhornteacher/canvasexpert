@@ -10,8 +10,6 @@ so staleness is visible, never silent (design law #4).
 """
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from . import read_service, store
 
 MIRROR_UNAVAILABLE = "mirror unavailable for this course"
@@ -92,36 +90,3 @@ def assignment_submissions(course_id, assignment_id, *, root=None):
         return None, MIRROR_UNAVAILABLE
     return [entry for entry in submissions["records"]
             if str(entry.get("assignment_id")) == str(assignment_id)], None
-
-
-def snapshot_queries(course_id, *, root=None, max_age_hours=None, now=None):
-    """``(queries_namespace, synced_at)`` when the mirror can serve the whole
-    gradebook snapshot, else ``(None, "")``. The namespace is a drop-in for
-    ``gradebook_snapshot.load_snapshot(queries=...)``.
-
-    Every scope the namespace serves is checked here, not merely for
-    existence. ``load_snapshot`` has no live fallback once it commits to this
-    namespace, so a scope that would refuse mid-snapshot has to keep the
-    caller on live Canvas instead. Roster freshness needs its own check
-    because ``data_freshness`` reads the submissions envelope: a delta pass
-    keeps submissions current while the roster, which only a full or roster
-    pass rewrites, can age past the serve window on its own.
-    """
-    synced_at = data_freshness(course_id, root=root,
-                               max_age_hours=max_age_hours, now=now)
-    if not synced_at:
-        return None, ""
-    roster = read_service.private_roster(
-        course_id, root=root,
-        max_age_hours=max_age_hours if max_age_hours is not None else _serve_max_age_hours(),
-        now=now)
-    if roster["state"] != "current":
-        return None, ""
-    if store.read_assignments(course_id, root=root) is None:
-        return None, ""
-    namespace = SimpleNamespace(
-        course_students=lambda cid: course_students(cid, root=root),
-        course_assignments=lambda cid: course_assignments(cid, root=root),
-        course_submissions=lambda cid: course_submissions(cid, root=root),
-    )
-    return namespace, synced_at

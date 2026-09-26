@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -128,6 +129,12 @@ def test_launcher_rendered_csrf_authorizes_stubbed_scan(tmp_path):
         text=True,
         timeout=30,
         check=False,
+        env={
+            **os.environ,
+            "LOCALAPPDATA": str(tmp_path / "subprocess-localappdata"),
+            "OneDrive": "",
+            "OneDriveCommercial": "",
+        },
     )
     assert result.returncode == 0, result.stderr
 
@@ -155,12 +162,7 @@ def test_detected_grading_and_home_cards_use_current_surfaces(monkeypatch):
     debt = finding(
         kind="grade.debt", course_id="course-1", assignment_id="assignment-debt",
         counts={"total": 5, "pending": 3, "affected": 3},
-        now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
-    )
-    late = finding(
-        kind="late.work", course_id="course-1", assignment_id="assignment-late",
-        counts={"total": 2, "pending": 2, "affected": 2},
-        now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
+        now="2026-07-11T12:00:00+00:00", resumable_url="/course?course_id=course-1",
     )
     roster = finding(
         kind="roster.warning", course_id="course-1", assignment_id="",
@@ -170,15 +172,15 @@ def test_detected_grading_and_home_cards_use_current_surfaces(monkeypatch):
     follow_up = finding(
         kind="grade.followup", course_id="course-1", assignment_id="assignment-follow-up",
         counts={"total": 2, "pending": 2, "affected": 2},
-        now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
+        now="2026-07-11T12:00:00+00:00", resumable_url="/course?course_id=course-1",
     )
     staff_check = finding(
         kind="grade.staff_check", course_id="course-1", assignment_id="assignment-staff-check",
         counts={"total": 1, "pending": 1, "affected": 1},
-        now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
+        now="2026-07-11T12:00:00+00:00", resumable_url="/course?course_id=course-1",
     )
     monkeypatch.setattr(
-        work.adapters, "collect_local_jobs", lambda: [debt, late, roster, follow_up, staff_check]
+        work.adapters, "collect_local_jobs", lambda: [debt, roster, follow_up, staff_check]
     )
     # Detected findings are relabeled with the mirror-resolved assignment name.
     assignment_names = {
@@ -200,10 +202,7 @@ def test_detected_grading_and_home_cards_use_current_surfaces(monkeypatch):
     # The title is now the assignment name; the aggregate summary is unchanged.
     assert by_kind["grade.debt"]["title"] == "Debt Essay"
     assert by_kind["grade.debt"]["summary"] == "3 submissions awaiting grading"
-    assert by_kind["grade.debt"]["action_label"] == "Open Gradebook"
-    assert by_kind["late.work"]["title"] == "Late Lab"
-    assert by_kind["late.work"]["summary"] == "2 late submissions"
-    assert by_kind["late.work"]["action_label"] == "Open Gradebook"
+    assert by_kind["grade.debt"]["action_label"] == "Open course"
     # roster.warning is course-level (no assignment) and keeps its aggregate title.
     assert by_kind["roster.warning"]["title"] == "Roster attention"
     assert by_kind["roster.warning"]["summary"] == "4 roster issues need review"
@@ -212,13 +211,13 @@ def test_detected_grading_and_home_cards_use_current_surfaces(monkeypatch):
         "course_label": "Fictional Course",
         "title": "Follow-up Reflection",
         "summary": "2 responses need a human check",
-        "action_label": "Open Gradebook",
+        "action_label": "Open course",
     }
     assert by_kind["grade.staff_check"] == {
         "course_label": "Fictional Course",
         "title": "Staff Check Task",
         "summary": "1 response needs a staff response check",
-        "action_label": "Open Gradebook",
+        "action_label": "Open course",
     }
     serialized = json.dumps(payload)
     assert "/powergrader" not in serialized
@@ -352,11 +351,11 @@ def test_scan_is_guarded_merges_findings_and_get_stays_local(monkeypatch, tmp_pa
     assert get_response.json()["presentations"][get_response.json()["jobs"][0]["job_id"]]["title"] == "Scanned Assignment"
 
 
-def test_retired_scoring_work_is_hidden_and_current_grading_uses_gradebook(monkeypatch):
+def test_retired_scoring_work_is_hidden_and_current_grading_opens_course(monkeypatch):
     debt = finding(
         kind="grade.debt", course_id="course-1", assignment_id="assignment-debt",
         counts={"total": 5, "pending": 3, "affected": 3},
-        now="2026-07-11T12:00:00+00:00", resumable_url="/gradebook",
+        now="2026-07-11T12:00:00+00:00", resumable_url="/course?course_id=course-1",
     )
     retired = finding(
         kind="grade.powergrader_ready", course_id="course-1", assignment_id="assignment-ready",
@@ -380,4 +379,4 @@ def test_retired_scoring_work_is_hidden_and_current_grading_uses_gradebook(monke
     assert by_kind["grade.debt"]["title"] == "Chapter 5 Essay"
     assert by_kind["grade.debt"]["summary"] == "3 submissions awaiting grading"
     assert set(by_kind) == {"grade.debt"}
-    assert payload["jobs"][0]["resumable_url"] == "/gradebook"
+    assert payload["jobs"][0]["resumable_url"] == "/course?course_id=course-1"

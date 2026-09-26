@@ -380,7 +380,6 @@ RECONCILE_TOKENS = (
     "merge_group_category",
     "_reconcile_group_category",
     "invalidate_groups",
-    "invalidate_late_policy",
     "invalidate_responses",
     "invalidate_scope",
 )
