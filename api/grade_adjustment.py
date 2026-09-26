@@ -42,7 +42,12 @@ def _freshness_refusal(baseline: dict) -> dict:
             },
         }
     code = baseline.get("blocking_error") or "grade_adjustment_preview_failed"
-    return {"ok": False, "code": code, "error": code, "blocking": True}
+    result = {"ok": False, "code": code, "error": code, "blocking": True}
+    attention = baseline.get("attention")
+    if attention:
+        result["error"] = attention.get("reason", code)
+        result["attention"] = attention
+    return result
 
 
 def _as_float(value, field: str):
@@ -199,12 +204,20 @@ def _prepare_entries(baseline: dict, adjustment: dict, vault) -> tuple[list[dict
     extra_skipped = {}
 
     if kind == "rule":
-        scores = [float(row["before"]) for row in eligible]
+        rule_rows = []
+        for row in eligible:
+            if row.get("missing"):
+                extra_skipped["missing"] = extra_skipped.get("missing", 0) + 1
+            elif _numbers_equal(row.get("before"), 0):
+                extra_skipped["zero"] = extra_skipped.get("zero", 0) + 1
+            else:
+                rule_rows.append(row)
+        scores = [float(row["before"]) for row in rule_rows]
         settings = copy.deepcopy(adjustment["settings"])
         settings["_scores"] = scores
         average = sum(scores) / len(scores) if scores else 0
         maximum = max(scores) if scores else 0
-        for row in eligible:
+        for row in rule_rows:
             after, capped = _rule_score(
                 float(row["before"]), adjustment["model"], settings,
                 float(baseline["assignment"]["points_possible"]), average,

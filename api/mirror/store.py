@@ -855,6 +855,7 @@ def normalize_submission(row: dict, vault=None) -> tuple[str, dict, dict] | None
         "submitted_at": row.get("submitted_at"),
         "graded_at": row.get("graded_at"),
         "score": row.get("score"),
+        "entered_score": row.get("entered_score"),
         "grade": row.get("grade"),
         "late": bool(row.get("late")),
         "missing": bool(row.get("missing")),

@@ -62,7 +62,7 @@ def _freshness_attention(roster: dict, assignments: dict, submissions: dict) -> 
     ]
     synced_at = min(timestamps) if timestamps and all(timestamps) else ""
     state = "stale" if any(scope.get("state") == "stale"
-                            for scope in (roster, assignments, submissions)) else "unavailable"
+                            for scope in (roster, assignments, submissions)) else "current"
     freshness = freshness_policy.freshness_envelope(
         "mirror", "submissions", state, synced_at)
     if (freshness.get("state") in {"current", "stale"}
@@ -121,28 +121,52 @@ def _mirror_baseline(payload: dict, target: dict) -> dict:
         if row is None:
             entries.append({"user_id": user_id, "eligible": False,
                             "skip_reason": "no_score", "before": None,
-                            "before_excused": False})
+                            "before_excused": False, "missing": False})
             continue
         excused = bool(row.get("excused"))
-        score = row.get("score")
+        entered_score = row.get("entered_score")
+        if (not excused and "entered_score" not in row
+                and _is_number(row.get("score"))):
+            # A row written before the mirror carried entered_score. Canvas
+            # only deducts from late submissions, so a non-late row's score
+            # already equals its entered score and can be used directly. A
+            # late row needs the real entered_score to curve safely, so it
+            # blocks until a full mirror pass backfills the key.
+            if row.get("late"):
+                return {"blocking_error": "mirror_refresh_required",
+                        "attention": {
+                            "action": "ask_teacher_confirmation",
+                            "reason": (
+                                "Some late scores in this local snapshot predate a "
+                                "newer field; the daily background refresh fills it "
+                                "in, so try again after that runs, or ask the "
+                                "teacher how to proceed."
+                            ),
+                        }}
+            entered_score = row.get("score")
         if excused:
             entries.append({"user_id": user_id, "eligible": False,
-                            "skip_reason": "excused", "before": score,
-                            "before_excused": True})
-        elif not _is_number(score):
+                            "skip_reason": "excused", "before": entered_score,
+                            "before_excused": True,
+                            "missing": bool(row.get("missing"))})
+        elif not _is_number(entered_score):
             entries.append({"user_id": user_id, "eligible": False,
-                            "skip_reason": "no_score", "before": score,
-                            "before_excused": False})
+                            "skip_reason": "no_score", "before": entered_score,
+                            "before_excused": False,
+                            "missing": bool(row.get("missing"))})
         else:
             entries.append({"user_id": user_id, "eligible": True,
-                            "skip_reason": None, "before": _number(score),
-                            "before_excused": False})
+                            "skip_reason": None, "before": _number(entered_score),
+                            "before_excused": False,
+                            "missing": bool(row.get("missing"))})
     for user_id, row in sorted(rows_by_user.items()):
         if user_id in current_ids:
             continue
         entries.append({"user_id": user_id, "eligible": False,
-                        "skip_reason": "not_current", "before": row.get("score"),
-                        "before_excused": bool(row.get("excused"))})
+                        "skip_reason": "not_current",
+                        "before": row.get("entered_score"),
+                        "before_excused": bool(row.get("excused")),
+                        "missing": bool(row.get("missing"))})
 
     return {
         "course_id": str(course_id),
@@ -256,7 +280,7 @@ class GradeAdjustmentAdapter:
         submission = submission or {}
         if bool(submission.get("excused")) != bool(excused):
             return False
-        return _numbers_equal(submission.get("score"), score)
+        return _numbers_equal(submission.get("entered_score"), score)
 
     @staticmethod
     def _mark_step(context, steps, step, state, error_code=None):

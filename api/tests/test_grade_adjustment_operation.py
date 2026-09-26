@@ -55,9 +55,9 @@ class FakeCanvas:
             "points_possible": 10, "name": "Synthetic Lab",
         }
         self.submissions = {
-            "student-1": {"score": 5, "excused": False},
-            "student-2": {"score": 8, "excused": False},
-            "student-3": {"score": 4, "excused": True},
+            "student-1": {"score": 5, "entered_score": 5, "excused": False},
+            "student-2": {"score": 8, "entered_score": 8, "excused": False},
+            "student-3": {"score": 4, "entered_score": 4, "excused": True},
         }
         self.puts = []
 
@@ -72,9 +72,9 @@ class FakeCanvas:
     def send(self, method, path, payload, timeout=30):
         self.puts.append((method, path, copy.deepcopy(payload)))
         user_id = path.rsplit("/", 1)[-1]
+        posted = float(payload["submission"]["posted_grade"])
         self.submissions[user_id] = {
-            "score": float(payload["submission"]["posted_grade"]),
-            "excused": False,
+            "score": posted, "entered_score": posted, "excused": False,
         }
         return copy.deepcopy(self.submissions[user_id]), None
 
@@ -192,3 +192,75 @@ def test_flat_bump_apply_receipt_and_revert_preview_are_digest_protected(
     assert canvas.submissions["student-1"]["score"] == 5
     assert canvas.submissions["student-2"]["score"] == 8
     assert grade_adjustment.report_adjustments() == []
+
+
+def test_curve_computes_from_and_verifies_against_entered_score(monkeypatch):
+    """Law: a curve reads, writes, and verifies against entered_score, the
+    value Canvas treats as posted_grade, not score (entered_score after any
+    late deduction). A late student is never penalized twice."""
+    late_penalty = 10
+    submissions = {
+        "student-1": {"entered_score": 80, "score": 80 - late_penalty,
+                      "excused": False},
+    }
+
+    def get(path, params=None, timeout=20):
+        if path.endswith("/assignments/assignment-1"):
+            return {"id": "assignment-1", "grading_type": "points",
+                    "points_possible": 100, "name": "Late Lab"}, None
+        user_id = path.rsplit("/", 1)[-1]
+        return copy.deepcopy(submissions.get(user_id)), None
+
+    def send(method, path, payload, timeout=30):
+        user_id = path.rsplit("/", 1)[-1]
+        entered = float(payload["submission"]["posted_grade"])
+        submissions[user_id] = {
+            "entered_score": entered, "score": entered - late_penalty,
+            "excused": False,
+        }
+        return copy.deepcopy(submissions[user_id]), None
+
+    vault = FakeVault()
+    monkeypatch.setattr(config, "active_courses",
+                        lambda: [{"id": "course-1", "name": "Synthetic Course"}])
+    monkeypatch.setattr(grade_adjustment, "_vault", lambda: vault)
+    monkeypatch.setattr(canvas_client, "canvas_get", get)
+    monkeypatch.setattr(canvas_client, "_canvas_send", send)
+    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed",
+                        lambda _course: None)
+
+    def mirror_baseline(payload, target):
+        return {
+            "course_id": "course-1", "assignment_id": "assignment-1",
+            "assignment": {"id": "assignment-1", "grading_type": "points",
+                           "points_possible": 100, "name": "Late Lab"},
+            "entries": [
+                {"user_id": "student-1", "eligible": True, "before": 80,
+                 "before_excused": False, "skip_reason": None,
+                 "missing": False},
+            ],
+            "roster": [{"id": "student-1"}],
+            "synced_at": "2026-09-23T12:00:00Z",
+            "freshness": {"state": "current", "within_policy": True},
+        }
+
+    monkeypatch.setattr(adapter_module, "_mirror_baseline", mirror_baseline)
+
+    preview = grade_adjustment.preview_grade_adjustment(
+        "course-1", "assignment-1",
+        {"kind": "rule", "model": "flat_bump", "settings": {"bump": 5}},
+    )
+    assert preview["ok"] is True
+    assert preview["preview"]["changed"] == [
+        {"pseudonym": "Pikachu", "before": 80, "after": 85},
+    ]
+
+    applied = grade_adjustment.apply_grade_adjustment(
+        preview["operation_id"], preview["batch_id"], preview["review_digest"])
+
+    assert applied["ok"] is True
+    assert applied["counts"] == {
+        "adjusted": 1, "skipped_changed": 0, "failed": 0, "unverified": 0,
+    }
+    assert submissions["student-1"]["entered_score"] == 85
+    assert submissions["student-1"]["score"] == 75

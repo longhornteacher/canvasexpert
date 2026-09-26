@@ -19,8 +19,19 @@ does the other's job.
 - One course, one assignment per operation.
 - Points-based assignments only (`grading_type == "points"`, `points_possible > 0`).
   Anything else is refused with `unsupported_grading_type`.
-- Eligible rows: a numeric current score, not excused, current enrollment. Every other
-  row is skipped and counted by reason (`excused`, `no_score`, `not_current`).
+- A curve computes from and verifies against `entered_score` (Canvas's pre-late-deduction
+  entered value), never `score`, so a late student is never penalized twice.
+- Eligible rows: a numeric `entered_score`, not excused, current enrollment. Every other
+  row is skipped and counted by reason (`excused`, `no_score`, `not_current`). A `rule`
+  adjustment additionally skips, after those three, a row whose mirror `missing` is true
+  (`missing`) or whose `entered_score` is 0 (`zero`); `explicit` and `revert` may still
+  target those rows.
+- A mirror row with a numeric `score` but no `entered_score` key predates this mirror
+  change. Canvas only deducts from late submissions, so a non-late row's `score` already
+  equals its entered score and is used directly. A late row needs the real `entered_score`
+  to curve safely, so it blocks the whole preview with `mirror_refresh_required` and an
+  `attention` object naming the remedy: the daily background full mirror pass backfills
+  the key, so the teacher tries again after that runs.
 - The write is `posted_grade` only. No comment, `excuse`, `late_policy_status`,
   `seconds_late_override`, or other submission field.
 - Not in scope: letter/percent/pass-fail/GPA grading, course final-grade overrides,
@@ -69,10 +80,10 @@ Rows whose new score equals the current score produce no entry.
 - Assignment check, live, once per apply: if `grading_type` or `points_possible`
   changed since preview, the whole target is blocked with `drift_detected`.
 - Per entry, live, just before writing: read the student's current submission. If the
-  score or excused state differs from the preview baseline, skip that entry as
+  `entered_score` or excused state differs from the preview baseline, skip that entry as
   `score_changed_since_preview` and write nothing for that student. The others still
   proceed.
-- Write, then read back. A matching score is `done`; a mismatch is
+- Write, then read back. A matching `entered_score` is `done`; a mismatch is
   `grade_write_unverified`; a transport failure is `grade_write_uncertain` and is
   reconciled by readback on retry before any resend; an HTTP rejection is
   `grade_write_rejected`.
