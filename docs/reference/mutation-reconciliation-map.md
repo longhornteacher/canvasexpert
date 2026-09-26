@@ -89,6 +89,13 @@ teacher refreshes the catalog by hand. `content.page` invalidates
 `catalog.pages` unconditionally and reaches this through the same post-apply
 hook; nothing in the push path itself changed.
 
+**Differentiated Hub AssignmentForge:** one `content.assignment` operation creates
+`catalog.assignments` plus one restricted `catalog.pages` object per supplied tier.
+Its payload-sensitive scope includes assignments, modules (the hub may use ordinary
+module placement), and pages; each page is reported from its checkpointed
+`create_tier_page:<index>` step. Tag reads never fetch membership and do not invalidate
+private group scopes.
+
 The `gradebook.sis_bridge` adapter is also covered: approved bridge creation or
 registration and grade writes map conservatively to `catalog.assignments`
 through the central post-apply invalidation hook. Module placement is outside

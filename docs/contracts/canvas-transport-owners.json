@@ -160,6 +160,17 @@
       "reason": "Patches only the caller-supplied published/due_at/unlock_at/lock_at fields of an existing assignment; description, points_possible, and assignment_group_id are never read or resent. The central operation-ledger post-apply hook invalidates catalog.assignments after the confirmed operation succeeds."
     },
     {
+      "path": "api/operation_ledger/adapters/assignment_hub.py",
+      "symbol": "_send",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(method, path, payload) [checkpointed Hub page create, restriction, assignment, publication, or compensation]",
+      "classification": "canvas_mutation",
+      "scopes": ["catalog.assignments", "catalog.pages"],
+      "reconciliation": "invalidate",
+      "reason": "Creates, secures, and compensates restricted Hub tier pages through distinct checkpointed steps; the operation ledger invalidates assignment and page catalog scopes after the complete Hub operation succeeds."
+    },
+    {
       "path": "api/operation_ledger/adapters/assignment_whole.py",
       "symbol": "_create_assignment",
       "detector": "attr:_canvas_send",

@@ -1,4 +1,6 @@
 """Tests for AssignmentForge 2.0 parsing and validation."""
+import pytest
+
 from api.webui import af
 
 VALID_ASSIGNMENT = """<ASSIGNMENTFORGE_JSON>
@@ -101,7 +103,7 @@ def test_direction_response_and_lines_rules():
 
 
 def test_tiers_are_canonical_content_overrides_and_group_is_refused():
-    data = assignment(tiers=[
+    data = assignment(differentiation="bridge", tiers=[
         {"label": "Support", "overview": "<p>Shared goal, clear support.</p>",
          "directions": [{"html": "<p>Start here.</p>", "response": "short", "lines": 3}],
          "supports": {"sentence_frames": ["One reason is ___."]}},
@@ -114,9 +116,33 @@ def test_tiers_are_canonical_content_overrides_and_group_is_refused():
     assert any("label must be Support, Core, or Accelerate" in p for p in af.validate(data))
 
 
+@pytest.mark.parametrize(("changes", "message"), [
+    ({"tiers": [{"label": "Core"}]}, "Ask the teacher which differentiation style"),
+    ({"differentiation": "unknown", "tiers": [{"label": "Core"}]}, "differentiation must"),
+    ({"differentiation": "bridge"}, "only valid when"),
+])
+def test_differentiation_style_contract(changes, message):
+    assert any(message in problem for problem in af.validate(assignment(**changes)))
+
+
+def test_hub_tiers_are_supports_only_and_allow_one_tier():
+    data = assignment(differentiation="hub", tiers=[
+        {"label": "Core", "supports": {"word_bank": ["evidence"]}},
+    ])
+    assert af.validate(data) == []
+    data["tiers"][0]["overview"] = "<p>Instructions</p>"
+    assert any("hub instructions belong on the hub" in p for p in af.validate(data))
+    del data["tiers"][0]["overview"]
+    del data["tiers"][0]["supports"]
+    assert any("supports is required" in p for p in af.validate(data))
+    data["tiers"][0]["supports"] = None
+    assert any("supports is required" in p for p in af.validate(data))
+
+
 def test_support_shapes_and_correction_semantics_are_preserved():
     data = assignment(
         supports={"sentence_frames": ["I think ___ because ___."], "html": ""},
+        differentiation="bridge",
         tiers=[{"label": "Support", "supports": {"word_bank": ["reason"]}},
                {"label": "Core"}],
         corrections={"item-1": {"shared": {"answer": "Use walk.", "why": "Present tense."},

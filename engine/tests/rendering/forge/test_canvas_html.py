@@ -153,6 +153,25 @@ def test_tiered_assignment_render_structure():
     assert html.index("Requirements") < html.index("Rubric") < html.index("Go further") < html.index("Citing sources") < html.index("Printable:") < html.index("Unit info")
 
 
+def test_hub_assignment_tier_page_line_uses_renderer_slots():
+    model = _assignment(title="Hub")
+    html = render_assignment(
+        model, palette_key="teal", tier=None, public_tag=None,
+        assignment_group=None, printable_link=None,
+        tier_page_slots=[{"href": "{{ce-tier-page:0}}", "tag": "Silver", "palette_key": "silver"}],
+    )
+    assert "Supports:" in html and 'href="{{ce-tier-page:0}}"' in html
+    assert "Silver" in html
+
+
+def test_hub_tier_page_renders_expanded_supports_in_tier_palette():
+    from engine.rendering.forge.canvas_html import render_tier_page
+    html = render_tier_page({"title": "Hub", "supports": {"word_bank": ["evidence"]}},
+                            palette_key="silver", tier="Support", public_tag="Silver")
+    assert "<h3" in html and "Supports" in html and "evidence" in html
+    assert "Rubric" not in html and "Printable" not in html
+
+
 def test_standard_page_render_structure():
     html = render_page({"title": "Unit 2", "layout": "standard", "overview": "<p>Opening.</p>", "sections": [{"heading": "This week", "html": "<table><tr><td>Read</td></tr></table>", "kind": "section"}], "unit_info": {"unit": "Unit 2"}}, palette_key="teal")
     assert "<h2" in html and "Unit 2" in html

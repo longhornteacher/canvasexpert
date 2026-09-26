@@ -1508,8 +1508,9 @@ def _staging_appendix(kind: str) -> str:
         "Canvas object in one call. Their request is the authorization: do "
         "not stage it instead and ask, and do not ask them to confirm a "
         "preview they did not ask for. Whole-class drafts may remain unpublished; "
-        "tiered deliveries are reviewed differentiated families and are not "
-        "left without teacher-owned tier placement. What you create is visible to them and "
+        "Bridge deliveries are reviewed differentiated families. Hub deliveries create "
+        "restricted support pages and a whole-class assignment; unresolved tag assignment "
+        "is reported for the teacher. What you create is visible to them and "
         "not yet to students -- they can edit or delete it by hand in Canvas "
         "and tell you what to change.\n\n"
         "**If they asked you to prepare it for their review**, call "
@@ -1646,8 +1647,10 @@ def preview_content_push(
     Delivery options are per kind -- a page takes published and module_name, a
     quiz takes tier/module options, and an
     assignment takes ordinary grading-category options plus post_to_sis and optional
-    ISO 8601 due_at/unlock_at/lock_at. Differentiated AssignmentForge deliveries are
-    unrestricted and may be undated; tier placement remains manual and teacher-owned.
+    ISO 8601 due_at/unlock_at/lock_at. Bridge AssignmentForge sources are unrestricted
+    and may be undated; Hub delivery creates a whole-class assignment plus restricted
+    support pages assigned to matching differentiation tags, with a teacher action when
+    a tag cannot be assigned.
     Naming one a kind cannot carry is refused, not dropped. Drafts stay
     unpublished unless published=true.
 

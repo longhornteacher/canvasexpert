@@ -97,6 +97,27 @@ def test_payload_build_from_file(tmp_path, monkeypatch):
     assert payload["post_to_sis"] is False
 
 
+def test_hub_payload_renders_one_whole_class_assignment_and_support_pages(monkeypatch):
+    from api.operation_ledger.adapters import assignment as assignment_module
+    from api.platform_services import config
+    authored = {"version": "2.0-json", "type": "ASSIGNMENT", "title": "Hub",
+                "points": 10, "submission": {"types": ["online_text_entry"]},
+                "overview": "<p>Shared directions.</p>",
+                "directions": [{"html": "<p>Write.</p>", "response": "long"}],
+                "differentiation": "hub",
+                "tiers": [{"label": "Support", "supports": {"word_bank": ["claim"]}}]}
+    monkeypatch.setattr(assignment_module.af, "parse_file", lambda _path: (authored, []))
+    monkeypatch.setattr(assignment_module, "_generate_printable", lambda *a, **k: {"available": False})
+    monkeypatch.setattr(config, "get_tier_tags", lambda: {"Support": "Silver"})
+    payload = AssignmentAdapter().build_payload({"path": "synthetic.json"})
+    assert payload["hub"] is True
+    assert "Shared directions" in payload["description"]
+    assert "{{ce-tier-page:0}}" in payload["description"]
+    assert payload["tiers"][0]["title"] == "Hub - Silver"
+    assert "claim" in payload["tiers"][0]["description"]
+    assert "Write." not in payload["tiers"][0]["description"]
+
+
 def test_assignment_canvas_text_contains_no_em_dashes(tmp_path, monkeypatch):
     af_file = tmp_path / "student-facing.assignmentforge.txt"
     af_file.write_text(
@@ -105,7 +126,7 @@ def test_assignment_canvas_text_contains_no_em_dashes(tmp_path, monkeypatch):
  "title":"Argument \u2014 draft","points":10,
  "overview":"<p>Read \u2014 respond.</p>",
  "directions":[{"html":"<p>Use \u2014 evidence.</p>","response":"none"}],
- "tiers":[{"label":"Support"},
+ "differentiation":"bridge","tiers":[{"label":"Support"},
           {"label":"Core","overview":"<p>Explain \u2014 evidence.</p>"}]}
 </ASSIGNMENTFORGE_JSON>""",
         encoding="utf-8",
@@ -163,7 +184,7 @@ def test_payload_build_accepts_tiers(tmp_path, monkeypatch):
     af_file = tmp_path / "tiered.assignmentforge.json"
     af_file.write_text(
         """<ASSIGNMENTFORGE_JSON>
-{"version":"2.0-json","type":"ASSIGNMENT","title":"Tiered","points":10,"overview":"<p>Hi</p>","directions":[{"html":"<p>Work.</p>","response":"none"}],"tiers":[{"label":"Support"},{"label":"Core"}]}
+{"version":"2.0-json","type":"ASSIGNMENT","title":"Tiered","points":10,"overview":"<p>Hi</p>","directions":[{"html":"<p>Work.</p>","response":"none"}],"differentiation":"bridge","tiers":[{"label":"Support"},{"label":"Core"}]}
 </ASSIGNMENTFORGE_JSON>""",
         encoding="utf-8",
     )
@@ -198,7 +219,7 @@ def test_tier_colors_are_resolved_during_prepare_and_frozen_in_payload(tmp_path,
 {"version":"2.0-json","type":"ASSIGNMENT","title":"Colored","points":10,
  "overview":"<p>Hi</p>","directions":[{"html":"<p>Work.</p>","response":"none"}],
  "supports":{"sentence_frames":["I can ___"]},
- "tiers":[{"label":"Support"},{"label":"Core"},{"label":"Accelerate"}]}
+ "differentiation":"bridge","tiers":[{"label":"Support"},{"label":"Core"},{"label":"Accelerate"}]}
 </ASSIGNMENTFORGE_JSON>""",
         encoding="utf-8",
     )
@@ -229,7 +250,7 @@ def test_payload_keeps_supports_and_corrections_private_to_the_operation(tmp_pat
         """<ASSIGNMENTFORGE_JSON>
 {"version":"2.0-json","type":"ASSIGNMENT","title":"Tiered","points":10,"overview":"<p>Hi</p>",
  "directions":[{"html":"<p>Work.</p>","response":"none"}],
- "tiers":[{"label":"Support"},{"label":"Core"},{"label":"Accelerate"}],
+ "differentiation":"bridge","tiers":[{"label":"Support"},{"label":"Core"},{"label":"Accelerate"}],
  "supports":{"sentence_frames":["The author reveals ___."],"word_bank":["reveals"]},
  "corrections":{"item-1":{"shared":{"answer":"Use walk.","why":"Present tense."},"by_tier":null}}}
 </ASSIGNMENTFORGE_JSON>""",

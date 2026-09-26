@@ -695,7 +695,7 @@ def test_a_real_tiered_assignmentforge_preview_allows_teacher_owned_dates(
         '<ASSIGNMENTFORGE_JSON>{"version":"2.0-json","type":"ASSIGNMENT",'
         '"title":"Tiered Essay","overview":"<p>Write the thing.</p>",'
         '"directions":[{"html":"<p>Submit it.</p>","response":"none"}],'
-        '"points":100,"tiers":[{"label":"Support"},{"label":"Core"}]}'
+        '"points":100,"differentiation":"bridge","tiers":[{"label":"Support"},{"label":"Core"}]}'
         '</ASSIGNMENTFORGE_JSON>'
     ))
     monkeypatch.setattr(config, "get_tier_tags", lambda: {

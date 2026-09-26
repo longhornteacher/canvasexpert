@@ -21,6 +21,8 @@ box. See `docs/contracts/forge-presentation-contract.md` for the rendered design
 Return strict JSON: double quotes, no comments or trailing commas, and escape quotes
 inside strings. Set `version` to `2.0-json` and `type` to `ASSIGNMENT`. Version
 `1.0-json` is retired; ask the teacher to fetch this current contract again.
+Before authoring tiered work, ask the teacher to choose Everyone (no tiers), Bridge,
+or Hub. Never infer the style; re-fetch this contract after the choice.
 
 ## 3. ASSIGNMENT FIELDS
 ```json
@@ -30,6 +32,7 @@ inside strings. Set `version` to `2.0-json` and `type` to `ASSIGNMENT`. Version
   "title": "Argument Paragraph: School Start Times",
   "points": 20,
   "submission": { "types": ["online_text_entry"] },
+  "differentiation": "hub",
   "overview": "<p>Make a claim about teen sleep and support it with evidence.</p>",
   "directions": [
     { "html": "<p>Choose a side.</p>", "response": "none" },
@@ -54,7 +57,7 @@ inside strings. Set `version` to `2.0-json` and `type` to `ASSIGNMENT`. Version
   "unit_info": { "unit": "Unit 2: Argument", "teks": ["8.10A"], "subject": "ELA", "grade": "8" },
   "tiers": [
     { "label": "Support", "supports": { "sentence_frames": ["One reason is ___."] } },
-    { "label": "Core" },
+    { "label": "Core", "supports": { "word_bank": ["claim", "evidence"] } },
     { "label": "Accelerate", "supports": { "html": "<p>Address the strongest counterargument.</p>" } }
   ]
 }
@@ -68,6 +71,8 @@ inside strings. Set `version` to `2.0-json` and `type` to `ASSIGNMENT`. Version
   `media_recording`, `student_annotation`, or `external_tool`. `external_tool` must
   be alone and requires `external_tool_url`. `allowed_extensions` is an optional
   array of bare file extensions for uploads. `annotatable_file` is refused.
+- `differentiation`: required when `tiers` is present; use `bridge` or `hub`. Omit
+  it for Everyone (no tiers).
 - `overview`: required student-facing introduction as HTML.
 - `directions`: required non-empty array. Each item has `html` and may have
   `response`: `none`, `short`, or `long`. `lines` is an optional integer from 1 to
@@ -113,12 +118,13 @@ teacher must prepare the handout with Track Changes enabled and locked. Consult
 `get_product_guide(topic="writing_timeline")` before advising on the feature.
 
 ## 5. TIERS, SUPPORTS, AND CORRECTIONS
-Use zero tiers for an untiered assignment, or at least two tiers with unique labels
-from `Support`, `Core`, and `Accelerate`. The teacher maps those labels to public
-Canvas title tags and handles student placement in Canvas. Do not infer, record, or
-recommend which student belongs in a tier. Each tier may replace only `overview`
-and/or `directions`, and may add tier-specific `supports`; it cannot replace the
-whole assignment.
+Choose one style with the teacher. Bridge needs at least two unique canonical tiers;
+each may replace `overview` and/or `directions` and add supports. Hub needs one or
+more unique canonical tiers with non-empty `supports` only; instructions stay on the
+shared hub assignment, and each supplied tier becomes a restricted support page.
+Omitting a tier means no page for it. The teacher maps labels to public Canvas tags
+and handles any unresolved page assignment. Never infer, record, or recommend which
+student belongs in a tier.
 
 Keep the same learning target across tiers. Support provides access to the same
 work through language support and scaffolds. Core is the baseline. Accelerate
@@ -159,7 +165,8 @@ Before returning the envelope, confirm:
    `short` and is between 1 and 12.
 4. Submission settings are consistent, including the external tool URL if needed.
 5. If present, rubric criterion points sum to assignment points.
-6. Tiers use at least two unique canonical labels and keep one learning target.
+6. `differentiation` is explicit when tiers are present. Bridge has at least two
+   complete variants; Hub has one or more supports-only supplements with unique labels.
 7. Every HTML fragment follows the allowlist. No style attributes or placeholders.
 8. Every attachment has a label and exactly one source (`file` or `canvas_file`); folder
    is valid only with `canvas_file`.
@@ -170,6 +177,7 @@ Before returning the envelope, confirm:
 {
   "version": "2.0-json",
   "type": "ASSIGNMENT",
+  "differentiation": "hub",
   "title": "Found Poetry: Remix the Article",
   "points": 20,
   "submission": { "types": ["online_upload"], "allowed_extensions": ["docx"] },
@@ -185,7 +193,7 @@ Before returning the envelope, confirm:
   "extras": [ { "summary": "Choosing words", "html": "<p>Look for words that create a strong image or feeling.</p>" } ],
   "tiers": [
     { "label": "Support", "supports": { "sentence_frames": ["I chose ___ because ___."] } },
-    { "label": "Core" },
+    { "label": "Core", "supports": { "word_bank": ["article", "image"] } },
     { "label": "Accelerate", "supports": { "html": "<p>Add a short artist statement about a deliberate choice in line breaks or word order.</p>" } }
   ]
 }

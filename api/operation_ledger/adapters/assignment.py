@@ -10,13 +10,13 @@ import requests
 from pathlib import Path
 import mimetypes
 
-from engine.rendering.forge.canvas_html import render_assignment
+from engine.rendering.forge.canvas_html import render_assignment, render_tier_page
 from engine.rendering.forge.printable import render_assignment_printable
 from engine.rendering.physical.emit_pdf import html_to_pdf
 from engine.utils.text_utils import safe_filename_component
 
 from .. import models
-from . import assignment_tiered, assignment_whole, differentiated_bridge
+from . import assignment_tiered, assignment_whole, assignment_hub, differentiated_bridge
 from . import forge_files
 from .adapter_support import (
     as_list as _as_list,
@@ -118,13 +118,49 @@ class AssignmentAdapter:
         external_tool = sub_fields.get("submission_types") == ["external_tool"]
         title_part = safe_filename_component(name)
         tiers = []
+        hub = data.get("differentiation") == "hub"
+        hub_description = None
         printables = []
         if authored_tiers:
             tags = differentiated_bridge.resolve_public_tags(
-                [row["label"] for row in authored_tiers]
+                [row["label"] for row in authored_tiers], minimum_tiers=1 if hub else 2
             )
             base_title = differentiated_bridge.normalize_base_title(name)
+            hub_slots = []
+            if hub:
+                hub_printable = None
+                if not external_tool:
+                    hub_printable = _generate_printable(
+                        model, palette_key=tier_colors["untiered"], public_tag=None,
+                        tier=None, tracked=tracked,
+                        attachment_labels=[row["label"] for row in attachments],
+                        sub_folder=title_part, filename=f"{title_part} - Printable.pdf",
+                    )
+                    printables.append(hub_printable)
+                for index, resolved in enumerate(tags):
+                    hub_slots.append({"tag": resolved["tag"], "palette_key": tier_colors[resolved["tier"]],
+                                     "href": f"{{{{ce-tier-page:{index}}}}}"})
+                description = render_assignment(
+                    model, palette_key=tier_colors["untiered"], tier=None, public_tag=None,
+                    assignment_group=assignment_group,
+                    printable_link=(forge_files.link_slot("printable", 0)
+                                    if hub_printable and hub_printable["available"] else None),
+                    attachment_slots=attachment_slots, tier_page_slots=hub_slots,
+                )
+                hub_description = description
             for authored, resolved in zip(authored_tiers, tags):
+                if hub:
+                    tier_model = {"title": base_title, "unit_info": model.get("unit_info"),
+                                  "supports": normalize_author_model(authored.get("supports"))}
+                    title = differentiated_bridge.source_title(base_title, resolved["tag"])
+                    body = render_tier_page(
+                        tier_model, palette_key=tier_colors[resolved["tier"]],
+                        tier=resolved["tier"], public_tag=resolved["tag"],
+                    )
+                    tiers.append({"label": resolved["tier"], **resolved, "title": title,
+                                  "description": body, "tag_status": "unavailable",
+                                  "page_href_token": f"{{{{ce-tier-page:{len(tiers)}}}}}"})
+                    continue
                 tier_model = normalize_author_model(model)
                 for field in ("overview", "directions"):
                     if field in authored:
@@ -159,7 +195,7 @@ class AssignmentAdapter:
                     ),
                     "printable": printable,
                 })
-            description = tiers[0]["description"]
+            description = hub_description if hub else tiers[0]["description"]
         else:
             printable = None
             if not external_tool:
@@ -197,8 +233,12 @@ class AssignmentAdapter:
         if tiers:
             payload["tiers"] = tiers
             payload["base_title"] = base_title
-            payload["unrestricted_tiers"] = True
-            if prepare_request.get("post_to_sis") is True:
+            if hub:
+                payload["hub"] = True
+                payload["description"] = description
+            else:
+                payload["unrestricted_tiers"] = True
+            if not hub and prepare_request.get("post_to_sis") is True:
                 raise ValueError(
                     "tiered AssignmentForge sources are SIS-disabled; omit post_to_sis"
                 )
@@ -289,6 +329,13 @@ class AssignmentAdapter:
     def capture_baseline(self, payload: dict, target: dict) -> dict:
         course_id = target["course_id"]
         name = payload.get("name", "")
+        if payload.get("hub"):
+            initial = target.get("baseline") is None
+            baseline = _capture_hub_baseline(payload, target, read_tags=initial)
+            if initial and not baseline.get("blocking_error") and not baseline.get("canvas_error"):
+                target["target_key"] = self.target_key(payload, course_id)
+                target["idempotency_key"] = self.idempotency_key(payload, course_id)
+            return baseline
         if payload.get("tiers"):
             matches = []
             for title in [row["title"] for row in payload["tiers"]]:
@@ -365,6 +412,8 @@ class AssignmentAdapter:
             fresh = self.capture_baseline(payload, target)
             if "canvas_error" in fresh or fresh.get("blocking_error"):
                 return True
+            if payload.get("hub"):
+                return False
             known = {
                 str(step.get("returned_object_id"))
                 for step in target.get("steps", [])
@@ -441,7 +490,30 @@ class AssignmentAdapter:
                          if row.get("canvas_file") and not row.get("student_visible")],
             "printables": printables,
         }
-        if payload.get("tiers"):
+        if payload.get("hub"):
+            hub_tiers = []
+            teacher_actions = []
+            steps = _ordered_steps(target)
+            for index, row in enumerate(payload.get("tiers", [])):
+                step = _find_step(steps, f"create_tier_page:{index}")
+                action = (f"Assign page '{row['title']}' to Canvas differentiation tag '{row['tag']}'."
+                          if row.get("tag_status") != "matched" else None)
+                if action:
+                    teacher_actions.append(action)
+                hub_tiers.append({
+                    "tier": row.get("label"), "tag": row.get("tag"), "title": row.get("title"),
+                    "page_id": step.get("returned_object_id"),
+                    "url": step.get("returned_object_url"),
+                    "published": bool(payload.get("published") and
+                                      _find_step(steps, f"publish_tier_page:{index}").get("state") in {"applied", "skipped"}),
+                    "tag_status": row.get("tag_status"), "teacher_action": action,
+                })
+            review["hub"] = {
+                "assignment": {"title": payload.get("name"), "published": payload.get("published")},
+                "tiers": hub_tiers,
+                "teacher_actions": teacher_actions,
+            }
+        elif payload.get("tiers"):
             review.update({
                 "tiered": True,
                 "tier_count": len(payload["tiers"]),
@@ -524,7 +596,10 @@ class AssignmentAdapter:
 
         prepared_payload = dict(payload)
         if attachment_infos:
-            if payload.get("tiers"):
+            if payload.get("hub"):
+                prepared_payload["description"] = forge_files.bind_link_slots(
+                    payload.get("description", ""), "attachment", attachment_infos)
+            elif payload.get("tiers"):
                 prepared_payload["tiers"] = [
                     {**tier, "description": forge_files.bind_link_slots(
                         tier["description"], "attachment", attachment_infos)}
@@ -535,6 +610,16 @@ class AssignmentAdapter:
                 prepared_payload["description"] = forge_files.bind_link_slots(
                     payload.get("description", ""), "attachment", attachment_infos)
         target = {**target, "steps": steps}
+        if prepared_payload.get("hub"):
+            return assignment_hub.execute(
+                prepared_payload, target, context,
+                ordered_steps=_ordered_steps,
+                whole_execute=assignment_whole.execute,
+                upload_course_file=_upload_course_file,
+                find_assignment_group=_find_assignment_group,
+                read_modules=_read_modules,
+                prepare_description=_prepare_whole_printable,
+            )
         if prepared_payload.get("tiers"):
             return assignment_tiered.execute(
                 prepared_payload,
@@ -571,6 +656,9 @@ class AssignmentAdapter:
             verified, error = _get_course_file(target["course_id"], str(file_id))
             if error or not isinstance(verified, dict) or str(verified.get("id")) != str(file_id):
                 return {"state": "sent_unknown", "error_code": "file_exact_id_unverified"}
+        if payload.get("hub"):
+            from . import assignment_hub
+            return assignment_hub.reconcile(payload, target, ordered_steps=_ordered_steps)
         if payload.get("tiers"):
             return assignment_tiered.reconcile(
                 payload,
@@ -593,6 +681,59 @@ class AssignmentAdapter:
                 target.get("state", "pending")
             )
         ]
+
+
+def _capture_hub_baseline(payload: dict, target: dict, *, read_tags: bool = True) -> dict:
+    """Freeze exact live tag matches and refuse collisions with existing tier pages."""
+    course_id = target["course_id"]
+    if read_tags:
+        categories, error, complete = canvas_client.canvas_get_all_complete(
+            f"/api/v1/courses/{course_id}/group_categories",
+            {"collaboration_state": "non_collaborative", "per_page": 100},
+        )
+        groups = []
+        if error or not complete:
+            for tier in payload.get("tiers", []):
+                tier.update({"tag_status": "unavailable", "matched_group_id": None,
+                             "matched_category_id": None})
+        else:
+            for category in categories:
+                category_id = category.get("id")
+                rows, group_error, group_complete = canvas_client.canvas_get_all_complete(
+                    f"/api/v1/group_categories/{category_id}/groups", {"per_page": 100})
+                if group_error or not group_complete:
+                    groups = None
+                    break
+                groups.extend({"category_id": category_id, "id": row.get("id"),
+                               "name": str(row.get("name") or "")} for row in rows)
+            if groups is None:
+                for tier in payload.get("tiers", []):
+                    tier.update({"tag_status": "unavailable", "matched_group_id": None,
+                                 "matched_category_id": None})
+            else:
+                for tier in payload.get("tiers", []):
+                    matches = [group for group in groups
+                               if group["name"].strip().casefold() == str(tier.get("tag") or "").strip().casefold()]
+                    status = "matched" if len(matches) == 1 else "not_found" if not matches else "ambiguous"
+                    tier.update({"tag_status": status,
+                                 "matched_group_id": str(matches[0]["id"]) if status == "matched" else None,
+                                 "matched_category_id": str(matches[0]["category_id"]) if status == "matched" else None})
+    pages, page_error = canvas_client.canvas_get_all(
+        f"/api/v1/courses/{course_id}/pages", {"per_page": 100})
+    if page_error:
+        return {"canvas_error": "Canvas tier pages could not be read."}
+    created = {str(step.get("returned_object_id")) for step in target.get("steps", [])
+               if str(step.get("step_key", "")).startswith("create_tier_page:") and step.get("returned_object_id")}
+    desired = {tier["title"] for tier in payload.get("tiers", [])}
+    collisions = [str(row.get("title") or "") for row in pages or []
+                  if str(row.get("title") or "") in desired
+                  and str(row.get("page_id") or row.get("id") or row.get("url") or "") not in created]
+    if collisions:
+        titles = collisions[:len(desired)]
+        return {"blocking_error": "tier_page_exists", "collision_titles": titles,
+                "error": "A tier page already exists: " + "; ".join(titles)}
+    return {"hub_tiers": [{"tier": row.get("label"), "tag_status": row["tag_status"]}
+                           for row in payload.get("tiers", [])]}
 
 
 # ── Module-level helpers ─────────────────────────────────────────────────
@@ -725,6 +866,17 @@ def _ordered_steps(target: dict) -> list[dict]:
             if key == "upload_printable":
                 return (-2, 0, 0)
             prefix, _, suffix = key.partition(":")
+            if prefix in {"create_tier_page", "restrict_tier_page", "assign_tier_page",
+                          "clear_tier_page_assignment"}:
+                rank = {"create_tier_page": 0, "restrict_tier_page": 1,
+                        "assign_tier_page": 2, "clear_tier_page_assignment": 3}[prefix]
+                return (0, int(suffix) if suffix.isdigit() else 999999, rank)
+            if prefix in {"publish_tier_page", "unpublish_tier_page"}:
+                return (1, int(suffix) if suffix.isdigit() else 999999,
+                        1 if prefix == "unpublish_tier_page" else 0)
+            if key in {"create_assignment", "attach_module", "create_module"}:
+                return (2, {"create_assignment": 0, "create_module": 1,
+                            "attach_module": 2}[key], 0)
             rank = {
                 "upload_attachment": -2,
                 "upload_printable": -1,

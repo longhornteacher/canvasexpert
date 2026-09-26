@@ -49,6 +49,8 @@ _PAGE_KIND = "content.page"
 
 def _scopes_for(kind: str, payload: dict | None) -> frozenset[str]:
     payload = payload or {}
+    if kind == "content.assignment" and payload.get("hub"):
+        return frozenset({"assignments", "modules", "pages"})
     if kind == _PAGE_KIND:
         scopes = {"pages"}
         if payload.get("module_name"):
@@ -78,7 +80,15 @@ def _created_objects(kind: str, payload: dict | None, result: dict | None,
             or page_step.get("returned_object_id"), "page", payload.get("title"))
     elif kind == "content.assignment":
         tiers = payload.get("tiers") or []
-        if tiers:
+        if payload.get("hub"):
+            for index, tier in enumerate(tiers):
+                step = by_key.get(f"create_tier_page:{index}") or {}
+                if step.get("state") in {"applied", "skipped"}:
+                    add(step.get("returned_object_id"), "page", tier.get("title"))
+            assignment_step = by_key.get("create_assignment") or {}
+            add(result.get("returned_object_id") or target.get("returned_object_id")
+                or assignment_step.get("returned_object_id"), "assignment", payload.get("name"))
+        elif tiers:
             for index, tier in enumerate(tiers):
                 step = by_key.get(f"create_tier_assignment:{index}") or {}
                 if step.get("state") in {"applied", "skipped"}:

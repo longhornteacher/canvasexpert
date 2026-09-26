@@ -88,7 +88,7 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `stage_content(kind, label, content)` | Writes one authored draft and its `.done` marker into the per-kind review Inbox; refuses an existing label rather than overwriting | No |
 | `stage_attachment(source_path)` | Copies a host-supplied regular file into the private Forge attachment inbox; returns only its file name and size | No |
 | `list_staged_content(kind="")` | Drafts in the local review Inbox; pass `kind` to filter or omit it for all drafts | No |
-| `preview_content_push(course_id, kind, label, published=None, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=None)` | Persists a local frozen review of one staged draft for one Current course; differentiated AssignmentForge creates unrestricted tier sources and the shared bridge; existing module IDs are exact, while module creation is explicit | No |
+| `preview_content_push(course_id, kind, label, published=None, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=None)` | Persists a local frozen review of one staged draft for one Current course; AssignmentForge style is explicit: Bridge creates unrestricted tier sources and the shared bridge, while Hub creates a whole-class assignment and restricted support pages; existing module IDs are exact, while module creation is explicit | No |
 | `list_groups(course_id)` | Current-course group-set and group names from the fresh local mirror; no memberships or Canvas IDs | No |
 | `preview_differentiated_quiz_push(course_id, variants, published=false, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=false)` | Persists a frozen review for one staged QuizForge family; each variant contains only its staged `label`, dates are optional, and sources attach unrestricted to the selected module while the gradebook-only bridge does not | No |
 | `apply_content_push(operation_id, batch_id, review_digest)` | Creates the exact frozen draft in Canvas through the Operation Ledger; same claims, drift check, and receipt as the push tab | No |
@@ -161,7 +161,8 @@ the teacher owns Canvas Grade Sync.
 The reviewed-preview machinery runs on every route. Whole-class drafts may remain
 unpublished. Differentiated sources use the reviewed family operation, including source-only
 module placement, bridge verification, and family-link save. QuizForge retains group
-restriction; AssignmentForge sources are unrestricted and tier placement is teacher-owned.
+restriction. Bridge AssignmentForge sources are unrestricted and tier placement is
+teacher-owned; Hub tier pages are restricted and assigned to live differentiation tags.
 
 The live push carries no due, unlock, or lock dates. Scheduling stays on
 `preview_content_push`, because dated work is the case that most wants a look before it

@@ -163,6 +163,7 @@ class FakeCanvas:
 def _authoring_data():
     return {"title": "Practice", "overview": "<p>Base</p>", "points": 10,
             "directions": [{"html": "<p>Answer.</p>", "response": "none"}],
+            "differentiation": "bridge",
             "tiers": copy.deepcopy(TIERS)}
 
 
@@ -252,6 +253,7 @@ def test_assignmentforge_tier_tag_collision_is_a_stable_envelope_refusal(monkeyp
     passes, matching QuizForge's identical shared rule."""
     colliding_data = {
         "title": "Practice", "overview": "<p>Base</p>", "points": 10,
+        "differentiation": "bridge",
         "directions": [{"html": "<p>Answer.</p>", "response": "none"}],
         "tiers": [
             {"label": "Support", "overview": "<p>Support body</p>"},

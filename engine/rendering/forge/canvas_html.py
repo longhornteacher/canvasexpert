@@ -122,7 +122,8 @@ def _rubric_html(rubric, palette):
 
 def render_assignment(model: dict, *, palette_key: str, tier: str | None, public_tag: str | None,
                       assignment_group: str | None, printable_link: str | None,
-                      attachment_slots: list[dict] | None = None) -> str:
+                      attachment_slots: list[dict] | None = None,
+                      tier_page_slots: list[dict] | None = None) -> str:
     """Render the §4 student-facing assignment description in its locked order."""
     palette = palette_for(palette_key)
     title = model.get("title", "")
@@ -145,6 +146,12 @@ def render_assignment(model: dict, *, palette_key: str, tier: str | None, public
         # No width: an auto-width table keeps the badge column as narrow as the badge.
         out.append(f'<table style="max-width:100%;border-collapse:collapse"><tbody>{"".join(rows)}</tbody></table>')
     out.append(_section_html(model.get("sections"), palette))
+    if tier_page_slots:
+        links = " ".join(
+            f'<a href="{_e(slot["href"])}" style="color:{palette_for(slot["palette_key"])["dark"]}">{_e(slot["tag"])}</a>'
+            for slot in tier_page_slots
+        )
+        out.append(f'<p style="margin:14px 0;padding:10px;background-color:{palette["tint"]}"><strong>Supports:</strong> {links}</p>')
     rubric = _rubric_html(model.get("rubric"), palette)
     if rubric:
         out.append(_details("Rubric", rubric, palette))
@@ -164,6 +171,21 @@ def render_assignment(model: dict, *, palette_key: str, tier: str | None, public
         out.append(f'<p style="margin:14px 0;padding:10px;background-color:{palette["tint"]}"><strong>Attachments:</strong> {links}</p>')
     if unit_body:
         out.append(_details("Unit info", unit_body, palette))
+    return "".join(out)
+
+
+def render_tier_page(model: dict, *, palette_key: str, tier: str,
+                     public_tag: str) -> str:
+    """Render a Differentiated Hub tier supplement using the §4 page layout."""
+    palette = palette_for(palette_key)
+    title = model.get("title", "")
+    unit_eyebrow, _ = _unit_parts(model.get("unit_info"))
+    eyebrow = " · ".join(part for part in (_e(public_tag), unit_eyebrow) if part)
+    out = [_banner(title, eyebrow, palette)]
+    support = _supports_html(model.get("supports"), palette)
+    if support:
+        out.append(f'<h3 style="color:{palette["dark"]}">{"Go further" if tier == "Accelerate" else "Supports"}</h3>')
+        out.append(support)
     return "".join(out)
 
 

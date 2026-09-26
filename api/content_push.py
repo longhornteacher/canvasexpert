@@ -689,6 +689,7 @@ def _result_projection(operation: dict, result: dict) -> dict:
     differentiated = (
         normalized.get("mode") == "differentiated" or bool(normalized.get("tiers"))
     )
+    is_hub = bool(normalized.get("hub"))
     is_quiz_variant = normalized.get("mode") == "differentiated"
     variants = normalized.get("variants") or normalized.get("tiers") or []
     for target_index, target in enumerate(result.get("target_results") or []):
@@ -721,7 +722,46 @@ def _result_projection(operation: dict, result: dict) -> dict:
         ]
         if steps:
             row["unfinished_steps"] = steps
-        if differentiated:
+        if is_hub:
+            tier_rows = []
+            actions = []
+            for index, tier in enumerate(normalized.get("tiers") or []):
+                create = next((step for step in step_source
+                               if step.get("step_key") == f"create_tier_page:{index}"), {})
+                assign = next((step for step in step_source
+                               if step.get("step_key") == f"assign_tier_page:{index}"), {})
+                published = next((step for step in step_source
+                                  if step.get("step_key") == f"publish_tier_page:{index}"), {})
+                action = (f"Assign page '{tier.get('title')}' to Canvas differentiation tag '{tier.get('tag')}'."
+                          if tier.get("tag_status") != "matched" or assign.get("error_code") in {
+                              "tag_changed", "tag_assignment_refused", "tag_assignment_unverified"} else None)
+                if action:
+                    actions.append(action)
+                page_id = create.get("returned_object_id")
+                tier_rows.append({
+                    "tier": tier.get("label"), "tag": tier.get("tag"),
+                    "title": tier.get("title"), "page_id": page_id,
+                    "url": create.get("returned_object_url"),
+                    "published": bool(normalized.get("published") and
+                                      published.get("state") in {"applied", "skipped"}),
+                    "tag_status": tier.get("tag_status"), "teacher_action": action,
+                })
+                if page_id:
+                    verify_hint.append({"course_id": course_id, "kind": "page", "id": page_id})
+            assignment_step = next((step for step in step_source
+                                    if step.get("step_key") == "create_assignment"), {})
+            if assignment_step.get("returned_object_id"):
+                verify_hint.append({"course_id": course_id, "kind": "assignment",
+                                    "id": assignment_step["returned_object_id"]})
+            row["hub"] = {
+                "assignment": {"title": normalized.get("name"),
+                               "assignment_id": assignment_step.get("returned_object_id"),
+                               "url": assignment_step.get("returned_object_url"),
+                               "published": bool(normalized.get("published") and
+                                                 assignment_step.get("state") in {"applied", "skipped"})},
+                "tiers": tier_rows, "teacher_actions": actions,
+            }
+        elif differentiated:
             created = []
             create_prefix = (
                 "create_quiz" if normalized.get("mode") == "differentiated"

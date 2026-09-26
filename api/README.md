@@ -45,7 +45,7 @@ execution remains local stdio; no hosted or tunnel setup is offered.
 | Contract | File | Role |
 |---|---|---|
 | **QuizForge** | `default_docs/AI Authoring/Author a Quiz (QuizForge).txt` (v3.0-json) | Quiz authoring: 12 question types, rationales, tiers |
-| **AssignmentForge** | `default_docs/AI Authoring/Author an Assignment (AssignmentForge).txt` (v1.0-json) | Assignment authoring: submissions, scaffolding tiers |
+| **AssignmentForge** | `default_docs/AI Authoring/Author an Assignment (AssignmentForge).txt` (v2.0-json) | Assignment authoring: submissions, Bridge and Hub tiers |
 | **PageForge** | `default_docs/AI Authoring/Author a Page (PageForge).txt` (v1.0-json) | Page authoring: unit hubs, placeholders |
 
 Each contract is canonical in `default_docs/AI Authoring/` — this backend consumes, never forks.
@@ -80,9 +80,10 @@ bundled Pandoc through `pypandoc-binary`.
 - **Validate**: `py validate_qf.py <file.txt>`
 
 Differentiated live delivery has no direct CLI. Use the reviewed AssignmentForge or
-QuizForge Operation Ledger path so bridge creation, exact-ID recovery, module placement,
-and the verified family link are one operation. QuizForge retains explicit group targets;
-AssignmentForge sources are unrestricted and manually placed by the teacher.
+QuizForge Operation Ledger path. Bridge delivery includes source creation, exact-ID recovery,
+module placement, and its verified family link; Hub delivery creates the whole-class
+assignment with restricted, tag-assigned support pages. QuizForge retains explicit group
+targets.
 
 ## Control console (not the primary working surface)
 
@@ -162,11 +163,14 @@ reconciliation; scoring requires the verified family link.
 - Extracts JSON from the `<ASSIGNMENTFORGE_JSON>` envelope.
 - Links attachments from exact-name Canvas Files matches or from files staged locally with `stage_attachment`; `{{file:…}}` and `{{page:…}}` placeholders are refused.
 - Creates assignment(s) with configurable submission types, points, dates, grading category.
-- **Differentiated family**: one file with two or more canonical tiers requires a selected
+- **Differentiated Bridge**: one file with two or more canonical tiers requires a selected
   module and a reviewed delivery operation. Each unrestricted source is published, omitted
   from the final grade, and SIS-disabled; tier placement is teacher-owned and manual. The
   shared family owner attaches sources, creates/verifies the gradebook-only bridge, and saves
   the family link only after all postconditions pass.
+- **Differentiated Hub**: one file with one or more supports-only tiers creates one ordinary
+  whole-class assignment plus restricted Canvas pages assigned to matching differentiation
+  tags. Unresolved pages stay hidden and include a teacher action to assign them in Canvas.
 
 Differentiated quiz delivery retains its timezone-aware due timestamp, module, unique public
 tags, equal points, and assignment-group requirements. AssignmentForge family sources preserve
@@ -226,9 +230,10 @@ ANTHROPIC_KEY=
   writing portion as a separate 100-point AssignmentForge artifact.
 - `numeric` needs `scoring_algorithm:"Numeric"` + a `scoring_data.value` array;
   `rich-fill-blank` needs `edit_distance ≥ 1`.
-- Canvas supports per-student / per-group assignment overrides, but CanvasExpert's
-  differentiated delivery intentionally does not use them. Sources are published
-  unrestricted and tier placement remains manual in Canvas.
+- Canvas supports per-student / per-group assignment overrides. Bridge AssignmentForge
+  sources are published unrestricted and tier placement remains manual in Canvas. Hub
+  AssignmentForge uses overrides only to restrict support pages to matching differentiation
+  tags; it never reads group membership or student IDs.
 - The New Quiz assignment shell accepts and reports `omit_from_final_grade` and
   `post_to_sis`. Differentiated delivery verifies both flags on every exact source and
   bridge assignment before the family link is saved.

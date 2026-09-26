@@ -31,7 +31,7 @@ def test_assignment_tier_operation_receipt_describes_complete_family_sources(mon
     operation = {
         "operation_id": "op-tiered",
         "kind": "content.assignment",
-        "normalized_payload": {"tiers": [
+        "normalized_payload": {"differentiation": "bridge", "tiers": [
             {"label": "Support", "title": "Practice - Red"},
             {"label": "Core", "title": "Practice - Blue"},
         ]},

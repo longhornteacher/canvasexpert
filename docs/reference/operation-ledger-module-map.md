@@ -38,6 +38,9 @@ results.
   assignment-draft creation, shared attachment uploads, each tier's printable upload,
   and exact-ID tiered reconcile. It performs no roster/group, override, module, or
   family-tail work.
+- `api/operation_ledger/adapters/assignment_hub.py` — restricted tier-page create,
+  visibility restriction, tag assignment, fail-closed publish, link substitution, and
+  exact-step reconciliation for Differentiated Hub AssignmentForge.
 - `api/operation_ledger/adapters/quiz_whole.py` — whole-class quiz coordinator and reconcile.
 - `api/operation_ledger/adapters/quiz_differentiated.py` — differentiated quiz
   coordinator, extra-time bucket handling, variant failure-state policy, shared

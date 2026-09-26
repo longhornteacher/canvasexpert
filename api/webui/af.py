@@ -278,18 +278,20 @@ def _validate_extras(value, path, problems):
         _html(item.get("html"), f"{item_path}.html", problems)
 
 
-def _validate_tiers(value, problems):
+def _validate_tiers(value, problems, style=None):
     if value is None:
         return
-    if not isinstance(value, list) or len(value) < 2:
-        problems.append("tiers must be an array with at least two tiers")
+    minimum = 1 if style == "hub" else 2
+    if not isinstance(value, list) or len(value) < minimum:
+        problems.append(f"tiers must be an array with at least {minimum} tier{'s' if minimum != 1 else ''}")
         return
     labels = set()
     for index, tier in enumerate(value):
         path = f"tiers[{index}]"
         if not _object(tier, path, problems):
             continue
-        _unknown_fields(tier, {"label", "overview", "directions", "supports"}, path, problems)
+        allowed = {"label", "supports"} if style == "hub" else {"label", "overview", "directions", "supports"}
+        _unknown_fields(tier, allowed, path, problems)
         label = tier.get("label")
         if not isinstance(label, str) or label.strip().casefold() not in TIER_LABELS:
             problems.append(f"{path}.label must be Support, Core, or Accelerate")
@@ -297,6 +299,10 @@ def _validate_tiers(value, problems):
             problems.append(f"{path}.label is duplicated")
         else:
             labels.add(label.strip().casefold())
+        if style == "hub" and ("overview" in tier or "directions" in tier):
+            problems.append(f"{path}: hub instructions belong on the hub")
+        if style == "hub" and tier.get("supports") is None:
+            problems.append(f"{path}.supports is required for hub tiers")
         if "overview" in tier:
             _html(tier["overview"], f"{path}.overview", problems)
         if "directions" in tier:
@@ -329,7 +335,14 @@ def validate(d):
             problems.append(f'version must be "2.0-json" (got {d.get("version")!r})')
     if d.get("type") != "ASSIGNMENT":
         problems.append(f"type must be ASSIGNMENT (got {d.get('type')!r}) — pages use PageForge")
-    _unknown_fields(d, {"version", "type", "title", "points", "submission", "overview", "directions", "sections", "rubric", "supports", "extras", "unit_info", "tiers", "corrections", "metadata", "attachments"}, "payload", problems)
+    _unknown_fields(d, {"version", "type", "title", "points", "submission", "overview", "directions", "sections", "rubric", "supports", "extras", "unit_info", "tiers", "differentiation", "corrections", "metadata", "attachments"}, "payload", problems)
+    style = d.get("differentiation")
+    if "differentiation" in d and style not in {"bridge", "hub"}:
+        problems.append('differentiation must be "bridge" or "hub"')
+    if d.get("tiers") is not None and style not in {"bridge", "hub"}:
+        problems.append("Ask the teacher which differentiation style to use, then re-fetch the AssignmentForge authoring contract.")
+    if d.get("tiers") is None and "differentiation" in d:
+        problems.append('differentiation is only valid when "tiers" is present')
     _required_text(d.get("title"), "title", problems)
     points = d.get("points")
     if not _is_nonnegative_number(points):
@@ -342,7 +355,7 @@ def validate(d):
     _validate_supports(d.get("supports"), "supports", problems)
     _validate_extras(d.get("extras"), "extras", problems)
     _validate_unit_info(d.get("unit_info"), "unit_info", problems)
-    _validate_tiers(d.get("tiers"), problems)
+    _validate_tiers(d.get("tiers"), problems, style=style)
     _validate_corrections(d.get("corrections"), problems)
     validate_attachments(d.get("attachments"), problems)
     return problems

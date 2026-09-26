@@ -247,9 +247,9 @@ def canonical_tier(value: object) -> str:
     )
 
 
-def resolve_public_tags(labels: list[object]) -> list[dict]:
-    if len(labels) < 2:
-        raise ValueError("Differentiated delivery requires at least two tiers")
+def resolve_public_tags(labels: list[object], minimum_tiers: int = 2) -> list[dict]:
+    if len(labels) < minimum_tiers:
+        raise ValueError(f"Differentiated delivery requires at least {minimum_tiers} tier{'s' if minimum_tiers != 1 else ''}")
     configured = config.get_tier_tags()
     resolved = []
     seen_tags: dict[str, str] = {}
