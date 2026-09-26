@@ -47,7 +47,9 @@ INSTRUCTION_BUDGET = 2200
 # model now supplies structured fields (explanation, glows, grows, fixes)
 # instead of one free-text feedback string, and stage_scoring_results gained
 # exemplars/disclosure. No persona field survives to offset the cost.
-LISTING_BUDGET = 18841
+# Raised to the measured 18,902 when that work landed on top of the v62
+# stage_attachment tool, which had fit under the older ceiling by itself.
+LISTING_BUDGET = 18902
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
