@@ -61,7 +61,6 @@ Source tests never substitute for rendered verification.
 | `/ai-expert` | **AI helper files** — paste-ready LLM skill files | inline |
 | `/course` | Course Info detail page | `course_info.js` |
 | `/settings` | Settings | `settings.js` |
-| `/calendar` | **Calendar** — school dates, Bell Schedules, Teacher Schedule | `pages/calendar.js` |
 | `/routines` | **Routines** — local automation control surface | inline / route-driven |
 | `/about` | What-is-Canvas-Expert explainer | — |
 
@@ -384,6 +383,13 @@ selected course via five tabs.
 ### Tab 1 — Policy & Sweep
 **Course-wide late policy**: %/day deduction, grade floor, missing-work score.
 Auto-loads when a course is selected. Writes via Canvas native late-policy API.
+
+**Grading policy** (`routes/gradebook_policy.py`, `gradebook/grading_policy.js`): a sibling
+panel for the Scoring Session effort-credit and teacher-confirmed late-day policy
+(`docs/contracts/grading-policy-contract.md`): floor percent, missing percent, sweep-after
+school days, and a workspace-wide no-school-dates list. Saving refuses a floor below the
+missing percent and shows advisory warnings read from the cached course late policy. No Web
+UI scoring queue; the policy only takes effect inside a Scoring Session.
 
 **Late-work sweep**: user picks a date range (grading-period chips default to
 current/next period). The sweep counts *school days* late — every no-count date from

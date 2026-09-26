@@ -49,7 +49,10 @@ INSTRUCTION_BUDGET = 2200
 # exemplars/disclosure. No persona field survives to offset the cost.
 # Raised to the measured 18,902 when that work landed on top of the v62
 # stage_attachment tool, which had fit under the older ceiling by itself.
-LISTING_BUDGET = 18902
+# Raised to the measured 18,964 for the scoring-lane effort-credit brief:
+# ScoringResult (stage_scoring_results's per-row shape) gains two optional
+# fields, insincere and late_days.
+LISTING_BUDGET = 18964
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {

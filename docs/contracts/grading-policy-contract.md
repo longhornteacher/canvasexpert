@@ -57,8 +57,7 @@ One record per course in the synced workspace settings, beside `extra_time`:
 {"floor_percent": 30, "missing_percent": 20, "sweep_after_school_days": 15}
 ```
 
-Plus one workspace-wide `no_school_dates` list of ISO dates (reuse the existing synced
-`late_sweep.holidays` key, which has a reader but no writer today).
+Plus one workspace-wide, top-level synced `no_school_dates` list of ISO dates.
 
 Setup lives in one small control-console panel beside the existing course late-policy
 controls: the three numbers and the no-school dates. On save it reads the cached course late
@@ -70,17 +69,28 @@ No record means today's behavior everywhere.
 
 ## 5. Scoring lane
 
-The AI results contract is unchanged except one optional row field, `insincere: true`, which
-is a proposal. `feedback_results.reidentify` carries it to the session row.
+Effort credit and teacher-confirmed late days are Scoring Session features only; Score myself
+and Auto-score sessions are untouched. The AI results contract is unchanged except two optional
+row fields, `insincere` (a proposal) and `late_days` (an integer 0-60); both must agree across
+every item row of one pseudonym. `stage_scoring_results` reads them straight from the incoming
+results (index-aligned with the reidentified rows, mapped by canvas_id) and stamps a `grading`
+record on each staged student, in a course with a policy.
+
+**Suggested late days.** Both the cached due date and the submission timestamp convert to
+`freshness_policy.LOCAL_TIMEZONE` local dates. Not late (`submitted_at <= cached_due_date`)
+suggests 0; otherwise `max(0, max(1, school_days_between(due_date, submitted_date)) -
+grace_days)`, where `school_days_between` counts Monday-Friday dates after the due date and
+through the submission date, excluding `no_school_dates`. A late submission is always at least
+1 day (same-day-late, or a Saturday right after a Friday due date, both suggest 1); weekends
+and no-school dates never add.
 
 `scoring_apply.build_plan` adds two question kinds when the course has a policy:
 
 - **Insincere attempts.** Every row proposed insincere becomes a teacher question. An
   unconfirmed row is treated as sincere.
 - **Late days.** One question listing each row Canvas marks late, with Canvas's day count and
-  a suggested count: school days from the student's `cached_due_date` to `submitted_at`,
-  minus grace days, floored at 0. The teacher accepts the suggestions or gives a number per
-  row. The review never says why a suggestion differs from Canvas's count.
+  a suggested count. The teacher accepts the suggestions or gives a number per row. The review
+  never says why a suggestion differs from Canvas's count.
 
 `session_actions._payload` is the one place the mark and late fields are computed, so the
 projected payload in the plan digest is exactly what is sent:
@@ -91,13 +101,13 @@ projected payload in the plan digest is exactly what is sent:
   `ceil(seconds / 86400)`, so whole days map exactly.
 - Late days of 0: `submission.late_policy_status = "none"` (manual not-late; Canvas ignores
   any override then).
-- Feedback: when the mark differs from the score, the score line becomes
-  `Rubric score: <score>/<P>. Entered in the gradebook: <mark>/<P>.`, with
-  ` Canvas applies any late penalty to that.` when late days are above 0.
+- Feedback: when the mark differs from the score, append a final paragraph
+  `Entered in the gradebook: <mark>/<P>.`, with ` Canvas applies the late penalty to that.`
+  when late days are above 0. The rendered `Score:` line stays as the rubric score.
 
 Unchanged: one write per student, no readback, no verification GET, no reading of Canvas's
-deduction. The session student record gains `cached_due_date` and `late` for every
-submission, not only New Quiz rows.
+deduction. The session student record gains `cached_due_date`, `canvas_late`, and
+`seconds_late` for every submission, not only New Quiz rows.
 
 Known Canvas behavior: a student resubmission resets the status and override to nil; the
 teacher re-enters late days if they rescore.

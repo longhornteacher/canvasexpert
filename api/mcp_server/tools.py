@@ -38,7 +38,7 @@ import re
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
-from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, gradebook_queries, learning_objectives, live_verify, operational_log, roster_context, roster_service, sis_grade_bridge
+from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, grading_policy, gradebook_queries, learning_objectives, live_verify, operational_log, roster_context, roster_service, sis_grade_bridge
 from api.operation_ledger import claims as operation_claims
 from api.operation_ledger.adapters import forge_files
 from api.operation_ledger import executor as operation_executor
@@ -2896,6 +2896,62 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
             student["ai_feedback"] = row.get("feedback") or ""
             student["ai_item_results"] = item_by_uid.get(str(user_id), [])
 
+    # Effort credit and teacher-confirmed late days -- Scoring Sessions only
+    # (grading-policy-contract.md section 5). insincere/late_days are read
+    # straight from the incoming results, index-aligned with rows by canvas_id,
+    # and never threaded through reidentify or merge_rows_by_uid.
+    if session.get("session_kind") == "scoring_assignment":
+        policy = config.get_grading_policy(session.get("course_id"))
+        if policy:
+            grading_flags_by_uid: dict[str, dict] = {}
+            for raw, row in zip(results, rows):
+                if not isinstance(raw, dict):
+                    continue
+                canvas_id = str(row.get("canvas_id") or "")
+                if not canvas_id:
+                    continue
+                grading_flags_by_uid[canvas_id] = {
+                    "insincere": bool(raw.get("insincere", False)),
+                    "late_days": raw.get("late_days"),
+                }
+            grace_days_by_uid = {
+                str(entry.get("id")): int(entry.get("days") or 0)
+                for entry in (config.get_extra_time(session.get("course_id")) or [])
+                if entry.get("id") is not None
+            }
+            no_school_dates = config.get_no_school_dates()
+            points_possible = float((candidate.get("assignment") or {}).get("points_possible") or 0)
+            # Only this call's staged rows (by_uid) get a stamp written or
+            # refreshed. A candidate staged earlier and left out of this call
+            # keeps its earlier stamp untouched, in both the candidate used
+            # for the plan digest and the persisted session -- otherwise the
+            # two disagree and apply refuses as stage_changed.
+            for user_id, student in students_by_uid.items():
+                if user_id not in by_uid:
+                    continue
+                flags = grading_flags_by_uid.get(user_id, {})
+                grading = {
+                    "floor_percent": int(policy.get("floor_percent") or 0),
+                    "points_possible": points_possible,
+                    "insincere": bool(flags.get("insincere", False)),
+                    "late_days": flags.get("late_days"),
+                    "suggested_late_days": None,
+                    "canvas_late_days": None,
+                }
+                if student.get("canvas_late"):
+                    grace_days = grace_days_by_uid.get(user_id, 0)
+                    submitted_at = (student.get("submission_baseline") or {}).get("submitted_at")
+                    grading["suggested_late_days"] = grading_policy.suggested_late_days(
+                        student.get("cached_due_date"), submitted_at, grace_days, no_school_dates)
+                    seconds_late = student.get("seconds_late")
+                    if seconds_late is not None:
+                        grading["canvas_late_days"] = math.ceil(float(seconds_late) / 86400)
+                student["grading"] = grading
+        else:
+            for user_id, student in students_by_uid.items():
+                if user_id in by_uid:
+                    student.pop("grading", None)
+
     # Ordinary assignment risk planning. Its internal user ids are translated
     # before any question can cross MCP. Planning performs no Canvas read.
     if session.get("session_kind") == "scoring_assignment":
@@ -2957,6 +3013,10 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                         target["ai_score"] = staged.get("ai_score")
                         target["ai_feedback"] = staged.get("ai_feedback")
                         target["ai_item_results"] = staged.get("ai_item_results") or []
+                        if "grading" in staged:
+                            target["grading"] = staged["grading"]
+                        else:
+                            target.pop("grading", None)
                 normalized_answers = {str(key): str(value) for key, value in (answers or {}).items()}
                 selected_ids = [str(uid) for uid in resolved.get("user_ids") or []]
                 stage_identity = {
@@ -3252,16 +3312,24 @@ def _scoring_apply_safe(plan: dict, names: dict) -> dict:
     def label(user_id: str) -> str:
         return names.get(str(user_id)) or "(unknown student)"
 
+    def safe_question(question: dict) -> dict:
+        safe = {
+            "id": question["id"],
+            "detail": question["detail"],
+            "students": sorted(label(uid) for uid in question["user_ids"]),
+            "answer_with": question["options"],
+        }
+        if "rows" in question:
+            safe["rows"] = [
+                {"student": label(row.get("user_id")),
+                 "canvas_days": row.get("canvas_days"),
+                 "late_days": row.get("late_days")}
+                for row in question["rows"]
+            ]
+        return safe
+
     return {
         "students": sorted(label(uid) for uid in plan["candidate_ids"]),
-        "questions": [
-            {
-                "id": question["id"],
-                "detail": question["detail"],
-                "students": sorted(label(uid) for uid in question["user_ids"]),
-                "answer_with": question["options"],
-            }
-            for question in plan["questions"]
-        ],
+        "questions": [safe_question(question) for question in plan["questions"]],
         "notes": plan["notes"],
     }

@@ -227,4 +227,184 @@ def test_stage_scoring_results_missing_exemplar_refuses_with_item_ids_only(
     assert result["code"] == "missing_exemplars"
     assert result["item_ids"] == ["item-1"]
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
-    assert "Clear reasoning" not in _blob(result)
+
+
+def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fields(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """EXAMPLE: a grading-policy course posts the effort-credit mark and the
+    teacher-confirmed late fields in the same request, with the gradebook
+    line and late sentence appended to the comment (criteria 3 and 4)."""
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    session["students"][0].update({
+        "cached_due_date": "2026-09-25T23:59:00-05:00",   # Friday, due
+        "canvas_late": True,
+        "seconds_late": 100000,                            # canvas_late_days = 2
+        "submission_baseline": {"attempt": 1, "submitted_at": "2026-09-28T08:00:00-05:00"},  # Monday
+    })
+
+    from api.platform_services import config
+    from api.powergrader import scoring_apply
+    monkeypatch.setattr(config, "get_grading_policy", lambda course_id: {
+        "floor_percent": 30, "missing_percent": 20, "sweep_after_school_days": 15})
+    monkeypatch.setattr(config, "get_extra_time", lambda course_id: [])
+    monkeypatch.setattr(config, "get_no_school_dates", lambda: [])
+    sent = []
+    monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
+        lambda method, path, payload, timeout=30: (sent.append((method, path, payload)) or ({"id": 1}, None))
+    ))
+
+    result_with_grading = _result(6)
+    result_with_grading[0]["late_days"] = 1
+    digest = _digest(bundle)
+    first = tools.stage_scoring_results("session-1", result_with_grading, digest,
+                                        exemplars=EXEMPLARS)
+    assert first["status"] == "needs_teacher_input"
+    assert [q["id"] for q in first["questions"]] == ["late_days"]
+    # Pseudonymized, with a per-row count -- criterion 6.
+    assert first["questions"][0]["rows"] == [
+        {"student": PSEUDONYM, "canvas_days": 2, "late_days": 1}
+    ]
+    assert REAL_ID not in _blob(first) and REAL_NAME not in _blob(first)
+
+    staged = tools.stage_scoring_results(
+        "session-1", result_with_grading, digest, exemplars=EXEMPLARS,
+        review_digest=first["review_digest"], answers={"late_days": "post_late_days"})
+    assert staged["status"] == "staged"
+
+    applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+    assert applied["counts"]["finalized"] == 1
+    assert len(sent) == 1
+    method, path, payload = sent[0]
+    assert method == "PUT" and path.endswith(f"/submissions/{REAL_ID}")
+    assert payload["submission"]["posted_grade"] == "7"
+    assert payload["submission"]["late_policy_status"] == "late"
+    assert payload["submission"]["seconds_late_override"] == 86400
+    assert payload["comment"]["text_comment"].endswith(
+        "Entered in the gradebook: 7/10. Canvas applies the late penalty to that."
+    )
+    assert REAL_ID not in _blob(applied) and REAL_NAME not in _blob(applied)
+
+
+REAL_ID_A, REAL_NAME_A, PSEUDONYM_A = REAL_ID, REAL_NAME, PSEUDONYM
+REAL_ID_B, REAL_NAME_B, PSEUDONYM_B = "900456", "Beatrix Potter", "Eevee"
+
+
+def _wire_two_students(monkeypatch, tmp_path, _set_active_courses):
+    """A two-student variant of ``_wire`` for the earlier-candidate law below."""
+    _set_active_courses(["course-1"])
+    from api.powergrader import session_store
+    bundle = {"contract_version": "1.0", "students": [
+        {"pseudonym": PSEUDONYM_A, "responses": [
+            {"item_id": "item-1", "prompt": "Explain.",
+             "response": "A sufficiently long synthetic answer.", "possible": 10}]},
+        {"pseudonym": PSEUDONYM_B, "responses": [
+            {"item_id": "item-1", "prompt": "Explain.",
+             "response": "Another sufficiently long synthetic answer.", "possible": 10}]},
+    ]}
+    bundle_path = tmp_path / "safe-bundle.json"
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+    vault = Vault(str(tmp_path / "vault.json"))
+    vault.get_or_assign(REAL_ID_A, real_name=REAL_NAME_A)
+    vault.set_pseudonym(REAL_ID_A, PSEUDONYM_A)
+    vault.get_or_assign(REAL_ID_B, real_name=REAL_NAME_B)
+    vault.set_pseudonym(REAL_ID_B, PSEUDONYM_B)
+    vault.save()
+    monkeypatch.setattr(tools, "_vault_factory", lambda: vault)
+    session = {"session_id": "session-1", "session_kind": "scoring_assignment",
+        "course_id": "course-1", "assignment_id": "assignment-1", "assignment_name": "Essay",
+        "created": "2026-01-01T08:00:00", "status": "ready",
+        "scoring_basis": {"source": "canvas_rubric", "label": "Canvas rubric"},
+        "privacy_artifacts": {"safe_bundle": str(bundle_path)},
+        "assignment": {"points_possible": 10},
+        "students": [{"user_id": REAL_ID_A, "new_quiz_items": []},
+                     {"user_id": REAL_ID_B, "new_quiz_items": []}]}
+    sessions = {"session-1": session}
+    monkeypatch.setattr(session_store, "load_session", lambda sid: sessions.get(sid))
+    monkeypatch.setattr(session_store, "save_session", lambda updated: sessions.__setitem__(updated["session_id"], updated))
+    monkeypatch.setattr(session_store, "session_lock", lambda _sid: __import__("contextlib").nullcontext())
+    monkeypatch.setattr(session_store, "scope_lock", lambda _course, _assignment: __import__("contextlib").nullcontext())
+    monkeypatch.setattr(session_store, "list_session_summaries", lambda: [
+        {"session_id": value["session_id"], "session_kind": value.get("session_kind", ""),
+         "course_id": value.get("course_id", ""), "assignment_id": value.get("assignment_id", ""),
+         "created": value.get("created", ""), "status": value.get("status", ""),
+         "assignment_name": value.get("assignment_name", ""), "total": len(value.get("students") or [])}
+        for value in sessions.values() if value])
+    return session, bundle, sessions
+
+
+def _result_for(pseudonym, score=10, **extra):
+    return {"pseudonym": pseudonym, "item_id": "item-1", "score": score,
+            "explanation": "Clear reasoning throughout the response.",
+            "glows": ["Strong topic sentence.", "Concrete supporting detail."],
+            "grows": ["Add a closing sentence."],
+            "fixes": ["Add one more supporting detail.", "Write a closing sentence."],
+            **extra}
+
+
+def test_a_students_earlier_stamp_and_question_survive_staging_only_b_again(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """Senior correction: the grading-stamp loop and the no-policy pop in
+    ``_stage_scoring_results_locked`` must both restrict to this call's
+    staged rows (``by_uid``), not every candidate. A student staged earlier
+    (A, insincere) and left out of a later call that stages only B must keep
+    its earlier stamp -- in both the candidate used for the plan digest and
+    the persisted session -- and the plan must still carry A's insincere
+    question, all the way through a clean apply (no stage_changed)."""
+    _session, bundle, sessions = _wire_two_students(monkeypatch, tmp_path, _set_active_courses)
+    from api.platform_services import config
+    from api.powergrader import scoring_apply
+    monkeypatch.setattr(config, "get_grading_policy", lambda course_id: {
+        "floor_percent": 30, "missing_percent": 20, "sweep_after_school_days": 15})
+    monkeypatch.setattr(config, "get_extra_time", lambda course_id: [])
+    monkeypatch.setattr(config, "get_no_school_dates", lambda: [])
+    sent = []
+    monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
+        lambda method, path, payload, timeout=30: (sent.append((method, path, payload)) or ({"id": 1}, None))
+    ))
+
+    digest = _digest(bundle)
+    both_results = [_result_for(PSEUDONYM_A, 10, insincere=True), _result_for(PSEUDONYM_B, 10)]
+    first = tools.stage_scoring_results("session-1", both_results, digest)
+    assert first["status"] == "needs_teacher_input"
+    assert [q["id"] for q in first["questions"]] == ["insincere_attempt"]
+
+    staged = tools.stage_scoring_results(
+        "session-1", both_results, digest,
+        review_digest=first["review_digest"], answers={"insincere_attempt": "confirm_insincere"})
+    assert staged["status"] == "staged"
+
+    a_grading_after_first_stage = dict(
+        next(s for s in sessions["session-1"]["students"] if s["user_id"] == REAL_ID_A)["grading"])
+    assert a_grading_after_first_stage["insincere"] is True
+
+    # Stage only B this time -- A is left out of the results entirely.
+    b_only = [_result_for(PSEUDONYM_B, 9)]
+    second = tools.stage_scoring_results("session-1", b_only, digest, exemplars=EXEMPLARS)
+    assert second["status"] == "needs_teacher_input"
+    # A is still a candidate (staged, unposted) with its earlier insincere
+    # mark, so the plan still asks about it -- the bug this corrects would
+    # have silently reset A's stamp and dropped this question.
+    assert [q["id"] for q in second["questions"]] == ["insincere_attempt"]
+    assert second["questions"][0]["students"] == [PSEUDONYM_A]
+
+    second_staged = tools.stage_scoring_results(
+        "session-1", b_only, digest, exemplars=EXEMPLARS,
+        review_digest=second["review_digest"], answers={"insincere_attempt": "confirm_insincere"})
+    assert second_staged["status"] == "staged"
+
+    a_student = next(s for s in sessions["session-1"]["students"] if s["user_id"] == REAL_ID_A)
+    assert a_student["grading"] == a_grading_after_first_stage
+    assert REAL_ID_A not in _blob(second) and REAL_NAME_A not in _blob(second)
+
+    # No digest disagreement between what staging froze and what apply
+    # recomputes from the persisted session -- the concrete failure mode the
+    # bug produced (stage_changed).
+    applied = tools.apply_staged_scoring_results("session-1", second_staged["stage_digest"])
+    assert applied.get("code") != "stage_changed"
+    assert applied["counts"]["finalized"] == 2
+    posted_grades = {path.rstrip("/").split("/")[-1]: payload["submission"]["posted_grade"]
+                     for _method, path, payload in sent}
+    assert posted_grades[REAL_ID_A] == "10"   # insincere: posts unchanged
+    assert posted_grades[REAL_ID_B] == "9"    # mark(9, 10, 30, False) == 9

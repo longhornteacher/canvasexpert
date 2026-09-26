@@ -1,4 +1,4 @@
-"""Gradebook late-policy routes."""
+"""Gradebook late-policy and grading-policy routes."""
 import json
 
 from fastapi import APIRouter, Form
@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from api.platform_services.canvas_client import canvas_get, _canvas_send
 from api import operational_log
 from api.mirror import store as mirror_store
+from api.platform_services import config
 
 router = APIRouter(tags=["gradebook"])
 
@@ -78,3 +79,85 @@ def apply_late_policy(courses: str = Form(...), policy: str = Form(...)):
         results.append({"course_name": cname, "ok": ok, "error": err,
                         "title": f"late policy {'updated' if method == 'PATCH' else 'created'}"})
     return JSONResponse({"ok": all(r["ok"] for r in results), "results": results})
+
+
+# --- Grading policy: effort credit and teacher-confirmed late days ----------
+
+def _grading_policy_warnings(course_id: str, missing_percent) -> list:
+    """Advisory-only warnings from the cached course late policy, never a
+    live Canvas call. No cached policy means no warning."""
+    document = mirror_store.read_late_policy(course_id)
+    policy = document.get("policy") if isinstance(document, dict) else None
+    if not isinstance(policy, dict):
+        return []
+    warnings = []
+    if policy.get("missing_submission_deduction_enabled"):
+        warnings.append(
+            "Canvas's missing-submission policy is on for this course, so "
+            "Canvas may fill in missing work on its own overnight."
+        )
+    floor = policy.get("late_submission_minimum_percent")
+    if (missing_percent is not None and policy.get("late_submission_minimum_percent_enabled")
+            and floor is not None):
+        try:
+            if float(floor) < float(missing_percent):
+                warnings.append(
+                    "Canvas's lowest possible grade is set below the missing "
+                    "value entered here."
+                )
+        except (TypeError, ValueError):
+            pass
+    return warnings
+
+
+@router.get("/api/grading-policy")
+def get_grading_policy(course_id: str):
+    policy = config.get_grading_policy(course_id)
+    missing_percent = policy.get("missing_percent") if policy else None
+    return JSONResponse({"ok": True, "policy": policy,
+                         "warnings": _grading_policy_warnings(course_id, missing_percent)})
+
+
+@router.post("/api/grading-policy")
+def save_grading_policy(course_id: str = Form(...), policy: str = Form(...)):
+    try:
+        parsed = json.loads(policy)
+    except json.JSONDecodeError as e:
+        return JSONResponse({"ok": False, "error": f"bad request: {e}"})
+    if not parsed:
+        config.set_grading_policy(course_id, None)
+        return JSONResponse({"ok": True, "policy": None, "warnings": []})
+    try:
+        floor_percent = int(parsed["floor_percent"])
+        missing_percent = int(parsed["missing_percent"])
+        sweep_after_school_days = int(parsed["sweep_after_school_days"])
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse({"ok": False,
+                             "error": "Floor percent, missing percent, and sweep days must be whole numbers."})
+    if not (0 <= missing_percent <= floor_percent <= 100):
+        return JSONResponse({"ok": False,
+                             "error": "The floor percent must be at or above the missing percent, both between 0 and 100."})
+    if not (1 <= sweep_after_school_days <= 60):
+        return JSONResponse({"ok": False, "error": "Sweep days must be between 1 and 60."})
+    value = {"floor_percent": floor_percent, "missing_percent": missing_percent,
+             "sweep_after_school_days": sweep_after_school_days}
+    config.set_grading_policy(course_id, value)
+    return JSONResponse({"ok": True, "policy": value,
+                         "warnings": _grading_policy_warnings(course_id, missing_percent)})
+
+
+@router.get("/api/no-school-dates")
+def get_no_school_dates():
+    return JSONResponse({"ok": True, "dates": config.get_no_school_dates()})
+
+
+@router.post("/api/no-school-dates")
+def save_no_school_dates(dates: str = Form(...)):
+    try:
+        parsed = json.loads(dates)
+    except json.JSONDecodeError as e:
+        return JSONResponse({"ok": False, "error": f"bad request: {e}"})
+    if not isinstance(parsed, list):
+        return JSONResponse({"ok": False, "error": "dates must be a list"})
+    config.set_no_school_dates(parsed)
+    return JSONResponse({"ok": True, "dates": config.get_no_school_dates()})

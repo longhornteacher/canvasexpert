@@ -273,7 +273,7 @@ def _pin_mcp_freshness(monkeypatch, now):
 
     monkeypatch.setattr(freshness_policy, "datetime", FixedDateTime)
     monkeypatch.setattr(store, "datetime", FixedDateTime)
-    monkeypatch.setattr(freshness_policy.config, "get_late_sweep_holidays", lambda: [])
+    monkeypatch.setattr(freshness_policy.config, "get_no_school_dates", lambda: [])
     monkeypatch.setattr(tools.mirror_queries, "_serve_max_age_hours", lambda: 6.0)
 
 

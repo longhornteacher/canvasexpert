@@ -30,7 +30,7 @@ def test_freshness_policy_window_and_age_rule(
         monkeypatch, label, local_now, age_minutes, holidays,
         expected_window, expected_school_hours, expected_within):
     monkeypatch.setattr(
-        freshness_policy.config, "get_late_sweep_holidays", lambda: holidays)
+        freshness_policy.config, "get_no_school_dates", lambda: holidays)
     now = local_now.astimezone(ZoneInfo("UTC"))
     synced_at = (now - timedelta(minutes=age_minutes)).isoformat()
 

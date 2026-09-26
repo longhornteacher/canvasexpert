@@ -17,6 +17,8 @@ import re
 from datetime import datetime, timezone
 from functools import wraps
 
+from api import grading_policy
+from api.feedback_results import _format_number
 from api.powergrader import attribution
 from api.powergrader import blind_first
 from api.powergrader import session_store
@@ -78,14 +80,45 @@ def _payload(student: dict) -> dict:
     # ``posted_grade`` (curve/late/extension) but never writes feedback here.
     # See docs/reference/powergrader-scoring-map.md (Guardrails: single grading surface).
     score = student.get("teacher_score")
+    grading = student.get("grading")
     feedback = normalize_student_text(
         attribution.attribute(
             _strip_draft_banner((student.get("teacher_feedback") or "").strip())
         )
     )
+
+    # This is the only place the mark and late fields are computed, so the
+    # projected payload in a plan digest is exactly what gets sent (see
+    # docs/contracts/grading-policy-contract.md section 5). Without a
+    # ``grading`` stamp this function is byte-identical to today.
+    days = None
+    if grading:
+        points_possible = grading.get("points_possible")
+        posted_grade = grading_policy.mark(
+            score, points_possible, grading.get("floor_percent"), bool(grading.get("insincere")),
+        )
+        if student.get("canvas_late"):
+            days = grading.get("late_days")
+            if days is None:
+                days = grading.get("suggested_late_days")
+        if posted_grade is not None and score is not None and float(posted_grade) != float(score):
+            line = (f"Entered in the gradebook: {_format_number(posted_grade)}"
+                    f"/{_format_number(points_possible)}.")
+            if days is not None and days > 0:
+                line += " Canvas applies the late penalty to that."
+            feedback = f"{feedback}\n\n{line}" if feedback else line
+    else:
+        posted_grade = score
+
     payload: dict = {}
-    if score is not None:
-        payload["submission"] = {"posted_grade": str(score)}
+    if posted_grade is not None:
+        payload["submission"] = {"posted_grade": str(posted_grade)}
+        if grading and student.get("canvas_late") and days is not None:
+            if days > 0:
+                payload["submission"]["late_policy_status"] = "late"
+                payload["submission"]["seconds_late_override"] = days * 86400
+            else:
+                payload["submission"]["late_policy_status"] = "none"
     if feedback:
         payload["comment"] = {"text_comment": feedback}
     return payload

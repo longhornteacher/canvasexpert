@@ -404,6 +404,15 @@ def validate_results(results, bundle: dict = None, vault: Vault = None,
             _error(where, "writing_process_observations",
                    "'writing_process_observations' must be text")
 
+        if "insincere" in r and not isinstance(r.get("insincere"), bool):
+            _error(where, "insincere", "'insincere' must be a boolean")
+
+        if "late_days" in r:
+            late_days = r.get("late_days")
+            if (not isinstance(late_days, int) or isinstance(late_days, bool)
+                    or not (0 <= late_days <= 60)):
+                _error(where, "late_days", "'late_days' must be an integer from 0 to 60")
+
         sc = r.get("score", None)
         if sc is not None and not isinstance(sc, (int, float)):
             _error(where, "score", "'score' must be a number or null")
@@ -429,6 +438,28 @@ def validate_results(results, bundle: dict = None, vault: Vault = None,
                     ):
                         _error(where, "fixes",
                                "'fixes' must be a list of at least one non-empty string")
+
+    # A confirmed-insincere mark and a confirmed late-day count are per
+    # student, not per item: every item row for one pseudonym must agree, or
+    # the review has no single answer to stamp onto the session.
+    grading_by_pseudonym: dict[str, set] = {}
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        ps = r.get("pseudonym")
+        if not ps or not isinstance(ps, str):
+            continue
+        grading_by_pseudonym.setdefault(ps, set()).add(
+            (bool(r.get("insincere", False)), r.get("late_days", None))
+        )
+    for ps, values in grading_by_pseudonym.items():
+        if len(values) > 1:
+            errors.append(
+                f"pseudonym {ps}: 'insincere' and 'late_days' must agree across "
+                "every item row for one student"
+            )
+            fields.add("insincere")
+            fields.add("late_days")
 
     if bundle:
         for key in sorted(expected - seen):

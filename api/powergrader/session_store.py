@@ -431,6 +431,33 @@ def _scope_summaries(course_id, assignment_id) -> list[dict]:
     ]
 
 
+def posted_insincere_user_ids(course_id, assignment_id) -> set[str]:
+    """Canvas user ids posted with a teacher-confirmed insincere mark.
+
+    Scans every Scoring Session for this exact scope, including terminal and
+    fully posted ones -- ``current_actionable_session`` excludes those, so it
+    cannot be used here. A later curve must never lift a confirmed-insincere
+    row regardless of which session posted it.
+    """
+    user_ids: set[str] = set()
+    for summary in _scope_summaries(course_id, assignment_id):
+        session_id = str(summary.get("session_id") or "")
+        if not session_id:
+            continue
+        session = load_session(session_id)
+        if not session:
+            continue
+        for student in session.get("students") or []:
+            if not student.get("posted"):
+                continue
+            grading = student.get("grading") or {}
+            if grading.get("insincere"):
+                uid = str(student.get("user_id") or "")
+                if uid:
+                    user_ids.add(uid)
+    return user_ids
+
+
 def _newest_summary(summaries: list[dict]) -> dict | None:
     if not summaries:
         return None

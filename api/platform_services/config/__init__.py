@@ -40,6 +40,7 @@ from .mirror import (
 from .gradebook import (
     TIER_NAMES,
     get_extra_time, set_extra_time,
+    get_grading_policy, set_grading_policy,
     get_tier_tags, set_tier_tags,
     get_tier_colors, set_tier_colors,
 )
@@ -107,7 +108,7 @@ def save_sis_grade_bridge_verified(course_id: str, registration: dict) -> bool:
 from . import _io
 
 # --- routine schedule policy ---
-from .routines import get_late_sweep_holidays, get_routine_states, set_routine_state
+from .routines import get_no_school_dates, set_no_school_dates, get_routine_states, set_routine_state
 
 # Re-export public constants from _io so consumers can still access config.SERVICE etc.
 CANVAS_BASE_DEFAULT = _io.CANVAS_BASE_DEFAULT

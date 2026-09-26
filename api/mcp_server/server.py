@@ -71,6 +71,8 @@ class ScoringResult(TypedDict):
     grows: list[str]
     fixes: NotRequired[list[str]]
     writing_process_observations: NotRequired[str]
+    insincere: NotRequired[bool]
+    late_days: NotRequired[int]
 
 
 def run_stdio() -> None:

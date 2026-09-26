@@ -100,6 +100,33 @@
       <div id="lp-banner" class="push-banner" hidden></div>
     </div>
 
+    <!-- Grading policy card -->
+    <div class="ce-panel ce-gradebook-panel">
+      <h2>Grading policy <small class="lbl-hint">(Scoring Sessions)</small></h2>
+      <p class="ce-hint ce-gradebook-snapshot-lede">
+        Effort credit for sincere attempts and teacher-confirmed late days when you score with
+        an agent. Canvas still does the late-penalty math from the days you confirm.
+      </p>
+      <div class="ce-gradebook-grid ce-gradebook-grid--policy">
+        <label>Effort floor <small class="lbl-hint">%</small>
+          <input type="number" id="gp-floor" value="30" min="0" max="100" step="1">
+        </label>
+        <label>Missing value <small class="lbl-hint">%</small>
+          <input type="number" id="gp-missing" value="20" min="0" max="100" step="1">
+        </label>
+        <label>Sweep after <small class="lbl-hint">school days</small>
+          <input type="number" id="gp-sweep" value="15" min="1" max="60" step="1">
+        </label>
+      </div>
+      <label>No-school dates <small class="lbl-hint">(one ISO date per line, e.g. 2026-11-26)</small>
+        <textarea id="gp-no-school-dates" rows="4"></textarea>
+      </label>
+      <div class="ce-actions">
+        <button id="btn-save-grading-policy" class="primary">Save grading policy</button>
+      </div>
+      <p id="gp-status" class="status hint"></p>
+      <ul id="gp-warnings" class="ce-hint" hidden></ul>
+    </div>
 
   </div><!-- /policy panel -->
 
@@ -191,6 +218,7 @@
 </script>
 <script src="/static/gradebook.js?v={{ asset_v }}"></script>
 <script src="/static/gradebook/policy.js?v={{ asset_v }}"></script>
+<script src="/static/gradebook/grading_policy.js?v={{ asset_v }}"></script>
 <script src="/static/gradebook/extra_time.js?v={{ asset_v }}"></script>
 <script src="/static/gradebook/snapshot.js?v={{ asset_v }}"></script>
 {% endblock %}

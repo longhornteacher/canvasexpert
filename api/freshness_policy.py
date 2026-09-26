@@ -20,7 +20,7 @@ def policy_window_minutes(now: datetime | None = None,
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     local_now = now.astimezone(LOCAL_TIMEZONE)
-    configured_holidays = (config.get_late_sweep_holidays()
+    configured_holidays = (config.get_no_school_dates()
                            if holidays is None else holidays)
     holiday_dates = {str(value) for value in configured_holidays or ()}
     school_day = local_now.weekday() < 5 and local_now.date().isoformat() not in holiday_dates

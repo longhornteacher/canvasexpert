@@ -20,16 +20,25 @@ def set_routine_state(routine_id: str, patch: dict):
     _io_mod._modify_machine(mutate)
 
 
-def get_late_sweep_holidays() -> list[str]:
-    """Return valid configured holiday dates without exposing other settings."""
-    late_sweep = _io_mod._synced_state().get("late_sweep", {})
-    values = late_sweep.get("holidays", []) if isinstance(late_sweep, dict) else []
+def get_no_school_dates() -> list[str]:
+    """Return valid configured no-school dates, sorted and deduplicated."""
+    values = _io_mod._synced_state().get("no_school_dates", [])
     if not isinstance(values, list):
         return []
-    holidays = []
+    dates = []
     for value in values:
         try:
-            holidays.append(date.fromisoformat(str(value)).isoformat())
+            dates.append(date.fromisoformat(str(value)).isoformat())
         except (TypeError, ValueError):
             continue
-    return sorted(set(holidays))
+    return sorted(set(dates))
+
+
+def set_no_school_dates(dates: list[str]):
+    valid = []
+    for value in (dates or []):
+        try:
+            valid.append(date.fromisoformat(str(value)).isoformat())
+        except (TypeError, ValueError):
+            continue
+    _io_mod._save_synced_key("no_school_dates", sorted(set(valid)))

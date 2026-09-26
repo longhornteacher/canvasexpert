@@ -212,7 +212,7 @@
     if (!gbCourseId()) return;
     if (!_needsLoad(tab)) return;
     switch (tab) {
-      case "policy":     window.CE_GRADEBOOK.loadPolicy();     break;
+      case "policy":     window.CE_GRADEBOOK.loadPolicy();     window.CE_GRADEBOOK.loadGradingPolicy(); break;
       case "extra-time": window.CE_GRADEBOOK.loadRoster();     break;
       case "extensions": window.CE_GRADEBOOK.loadExtensions(); break;
       case "curves":     window.CE_GRADEBOOK.loadCurveAssignments(); break;

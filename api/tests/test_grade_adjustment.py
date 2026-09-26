@@ -122,9 +122,10 @@ def test_invalid_pseudonym_is_named_and_no_changes_are_refused(service_harness):
     }
 
 
-def test_rule_curve_never_lifts_a_missing_or_zero_row(monkeypatch):
-    """Law: a rule curve never changes a missing or zero row; an explicit
-    adjustment (the teacher fixing named rows) may still target them."""
+def test_rule_curve_never_lifts_a_missing_zero_or_insincere_row(monkeypatch):
+    """Law: a rule curve never changes a missing, zero, or posted
+    confirmed-insincere row; an explicit adjustment (the teacher fixing named
+    rows) may still target them."""
     baseline = {
         "course_id": "course-1", "assignment_id": "assignment-1",
         "assignment": {"id": "assignment-1", "name": "Curve Lab",
@@ -136,18 +137,24 @@ def test_rule_curve_never_lifts_a_missing_or_zero_row(monkeypatch):
              "before_excused": False, "skip_reason": None, "missing": False},
             {"user_id": "student-3", "eligible": True, "before": 0,
              "before_excused": False, "skip_reason": None, "missing": True},
+            {"user_id": "student-4", "eligible": True, "before": 5,
+             "before_excused": False, "skip_reason": None, "missing": False},
         ],
         "roster": [{"id": "student-1"}, {"id": "student-2"},
-                   {"id": "student-3"}],
+                   {"id": "student-3"}, {"id": "student-4"}],
         "synced_at": "2026-09-23T12:00:00Z",
         "freshness": {"state": "current", "within_policy": True},
     }
     vault = FakeVault()
+    vault.by_id["student-4"] = "Charmander"
     monkeypatch.setattr(config, "active_courses",
                         lambda: [{"id": "course-1", "name": "Synthetic Course"}])
     monkeypatch.setattr(grade_adjustment, "_vault", lambda: vault)
     monkeypatch.setattr(adapter_module, "_mirror_baseline",
                         lambda payload, target: copy.deepcopy(baseline))
+    from api.powergrader import session_store
+    monkeypatch.setattr(session_store, "posted_insincere_user_ids",
+                        lambda course_id, assignment_id: {"student-4"})
 
     rule_preview = grade_adjustment.preview_grade_adjustment(
         "course-1", "assignment-1",
@@ -159,17 +166,19 @@ def test_rule_curve_never_lifts_a_missing_or_zero_row(monkeypatch):
     ]
     assert rule_preview["preview"]["summary"]["skipped"]["zero"] == 1
     assert rule_preview["preview"]["summary"]["skipped"]["missing"] == 1
+    assert rule_preview["preview"]["summary"]["skipped"]["insincere"] == 1
 
     explicit_preview = grade_adjustment.preview_grade_adjustment(
         "course-1", "assignment-1",
         {"kind": "explicit", "entries": [
             {"pseudonym": "Eevee", "new_score": 3},
             {"pseudonym": "Snorlax", "new_score": 2},
+            {"pseudonym": "Charmander", "new_score": 8},
         ]},
     )
     assert explicit_preview["ok"] is True
     assert {row["pseudonym"] for row in explicit_preview["preview"]["changed"]} == {
-        "Eevee", "Snorlax",
+        "Eevee", "Snorlax", "Charmander",
     }
 
 

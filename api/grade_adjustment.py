@@ -12,6 +12,7 @@ from api.operation_ledger.adapters.grade_adjustment import (
     KIND, GradeAdjustmentAdapter, _is_number, _number, _numbers_equal,
 )
 from api.platform_services import config
+from api.powergrader import session_store
 
 
 _RULES = {"flat_bump", "target_average", "proportional", "floor_cap"}
@@ -204,12 +205,16 @@ def _prepare_entries(baseline: dict, adjustment: dict, vault) -> tuple[list[dict
     extra_skipped = {}
 
     if kind == "rule":
+        insincere_ids = session_store.posted_insincere_user_ids(
+            baseline.get("course_id"), baseline.get("assignment_id"))
         rule_rows = []
         for row in eligible:
             if row.get("missing"):
                 extra_skipped["missing"] = extra_skipped.get("missing", 0) + 1
             elif _numbers_equal(row.get("before"), 0):
                 extra_skipped["zero"] = extra_skipped.get("zero", 0) + 1
+            elif str(row.get("user_id")) in insincere_ids:
+                extra_skipped["insincere"] = extra_skipped.get("insincere", 0) + 1
             else:
                 rule_rows.append(row)
         scores = [float(row["before"]) for row in rule_rows]

@@ -114,6 +114,8 @@ line, only when the teacher asked for one this session.
 | `grows` | yes | 1-2 specific areas to improve, at least one non-empty string. |
 | `fixes` | required when the row is not at full marks | 2-4 concrete changes doable by hand in a second draft. |
 | `writing_process_observations` | no | Separate, teacher-only local observation; never student feedback or a score input. |
+| `insincere` | no | A sincere-attempt proposal, in a course with a grading policy; must agree across every item row of one pseudonym. |
+| `late_days` | no | An integer 0-60, in a course with a grading policy; must agree across every item row of one pseudonym. |
 
 `exemplars` is a separate `{item_id: text}` argument to `stage_scoring_results`,
 not a per-result field: one shared model answer per item, written once and used
@@ -202,8 +204,13 @@ refresh, no score equality comparison, no comment-count or latest-comment compar
 may apply a late/missing policy or any other gradebook adjustment; CE neither changes that
 policy nor asks about, reads, calculates, displays, or treats the adjusted result as a write
 failure. The teacher reviews the result in Canvas and may edit it there; that review is not an
-automated CE responsibility. CE sends no `late_policy_status`, `seconds_late_override`,
-`excuse`, or other policy/gradebook adjustment field, and requests no course late policy.
+automated CE responsibility. CE sends no `excuse` or other policy/gradebook adjustment field,
+and requests no course late policy. In a course with a grading policy
+(`docs/contracts/grading-policy-contract.md`), `posted_grade` is the effort-credit mark rather
+than the raw rubric score, and a Scoring Session sends `late_policy_status` and
+`seconds_late_override` for the teacher-confirmed late-day count -- the only two exceptions to
+"no policy/gradebook adjustment field." Without a grading policy, CE sends neither field and
+the posted value stays the raw score, exactly as before.
 
 A Canvas HTTP success means the write was accepted; CE records that compact receipt and moves
 on. A non-HTTP transport error is `write_transport_unknown`: it performs no later verification

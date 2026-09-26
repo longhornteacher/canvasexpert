@@ -55,7 +55,9 @@ def test_send_writes_the_raw_score_and_plain_text_comment_once():
 
 
 def test_no_late_policy_or_gradebook_adjustment_field_is_sent():
-    """LAW: CE sends no policy/gradebook adjustment field and requests no policy."""
+    """LAW: without a ``grading`` stamp, CE sends no policy/gradebook
+    adjustment field and requests no policy -- byte-identical to a course
+    with no grading policy."""
     session = _session()
     sent = []
 
@@ -73,6 +75,34 @@ def test_no_late_policy_or_gradebook_adjustment_field_is_sent():
     for forbidden in ("late_policy_status", "seconds_late_override", "excuse",
                       "points_deducted", "late_policy"):
         assert forbidden not in blob
+
+
+def test_late_fields_appear_only_with_a_grading_stamp():
+    """LAW: the late submission fields are sent only when a ``grading``
+    stamp is present (a grading-policy course) and the row is Canvas-late."""
+    session = _session()
+    session["students"][0]["canvas_late"] = True
+    session["students"][0]["grading"] = {
+        "floor_percent": 30, "points_possible": 10,
+        "insincere": False, "late_days": 1,
+        "suggested_late_days": 1, "canvas_late_days": 1,
+    }
+    session["students"][0]["teacher_score"] = 6
+    sent = []
+
+    def send(method, path, payload):
+        sent.append(payload)
+        return {}, None
+
+    session_actions.push_grades(
+        "session-1", user_ids='["user-1"]',
+        load_session=lambda _: session, save_session=lambda _: None,
+        canvas_send=send,
+    )
+
+    assert sent[0]["submission"]["posted_grade"] == "7"
+    assert sent[0]["submission"]["late_policy_status"] == "late"
+    assert sent[0]["submission"]["seconds_late_override"] == 86400
 
 
 def test_successful_send_performs_no_canvas_read():

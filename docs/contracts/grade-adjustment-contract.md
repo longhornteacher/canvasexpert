@@ -24,7 +24,9 @@ does the other's job.
 - Eligible rows: a numeric `entered_score`, not excused, current enrollment. Every other
   row is skipped and counted by reason (`excused`, `no_score`, `not_current`). A `rule`
   adjustment additionally skips, after those three, a row whose mirror `missing` is true
-  (`missing`) or whose `entered_score` is 0 (`zero`); `explicit` and `revert` may still
+  (`missing`), whose `entered_score` is 0 (`zero`), or that a Scoring Session posted with a
+  teacher-confirmed insincere mark for this exact assignment (`insincere`, read locally from
+  the session store, never sent to the agent as a reason); `explicit` and `revert` may still
   target those rows.
 - A mirror row with a numeric `score` but no `entered_score` key predates this mirror
   change. Canvas only deducts from late submissions, so a non-late row's `score` already

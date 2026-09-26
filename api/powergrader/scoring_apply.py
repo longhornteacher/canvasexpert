@@ -54,6 +54,8 @@ QUESTION_OPTIONS: dict[str, tuple[str, ...]] = {
     "missing_score": ("comment_only", "skip_those"),
     "pseudonym_in_feedback": ("skip_those", "post_anyway"),
     "held_not_scored": ("proceed", "stop"),
+    "insincere_attempt": ("confirm_insincere", "stop"),
+    "late_days": ("post_late_days", "stop"),
 }
 
 # Answers that drop the question's affected rows from the write. Everything
@@ -103,14 +105,16 @@ def default_transports():
     return _canvas_send
 
 
-def _question(kind: str, detail: str, user_ids: list[str]) -> dict:
-    return {
+def _question(kind: str, detail: str, user_ids: list[str], **extra) -> dict:
+    question = {
         "id": kind,
         "kind": kind,
         "detail": detail,
         "user_ids": sorted(user_ids),
         "options": list(QUESTION_OPTIONS[kind]),
     }
+    question.update(extra)
+    return question
 
 
 def build_plan(session: dict, *, pseudonyms=()) -> dict:
@@ -157,6 +161,12 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
     receives_nothing = [str(s["user_id"]) for s in students
                         if not _staged(s) and not s.get("posted")]
 
+    # Grading-policy facts, stamped only on candidates in a policy course
+    # (docs/contracts/grading-policy-contract.md section 5).
+    insincere = [str(s["user_id"]) for s in candidates if (s.get("grading") or {}).get("insincere")]
+    late_candidates = [s for s in candidates
+                       if s.get("grading") and s.get("canvas_late")]
+
     questions = []
     if above:
         questions.append(_question(
@@ -178,6 +188,27 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
             "These submissions have nothing staged and would receive nothing. "
             "Attachment-only and media-only work is held out of AI packets.",
             receives_nothing))
+    if insincere:
+        questions.append(_question(
+            "insincere_attempt",
+            "These attempts get no effort credit and post their rubric score.",
+            insincere))
+    if late_candidates:
+        questions.append(_question(
+            "late_days",
+            "Confirm how many days late each of these submissions counts for grading.",
+            [str(s["user_id"]) for s in late_candidates],
+            rows=[
+                {
+                    "user_id": str(s["user_id"]),
+                    "canvas_days": (s.get("grading") or {}).get("canvas_late_days"),
+                    "late_days": ((s["grading"].get("late_days"))
+                                 if (s["grading"].get("late_days")) is not None
+                                 else s["grading"].get("suggested_late_days")),
+                }
+                for s in sorted(late_candidates, key=lambda s: str(s["user_id"]))
+            ],
+        ))
 
     return {
         "ok": True,

@@ -109,8 +109,13 @@ def build_students(
             "is_monitored":  bool(mon),
             "monitored_note": (mon or {}).get("note", ""),
             "extra_time_days": extra_days,
-            **({"new_quiz_attempt": s.get("new_quiz_attempt"), "canvas_late": bool(s.get("late")),
-                "seconds_late": s.get("seconds_late")} if s.get("new_quiz_attempt") is not None else {}),
+            # Every submission carries its due-date/late facts now, not only
+            # New Quiz rows -- Scoring Sessions need them for effort credit
+            # and teacher-confirmed late days (grading-policy-contract.md).
+            "cached_due_date": s.get("cached_due_date"),
+            "canvas_late":   bool(s.get("late")),
+            "seconds_late":  s.get("seconds_late"),
+            **({"new_quiz_attempt": s.get("new_quiz_attempt")} if s.get("new_quiz_attempt") is not None else {}),
         })
 
     students.sort(key=lambda x: x["real_name"].lower())
