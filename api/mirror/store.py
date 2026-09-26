@@ -290,13 +290,26 @@ def _rehydrate_student(vault, pseudonym: str, stored: dict) -> dict:
     }
 
 
+def _projection_vault(root=None):
+    """The vault a private roster/groups projection needs, or ``None``.
+
+    Those documents are pseudonym-keyed at rest; without the vault they cannot
+    become the real-identity projection their readers expect, so the read is
+    unavailable rather than a pseudonym-keyed stand-in.
+    """
+    from api.identity_vault_service import IdentityVaultUnavailable
+    try:
+        return _identity_vault(root)
+    except (IdentityVaultUnavailable, OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
 def _rehydrate_roster(document: dict | None, root=None) -> dict | None:
     if document is None:
         return None
-    try:
-        vault = _identity_vault(root)
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return document
+    vault = _projection_vault(root)
+    if vault is None:
+        return None
     result = dict(document)
     result["students"] = {
         _real_id_for(vault, pseudonym): _rehydrate_student(vault, pseudonym, stored)
@@ -308,10 +321,9 @@ def _rehydrate_roster(document: dict | None, root=None) -> dict | None:
 def _rehydrate_groups(document: dict | None, root=None) -> dict | None:
     if document is None:
         return None
-    try:
-        vault = _identity_vault(root)
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return document
+    vault = _projection_vault(root)
+    if vault is None:
+        return None
     result = dict(document)
     categories = []
     for category in document.get("categories", []):

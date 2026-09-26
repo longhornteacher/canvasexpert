@@ -90,6 +90,19 @@ def test_roster_unions_sections_for_a_user_listed_once_per_enrollment(tmp_path):
         {"course_section_id": "800001"}, {"course_section_id": "800002"}]
 
 
+def test_existing_roster_without_workspace_reads_as_unavailable(tmp_path, monkeypatch):
+    """The machine-cache mirror outlives the workspace; without the paired
+    vault a roster read is unavailable, never an exception or pseudonym rows."""
+    from api.platform_services import workspace
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
+    store.write_roster(COURSE, USERS, SECTIONS)
+    monkeypatch.setattr(workspace, "workspace_root", lambda: None)
+    assert store.read_roster(COURSE) is None
+    envelope = read_service.private_roster(COURSE, max_age_hours=6)
+    assert envelope["state"] == "unavailable"
+    assert envelope["records"] == []
+
+
 def test_roster_read_returns_none_for_missing_or_corrupt(tmp_path):
     assert store.read_roster(COURSE, root=str(tmp_path)) is None
     path = store.roster_path(COURSE, str(tmp_path))
