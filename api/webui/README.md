@@ -54,14 +54,13 @@ Source tests never substitute for rendered verification.
 |---|---|---|
 | `/` | **CanvasAgent** — local MCP, Canvas account, CanvasMirror, and privacy health | `canvasagent.html` + `canvasagent.js` |
 | `/course-expert` | **Create** — quiz, assignment, page, and quick-column tools | `push.js` + `push/*.js`, `course_expert/*.js` |
-| `/students/reports` | **Student reports** — packet and portfolio tools under Students | `student_reports.html` + `course_expert/student_reports.js` + `course_expert/portfolio.js` |
 | `/roster` | **Rosters** — student-level Canvas-group and local settings console | `roster.js`, `roster/*.js` |
 | Scoring Sessions | MCP only; cross-course discovery followed by teacher-selected assignment-bounded packets. No Canvas Expert scoring page or browser assets; review and edit posted results in Canvas Live. | `docs/reference/powergrader-scoring-map.md` |
 | `/ai-expert` | **AI helper files** — paste-ready LLM skill files | inline |
 | `/course` | Course Info detail page | `course_info.js` |
 | `/settings` | Settings | `settings.js` |
-| `/routines` | **Routines** — local automation control surface | inline / route-driven |
-| `/about` | What-is-Canvas-Expert explainer | — |
+| `/routines` | **Routines** — local automation control surface (`workspace/full`) | inline / route-driven |
+| `/receipts/{receipt_id}` | Read-only local receipt summary | `receipt.html`; detail remains private JSON |
 
 CanvasAgent's secondary Canvas refresh queues local read-only coordinator work and polls its
 opaque plan status. It does not scan or refresh retired Home work cards.
@@ -78,7 +77,7 @@ Create is split for low-token debugging.
 - Page/template owner: `course_expert.html`
 - Shared browser files: `push/core.js`, `push/file_sources.js`, `push/delivery.js`, `push/course_picker.js`, `push.js`
 - Feature files: `push/quiz.js`, `push/assignment.js`, `push/page.js`
-- Work tools page files: `course_expert/tabs.js`, `course_expert/student_reports.js`, `course_expert/portfolio.js`, `course_expert/quick_assignment.js`
+- Work tools page files: `course_expert/tabs.js`, `course_expert/quick_assignment.js`
 - Backend push routes: `routes/push.py`, `routes/push_validation.py`
 - Source-material facade/extractors: `source_materials.py`, `source_material_extractors.py`
 
@@ -109,8 +108,6 @@ Settings is stable but still browser-heavy.
 - Persistence facade: `config/__init__.py` with split modules under `config/`
 
 For the full ownership map, see `docs/reference/settings-module-map.md`.
-
-### Calendar module routing
 
 ### Scoring Sessions
 
@@ -158,10 +155,6 @@ current work; moving them back is reversible. **Add courses from Canvas** is the
 surface that browses every live Canvas course. Nicknames set here are the display
 names used throughout the app. Internally, `active_courses()` is the compatibility-
 named Current-course boundary and the persisted `active` field remains unchanged.
-
-### Class schedule & calendar
-Moved to the primary-nav **Calendar** page (`/calendar`) — see
-`docs/contracts/canonical-school-calendar-contract.md`. Settings links to it only.
 
 ### Download location
 Root folder for submission downloads. Each course gets its own subfolder.
@@ -325,8 +318,8 @@ to a canonical course-first folder tree: `Student Work/Submissions/<Course>/Assi
 entry), grading category, due date, publish — created in every checked course.
 No Forge file involved; for authored instructions use the Assignment tab.
 
-## Student reports (`/students/reports`)
-On-demand per-student packet: pick a course → load the roster → pick a student →
+## Student reports (`/roster?focus=reports`)
+Student reports are a view inside Rosters. Pick a course → load the roster → pick a student →
 check the sections to include → **Generate**. Runs across **every Current course**
 the student is in, not just the one used to load the roster.
 

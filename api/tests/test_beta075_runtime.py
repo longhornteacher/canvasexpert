@@ -177,17 +177,16 @@ def test_quick_fix_contract_and_version(monkeypatch, tmp_path):
 
     monkeypatch.setattr(server.config, "token_is_set", lambda: True)
     monkeypatch.setattr(server.config, "get_canvas_base", lambda: "https://canvas.invalid")
-    response = TestClient(server.app).get("/about")
-    assert response.status_code == 200
-    assert __version__ in response.text
-    assert "every assignment currently needing scoring" in response.text
-    assert "one pseudonymized assignment packet at a time" in response.text
+    client = TestClient(server.app)
+    retired_about = client.get("/about")
+    assert retired_about.status_code == 404
 
     # Consistent scoring feedback: personas are removed entirely. /settings
-    # renders with no Personas row, and the retired /api/feedback/* routes
-    # are gone (404), never rendered against the real workspace.
-    settings_response = TestClient(server.app).get("/settings")
+    # renders the current version with no Personas row, and the retired
+    # /api/feedback/* routes are gone (404).
+    settings_response = client.get("/settings")
     assert settings_response.status_code == 200
+    assert f"You are on {__version__}." in settings_response.text
     assert "Personas" not in settings_response.text
     personas_response = TestClient(server.app).get("/api/feedback/personas")
     assert personas_response.status_code == 404

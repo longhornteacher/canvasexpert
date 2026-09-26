@@ -53,10 +53,8 @@ Create feature scripts own:
   `window.CE_COURSE_EXPERT`
 - `course_expert/quick_assignment.js` - quick gradebook-column push
 
-Student Reports feature scripts are loaded only by `student_reports.html`:
-
-- `course_expert/student_reports.js` - roster load, monitor toggle, and student packet SSE
-- `course_expert/portfolio.js` - New Quizzes CSV portfolio and merged portfolio forms
+Student Reports is a view inside `/roster?focus=reports`; its template and scripts are
+owned by the Roster page and documented in `roster-module-map.md`.
 
 Shared push scripts still own the core push cards:
 
@@ -106,8 +104,6 @@ generation remains a separate later batch.
 ## First Places To Look By Symptom
 
 - Create tab deep-linking / shell glue: `course_expert/tabs.js`
-- Student Reports packet controls: `student_reports.html`, `course_expert/student_reports.js`
-- Student Reports NQ / merged portfolio forms: `student_reports.html`, `course_expert/portfolio.js`
 - Work tools quick assignment: `course_expert/quick_assignment.js`
 - target course picker: `push/course_picker.js`
 - module/category dropdowns or delivery settings: `push/delivery.js`,
@@ -125,8 +121,6 @@ generation remains a separate later batch.
   `engine/rendering/physical/`
 - Assignment evidence refresh: `api/powergrader/assignment_refresh.py` (shared owner)
   download-related routes
-- Student Reports/portfolio behavior: `student_reports.html`,
-  `course_expert/student_reports.js`, `course_expert/portfolio.js`, and report/portfolio routes
 
 ## Guardrails
 

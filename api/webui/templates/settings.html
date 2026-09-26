@@ -32,12 +32,11 @@
     </div>
 
     <div class="ce-rail-nav__group">
-      <p class="ce-rail-nav__kicker">Files &amp; calendars</p>
+      <p class="ce-rail-nav__kicker">Files</p>
       <div class="ce-rail-nav__links">
         <a href="#workspace-settings-card" data-rail-link>Workspace</a>
         <a href="#identity-vault-card" data-rail-link>Identity Vault</a>
         <a href="#download-root-card" data-rail-link>Downloads</a>
-        <a href="#calendar-card" data-rail-link>Class schedule &amp; calendar</a>
       </div>
     </div>
 
@@ -52,7 +51,7 @@
 {% endcall %}
 {% endblock %}
 
-{% block workspace_header %}{{ page_header('Settings', 'Your Canvas connection, courses, AI keys, folders, and calendars.') }}{% endblock %}
+{% block workspace_header %}{{ page_header('Settings', 'Your Canvas connection, courses, AI keys, and folders.') }}{% endblock %}
 
 {% block primary %}
 
@@ -370,17 +369,6 @@
     </label>
     <p id="download-root-status" class="status ce-settings-status"></p>
   </form>
-</section>
-
-<section class="ce-panel ce-settings-panel" id="calendar-card">
-  <h2>Class schedule &amp; calendar</h2>
-  <p class="ce-hint">
-    The Teacher Schedule, Bell Schedules, and the school-year calendar (used by
-    Late Work Sweep, Extensions, and Routines) all live on one page now.
-  </p>
-  <div class="ce-actions">
-    <a href="/calendar" class="ce-btn">Open Calendar</a>
-  </div>
 </section>
 
 <section class="ce-panel ce-settings-panel" id="update-card">

@@ -17,7 +17,7 @@ When connected through MCP, the assistant is the primary working surface for age
 cooperation: it can use CanvasExpert's local projections, create local drafts and reviewed
 records, and use narrowly bounded Canvas write paths. The local browser remains a small
 control console for setup, readiness, mirror status and refresh, operation review and
-  recovery, receipts, diagnostics, calendar and other local-only controls, plus any action
+  recovery, receipts, diagnostics and other local-only controls, plus any action
 that the current agent contract deliberately does not own.
 
 ## High-value capabilities
@@ -69,13 +69,9 @@ teacher-authorized narrow reviewed
 roster path can apply a `canvas_group` patch; this is not part of AssignmentForge tier
 delivery.
 
-The canonical local School Calendar provides dates, day kinds, grading periods, Bell
-Schedules, and Teacher Schedule data for the control console and local routines. There
-are no agent-facing schedule/calendar MCP tools in this contract. Calendar and schedule
-edits remain in the control console. Local Routines can download work, report grading
-debt, sweep late work, curve, refresh reports, or sync an already linked SIS bridge;
-custom Python routines are supported. They run on the teacher's machine when the app is
-open, not through a cloud scheduler.
+Canvas Expert has no Calendar page or school/bell/teacher schedule editor. There are no
+agent-facing schedule/calendar MCP tools in this contract. Local Routines run on the
+teacher's machine while the app is open, not through a cloud scheduler.
 
 ## Safe operating rules
 

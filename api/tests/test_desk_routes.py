@@ -98,15 +98,14 @@ def test_health_mapping_covers_client_mirror_privacy_and_overall_failure_paths()
         assert contract in script
 
 
-def test_student_reports_redirect_is_preserved(monkeypatch):
+def test_student_reports_compatibility_routes_are_retired(monkeypatch):
     monkeypatch.setattr(pages.config, "token_is_set", lambda: True)
     monkeypatch.setattr(pages.config, "get_canvas_base", lambda: "https://canvas.example.test")
 
     client = TestClient(server.app)
-    old_tab = client.get("/course-expert?tab=students", follow_redirects=False)
+    create = client.get("/course-expert?tab=students", follow_redirects=False)
     old_page = client.get("/students/reports", follow_redirects=False)
 
-    assert old_tab.status_code == 307
-    assert old_tab.headers["location"] == "/roster?focus=reports"
-    assert old_page.status_code == 307
-    assert old_page.headers["location"] == "/roster?focus=reports"
+    assert create.status_code == 200
+    assert "Location" not in create.headers
+    assert old_page.status_code == 404

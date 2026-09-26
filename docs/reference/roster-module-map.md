@@ -8,9 +8,9 @@ This is a retained control-console implementation map. Agent-facing roster reads
 bounded local changes start at the runtime/MCP contract; the browser entries below describe
 the console path and its safety seams, not a competing agent workflow.
 
-Student Reports is a separate surface at `/students/reports`; it does not share Roster
-state or mutation paths. Roster lenses are visual views over one loaded roster, not
-separate datasets.
+Student Reports is a view inside `/roster?focus=reports`; it uses the Roster page and
+its report routes. Roster lenses are visual views over one loaded roster, not separate
+datasets.
 
 ## Entry points and owners
 

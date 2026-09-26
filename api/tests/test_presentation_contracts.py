@@ -32,8 +32,8 @@ EXPECTED_PRESENTATION = {
     # with the other primary-nav pages instead of jumping inward.
     "/routines": ("routines.html", "workspace", "full", 0),
     "/course": ("course.html", "document", "wide", 0),
-    "/about": ("about.html", "document", "wide", 0),
     "/ai-expert": ("ai_expert.html", "document", "standard", 0),
+    "/receipts/{receipt_id}": ("receipt.html", "document", "standard", 0),
     "/welcome": ("welcome.html", "wizard", "", 0),
 }
 FEATURE_CSS = (
@@ -44,7 +44,6 @@ FEATURE_CSS = (
     "api/webui/static/pages/routines.css",
     "api/webui/static/pages/student_reports.css",
     "api/webui/static/pages/course.css",
-    "api/webui/static/pages/about.css",
     "api/webui/static/pages/ai_expert.css",
     "api/webui/static/pages/welcome.css",
 )
@@ -169,6 +168,12 @@ def test_shared_component_classes_are_not_javascript_hooks():
 
 def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_path):
     _configure_fictional(monkeypatch)
+    monkeypatch.setattr("api.webui.routes.receipts.receipts.list_receipts", lambda: [{
+        "receipt_id": "presentation-receipt", "subject_type": "routine",
+        "subject_id": "routine-id", "kind": "routine.run", "status": "applied",
+        "attempted_at": "2026-09-20T12:00:00Z", "completed_at": "2026-09-20T12:00:00Z",
+        "target_count": 0,
+    }])
     root = tmp_path / "CanvasExpert"
     routes = {
         "/": "/",
@@ -177,8 +182,8 @@ def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_pat
         "/settings": "/settings",
         "/routines": "/routines",
         "/course": "/course",
-        "/about": "/about",
         "/ai-expert": "/ai-expert",
+        "/receipts/{receipt_id}": "/receipts/presentation-receipt",
         "/welcome": "/welcome",
     }
     client = _client()
@@ -223,17 +228,11 @@ def test_migrated_routes_render_the_expected_isolated_shell(monkeypatch, tmp_pat
         ids = re.findall(r'\bid="([^"]+)"', text)
         assert len(ids) == len(set(ids)), url
 
-    for url in ("/powergrader", "/feedback-expert", "/api/powergrader/session/synthetic/packet"):
+    for url in ("/powergrader", "/feedback-expert", "/api/powergrader/session/synthetic/packet",
+                "/about", "/students/reports"):
         assert client.get(url).status_code == 404
+    assert client.get("/course-expert?tab=students").status_code == 200
     assert client.get("/connections").status_code == 404
-
-
-def test_student_reports_redirect_is_preserved(monkeypatch):
-    _configure_fictional(monkeypatch)
-    for url in ("/course-expert?tab=students", "/students/reports"):
-        response = _client().get(url, follow_redirects=False)
-        assert response.status_code == 307, url
-        assert response.headers["location"] == "/roster?focus=reports", url
 
 
 def test_create_first_session_notice_is_present_only_without_current_courses(monkeypatch):
@@ -258,12 +257,26 @@ def test_create_title_matches_its_navigation_and_page_title(monkeypatch):
     assert ">Create<" in text
 
 
-def test_settings_links_to_calendar_for_class_schedule(monkeypatch):
-    """Settings no longer owns the Class schedule editor -- Calendar does."""
+def test_settings_and_welcome_have_no_retired_calendar_links(monkeypatch):
     _configure_fictional(monkeypatch)
-    text = _client().get("/settings").text
-    assert 'id="calendar-card"' in text
-    assert 'href="#calendar-card"' in text
-    assert 'href="/calendar"' in text
-    assert 'id="class-schedule-card"' not in text
-    assert 'id="cal"' not in text
+    client = _client()
+    settings = client.get("/settings").text
+    welcome = client.get("/welcome").text
+    assert "/calendar" not in settings + welcome
+    assert "bell schedule" not in welcome.lower()
+    assert 'href="/"' in welcome
+
+
+def test_settings_and_welcome_internal_links_resolve(monkeypatch):
+    _configure_fictional(monkeypatch)
+    client = _client()
+    for route in ("/settings", "/welcome"):
+        text = client.get(route).text
+        ids = set(re.findall(r'\bid="([^"]+)"', text))
+        for fragment in re.findall(r'href="#([^"]+)"', text):
+            assert fragment in ids, f"{route} links to missing #{fragment}"
+        for target in re.findall(r'href="(/[^\"]*)"', text):
+            path = target.split("#", 1)[0].split("?", 1)[0]
+            if path.startswith(("/api/", "/static/")):
+                continue
+            assert client.get(path).status_code == 200, f"{route} links to missing {target}"

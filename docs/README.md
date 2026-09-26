@@ -40,13 +40,11 @@ Useful starting references for new debugging and refactor sessions:
 - `docs/reference/canvasmirror-1.0beta-information-spine.md` - grand vision, migration order,
   tool-to-Canvas routing, and release gates for making CanvasMirror the default project read
   spine without weakening live write preflights.
-- `docs/contracts/canonical-school-calendar-contract.md` - target authority for school dates,
-  bell/teacher schedule relationships, Calendar UI edits, and dependent-feature gates.
 - `docs/reference/course-expert-module-map.md` - Work tools push/download route, script, and template ownership map.
 - `docs/reference/settings-module-map.md` - Settings route/script/config ownership map.
 - `docs/reference/powergrader-scoring-map.md` - internal/private Scoring Session packet, privacy, and guarded-write implementation map (legacy filename).
 - `docs/reference/powergrader-module-map.md` - internal/private Scoring Session backend module map (legacy filename); no teacher-facing scoring UI remains.
-- `docs/reference/gradebook-module-map.md` - Remaining Gradebook services and runtime routing map.
+- `docs/reference/gradebook-module-map.md` - Remaining gradebook services and runtime routing map; no Gradebook console page.
 - `docs/reference/roster-module-map.md` - Roster route/script ownership and current hotspot map.
 - `docs/reference/assignment-corrections-design.md` - accepted private correction behavior for
   AssignmentForge results, its exact-ID association, and the remaining bounded constraints.

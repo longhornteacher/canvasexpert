@@ -1,0 +1,25 @@
+{% extends "layouts/document.html" %}
+{% block title %}{% if receipt %}Receipt — Canvas Expert{% else %}Receipt not found — Canvas Expert{% endif %}{% endblock %}
+{% block document_variant %}standard{% endblock %}
+{% block primary %}
+<div class="ce-page-header">
+  <h1>{% if receipt %}Receipt{% else %}Receipt not found{% endif %}</h1>
+</div>
+{% if receipt %}
+<section class="ce-panel" aria-label="Receipt summary">
+  <dl>
+    <dt>Status</dt><dd>{{ receipt.status }}</dd>
+    <dt>Kind</dt><dd>{{ receipt.kind }}</dd>
+    <dt>Time</dt><dd>{{ receipt.time }}</dd>
+    <dt>Subject</dt><dd>{{ receipt.subject }}</dd>
+    <dt>Targets</dt><dd>{{ receipt.target_count }}</dd>
+  </dl>
+  <p><a class="ce-btn" href="{{ receipt.action_url }}">{{ receipt.action_label }}</a></p>
+</section>
+{% else %}
+<section class="ce-panel" role="status">
+  <p>No receipt was found for this link.</p>
+  <a class="ce-btn" href="/">Open CanvasAgent</a>
+</section>
+{% endif %}
+{% endblock %}

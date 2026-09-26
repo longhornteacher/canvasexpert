@@ -20,7 +20,6 @@ from api.webui.server import app
 
 EXPECTED = [
     ('/', ('GET',)),
-    ('/about', ('GET',)),
     ('/ai-expert', ('GET',)),
     ('/api/af/validate', ('POST',)),
     ('/api/ai-ta/file', ('GET',)),
@@ -89,7 +88,7 @@ EXPECTED = [
     ('/redoc', ('GET',)),
     ('/routines', ('GET',)),
     ('/settings', ('GET',)),
-    ('/students/reports', ('GET',)),
+    ('/receipts/{receipt_id}', ('GET',)),
     ('/settings/canvas', ('POST',)),
     ('/settings/courses/bookmark', ('POST',)),
     ('/settings/courses/{course_id}/remove', ('POST',)),

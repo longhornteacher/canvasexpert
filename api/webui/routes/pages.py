@@ -1,10 +1,9 @@
 """HTML page routes for Canvas Expert.
 
-One APIRouter; all 9 GET page routes + the /api/open-path utility POST.
+One APIRouter for retained page routes and the /api/open-path utility POST.
 Imported by server.py via app.include_router(router).
 
-Routes: GET /, /about, /ai-expert, /course, /course-expert,
-        /roster, /routines, /settings
+Routes: GET /ai-expert, /course, /course-expert, /roster, /routines, /settings
         POST /api/open-path
 """
 import glob
@@ -14,7 +13,7 @@ import subprocess
 import sys
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from api.platform_services import config, workspace
 from engine.rendering.forge.palette import PALETTES
@@ -35,7 +34,7 @@ router = APIRouter(tags=["pages"])
 # --------------------------------------------------------------------------
 
 def _routines_template_context() -> dict:
-    """Template values shared by the standalone route and the Gradebook tab."""
+    """Template values shared by the standalone route."""
     def _entry(name):
         return {"name": name, "path": os.path.normpath(os.path.join(_CUSTOM_DIR, name))}
 
@@ -56,8 +55,6 @@ def _routines_template_context() -> dict:
 
 @router.get("/course-expert", response_class=HTMLResponse)
 def course_expert_page(request: Request):
-    if request.query_params.get("tab") == "students":
-        return RedirectResponse("/roster?focus=reports", status_code=307)
     skills = list_ai_ta_files()
     return templates.TemplateResponse(request, "course_expert.html", {
         **_push_base_ctx(request),
@@ -70,12 +67,6 @@ def course_expert_page(request: Request):
             "page":       _authoring_skill(skills, "Author a Page"),
         },
     })
-
-
-@router.get("/students/reports")
-def student_reports_page():
-    """Reports are a view inside the Students page; keep old links working."""
-    return RedirectResponse("/roster?focus=reports", status_code=307)
 
 
 def _authoring_skill(skills: list, prefix: str) -> str:
@@ -127,11 +118,6 @@ def roster_page(request: Request):
         "canvas_base":   config.get_canvas_base(),
         "saved_courses": config.active_courses(),
     })
-
-
-@router.get("/about", response_class=HTMLResponse)
-def about(request: Request):
-    return templates.TemplateResponse(request, "about.html", {"nav_section": "help"})
 
 
 @router.get("/course", response_class=HTMLResponse)

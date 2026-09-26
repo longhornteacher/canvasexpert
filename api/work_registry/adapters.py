@@ -97,7 +97,7 @@ def _receipt_jobs() -> list[dict]:
         output.append(_project(
             kind="operation_receipt", origin="system", source_type="operation_receipt",
             source_value=receipt_id, course_ids=[], assignment_id="",
-            resume_url=f"/api/receipts/{receipt_id}", status=status,
+            resume_url=f"/receipts/{receipt_id}", status=status,
             counts={"total": 0, "pending": 0, "affected": 0},
             attention_reason="Operation receipt needs attention" if status == "attention" else "",
         ))

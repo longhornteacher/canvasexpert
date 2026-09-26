@@ -65,8 +65,6 @@ Current split:
 - token/base URL problems: `settings/account.js`, `settings.js`, `routes/settings.py`, `config/canvas.py`
 - Current/Previous course problems: `settings/courses.js`, `settings.js`, `routes/settings.py`,
   `config/courses.py`
-- calendar/schedule problems: see
-  `docs/contracts/canonical-school-calendar-contract.md` (owned by the Calendar page, not Settings)
 - workspace/AI Authoring folder issues: `settings.html`, `settings/workspace.js`, `settings.js`,
   `api/platform_services/workspace.py`, `api/webui/ai_ta.py`
 
@@ -77,8 +75,6 @@ Current split:
 - Do not add district URLs, real calendars, teacher names, or other district-specific
   defaults to source.
 - Keep Settings local-only and do not introduce a public callback or OAuth route.
-  the canonical `School Calendar.json` is written only by the Calendar page and local
-  control-console services (see `docs/contracts/canonical-school-calendar-contract.md`).
 - Preserve the `config.*` facade and storage keys unless a migration is explicitly
   planned and tested.
 - `config.active_courses()` is the compatibility-named Current-course boundary for

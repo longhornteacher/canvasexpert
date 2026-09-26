@@ -39,14 +39,6 @@
 .ce-settings-cal-actions { margin-top: 0; flex-wrap: wrap; }
 .ce-settings-cal-empty { margin: 0; }
 .ce-settings-cal-status { margin-top: 10px; }
-.ce-settings-calendar-details { margin-top: 18px; }
-.ce-settings-calendar-details .delivery-inner { margin-top: var(--ce-space-2); padding-top: var(--ce-space-3); border-top: 1px solid var(--ce-rule); }
-.ce-settings-calendar-details .delivery-summary { cursor: pointer; color: var(--ce-ink); font-weight: 700; }
-.ce-settings-calendar-details .delivery-summary::before { content: '▸'; display: inline-block; margin-right: var(--ce-space-1); font-size: 10px; transition: transform .15s; }
-.ce-settings-calendar-details[open] > .delivery-summary::before { transform: rotate(90deg); }
-.ce-settings-calendar-details--nested { margin-bottom: var(--ce-space-3); }
-.ce-settings-calendar-details--nested .delivery-summary { font-size: 12.5px; }
-.ce-settings-calendar-details--nested p { font-size: 12px; }
 .ce-settings-prompt { resize: none; cursor: text; font-size: 12px; }
 .ce-settings-preview { margin: var(--ce-space-2) 0; padding: 10px 14px; border: 1px solid var(--ce-rule); background: var(--ce-surface-soft); font-size: 13px; }
 .cal-row { display: flex; align-items: center; justify-content: space-between; gap: var(--ce-space-2); margin-bottom: var(--ce-space-2); padding: var(--ce-space-2) var(--ce-space-3); border: 1px solid var(--ce-rule); background: var(--ce-surface-soft); }
@@ -77,5 +69,4 @@
   .profiles td:nth-child(2) { overflow-wrap: anywhere; }
   .profiles td:nth-child(4), .profiles td:nth-child(5) { display: inline-block; width: auto; padding-right: var(--ce-space-2); }
   .profiles td:nth-child(4)::before, .profiles td:nth-child(5)::before { display: none; }
-  .ce-schedule-block-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
 }

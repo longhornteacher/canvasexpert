@@ -96,13 +96,13 @@ source of truth for route, template, layout, variant, rail count, and migration 
 This is a retained control-console presentation contract, not a mandate to add browser
 routes or duplicate agent-facing workflows.
 CanvasAgent uses `workspace/full`; Create uses `workspace/three`;
-Gradebook, Students, and Settings use `workspace/left-main`;
-Routines, Course Info, and About use `document/wide`; AI Expert uses
-`document/standard`; and Welcome uses `wizard`. Student reports is not a route
-presentation: it is a view inside the Students page (`_student_reports_panels.html`
-included by `roster.html`, selected by `?focus=reports`), and `/students/reports`
-redirects there. The document layout required
-no interface adjustment at first use. The wizard shell provides the same responsive
+Students and Settings use `workspace/left-main`; Routines uses `workspace/full`;
+Course Info uses `document/wide`; AI Expert uses `document/standard`; and Welcome uses
+`wizard`. Student reports is a view inside the Students page (`_student_reports_panels.html`
+included by `roster.html`, selected by `?focus=reports`). `/students/reports`,
+`/course-expert?tab=students`, and `/about` are retired without redirects. The document layout required
+no interface adjustment at first use. The receipt landing uses `document/standard`.
+The wizard shell provides the same responsive
 outer-gutter ownership as the other layouts while intentionally omitting the app
 header.
 
@@ -110,8 +110,8 @@ All registry rows are migrated. Its source checks are repo-wide: every live temp
 is layout-backed and free of static inline styles, all feature CSS consumes shared
 tokens, and no live template can reference the removed legacy stylesheet pair.
 `style.css`, `workbench.css`, `workbench_base.html`, `_workbench_header.html`,
-`name_manager.html`, and `_course_picker.html` are retired; the route redirects they
-previously accompanied remain route behavior, not template dependencies.
+`name_manager.html`, and `_course_picker.html` are retired. No compatibility routes
+remain for retired pages.
 
 ## Change propagation
 

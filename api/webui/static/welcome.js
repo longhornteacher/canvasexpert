@@ -1,8 +1,6 @@
 /* ── Onboarding wizard (welcome.html) ─────────────────────────────────────
  * Step navigation and form submission for the first-run flow.
- * Workspace → Canvas URL → API token → Done. Calendar setup (school dates,
- * bell schedules) happens on its own page (/calendar) after onboarding, not
- * as a wizard step -- it is a teacher-maintained record, not a one-time pick.
+ * Workspace → Canvas URL → API token → Done.
  */
 
 var WIZARD_HIDDEN_CLASS = "ce-wizard-initially-hidden";

@@ -13,14 +13,11 @@ The runtime supports:
 - **Push Assignments** (AssignmentForge JSON → live whole-class assignments)
 - **Push Pages** (PageForge JSON → live pages)
 - **Printable outputs** (QuizForge JSON → local DOCX + PDF files)
-- **Gradebook tools** — late policy sweep, student extensions, curves
+- **Gradebook services** — reviewed grade adjustments, missing-work operations, and bounded runtime reads
 - **Scoring Sessions** — MCP-connected agent discovers work across every Current course,
   waits for teacher direction, then prepares one exact assignment at a time using an
   assignment-bounded SAFE packet and writes the reviewed raw score and one plain-text
-  comment to Canvas once. Canvas Expert does not read the resulting grade back; Canvas
-  applies every gradebook and late-policy adjustment, and the teacher reviews the result
-  in Canvas Live
-- **School Calendar:** school dates, day kinds, grading periods, bell schedules, and Teacher Schedule
+  comment to Canvas once. The teacher reviews the result in Canvas Live.
 - **MCP server:** local pseudonymized reads, guarded writes, and Scoring Sessions
 - **Daily Writing:** longitudinal Writing Record and tracked-assignment Writing Timeline
 - **Download** — submission bundles by assignment or by student
@@ -124,7 +121,7 @@ local model is unavailable, the affected media evidence remains held. Weights st
 `CANVAS_EXPERT_WHISPER_MODEL_CACHE` override, never in the workspace or an AI packet.
 
 **Control-console and retained-surface reference** (Settings, readiness, mirror status,
-  operations, receipts, retained Create/Gradebook/Roster/Course Info surfaces):
+  operations, receipts, retained Create/Roster/Course Info surfaces):
   **`api/webui/README.md`**. Agent-facing workflows are defined by the MCP contract and
   the relevant runtime/feature contracts, not by browser page parity.
 
