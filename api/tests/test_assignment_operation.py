@@ -273,7 +273,7 @@ def test_payload_build_raises_on_placeholders(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     adapter = AssignmentAdapter()
-    with pytest.raises(ValueError, match="placeholders"):
+    with pytest.raises(ValueError, match="canvas_file attachment"):
         adapter.build_payload({"path": str(af_file)})
 
 

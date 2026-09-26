@@ -40,6 +40,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, gradebook_queries, learning_objectives, live_verify, operational_log, roster_context, roster_service, sis_grade_bridge
 from api.operation_ledger import claims as operation_claims
+from api.operation_ledger.adapters import forge_files
 from api.operation_ledger import executor as operation_executor
 from api.operation_ledger import operations as operation_operations
 from api.powergrader import scoring_discovery, scoring_local
@@ -1324,6 +1325,7 @@ _TOOL_GROUPS = {
         "get_product_guide",
         "get_authoring_contract",
         "stage_content",
+        "stage_attachment",
         "list_staged_content",
         "preview_content_push",
         "preview_differentiated_quiz_push",
@@ -1746,14 +1748,13 @@ def apply_assignment_update(operation_id: str, batch_id: str, review_digest: str
 
 
 def stage_content(kind: str, label: str, content: str) -> dict:
-    """Write one authored draft into the teacher's per-kind To Review Inbox.
-
-    The staging step an assistant used to have to perform with file access:
-    the envelope and its byte-count marker are written together, so the draft
-    appears in the matching push tab for the teacher to review and land. No
-    Canvas write, and an existing label is refused rather than overwritten.
-    """
+    """Stage one Forge draft for teacher review."""
     return content_push.stage_content(kind, label, content)
+
+
+def stage_attachment(source_path: str) -> dict:
+    """Stage one local file as a Forge attachment."""
+    return forge_files.stage_attachment(source_path)
 
 
 def push_content_live(

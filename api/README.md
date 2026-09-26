@@ -160,7 +160,7 @@ reconciliation; scoring requires the verified family link.
 
 ### Assignments (AssignmentForge)
 - Extracts JSON from the `<ASSIGNMENTFORGE_JSON>` envelope.
-- Resolves course-resource placeholders (`{{file:NAME}}`, `{{page:Title}}` per course).
+- Links attachments from exact-name Canvas Files matches or from files staged locally with `stage_attachment`; `{{file:…}}` and `{{page:…}}` placeholders are refused.
 - Creates assignment(s) with configurable submission types, points, dates, grading category.
 - **Differentiated family**: one file with two or more canonical tiers requires a selected
   module and a reviewed delivery operation. Each unrestricted source is published, omitted
@@ -176,7 +176,7 @@ safety remain part of the reviewed family operation. Tier placement is manual an
 
 ### Pages (PageForge)
 - Extracts JSON from the `<PAGEFORGE_JSON>` envelope.
-- Resolves course-resource placeholders (`{{file:…}}`, `{{page:…}}` per course).
+- Links attachments from exact-name Canvas Files matches or from files staged locally with `stage_attachment`; `{{file:…}}` and `{{page:…}}` placeholders are refused.
 - Creates page with rich HTML body, optional module placement.
 - No tiers (pages are reference content, not submitted).
 

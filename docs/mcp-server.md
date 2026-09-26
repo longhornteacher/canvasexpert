@@ -57,7 +57,8 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 61 (54 tools). Version 61 removes the legacy group field from differentiated quiz variants
+Tool schema version 62 (55 tools). Version 62 adds `stage_attachment(source_path)` for safely
+staging teacher-posted files from chat into the private Forge attachment inbox. Version 61 removes the legacy group field from differentiated quiz variants
 and removes student-group data from roster settings. Version 60 adds the reviewed existing-grade adjustment
 pair. Version 59 added `verify_live`, `resume_operation`, and
 `abandon_operation`, and adds a `verify_hint` field to every successful apply
@@ -85,6 +86,7 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `get_authoring_contract(kind)` | Canonical authoring contract for Forge (`quiz`, `assignment`, `page`) from `api/default_docs/AI Authoring/` | No |
 | `get_product_guide(topic="")` | CanvasExpert product knowledge; omit `topic` for the overview, use the annotated topic map to choose detail, or select `tools` for the complete generated inventory | No |
 | `stage_content(kind, label, content)` | Writes one authored draft and its `.done` marker into the per-kind review Inbox; refuses an existing label rather than overwriting | No |
+| `stage_attachment(source_path)` | Copies a host-supplied regular file into the private Forge attachment inbox; returns only its file name and size | No |
 | `list_staged_content(kind="")` | Drafts in the local review Inbox; pass `kind` to filter or omit it for all drafts | No |
 | `preview_content_push(course_id, kind, label, published=None, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=None)` | Persists a local frozen review of one staged draft for one Current course; differentiated AssignmentForge creates unrestricted tier sources and the shared bridge; existing module IDs are exact, while module creation is explicit | No |
 | `list_groups(course_id)` | Current-course group-set and group names from the fresh local mirror; no memberships or Canvas IDs | No |

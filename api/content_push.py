@@ -214,7 +214,8 @@ def preview_content_push(
     ledger_kind = _LEDGER_KINDS[content_kind]
     adapter = registry.get_adapter(ledger_kind)
     try:
-        payload = adapter.build_payload(_prepare_request(content_kind, path, named))
+        payload = adapter.build_payload({**_prepare_request(content_kind, path, named),
+                                         "course_id": course_key})
         target = adapter.verify_targets(payload, [{"course_id": course_key}])[0]
         baseline = adapter.capture_baseline(payload, target)
         if isinstance(baseline, dict) and baseline.get("blocking_error"):
@@ -256,6 +257,9 @@ def preview_content_push(
         }
     except ValueError as exc:
         message = str(exc)
+        if hasattr(exc, "code"):
+            return {"ok": False, "code": exc.code, "error": message,
+                    "candidates": exc.candidates[:10], "blocking": True}
         code = None
         lowered = message.casefold()
         if "assignmentforge" in lowered and "module" in lowered:

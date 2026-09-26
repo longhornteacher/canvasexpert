@@ -150,8 +150,8 @@ Established by read-only survey. The executor re-verifies the seams its batch na
   only for quizzes (`api/teks.py`).
 
 ### 1.6 Sync points if MCP tool parameters change
-- **Schema version.** `api/mcp_server/contract.py:8` `TOOL_SCHEMA_VERSION = 60`, plus a
-  new `tool_schema_v61.json`. `api/tests/mcp_server/test_contract.py:13` asserts it.
+- **Schema version.** `api/mcp_server/contract.py` `TOOL_SCHEMA_VERSION = 61`, plus a
+  new `tool_schema_v62.json`. `api/tests/mcp_server/test_contract.py` asserts it.
 - **Tool count doc.** `docs/mcp-server.md:60` states the version and tool count, and
   `api/tests/test_beta075_mcp.py:159` checks it.
 - **Tool groups.** `tools._TOOL_GROUPS` :1335, checked by
@@ -787,7 +787,7 @@ and resume path before delegation.
 ## 10. Known adjacent defects (outside this plan)
 
 - `{{page:…}}` placeholders are never resolved (§1.5). They are refused until page links
-  are designed. `{{file:…}}` is superseded by `canvas_file` attachments (Batch 3b).
+  are designed. `{{file:…}}` is refused and directs authors to `canvas_file` attachments.
 - `PageAdapter.build_payload` silently drops `module_id` and `create_module`, which
   `content_push._KIND_OPTIONS["page"]` accepts. That contradicts the rule that unsupported
   options are refused, not dropped.

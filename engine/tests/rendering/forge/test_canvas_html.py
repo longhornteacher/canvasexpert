@@ -71,6 +71,13 @@ def test_author_html_allowlist_refusal_is_specific(fragment):
     assert all(problem.startswith("directions[2].html:") for problem in problems)
 
 
+def test_file_placeholder_refusal_points_to_canvas_file_and_keeps_page_refusal():
+    file_problems = validate_author_html("<p>{{file:handout.pdf}}</p>", field_path="body")
+    page_problems = validate_author_html("<p>{{page:unit}}</p>", field_path="body")
+    assert any("canvas_file attachment" in problem for problem in file_problems)
+    assert any("page placeholders are not supported" in problem for problem in page_problems)
+
+
 def test_freeform_style_color_shorthands_cannot_escape_palette():
     problems = validate_author_html(
         '<p style="border:1px solid r/**/ed;background:linear-gradient(#1e6f6a, blue)">x</p>',

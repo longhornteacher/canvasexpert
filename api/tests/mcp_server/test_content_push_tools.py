@@ -207,6 +207,7 @@ def test_preview_freezes_one_staged_draft_for_one_course(_adapter):
     assert _adapter.requests == [{
         "path": os.path.abspath(str(runtime_paths.inbox_folder("page") / "welcome.txt")),
         "published": False,
+        "course_id": "course-x",
     }]
 
 
@@ -330,6 +331,7 @@ def test_assignment_options_reach_the_adapter_verbatim(_adapter):
         "module_name": "Unit 3",
         "assignment_group_name": "Essays",
         "due_at": "2026-09-11T23:59:00Z",
+        "course_id": "course-x",
     }]
 
 

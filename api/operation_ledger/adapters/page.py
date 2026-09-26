@@ -44,7 +44,8 @@ class PageAdapter:
         title = normalize_student_text(data.get("title") or "").strip()
         model = {key: normalize_author_model(data[key]) for key in _RENDER_FIELDS if key in data}
         model["title"] = title
-        attachments = forge_files.resolve_attachments(data.get("attachments") or [])
+        attachments = forge_files.resolve_attachments(
+            data.get("attachments") or [], course_id=prepare_request.get("course_id"))
         attachment_slots = [
             {"href": forge_files.link_slot("attachment", index), "label": row["label"]}
             for index, row in enumerate(attachments)
@@ -136,13 +137,16 @@ class PageAdapter:
             "module_name": payload.get("module_name"),
             "baseline_has_existing_page": existing is not None,
             "baseline_page_url": existing.get("url") if existing else None,
-            "attachments": [{"file": row.get("file"), "label": row.get("label"),
-                             "sha256": row.get("sha256")}
+            "attachments": [_attachment_review_row(row)
                             for row in payload.get("attachments", [])],
+            "warnings": ["attachment_not_student_visible" for row in payload.get("attachments", [])
+                         if row.get("canvas_file") and not row.get("student_visible")],
         }
 
     def check_drift(self, payload: dict, target: dict, baseline: dict) -> bool:
         for record in payload.get("attachments", []):
+            if record.get("canvas_file_id"):
+                continue
             if not _frozen_file_matches(record):
                 return True
         if baseline is None:
@@ -173,8 +177,21 @@ class PageAdapter:
         published = bool(payload.get("published"))
         module_name = payload.get("module_name")
         steps = _ordered_steps(target)
+        canvas_files = {}
+        for index, record in enumerate(payload.get("attachments", [])):
+            if not record.get("canvas_file_id"):
+                continue
+            current = forge_files.verify_canvas_attachment(
+                record, course_id=course_id, get_file=_get_course_file)
+            if current is None:
+                return _build_result("blocked", steps=steps, error_code="file_drift",
+                                     private_diagnostic="the reviewed Canvas file is missing or changed")
+            canvas_files[index] = current
         attachment_infos = []
         for index, record in enumerate(payload.get("attachments", [])):
+            if record.get("canvas_file_id"):
+                attachment_infos.append(canvas_files[index])
+                continue
             file_info, failure = forge_files.ensure_uploaded_file(
                 record={**record, "filename": record.get("file")},
                 step_key=f"upload_attachment:{index}",
@@ -516,6 +533,16 @@ def _ordered_steps(target: dict) -> list[dict]:
 
 def _get_course_file(course_id: str, file_id: str):
     return canvas_client.canvas_get(f"/api/v1/courses/{course_id}/files/{file_id}")
+
+
+def _attachment_review_row(row):
+    if row.get("canvas_file"):
+        return {"canvas_file": row.get("canvas_file"), "folder": row.get("folder"),
+                "label": row.get("label"), "size": row.get("size"),
+                "updated_at": row.get("updated_at"),
+                "student_visible": row.get("student_visible")}
+    return {"file": row.get("file"), "label": row.get("label"),
+            "sha256": row.get("sha256")}
 
 
 def _upload_course_file(course_id: str, file_path, *, folder):

@@ -14,7 +14,8 @@ COMMON_TAGS = frozenset(
 PAGE_TAGS = COMMON_TAGS | {"iframe"}
 GLOBAL_ATTRS = {"a": {"href", "target"}, "th": {"colspan", "rowspan"}, "td": {"colspan", "rowspan"}, "img": {"src", "alt"}, "iframe": {"src", "title"}}
 FORBIDDEN_TAGS = {"h1", "h2", "script", "style", "font", "center", "div", "span", "details"}
-PLACEHOLDER_RE = re.compile(r"\{\{\s*(?:file|page)\s*:", re.IGNORECASE)
+FILE_PLACEHOLDER_RE = re.compile(r"\{\{\s*file\s*:", re.IGNORECASE)
+PAGE_PLACEHOLDER_RE = re.compile(r"\{\{\s*page\s*:", re.IGNORECASE)
 HEX_COLOR_RE = re.compile(r"#[0-9a-f]{3,8}\b", re.I)
 COLOR_FUNCTION_RE = re.compile(r"\b(?:rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color|color-mix|device-cmyk)\s*\(", re.I)
 COLOR_PROPERTIES = {
@@ -136,8 +137,10 @@ class _Validator(HTMLParser):
             self.stack.pop()
 
     def handle_data(self, data):
-        if PLACEHOLDER_RE.search(data):
-            self.problem("file/page placeholders are not supported")
+        if FILE_PLACEHOLDER_RE.search(data):
+            self.problem("{{file:…}} is refused; use a canvas_file attachment")
+        if PAGE_PLACEHOLDER_RE.search(data):
+            self.problem("page placeholders are not supported")
 
     def handle_comment(self, data):
         self.problem("HTML comments are not allowed")
@@ -162,8 +165,10 @@ def validate_author_html(value: str, *, field_path: str, page: bool = False, fre
     if not isinstance(value, str):
         return [f"{field_path}: must be a string"]
     parser = _Validator(page=page, freeform=freeform, field_path=field_path)
-    if PLACEHOLDER_RE.search(value):
-        parser.problem("file/page placeholders are not supported")
+    if FILE_PLACEHOLDER_RE.search(value):
+        parser.problem("{{file:…}} is refused; use a canvas_file attachment")
+    if PAGE_PLACEHOLDER_RE.search(value):
+        parser.problem("page placeholders are not supported")
     try:
         parser.feed(value)
         parser.close()

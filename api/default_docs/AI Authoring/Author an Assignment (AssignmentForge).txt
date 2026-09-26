@@ -50,7 +50,7 @@ inside strings. Set `version` to `2.0-json` and `type` to `ASSIGNMENT`. Version
   },
   "supports": { "sentence_frames": ["School should ___ because ___."] },
   "extras": [ { "summary": "Citing an article", "html": "<p>Use the article title in your citation.</p>" } ],
-  "attachments": [ { "file": "Found Poetry Handout.pdf", "label": "Found Poetry handout" } ],
+  "attachments": [ { "canvas_file": "Found Poetry Handout.pdf", "label": "Found Poetry handout" } ],
   "unit_info": { "unit": "Unit 2: Argument", "teks": ["8.10A"], "subject": "ELA", "grade": "8" },
   "tiers": [
     { "label": "Support", "supports": { "sentence_frames": ["One reason is ___."] } },
@@ -83,14 +83,15 @@ inside strings. Set `version` to `2.0-json` and `type` to `ASSIGNMENT`. Version
 - `supports`: optional shared support object with one or more of `sentence_frames`
   (string array), `word_bank` (string array), and `html` (semantic HTML fragment).
 - `extras`: optional array of non-essential help, each with a `summary` and `html`.
-- `attachments`: optional array of `{ "file", "label" }` entries for teacher-provided
-  files that students need. `file` is the exact bare file name and must be unique
-  (case-insensitively); `label` is the link text students see. Allowed file types are
-  PDF, DOCX, PPTX, XLSX, PNG, JPG, and JPEG.
-  Ask the teacher to place each exact file in the Canvas Expert workspace folder
-  `To Review/Attachments/` before returning the payload. Do not put a local path in the
-  JSON. If the teacher cannot place the file there, ask them to do so before preparing
-  the assignment. Missing or duplicate files prevent preparation.
+- `attachments`: optional array of `{ "file", "label" }` or
+  `{ "canvas_file", "label", "folder"? }` entries. Use `canvas_file` for an existing
+  course Canvas Files item, matched by exact name (case-insensitive); `folder` optionally
+  narrows by Canvas folder path. Use `file` for a file the teacher posted in chat and the
+  host saved locally; hand its path to `stage_attachment(source_path)` before authoring.
+  The teacher never manages `To Review/Attachments/`. Do not put local paths or bytes in
+  the JSON or tool arguments. Both sources allow PDF, DOCX, PPTX, XLSX, PNG, JPG, and JPEG.
+  If the host provides no local path, suggest that the teacher upload the file to Canvas
+  Files. If preview returns candidates, ask the teacher to choose.
 - `unit_info`: optional student-facing unit facts: `unit`, `teks` (string array),
   `subject`, and `grade`.
 - `metadata`: optional private notes; it is ignored and not shown to students.
@@ -99,9 +100,9 @@ inside strings. Set `version` to `2.0-json` and `type` to `ASSIGNMENT`. Version
 Ask how students will submit. Use the teacher's choice in `submission.types` and
 include an explicit sentence in the overview or directions describing the work and
 submission expected. `external_tool_url` is the launch URL when `external_tool` is
-used. Do not use course file or page placeholders: `{{file:...}}` and `{{page:...}}`
-are not resolved and are refused. Ask the teacher for a working resource link or
-include a plain external URL when appropriate.
+used. Never use `{{file:...}}`; it is refused. Use a `canvas_file` attachment instead.
+`{{page:...}}` remains refused; ask the teacher for a working resource link or include a
+plain external URL when appropriate.
 
 A tracked writing assignment is exactly `{"types":["online_upload"],
 "allowed_extensions":["docx"]}`. Any other type or extension means it is not
@@ -160,7 +161,8 @@ Before returning the envelope, confirm:
 5. If present, rubric criterion points sum to assignment points.
 6. Tiers use at least two unique canonical labels and keep one learning target.
 7. Every HTML fragment follows the allowlist. No style attributes or placeholders.
-8. Every listed attachment has a label and its exact file is in `To Review/Attachments/`.
+8. Every attachment has a label and exactly one source (`file` or `canvas_file`); folder
+   is valid only with `canvas_file`.
 
 ## 8. FULL EXAMPLE
 ```text

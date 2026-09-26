@@ -306,10 +306,13 @@ def test_upload_success_without_id_is_attention_and_never_resends(monkeypatch, t
 
 def test_assignment_attachment_and_printable_apply_then_resume(monkeypatch, tmp_path):
     workspace = tmp_path / "workspace"
-    handout = workspace / "To Review" / "Attachments" / "handout.pdf"
+    handout = tmp_path / "host-file" / "handout.pdf"
     handout.parent.mkdir(parents=True)
     handout.write_bytes(b"teacher handout")
     monkeypatch.setattr(runtime_paths, "workspace_root", lambda: workspace)
+    monkeypatch.setattr(forge_files, "_private_store_roots", lambda: [workspace])
+    staged = forge_files.stage_attachment(str(handout))
+    assert staged == {"ok": True, "file": "handout.pdf", "size_bytes": len(b"teacher handout")}
     monkeypatch.setattr(assignment_adapter.af, "parse_file", lambda _path: ({
         "title": "Practice", "points": 5,
         "overview": "<p>Read and respond.</p>",
@@ -366,14 +369,9 @@ def test_assignment_attachment_and_printable_apply_then_resume(monkeypatch, tmp_
 
 
 def test_page_attachment_apply_then_resume(monkeypatch, tmp_path):
-    workspace = tmp_path / "workspace"
-    handout = workspace / "To Review" / "Attachments" / "slides.pptx"
-    handout.parent.mkdir(parents=True)
-    handout.write_bytes(b"teacher slides")
-    monkeypatch.setattr(runtime_paths, "workspace_root", lambda: workspace)
     monkeypatch.setattr(page_adapter.pf, "parse_file", lambda _path: ({
         "title": "Reference", "layout": "standard", "overview": "<p>Read this.</p>",
-        "attachments": [{"file": "slides.pptx", "label": "Class slides"}],
+        "attachments": [{"canvas_file": "slides.pptx", "label": "Class slides"}],
     }, []))
 
     uploads = []
@@ -381,7 +379,7 @@ def test_page_attachment_apply_then_resume(monkeypatch, tmp_path):
 
     def fake_upload(_course, path, *, folder):
         uploads.append((folder, Path(path).name))
-        return {"id": 81}, None
+        return {"id": 82}, None
 
     def fake_send(method, path, body, timeout=30):
         sent.append((method, path, body))
@@ -393,19 +391,41 @@ def test_page_attachment_apply_then_resume(monkeypatch, tmp_path):
         raise AssertionError(path)
 
     monkeypatch.setattr(page_adapter, "_upload_course_file", fake_upload)
-    monkeypatch.setattr(page_adapter, "_get_course_file", lambda _course, file_id: ({"id": file_id}, None))
+    file_info = {"id": 81, "display_name": "slides.pptx", "size": 17,
+                 "updated_at": "2026-09-25T12:00:00Z"}
+    monkeypatch.setattr(page_adapter, "_get_course_file", lambda _course, file_id: (file_info, None))
+    monkeypatch.setattr(canvas_client, "canvas_get_all_complete", lambda path, params: (
+        [file_info], None, True))
     monkeypatch.setattr(canvas_client, "_canvas_send", fake_send)
     monkeypatch.setattr(canvas_client, "canvas_get", fake_get)
 
     adapter = page_adapter.PageAdapter()
-    payload = adapter.build_payload({"path": "synthetic.pageforge.json"})
+    payload = adapter.build_payload({"path": "synthetic.pageforge.json", "course_id": "42"})
     first = adapter.execute(payload, {"course_id": "42", "steps": []}, {}, {}, FakeContext())
     assert first["state"] == "applied"
-    assert uploads == [("Canvas Expert Attachments", "slides.pptx")]
+    assert uploads == []
     body = sent[0][2]["wiki_page"]["body"]
     assert "Class slides" in body and "/files/81/download" in body
     assert "{{ce:" not in body
 
     again = adapter.execute(payload, {"course_id": "42", "steps": copy.deepcopy(first["steps"])}, {}, {}, FakeContext())
     assert again["state"] == "applied"
-    assert len(uploads) == 1 and len(sent) == 1
+    assert len(uploads) == 0 and len(sent) == 1
+
+
+def test_canvas_file_drift_blocks_before_content_creation(monkeypatch):
+    payload = {"title": "Reference", "body": '<a href="{{ce:attachment:0}}">Guide</a>',
+               "published": False, "attachments": [{
+                   "canvas_file": "Guide.pdf", "canvas_file_id": "81",
+                   "label": "Guide", "size": 17,
+                   "updated_at": "2026-09-25T12:00:00Z",
+               }]}
+    monkeypatch.setattr(page_adapter, "_get_course_file", lambda *_args: ({
+        "id": "81", "size": 18, "updated_at": "2026-09-25T12:00:00Z",
+    }, None))
+    monkeypatch.setattr(canvas_client, "_canvas_send",
+                        lambda *_args, **_kwargs: pytest.fail("content was created after file drift"))
+    result = page_adapter.PageAdapter().execute(
+        payload, {"course_id": "42", "steps": []}, {}, {}, FakeContext())
+    assert result["state"] == "blocked"
+    assert result["error_code"] == "file_drift"

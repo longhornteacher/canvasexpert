@@ -33,7 +33,7 @@ quotes inside strings. Set `version` to `2.0-json` and `type` to `PAGE`. Version
     { "html": "<p>Bring your notes to class.</p>", "kind": "callout" }
   ],
   "extras": [ { "summary": "More practice", "html": "<p>Try another short comparison.</p>" } ],
-  "attachments": [ { "file": "Poetry Terms.pdf", "label": "Poetry terms handout" } ],
+  "attachments": [ { "canvas_file": "Poetry Terms.pdf", "label": "Poetry terms handout" } ],
   "unit_info": { "unit": "Unit 2", "teks": ["8.10A"], "subject": "ELA", "grade": "8" }
 }
 ```
@@ -45,14 +45,15 @@ quotes inside strings. Set `version` to `2.0-json` and `type` to `PAGE`. Version
 - `sections`: optional array of `{ "heading", "html", "kind" }`. `kind` is
   `section` (default), `callout`, or `collapsed`. Omit the heading for a callout.
 - `extras`: optional non-essential help blocks, each with a `summary` and `html`.
-- `attachments`: optional array of `{ "file", "label" }` entries for teacher-provided
-  files students need. `file` is the exact bare file name and must be unique
-  (case-insensitively); `label` is the link text students see. Allowed types are PDF,
-  DOCX, PPTX, XLSX, PNG, JPG, and JPEG. Ask the teacher to place each exact file in the
-  Canvas Expert workspace folder
-  `To Review/Attachments/` before returning the payload. Do not put a local path in the
-  JSON. If the teacher cannot place the file there, ask them to do so before preparing
-  the page. Missing or duplicate files prevent preparation.
+- `attachments`: optional array of `{ "file", "label" }` or
+  `{ "canvas_file", "label", "folder"? }` entries. Use `canvas_file` for an existing
+  course Canvas Files item, matched by exact name (case-insensitive); `folder` optionally
+  narrows by Canvas folder path. Use `file` for a file the teacher posted in chat and the
+  host saved locally; hand its path to `stage_attachment(source_path)` before authoring.
+  The teacher never manages `To Review/Attachments/`. Do not put local paths or bytes in
+  the JSON or tool arguments. Both sources allow PDF, DOCX, PPTX, XLSX, PNG, JPG, and JPEG.
+  If the host provides no local path, suggest that the teacher upload the file to Canvas
+  Files. If preview returns candidates, ask the teacher to choose.
 - `unit_info`: optional student-facing `unit`, `teks` (string array), `subject`,
   and `grade`.
 - `metadata`: optional private notes; it is ignored and not shown to students.
@@ -79,9 +80,8 @@ Write concise, age-appropriate content in semantic HTML. You may use allowed
 emphasis, lists, tables, images with alt text, links, and (on pages) embedded
 iframes when they convey useful information. For standard pages, do not add
 styling, colors, widths, layout wrappers, or course-resource placeholders.
-`{{file:...}}` and
-`{{page:...}}` links are not resolved and are refused; ask the teacher for a
-working URL or use a plain external URL when appropriate.
+`{{file:...}}` is refused; use a `canvas_file` attachment. `{{page:...}}` remains
+refused; ask the teacher for a working URL or use a plain external URL when appropriate.
 
 The author HTML allowlist is enforced. Unsupported HTML causes a field-specific
 validation error rather than being silently removed. See
@@ -101,7 +101,8 @@ assignment for that work.
 3. Freeform pages have a body and omit overview and sections.
 4. Every HTML fragment follows the allowlist. Standard pages have no style attributes;
    freeform styles follow the width and palette laws. No placeholders.
-5. Every listed attachment has a label and its exact file is in `To Review/Attachments/`.
+5. Every attachment has a label and exactly one source (`file` or `canvas_file`); folder
+   is valid only with `canvas_file`.
 
 ## 7. FULL EXAMPLE
 ```text

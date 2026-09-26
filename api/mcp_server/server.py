@@ -28,36 +28,32 @@ from mcp.server.fastmcp import FastMCP
 from . import tools
 
 _SERVER_INSTRUCTIONS = (
-    "CanvasExpert is a local teacher-controlled runtime. Real names, Canvas/SIS "
-    "ids, credentials, and private paths stay local; student rows use stable "
-    "pseudonyms. Never read the Identity Vault or teacher-only Web UI routes. "
-    "Rely on a catalog or mirror read only when its freshness envelope has "
-    "within_policy true. Otherwise, or on catalog_not_current or an unavailable "
-    "projection, ask the teacher whether Canvas work changed (not a failure). "
-    "Never refresh without an explicit teacher request. "
-    "For broad grading, call discover_scoring_work first: it reads every Current "
-    "course's mirror and returns the complete assignment and attention set. Report "
-    "all rows, wait for teacher direction, then use selected exact rows. Call "
-    "prepare_scoring_session once per exact assignment. If its snapshot is over "
-    "threshold, ask whether Canvas work changed; refresh only after an explicit teacher request, or retry with "
-    "use_existing_mirror=true. On scoring_session_already_open, use that session and "
-    "do not prepare or refresh the assignment again. Then work locally from its "
-    "immutable packet. For needs_scoring_norms, ask its question and retry with "
-    "bounded scoring guidance; never ask the teacher to choose a scoring transport "
-    "or assignment type. An explicit score/post direction authorizes the selected "
-    "discovery rows together without reconfirming each assignment, but never "
-    "extends beyond those rows or another session. Read every SAFE page with "
-    "get_scoring_packet, including contract/rubric; held work and evidence gaps are "
-    "not empty. Submit only that packet's results with expected_packet_digest to "
-    "stage_scoring_results, summarize, and call apply_staged_scoring_results only on "
-    "a direct teacher instruction; never read back grades. For needs_teacher_input, "
-    "ask only its questions and resubmit the same results to stage_scoring_results "
-    "with the review digest and answers. Canvas Live is the review surface; "
-    "list_scoring_sessions resumes work; list_feedback_contracts gives feedback "
-    "rules. Across devices: handoff_work_item before switching, "
-    "take_over_work_item after sync; confirm stale takeover only once the prior "
-    "device stopped. For content/product, call get_authoring_contract or "
-    "get_product_guide."
+    "CanvasExpert is local and teacher-controlled. Names, Canvas/SIS IDs, credentials, "
+    "and private paths stay local; student rows use pseudonyms. Never read the Identity "
+    "Vault or teacher-only Web UI routes. Use catalog/mirror only when within_policy is "
+    "true. On stale, unavailable, or non-current data, ask whether Canvas changed; refresh "
+    "only after an explicit teacher request. "
+    "For broad grading, call discover_scoring_work for every Current course's complete "
+    "assignment and attention set; report all rows, wait for teacher direction, then use "
+    "selected exact rows. Call prepare_scoring_session "
+    "once per assignment. If its snapshot is over threshold, ask whether Canvas changed; "
+    "refresh only on request or retry with use_existing_mirror=true. On "
+    "scoring_session_already_open, use it and do not prepare or refresh the assignment "
+    "again. An explicit score/post direction authorizes the selected discovery rows together "
+    "without reconfirming each assignment, but never extends beyond those rows or another session. "
+    "Work only from its immutable "
+    "SAFE packet; work locally, read every page with get_scoring_packet, including rubric/contract, "
+    "and report held work; evidence gaps are not empty. For missing norms, ask and retry "
+    "with bounded scoring guidance; never ask the teacher to choose a scoring transport "
+    "or assignment type. Stage only unchanged "
+    "results; for needs_teacher_input, ask only its questions and resubmit the same results to stage_scoring_results with its "
+    "review digest and answers. Apply with apply_staged_scoring_results only after direct "
+    "teacher instruction; never read back grades. Canvas Live is the "
+    "review surface. Use handoff_work_item before switching devices and take_over_work_item "
+    "after sync. For content, fetch get_authoring_contract or get_product_guide. For "
+    "attachments, use canvas_file by exact name or stage_attachment(source_path). Never "
+    "list files or pass bytes; without a local path, suggest Canvas Files. Ask the teacher "
+    "to choose preview candidates."
 )
 
 mcp = FastMCP("canvas-expert", instructions=_SERVER_INSTRUCTIONS)
@@ -380,10 +376,8 @@ def get_submissions(course_id: str, assignment_id: str,
 def get_writing_history(pseudonym: str, since: str = "", until: str = "",
                         include_text: bool = False,
                         max_text_chars: int = 2000) -> str:
-    """Read one pseudonym's private Writing Record evidence across time.
-    It does not score, coach, or judge work and has no course_id. since/until
-    are YYYY-MM-DD. include_text=false omits student prose; max_text_chars=0
-    returns it in full."""
+    """Read pseudonymized Writing Record evidence; never score, coach, or judge.
+    Date filters use YYYY-MM-DD; include_text=false omits prose."""
     return _compact(tools.get_writing_history(
         pseudonym, since=since, until=until,
         include_text=include_text, max_text_chars=max_text_chars,
@@ -461,9 +455,7 @@ def preview_differentiated_quiz_push(
 
 @mcp.tool(structured_output=False)
 def apply_content_push(operation_id: str, batch_id: str, review_digest: str) -> str:
-    """Create the exact frozen draft in the Canvas course its review was frozen against.
-    Use only the unchanged coordinates returned by preview_content_push or
-    preview_differentiated_quiz_push."""
+    """Apply the exact frozen draft to Canvas using unchanged preview coordinates."""
     return _compact(tools.apply_content_push(
         operation_id, batch_id, review_digest
     ))
@@ -500,6 +492,12 @@ def stage_content(kind: str, label: str, content: str) -> str:
 
 
 @mcp.tool(structured_output=False)
+def stage_attachment(source_path: str) -> str:
+    """Stage one local Forge attachment."""
+    return _compact(tools.stage_attachment(source_path))
+
+
+@mcp.tool(structured_output=False)
 def push_content_live(
     course_id: str,
     kind: str,
@@ -529,9 +527,7 @@ def verify_live(course_id: str, kind: str, id: str = "", title: str = "") -> str
 
 @mcp.tool(structured_output=False)
 def resume_operation(operation_id: str) -> str:
-    """Continue one existing, teacher-approved operation from its last recorded step.
-    Not a new write capability -- refuses an operation that already applied, was
-    abandoned, or is held by another attempt."""
+    """Continue a teacher-approved operation; refuses applied, abandoned, or held work."""
     return _compact(tools.resume_operation(operation_id))
 
 

@@ -100,7 +100,8 @@ class AssignmentAdapter:
             raise ValueError("AssignmentForge file must have a title")
 
         authored_tiers = data.get("tiers") or []
-        attachments = forge_files.resolve_attachments(data.get("attachments") or [])
+        attachments = forge_files.resolve_attachments(
+            data.get("attachments") or [], course_id=prepare_request.get("course_id"))
         attachment_slots = [
             {"href": forge_files.link_slot("attachment", index), "label": row["label"]}
             for index, row in enumerate(attachments)
@@ -349,6 +350,8 @@ class AssignmentAdapter:
 
     def check_drift(self, payload: dict, target: dict, baseline: dict) -> bool:
         for record in payload.get("attachments", []):
+            if record.get("canvas_file_id"):
+                continue
             if not _frozen_file_matches(record, attachments=True):
                 return True
         for record in payload.get("printables", []):
@@ -398,7 +401,12 @@ class AssignmentAdapter:
         sub = payload.get("submission_types", [])
         dependencies = []
         attachments = [{"file": row.get("file"), "label": row.get("label"),
-                        "sha256": row.get("sha256")}
+                        "sha256": row.get("sha256"),
+                        **({"canvas_file": row.get("canvas_file"), "folder": row.get("folder"),
+                            "student_visible": row.get("student_visible")}
+                           if row.get("canvas_file") else {}),
+                        **({"size": row.get("size"), "updated_at": row.get("updated_at")}
+                           if row.get("canvas_file_id") else {})}
                        for row in payload.get("attachments", [])]
         printables = [{
             "tier": row.get("tier"), "tag": row.get("tag"),
@@ -429,6 +437,8 @@ class AssignmentAdapter:
             "baseline_existing_url": existing.get("html_url") if existing else None,
             "dependencies": dependencies,
             "attachments": attachments,
+            "warnings": ["attachment_not_student_visible" for row in payload.get("attachments", [])
+                         if row.get("canvas_file") and not row.get("student_visible")],
             "printables": printables,
         }
         if payload.get("tiers"):
@@ -480,8 +490,21 @@ class AssignmentAdapter:
         claim: dict, context,
     ) -> dict:
         steps = _ordered_steps(target)
+        canvas_files = {}
+        for index, record in enumerate(payload.get("attachments", [])):
+            if not record.get("canvas_file_id"):
+                continue
+            current = forge_files.verify_canvas_attachment(
+                record, course_id=target["course_id"], get_file=_get_course_file)
+            if current is None:
+                return _build_result("blocked", steps=steps, error_code="file_drift",
+                                     private_diagnostic="the reviewed Canvas file is missing or changed")
+            canvas_files[index] = current
         attachment_infos = []
         for index, record in enumerate(payload.get("attachments", [])):
+            if record.get("canvas_file_id"):
+                attachment_infos.append(canvas_files[index])
+                continue
             record = {**record, "filename": record.get("file"),
                       "content_type": mimetypes.guess_type(record.get("file", ""))[0]}
             file_info, failure = forge_files.ensure_uploaded_file(
