@@ -18,29 +18,6 @@ def set_extra_time(course_id: str, students: list[dict]):
     )
 
 
-def get_grading_policy(course_id: str) -> dict | None:
-    policies = _io_mod._synced_state().get("grading_policy", {})
-    if not isinstance(policies, dict):
-        return None
-    value = policies.get(str(course_id))
-    return dict(value) if isinstance(value, dict) else None
-
-
-def set_grading_policy(course_id: str, value: dict | None):
-    def update(state):
-        policies = state.setdefault("grading_policy", {})
-        if not isinstance(policies, dict):
-            policies = {}
-            state["grading_policy"] = policies
-        if value is None:
-            policies.pop(str(course_id), None)
-        else:
-            policies[str(course_id)] = dict(value)
-        return state
-
-    _io_mod._modify_synced(update)
-
-
 def get_tier_tags() -> dict:
     saved = _io_mod._synced_state().get("tier_tags", {})
     return {name: str(saved.get(name, "")).strip() for name in TIER_NAMES}

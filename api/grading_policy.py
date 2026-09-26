@@ -1,15 +1,131 @@
-"""Pure grading-policy math: the effort-credit mark and suggested late days.
+"""Pure grading-policy math, plus these two file readers: the effort-credit
+mark, suggested late days, and the two plain workspace files the teacher
+edits directly.
 
-No Canvas, config, or session access -- everything is passed in. See
-docs/contracts/grading-policy-contract.md for the product decisions this
-implements.
+No Canvas or session access. See docs/contracts/grading-policy-contract.md
+for the product decisions this implements.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import csv
+import os
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
 from api.freshness_policy import LOCAL_TIMEZONE
+from api.platform_services import workspace
+
+POLICY_FILENAME = "Grading Policy.txt"
+HOLIDAYS_SUBFOLDER = "Calendars"
+HOLIDAYS_FILENAME = "Holidays.csv"
+
+_POLICY_KEYS = ("floor_percent", "missing_percent", "sweep_after_school_days")
+
+
+class GradingPolicyFileError(ValueError):
+    """Raised when Library/Grading Policy.txt exists but is not usable.
+
+    The message is a plain, one-sentence, teacher-facing explanation of the
+    exact problem -- a missing key, a non-integer value, or a value out of
+    range.
+    """
+
+
+def _policy_path(root=None):
+    base = workspace.library_root(root)
+    return os.path.join(base, POLICY_FILENAME) if base else None
+
+
+def _holidays_path(root=None):
+    base = workspace.library_folder(HOLIDAYS_SUBFOLDER, root)
+    return os.path.join(base, HOLIDAYS_FILENAME) if base else None
+
+
+def load_policy(root=None) -> dict | None:
+    """Read ``Library/Grading Policy.txt``, or ``None`` when the file is absent.
+
+    ``key: value`` lines, ``#`` starts a comment, blank lines are ignored,
+    and keys are case-insensitive. All three keys (``floor_percent``,
+    ``missing_percent``, ``sweep_after_school_days``) are required integers
+    with ``0 <= missing_percent <= floor_percent <= 100`` and
+    ``1 <= sweep_after_school_days <= 60``. A present but invalid file raises
+    ``GradingPolicyFileError`` naming the exact problem. The file is read
+    fresh every call; nothing is cached.
+    """
+    path = _policy_path(root)
+    if not path or not os.path.isfile(path):
+        return None
+    values: dict[str, str] = {}
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.split("#", 1)[0].strip()
+            if not line or ":" not in line:
+                continue
+            key, _, value = line.partition(":")
+            values[key.strip().lower()] = value.strip()
+    missing_keys = [key for key in _POLICY_KEYS if key not in values]
+    if missing_keys:
+        raise GradingPolicyFileError(
+            f"Grading Policy.txt is missing {', '.join(missing_keys)}.")
+    parsed: dict[str, int] = {}
+    for key in _POLICY_KEYS:
+        raw_value = values[key]
+        try:
+            parsed[key] = int(raw_value)
+        except ValueError:
+            raise GradingPolicyFileError(
+                f"Grading Policy.txt's {key} must be a whole number, not "
+                f"'{raw_value}'.") from None
+    floor_percent = parsed["floor_percent"]
+    missing_percent = parsed["missing_percent"]
+    sweep_after_school_days = parsed["sweep_after_school_days"]
+    if not (0 <= missing_percent <= floor_percent <= 100):
+        raise GradingPolicyFileError(
+            "Grading Policy.txt's floor_percent must be at or above "
+            "missing_percent, and both must be between 0 and 100.")
+    if not (1 <= sweep_after_school_days <= 60):
+        raise GradingPolicyFileError(
+            "Grading Policy.txt's sweep_after_school_days must be between "
+            "1 and 60.")
+    return parsed
+
+
+def load_no_school_dates(root=None) -> list[str]:
+    """Read ``Library/Calendars/Holidays.csv``, or ``[]`` when it is absent.
+
+    Each row is ``start`` or ``start,end`` or ``start,end,name`` (ISO dates;
+    ``name`` is ignored). A header row or any row whose first cell is not an
+    ISO date is skipped. A range expands to every date from ``start`` to
+    ``end`` inclusive. Returns sorted, deduplicated ISO dates. The file is
+    read fresh every call; nothing is cached.
+    """
+    path = _holidays_path(root)
+    if not path or not os.path.isfile(path):
+        return []
+    dates: set[str] = set()
+    with open(path, encoding="utf-8", newline="") as handle:
+        for row in csv.reader(handle):
+            if not row:
+                continue
+            try:
+                start = date.fromisoformat(str(row[0]).strip())
+            except ValueError:
+                continue
+            end_text = str(row[1]).strip() if len(row) > 1 else ""
+            if end_text:
+                try:
+                    end = date.fromisoformat(end_text)
+                except ValueError:
+                    end = start
+            else:
+                end = start
+            if end < start:
+                start, end = end, start
+            current = start
+            while current <= end:
+                dates.add(current.isoformat())
+                current += timedelta(days=1)
+    return sorted(dates)
 
 
 def round_half_up(value) -> int:
@@ -50,8 +166,6 @@ def school_days_between(start_date, end_date, no_school_dates) -> int:
     """Count local dates ``d`` with ``start_date < d <= end_date``, Monday
     through Friday, excluding every date in ``no_school_dates`` (ISO strings).
     """
-    from datetime import timedelta
-
     excluded = {str(value) for value in (no_school_dates or ())}
     count = 0
     current = start_date + timedelta(days=1)

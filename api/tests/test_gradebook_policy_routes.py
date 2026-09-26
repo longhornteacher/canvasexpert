@@ -255,124 +255,19 @@ def test_write_late_policy_drops_canvas_identity_and_timestamp_fields(tmp_path):
     assert set(document) == {"schema_version", "course_id", "policy", "state", "source", "synced_at"}
 
 
-# --- Grading policy: effort credit and teacher-confirmed late days ----------
-
-import json as _json
-
-
-def test_get_grading_policy_defaults_to_none_with_no_warnings(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    resp = client.get(f"/api/grading-policy?course_id={COURSE}")
-    data = resp.json()
-    assert data == {"ok": True, "policy": None, "warnings": []}
+# --- Grading policy and no-school dates now live only as the two plain
+# workspace files (docs/contracts/grading-policy-contract.md section 4);
+# see api/tests/test_grading_policy.py for their loader laws and
+# api/tests/test_missing_sweep_operation.py / api/tests/mcp_server for their
+# consumers. No panel, script, or route remains here to test.
 
 
-def test_save_and_get_grading_policy_round_trips(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    resp = client.post("/api/grading-policy", data={
-        "course_id": COURSE,
-        "policy": _json.dumps({"floor_percent": 30, "missing_percent": 20,
-                               "sweep_after_school_days": 15}),
-    })
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["policy"] == {"floor_percent": 30, "missing_percent": 20,
-                              "sweep_after_school_days": 15}
-
-    again = client.get(f"/api/grading-policy?course_id={COURSE}").json()
-    assert again["policy"] == data["policy"]
-
-
-def test_save_grading_policy_empty_removes_it(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    client.post("/api/grading-policy", data={
-        "course_id": COURSE,
-        "policy": _json.dumps({"floor_percent": 30, "missing_percent": 20,
-                               "sweep_after_school_days": 15}),
-    })
-    resp = client.post("/api/grading-policy", data={"course_id": COURSE, "policy": "{}"})
-    data = resp.json()
-    assert data == {"ok": True, "policy": None, "warnings": []}
-    assert client.get(f"/api/grading-policy?course_id={COURSE}").json()["policy"] is None
-
-
-def test_save_grading_policy_refuses_floor_below_missing(monkeypatch, tmp_path):
-    """LAW: a sincere score above 0 never marks below the missing value. That
-    invariant is enforced here, at save time, by refusing a floor percent
-    below the missing percent -- mark() itself has no missing_percent to
-    check against."""
-    _mount(monkeypatch, tmp_path)
-    resp = client.post("/api/grading-policy", data={
-        "course_id": COURSE,
-        "policy": _json.dumps({"floor_percent": 10, "missing_percent": 20,
-                               "sweep_after_school_days": 15}),
-    })
-    data = resp.json()
-    assert data["ok"] is False
-    assert "floor percent" in data["error"].lower()
-    # Nothing was persisted by the refused save.
-    assert client.get(f"/api/grading-policy?course_id={COURSE}").json()["policy"] is None
-
-
-def test_grading_policy_warnings_read_from_cached_late_policy_no_live_call(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    mirror_store.write_late_policy(COURSE, {
-        **RAW_CANVAS_POLICY,
-        "missing_submission_deduction_enabled": True,
-        "late_submission_minimum_percent_enabled": True,
-        "late_submission_minimum_percent": 10.0,
-    }, root=str(tmp_path))
-    monkeypatch.setattr(gradebook_policy, "canvas_get", _explode)
-    monkeypatch.setattr(gradebook_policy, "_canvas_send", _explode)
-
-    resp = client.post("/api/grading-policy", data={
-        "course_id": COURSE,
-        "policy": _json.dumps({"floor_percent": 30, "missing_percent": 20,
-                               "sweep_after_school_days": 15}),
-    })
-    data = resp.json()
-    assert data["ok"] is True
-    assert len(data["warnings"]) == 2
-
-    again = client.get(f"/api/grading-policy?course_id={COURSE}").json()
-    assert len(again["warnings"]) == 2
-
-
-def test_grading_policy_no_cached_late_policy_means_no_warning(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    resp = client.post("/api/grading-policy", data={
-        "course_id": COURSE,
-        "policy": _json.dumps({"floor_percent": 30, "missing_percent": 20,
-                               "sweep_after_school_days": 15}),
-    })
-    assert resp.json()["warnings"] == []
-
-
-# --- No-school dates: workspace-wide, validated, sorted, deduplicated -------
-
-def test_no_school_dates_round_trip_validates_sorts_and_dedupes(monkeypatch, tmp_path):
-    _mount(monkeypatch, tmp_path)
-    resp = client.post("/api/no-school-dates", data={
-        "dates": _json.dumps(["2026-11-26", "not-a-date", "2026-09-01", "2026-09-01"]),
-    })
-    data = resp.json()
-    assert data["ok"] is True
-    assert data["dates"] == ["2026-09-01", "2026-11-26"]
-
-    again = client.get("/api/no-school-dates").json()
-    assert again["dates"] == ["2026-09-01", "2026-11-26"]
-
-
-# --- Rendered template: the panel and its script load order ----------------
-
-def test_gradebook_page_includes_grading_policy_panel_and_script_order(monkeypatch, tmp_path):
+def test_gradebook_page_renders_without_the_retired_grading_policy_panel(monkeypatch, tmp_path):
     _mount(monkeypatch, tmp_path)
     resp = client.get("/gradebook")
     assert resp.status_code == 200
     body = resp.text
-    assert 'id="btn-save-grading-policy"' in body
-    assert 'id="gp-floor"' in body
-    assert 'id="gp-no-school-dates"' in body
-    policy_index = body.index("/static/gradebook/policy.js")
-    grading_policy_index = body.index("/static/gradebook/grading_policy.js")
-    assert policy_index < grading_policy_index
+    assert 'id="btn-save-grading-policy"' not in body
+    assert 'id="gp-floor"' not in body
+    assert 'id="gp-no-school-dates"' not in body
+    assert "/static/gradebook/grading_policy.js" not in body

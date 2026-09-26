@@ -142,7 +142,11 @@ def _discover(course_id: str) -> tuple[list[dict], dict, dict | None]:
     assignment, then per-row eligibility. Returns
     ``(entries, skipped_counts, blocking)``; ``blocking`` is ``None`` on
     success."""
-    policy = config.get_grading_policy(course_id)
+    try:
+        policy = grading_policy.load_policy()
+    except grading_policy.GradingPolicyFileError as exc:
+        return [], {}, {"blocking_error": "grading_policy_file_invalid",
+                        "message": str(exc)}
     if not policy:
         return [], {}, {"blocking_error": "no_grading_policy"}
 
@@ -165,7 +169,7 @@ def _discover(course_id: str) -> tuple[list[dict], dict, dict | None]:
         str(student.get("id")) for student in roster["records"]
         if student.get("id") is not None
     }
-    no_school_dates = config.get_no_school_dates()
+    no_school_dates = grading_policy.load_no_school_dates()
     extra_time = {
         str(row.get("id")): int(row.get("days") or 0)
         for row in (config.get_extra_time(course_id) or [])

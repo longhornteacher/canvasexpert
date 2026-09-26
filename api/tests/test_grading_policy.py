@@ -76,3 +76,54 @@ def test_school_days_between_excludes_weekends_and_no_school_dates():
     count = grading_policy.school_days_between(
         date(2026, 9, 25), date(2026, 10, 2), ["2026-09-30"])
     assert count == 4
+
+
+# --- load_policy() / load_no_school_dates(): the two plain workspace files
+# (docs/contracts/grading-policy-contract.md section 4) -----------------------
+
+def test_load_policy_absent_file_returns_none(grading_policy_files):
+    assert grading_policy.load_policy() is None
+
+
+def test_load_policy_valid_file_parses_case_insensitive_keys_and_comments(grading_policy_files):
+    grading_policy_files.raw_policy(
+        "# a comment line\n"
+        "\n"
+        "FLOOR_PERCENT: 30  # inline comment\n"
+        "missing_percent:20\n"
+        "Sweep_After_School_Days: 15\n"
+    )
+    assert grading_policy.load_policy() == {
+        "floor_percent": 30, "missing_percent": 20, "sweep_after_school_days": 15,
+    }
+
+
+@pytest.mark.parametrize("raw", [
+    "floor_percent: 30\nmissing_percent: 20\n",  # missing sweep_after_school_days
+    "floor_percent: 10\nmissing_percent: 20\nsweep_after_school_days: 15\n",  # floor below missing
+    "floor_percent: abc\nmissing_percent: 20\nsweep_after_school_days: 15\n",  # non-integer
+    "floor_percent: 30\nmissing_percent: 20\nsweep_after_school_days: 0\n",  # sweep out of range (low)
+    "floor_percent: 30\nmissing_percent: 20\nsweep_after_school_days: 61\n",  # sweep out of range (high)
+], ids=["missing_key", "floor_below_missing", "non_integer", "sweep_too_low", "sweep_too_high"])
+def test_load_policy_invalid_file_raises_with_a_readable_message(grading_policy_files, raw):
+    grading_policy_files.raw_policy(raw)
+    with pytest.raises(grading_policy.GradingPolicyFileError):
+        grading_policy.load_policy()
+
+
+def test_load_no_school_dates_absent_file_returns_empty_list(grading_policy_files):
+    assert grading_policy.load_no_school_dates() == []
+
+
+def test_load_no_school_dates_expands_ranges_skips_header_and_junk_rows(grading_policy_files):
+    grading_policy_files.holidays([
+        ["start", "end", "name"],  # header row, skipped
+        ["2026-11-23", "2026-11-27", "Thanksgiving"],
+        ["2026-12-21"],
+        ["not-a-date", "2026-12-22"],  # junk first cell, whole row skipped
+        [],  # blank row, skipped
+    ])
+    assert grading_policy.load_no_school_dates() == [
+        "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27",
+        "2026-12-21",
+    ]

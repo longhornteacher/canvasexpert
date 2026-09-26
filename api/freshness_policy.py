@@ -4,8 +4,6 @@ from __future__ import annotations
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 
-from api.platform_services import config
-
 
 LOCAL_TIMEZONE = ZoneInfo("America/Chicago")
 SCHOOL_START = time(7, 0)
@@ -20,8 +18,13 @@ def policy_window_minutes(now: datetime | None = None,
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     local_now = now.astimezone(LOCAL_TIMEZONE)
-    configured_holidays = (config.get_no_school_dates()
-                           if holidays is None else holidays)
+    if holidays is None:
+        # Function-local import: grading_policy imports LOCAL_TIMEZONE from
+        # this module, so a module-level import here would cycle.
+        from api import grading_policy
+        configured_holidays = grading_policy.load_no_school_dates()
+    else:
+        configured_holidays = holidays
     holiday_dates = {str(value) for value in configured_holidays or ()}
     school_day = local_now.weekday() < 5 and local_now.date().isoformat() not in holiday_dates
     school_hours = bool(school_day and SCHOOL_START <= local_now.time() < SCHOOL_END)

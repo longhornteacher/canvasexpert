@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from api import gradebook_queries, gradebook_snapshot
-from api import freshness_policy
+from api import freshness_policy, grading_policy
 from api.mirror import queries, store
 from api.mcp_server import tools
 from api.platform_services import workspace
@@ -273,7 +273,7 @@ def _pin_mcp_freshness(monkeypatch, now):
 
     monkeypatch.setattr(freshness_policy, "datetime", FixedDateTime)
     monkeypatch.setattr(store, "datetime", FixedDateTime)
-    monkeypatch.setattr(freshness_policy.config, "get_no_school_dates", lambda: [])
+    monkeypatch.setattr(grading_policy, "load_no_school_dates", lambda root=None: [])
     monkeypatch.setattr(tools.mirror_queries, "_serve_max_age_hours", lambda: 6.0)
 
 

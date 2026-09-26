@@ -54,21 +54,32 @@ complex. This design keeps that decision:
 
 ## 4. Policy record and setup
 
-One record per course in the synced workspace settings, beside `extra_time`:
+Two plain files in the synced workspace, both optional; neither is seeded or created by
+Canvas Expert. One policy applies to every course -- there is no per-course record and no
+Web UI panel.
 
-```json
-{"floor_percent": 30, "missing_percent": 20, "sweep_after_school_days": 15}
-```
+- `Library/Grading Policy.txt`: `key: value` lines, `#` starts a comment, blank lines
+  ignored, keys case-insensitive. Three required integer keys: `floor_percent`,
+  `missing_percent`, `sweep_after_school_days`, with `0 <= missing_percent <=
+  floor_percent <= 100` and `1 <= sweep_after_school_days <= 60`. A present but invalid
+  file (a missing key, a non-integer, or a value out of range) blocks both the Scoring
+  Session stage and the missing sweep preview with `grading_policy_file_invalid` and a
+  plain one-sentence message naming the exact problem -- it never falls back to
+  no-policy behavior.
+- `Library/Calendars/Holidays.csv`: each row is `start` or `start,end` or
+  `start,end,name` (ISO dates; `end` blank or absent means one day; `name` is ignored).
+  A header row, or any row whose first cell is not an ISO date, is skipped. A range
+  expands to every date from `start` to `end` inclusive.
 
-Plus one workspace-wide, top-level synced `no_school_dates` list of ISO dates.
+Both files are read fresh on every use (`api/grading_policy.py`'s `load_policy` and
+`load_no_school_dates`); nothing is cached. No `Grading Policy.txt` means today's behavior
+everywhere: raw scores with no effort credit, and the missing sweep refuses
+`no_grading_policy`. No `Holidays.csv` means no no-school dates.
 
-Setup lives in one small control-console panel beside the existing course late-policy
-controls: the three numbers and the no-school dates. On save it reads the cached course late
-policy (`late_policy.v1.json`) and warns, without blocking, when Canvas's missing-submission
-policy is on, or when Canvas's lowest-possible-grade is below the missing value. Saving
-refuses `floor_percent < missing_percent`.
-
-No record means today's behavior everywhere.
+The teacher edits both files directly; Canvas's own missing-submission policy and
+lowest-possible-grade settings remain the teacher's business to check in Canvas -- turn
+the missing-submission policy off, and keep the lowest possible grade at or above the
+missing value.
 
 ## 5. Scoring lane
 

@@ -116,7 +116,9 @@ def _mirror_scope(records: list[dict]) -> dict:
     return {"records": records, "last_success_at": _SYNCED_AT, "state": "current"}
 
 
-def test_preview_to_apply_verifies_the_sweep_then_undo_returns_it_to_blank(monkeypatch):
+def test_preview_to_apply_verifies_the_sweep_then_undo_returns_it_to_blank(
+    monkeypatch, grading_policy_files,
+):
     """Example, once: preview -> apply -> verify (criterion 1), then undo
     (criterion 6), against a fake Canvas exercising the real mirror-prefilter
     plus live-per-assignment-GET discovery path."""
@@ -138,10 +140,11 @@ def test_preview_to_apply_verifies_the_sweep_then_undo_returns_it_to_blank(monke
 
     monkeypatch.setattr(config, "active_courses",
                         lambda: [{"id": "course-1", "name": "Synthetic Course"}])
-    monkeypatch.setattr(config, "get_grading_policy",
-                        lambda course_id: {"floor_percent": 30, "missing_percent": 20,
-                                           "sweep_after_school_days": 15})
-    monkeypatch.setattr(config, "get_no_school_dates", lambda: no_school_dates)
+    # Grading policy and no-school dates are now the two plain workspace
+    # files (grading-policy-contract.md section 4); no-school dates stays
+    # empty for this test simply by leaving Holidays.csv unwritten.
+    grading_policy_files.policy(floor_percent=30, missing_percent=20,
+                                sweep_after_school_days=15)
     monkeypatch.setattr(config, "get_extra_time", lambda course_id: [])
     monkeypatch.setattr(read_service, "private_roster",
                         lambda course_id, max_age_hours=None: _mirror_scope(
@@ -201,6 +204,26 @@ def test_preview_to_apply_verifies_the_sweep_then_undo_returns_it_to_blank(monke
     assert undo_request["submission"]["late_policy_status"] == "missing"
     assert canvas.rows["assignment-1:student-1"]["entered_score"] is None
     assert canvas.rows["assignment-1:student-1"]["late_policy_status"] == "missing"
+
+
+def test_invalid_grading_policy_file_blocks_the_sweep_preview_with_a_message(
+    monkeypatch, grading_policy_files,
+):
+    """Criterion 3 (sweep side): an invalid Grading Policy.txt blocks the
+    preview with grading_policy_file_invalid and load_policy's own readable
+    message, before any mirror read is attempted."""
+    monkeypatch.setattr(config, "active_courses",
+                        lambda: [{"id": "course-1", "name": "Synthetic Course"}])
+    grading_policy_files.raw_policy(
+        "floor_percent: 10\nmissing_percent: 20\nsweep_after_school_days: 15\n")
+
+    result = missing_sweep.preview_missing_sweep("course-1")
+
+    assert result == {"ok": False, "code": "grading_policy_file_invalid",
+                      "error": ("Grading Policy.txt's floor_percent must be at or "
+                               "above missing_percent, and both must be between "
+                               "0 and 100."),
+                      "blocking": True}
 
 
 def _three_row_payload() -> dict:

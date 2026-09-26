@@ -230,7 +230,7 @@ def test_stage_scoring_results_missing_exemplar_refuses_with_item_ids_only(
 
 
 def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fields(
-    monkeypatch, tmp_path, _set_active_courses,
+    monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
 ):
     """EXAMPLE: a grading-policy course posts the effort-credit mark and the
     teacher-confirmed late fields in the same request, with the gradebook
@@ -245,10 +245,9 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
 
     from api.platform_services import config
     from api.powergrader import scoring_apply
-    monkeypatch.setattr(config, "get_grading_policy", lambda course_id: {
-        "floor_percent": 30, "missing_percent": 20, "sweep_after_school_days": 15})
+    grading_policy_files.policy(floor_percent=30, missing_percent=20,
+                                sweep_after_school_days=15)
     monkeypatch.setattr(config, "get_extra_time", lambda course_id: [])
-    monkeypatch.setattr(config, "get_no_school_dates", lambda: [])
     sent = []
     monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
         lambda method, path, payload, timeout=30: (sent.append((method, path, payload)) or ({"id": 1}, None))
@@ -284,6 +283,25 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
         "Entered in the gradebook: 7/10. Canvas applies the late penalty to that."
     )
     assert REAL_ID not in _blob(applied) and REAL_NAME not in _blob(applied)
+
+
+def test_stage_scoring_results_refuses_when_grading_policy_file_is_invalid(
+    monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
+):
+    """Criterion 3 (staging side): an invalid Grading Policy.txt refuses
+    staging with grading_policy_file_invalid and load_policy's own readable
+    message, before anything is frozen."""
+    _session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    grading_policy_files.raw_policy(
+        "floor_percent: 10\nmissing_percent: 20\nsweep_after_school_days: 15\n")
+
+    result = tools.stage_scoring_results(
+        "session-1", _result(8), _digest(bundle), exemplars=EXEMPLARS)
+
+    assert result == {"ok": False, "code": "grading_policy_file_invalid",
+                      "error": ("Grading Policy.txt's floor_percent must be at or "
+                               "above missing_percent, and both must be between "
+                               "0 and 100.")}
 
 
 REAL_ID_A, REAL_NAME_A, PSEUDONYM_A = REAL_ID, REAL_NAME, PSEUDONYM
@@ -343,7 +361,7 @@ def _result_for(pseudonym, score=10, **extra):
 
 
 def test_a_students_earlier_stamp_and_question_survive_staging_only_b_again(
-    monkeypatch, tmp_path, _set_active_courses,
+    monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
 ):
     """Senior correction: the grading-stamp loop and the no-policy pop in
     ``_stage_scoring_results_locked`` must both restrict to this call's
@@ -355,10 +373,9 @@ def test_a_students_earlier_stamp_and_question_survive_staging_only_b_again(
     _session, bundle, sessions = _wire_two_students(monkeypatch, tmp_path, _set_active_courses)
     from api.platform_services import config
     from api.powergrader import scoring_apply
-    monkeypatch.setattr(config, "get_grading_policy", lambda course_id: {
-        "floor_percent": 30, "missing_percent": 20, "sweep_after_school_days": 15})
+    grading_policy_files.policy(floor_percent=30, missing_percent=20,
+                                sweep_after_school_days=15)
     monkeypatch.setattr(config, "get_extra_time", lambda course_id: [])
-    monkeypatch.setattr(config, "get_no_school_dates", lambda: [])
     sent = []
     monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
         lambda method, path, payload, timeout=30: (sent.append((method, path, payload)) or ({"id": 1}, None))

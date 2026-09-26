@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from api import freshness_policy
+from api import freshness_policy, grading_policy
 
 
 CENTRAL = ZoneInfo("America/Chicago")
@@ -30,7 +30,7 @@ def test_freshness_policy_window_and_age_rule(
         monkeypatch, label, local_now, age_minutes, holidays,
         expected_window, expected_school_hours, expected_within):
     monkeypatch.setattr(
-        freshness_policy.config, "get_no_school_dates", lambda: holidays)
+        grading_policy, "load_no_school_dates", lambda root=None: holidays)
     now = local_now.astimezone(ZoneInfo("UTC"))
     synced_at = (now - timedelta(minutes=age_minutes)).isoformat()
 

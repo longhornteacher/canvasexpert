@@ -2926,7 +2926,10 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
     # straight from the incoming results, index-aligned with rows by canvas_id,
     # and never threaded through reidentify or merge_rows_by_uid.
     if session.get("session_kind") == "scoring_assignment":
-        policy = config.get_grading_policy(session.get("course_id"))
+        try:
+            policy = grading_policy.load_policy()
+        except grading_policy.GradingPolicyFileError as exc:
+            return {"ok": False, "code": "grading_policy_file_invalid", "error": str(exc)}
         if policy:
             grading_flags_by_uid: dict[str, dict] = {}
             for raw, row in zip(results, rows):
@@ -2944,7 +2947,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                 for entry in (config.get_extra_time(session.get("course_id")) or [])
                 if entry.get("id") is not None
             }
-            no_school_dates = config.get_no_school_dates()
+            no_school_dates = grading_policy.load_no_school_dates()
             points_possible = float((candidate.get("assignment") or {}).get("points_possible") or 0)
             # Only this call's staged rows (by_uid) get a stamp written or
             # refreshed. A candidate staged earlier and left out of this call

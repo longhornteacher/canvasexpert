@@ -31,6 +31,8 @@ def _current_course(course_id: str) -> bool:
 def _blocking_refusal(blocking: dict) -> dict:
     code = blocking.get("blocking_error") or "missing_sweep_preview_failed"
     result = {"ok": False, "code": code, "error": code, "blocking": True}
+    if blocking.get("message"):
+        result["error"] = blocking["message"]
     attention = blocking.get("attention")
     if attention:
         result["error"] = attention.get("reason", code)
