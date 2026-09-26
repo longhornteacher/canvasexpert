@@ -748,6 +748,7 @@ code. Locked now:
 - The payload `rubric` is the single source. The Canvas rubric, the collapsed box, and
   the printable table all derive from it.
 - Each tier source gets the same rubric. The bridge gets none.
+- A Hub (D7) gets the rubric on the hub assignment only. Tier pages get none.
 - A push without `rubric` creates no Canvas rubric.
 
 ## 8. Teacher decisions (resolved 2026-09-25)
@@ -767,6 +768,12 @@ code. Locked now:
   folder.** Existing Canvas files are found by name lookup only, with no listing tool.
   Chat-posted files come through `stage_attachment`, capped at 25 MB (contract §6.1).
   This is implemented by Batch 3b.
+- **D7: Differentiated Hub is a third AssignmentForge style** (2026-09-25), next to
+  Everyone and Bridge. Canvas differentiation tags are the pod source of truth, and CE
+  assigns tier pages to tags by exact public-tag name, with the teacher as the fallback.
+  Design: `docs/reference/assignment-differentiation-design.md`, "Delivery styles" and
+  "Differentiated Hub". Hub live checks use ELA 7, because CS8 has no tags. The Hub
+  brief is separate from this plan's batch sequence and does not move the §9 pointer.
 
 ## 9. Next batch (single current pointer)
 

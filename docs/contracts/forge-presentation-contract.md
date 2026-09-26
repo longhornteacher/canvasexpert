@@ -56,8 +56,12 @@ this file wins, and the authoring contract is the one that gets fixed.
   "Support".
 - **Canvas Expert knows tiers, not students.** It has no student-to-tier mapping: no roster
   tier scheme, no per-student tier, no group set chosen as a tier source, no tier data in
-  scoring session rows. The teacher assigns each tier's Canvas assignment to students or
-  pods in Canvas. Only assigned students see a tier assignment.
+  scoring session rows. In a Bridge family, the teacher assigns each tier's Canvas
+  assignment to students or pods in Canvas, and only assigned students see a tier
+  assignment. In a Hub (amended 2026-09-25), Canvas Expert assigns each tier page to the
+  Canvas differentiation tag whose name matches the tier's public tag. It knows tier →
+  tag, never tag membership. When it cannot, the teacher assigns the page in Canvas
+  (`docs/reference/assignment-differentiation-design.md`, "Differentiated Hub").
 - An untiered assignment and every page use the `untiered` color.
 - **The review freezes the color.** The push resolves colors when it prepares, and the
   frozen review keeps them. A Settings change after preview does not alter an apply.
@@ -115,6 +119,23 @@ renders in this fixed order:
     table.
 
 A section with no content is omitted entirely, with no empty headings or boxes.
+
+**Hub assignments** (amended 2026-09-25) use the untiered color and no tag in the
+banner. They add one item between Sections (5) and Rubric (6): a **tier pages line**, a
+tint-shaded line reading **Supports:** followed by one link per tier page, in canonical
+tier order. Each link's text is the public tag, drawn in that tier's dark color. The
+line is not collapsed.
+
+### Hub tier page layout
+
+A hub tier page is a Canvas Page rendered from one tier's supports only:
+1. Banner in the tier's color. The eyebrow is `<Public tag> · <unit>`, and the `<h2>` is
+   the base assignment title.
+2. The supports, expanded, not collapsed, under an `<h3>` reading "Supports" ("Go
+   further" on the Accelerate tier): sentence frames, word bank, and HTML, in that order.
+
+Laws 1–3 and 5 (§7) apply to tier pages. A tier page has no header line, rubric,
+printable link, or unit info.
 
 ### Submission wording (header line)
 
