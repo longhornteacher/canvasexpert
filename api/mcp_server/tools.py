@@ -1748,12 +1748,22 @@ def apply_assignment_update(operation_id: str, batch_id: str, review_digest: str
 
 
 def stage_content(kind: str, label: str, content: str) -> dict:
-    """Stage one Forge draft for teacher review."""
+    """Write one authored draft into the teacher's per-kind To Review Inbox.
+
+    The staging step an assistant used to have to perform with file access:
+    the envelope and its byte-count marker are written together, so the draft
+    appears in the matching push tab for the teacher to review and land. No
+    Canvas write, and an existing label is refused rather than overwritten.
+    """
     return content_push.stage_content(kind, label, content)
 
 
 def stage_attachment(source_path: str) -> dict:
-    """Stage one local file as a Forge attachment."""
+    """Copy one local file into the private Forge attachment inbox.
+
+    Accepts a regular file path, not file bytes. Returns only a safe filename
+    and size; it never reveals a private destination path.
+    """
     return forge_files.stage_attachment(source_path)
 
 
