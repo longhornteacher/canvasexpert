@@ -27,7 +27,7 @@ The runtime supports:
 
 Local-only, never served. See `AGENTS.md` Guardrails.
 
-The current version is `1.0.0-beta.4` (see `api/__init__.py`). The supported launcher is
+The current version is `1.0.0-beta.5` (see `api/__init__.py`). The supported launcher is
 `py qf_ui.py` from `api/` or `py api/qf_ui.py` from the repository root; it binds
 only to `127.0.0.1` and preserves the `--port` and `--no-browser` options.
 `api/README.md` owns the backend, CLI, packaging, setup, credentials, workspace, and the
