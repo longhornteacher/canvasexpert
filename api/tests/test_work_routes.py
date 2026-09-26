@@ -55,7 +55,7 @@ def _client():
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
-def test_launcher_rendered_csrf_authorizes_stubbed_scan():
+def test_launcher_rendered_csrf_authorizes_stubbed_scan(tmp_path):
     script = textwrap.dedent(
         """
         from html.parser import HTMLParser
@@ -80,7 +80,7 @@ def test_launcher_rendered_csrf_authorizes_stubbed_scan():
         server.config.get_canvas_base = lambda: "https://canvas.invalid"
         server.config.active_courses = lambda: []
         workspace.workspace_root = lambda: None
-        work.storage.workspace.workspace_root = lambda: "stubbed-workspace"
+        work.storage.workspace.workspace_root = lambda: WORKSPACE_PATH
         work.discovery.scan_active_courses = lambda: {
             "ok": True,
             "partial": False,
@@ -120,7 +120,7 @@ def test_launcher_rendered_csrf_authorizes_stubbed_scan():
             "error_codes": [],
         }
         """
-    )
+    ).replace("WORKSPACE_PATH", repr(str(tmp_path / "stubbed-workspace")))
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=API_DIR.parent,
