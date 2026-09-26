@@ -136,8 +136,9 @@ _NEXT_STEPS = {
         "Read total as response rows and students_total as people. Keep the scoring "
         "contract and rubric on page zero; use next_offset for later pages. After "
         "reading every page, call stage_scoring_results with one "
-        "{pseudonym, item_id, score, feedback} row per packet student row and "
-        "packet_digest as expected_packet_digest."
+        "{pseudonym, item_id, score, explanation, glows, grows, fixes} row per packet "
+        "student row, the page-zero `exemplars`, and packet_digest as "
+        "expected_packet_digest."
     ),
     "stage_scoring_results": (
         "Stage validated results locally. Summarize the staged aggregate and wait for "
