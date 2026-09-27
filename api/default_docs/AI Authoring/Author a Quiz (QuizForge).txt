@@ -83,7 +83,7 @@ The teacher reviews the family in Canvas Live and owns Canvas Grade Sync.
   never QuizForge auto-scoring.
 - `prompt` (string): Full stem. Include fences inline (see Section 6) with explicit `\n` newlines. Every scored item needs a non-empty prompt; only `STIMULUS`/`STIMULUS_END` may be empty (and `ORDERING` may reuse `header` if `prompt` is omitted).
 - `points` (number, optional): Only include when the teacher explicitly asks for custom weights. Otherwise, omit `points` and let QuizForge assign default scoring.
-- `stimulus_id` (string): Optional explicit link to a stimulus `id`; otherwise, item attaches to the most recent stimulus above it.
+- `stimulus_id` (string): Explicit link to a stimulus `id`. Set it on every question that uses a stimulus. QuizForge's QTI conversion can attach a question without this field to the most recent preceding stimulus until `STIMULUS_END`; the Canvas Expert live API push cannot and will not include that stimulus in the question stem.
 - `notes` / `metadata`: Optional authoring or machine notes, ignored by students (the metadata/extension rules in Section 3 apply).
 - **`metadata.teks`** (string or array of strings): the TEKS standard code(s) the item assesses, e.g. `"metadata": { "teks": "126.34(c)(4)(A)" }` or `"teks": ["126.34(c)(4)(A)", "126.34(c)(5)(B)"]`. Use the bare code (no "TEKS " prefix — tools add it). The Canvas-API backend reports per-standard coverage and embeds a small visible TEKS label on each tagged question. (Per-question Canvas Outcome alignment is UI-only, so it is not done programmatically.) Tag every scored item with the standard it targets when standards tracking is desired.
 
@@ -99,9 +99,14 @@ The teacher reviews the family in Canvas Live and owns Canvas Grade Sync.
 - Modes other than exact are experimental. The LLM may produce them, but tools are not required to support or validate them yet.
 - **ESSAY** and **FILEUPLOAD** (classic only) — `prompt` and a positive `points` are required, and they take no rationale. Ask the teacher how many points each is worth (this is the one place you set `points` without a weighting scheme); unless an auto-scored item sets `points`, QuizForge splits the rest of the 100 across the auto-scored items, so writing points must total less than 100 when auto-scored items are present.
 - **Classic refusals** — a classic file cannot use `ORDERING` or `CATEGORIZATION` (use `MATCHING` or `MC`), FITB `answer_mode: "wordbank"` (use `dropdown`), `fuzzy_match`, or `case_sensitive: true`, or NUMERICAL `percent_margin` or `decimal_places`. Also, calculator type, shuffle questions, build-on-last-attempt, attempt cooldown, and keep-first scoring have no classic equivalent.
-- **STIMULUS** — Requires `id`. Optional `format`: `"text" | "code" | "markdown"`. Optional `layout`: `"below"` (default) or `"right"`. Optional `assets`: list of `{ "type": "image|table|audio|video|data", "uri": "...", "alt_text": "..." }`. STIMULUS items are never scored. Do not include a `points` field on STIMULUS items. Prompt is optional; empty prompts are accepted but include text when students need context. QuizForge treats them as zero-point containers only. **Limit attached questions to 2–4 per stimulus**; more creates cramped formatting, and scrolling back to the stimulus is not burdensome.
+- **STIMULUS** — Requires `id`. STIMULUS items are unscored; do not include a `points` field. Prompt is optional, but put substantive content students need in `prompt`, including media with appropriate alt text. Author 2–4 questions per stimulus as a guideline, not an enforced limit or a promise about Canvas layout. Optional `layout`: `"below"` (default) or `"right"`; only QTI export uses it for orientation. Optional `format` (`"text" | "code" | "markdown"`) and `assets` (a list of `{ "type": "image|table|audio|video|data", "uri": "...", "alt_text": "..." }`) are not consumed by the live API push, QTI export, or printable renderer. Printables detect code and poetry from `prompt` markup instead.
   - **STIMULUS is for actual content students must reference** — a passage, excerpt, poem, code block, image, or data table. It is NOT a heading or instruction wrapper. Simple directions like `"Read the passage below."`, `"Answer the following questions."`, or `"Use the chart to respond."` are NOT valid STIMULUS content; place that text in the individual question prompts instead. If there is no substantive content to display alongside the questions, do not create a STIMULUS block.
 - **STIMULUS_END** — Type only; `prompt` may be empty (`""`). STIMULUS_END is only a structural marker. Do not include points or rationales for STIMULUS_END.
+
+### Stimulus behavior by output path
+- **Canvas Expert live API push:** Each scored question with a matching explicit `stimulus_id` gets the stimulus `prompt` HTML prefixed to its own stem. The same stimulus HTML is repeated in every linked question; the push does not create one shared/native Canvas stimulus item. `STIMULUS` and `STIMULUS_END` are omitted from posted items. A question without `stimulus_id` does not inherit the preceding stimulus.
+- **QTI-ZIP export for manual import:** Emits the stimulus as a separate zero-point text item and records parent-stimulus metadata on linked questions. QuizForge's QTI conversion can use the most recent preceding stimulus when `stimulus_id` is absent, until `STIMULUS_END`. This describes the generated QTI structure, not how Canvas will display an imported package.
+- **Printables:** Render one stimulus block followed by its questions in source order. `STIMULUS_END` closes that group. Keep the questions after the stimulus in the source items.
 
 ## 5a. FILL IN THE BLANK (FITB) — DETAILED GUIDANCE
 
@@ -196,7 +201,7 @@ Under `quiz_engine: "classic"` there is no word bank: use `dropdown` instead.
 
 ### When to Use STIMULUS vs. Inline HTML:
 - **Use inline HTML:** For single questions with quoted text, code, or multi-paragraph prompts
-- **Use STIMULUS:** Only when 2-4 questions share the **same substantive content** — a passage, code block, poem, image, or data table that students must actively refer back to
+- **Use STIMULUS:** When 2–4 questions share the **same substantive content** — a passage, code block, poem, image, or data table that students must actively refer back to. Set each linked question's `stimulus_id` explicitly for the live API push.
 - **Do NOT use STIMULUS for instructions:** Text like "Read the passage below." or "Answer all questions." is not a stimulus — it is an instruction. Wrapping instructions in a STIMULUS block incorrectly attaches all subsequent questions to it.
 
 **Use single quotes for HTML attributes** (`style='...'`, not `style="..."`) so you don't have to escape them inside the JSON string.
@@ -247,7 +252,7 @@ from `metadata.variant`; student placement remains a separate teacher-owned Canv
 ## 8. UDL & ACCESSIBILITY DEFAULTS
 - Bold headers, avoid ALL CAPS and heavy italics, prefer active voice unless discipline demands passive.
 - Alt text for visuals; chunk complex prompts; keep language clear.
-- **Stimulus layout:** Use `"layout": "below"` (default) for short stimuli and mobile-friendly display. Use `"layout": "right"` for longer passages where side-by-side comparison helps. "Below" is safer for screen readers and narrow viewports.
+- **Stimulus layout in QTI export:** `"layout": "below"` (default) sets top orientation; `"layout": "right"` sets left orientation in the generated QTI. The live API push and printables ignore `layout`; check the imported result in Canvas rather than assuming a particular display.
 
 ## 9. PLANNING FROM TEACHER INTENT
 - Extract: topic/standard, grade level, question count/types, requested tier (default Core), UDL/ELL cues, provided passages/poetry/code, tone, and scaffolds.
@@ -366,7 +371,7 @@ This applies to correct choices, distractors, and the single-rationale types ali
  Rationales (Section 11): one per scored item, skip stimuli; every rationale is exactly two sentences (concept, then applied to this choice or answer); MC/MA need a per-choice rationale for every choice `id`; other scorable types use one two-sentence string.
  Writing split: no ESSAY or FILEUPLOAD items unless the teacher chose `quiz_engine: "classic"`; otherwise one separate AssignmentForge artifact per writing portion, each with `points: 100`.
  Classic (teacher-approved only): every ESSAY/FILEUPLOAD has a `prompt`, positive `points`, and no rationale; writing points total under 100 beside auto-scored items; no ORDERING, CATEGORIZATION, wordbank/fuzzy/case-sensitive FITB, or percent/decimal NUMERICAL; `differentiation`/`tiers` appear only as a Hub (`"hub"`, unique labels, non-empty `supports`).
- Stimuli: set `stimulus_id` to attach; 2–4 questions per stimulus; every STIMULUS holds real content (passage/code/image/table), never a bare instruction.
+ Stimuli: set `stimulus_id` on every linked question for live API push; use 2–4 questions per substantive stimulus as guidance, not a hard limit; put needed content and media with alt text in `prompt`, never a bare instruction. QTI can fall back to the preceding stimulus until `STIMULUS_END`, but live push cannot.
  Differentiated family: at least two files; one exact unsuffixed title; one canonical
  `metadata.variant` (or `metadata.variant_label`) per file; distinct tiers; equal totals.
 

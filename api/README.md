@@ -134,7 +134,11 @@ changed bridge grades in Canvas Live. The teacher reviews there and owns Canvas 
 
 ### Quizzes (QuizForge)
 - Extracts JSON from the `<QUIZFORGE_JSON>` envelope.
-- Inlines `STIMULUS` blocks as embedded HTML (code syntax-highlighted, Monokai).
+- Prefixes each scored question with its explicitly linked `STIMULUS` prompt HTML
+  (code syntax-highlighted, Monokai). The HTML is repeated in every linked
+  question stem; the push does not create one shared/native Canvas stimulus item.
+  Questions without `stimulus_id` do not inherit the preceding stimulus;
+  `STIMULUS_END` is omitted.
 - Distributes a **100-point** total across items.
 - Posts each item with **retry on transient failures** (429/500/502/503/504,
   exponential backoff) so a flaky gateway can't silently drop a question.
@@ -235,8 +239,10 @@ ANTHROPIC_KEY=
 ## Confirmed Canvas API facts / limits (from live probes)
 
 - A New Quiz's `assignment_id` **equals** its quiz `id`.
-- Live QuizForge has **10 auto-graded/structural item types**. `STIMULUS` is inlined as
-  HTML and `STIMULUS_END` is dropped; the remaining eight types create Canvas items.
+- Live QuizForge has **10 auto-graded/structural item types**. The live API push
+  repeats `STIMULUS` prompt HTML in each scored item with a matching explicit
+  `stimulus_id`, without posting a shared stimulus item; `STIMULUS_END` is dropped.
+  The remaining eight types create Canvas items.
   `ESSAY` and `FILEUPLOAD` are rejected before transformation or Canvas unless the file
   declares `quiz_engine: "classic"`; otherwise author each writing portion as a separate
   100-point AssignmentForge artifact.
