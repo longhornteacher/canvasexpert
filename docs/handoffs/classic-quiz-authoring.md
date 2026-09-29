@@ -377,3 +377,20 @@ Preserve completed work and report evidence without guessing.
 **Unresolved:** item 4 only. The live ELA 7 smoke is still owed by the senior: an unpublished classic Hub quiz with one question of each classic type, checking the Quiz-type module item and Student View rendering (Student View is untested).
 
 Correction: senior decision applied. `shuffle_questions: true` is now refused under classic with one sentence in the planner (`_classic_setting_problems`), added to the parametrized refusal test and the QuizForge contract wording; `false` or absent is still accepted and ignored. `validate_qf` has no push-settings input, so it carries no setting refusals (same as `calculator_type` and the others). Focused gate with new files: 678 passed in 150s; `git diff --check` clean.
+
+**Senior acceptance (2026-09-29): GREEN, accepted.**
+- Reviewed seams:
+  - The helpers moved into `tier_pages` are byte-identical to the originals.
+  - The AssignmentForge Hub test edits are import-path only.
+  - Classic existence goes through `assignment_id`, the assignment patch targets the assignment id, and `save_quiz` verifies points.
+  - Deviations 1–3 and 5–7 are accepted, and item 4 is resolved (refuse when true).
+- Live smoke through the committed adapter in the teacher's CS course, via a temporary pytest harness that was deleted afterward:
+  - Setup: an unpublished classic Hub quiz with 11 questions (MC, MA, TF, MATCHING, short-answer, multi-blank and dropdown FITB, two NUMERICAL, ESSAY 20, FILEUPLOAD 10), two tiers with invented tags, and a new module.
+  - Apply `applied`, reconcile `applied`.
+  - Quiz and assignment points were 100 (70 auto plus 30 writing).
+  - MC/MA answer comments and single-rationale `neutral_comments_html` landed.
+  - Module item: `type: Quiz` with the quiz's content id, unpublished; the new module is unpublished.
+  - Both tier pages were unpublished, `visible_to_everyone: false` with 0 overrides, and linked from the quiz description. The tags were `not_found`, which produced 2 teacher actions.
+  - Cleanup: the quiz, both pages, and the module were deleted; the assignment, pages, and module all return 404.
+- Not exercised live: the publish path (no students may see a smoke object; it is covered by the fake-Canvas tests and the 2026-09-29 probe) and a matched tag assignment (the same moved code was verified live on 2026-09-25). Student View rendering and short-answer case handling wait for the first real classic quiz with students.
+- Follow-up flagged separately: item 8, recovered module-item step key.
