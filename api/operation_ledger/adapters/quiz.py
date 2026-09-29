@@ -2,7 +2,8 @@
 
 Pure plan subprocess, then checkpointed New Quiz create/item/assignment/module
 writes with exact-ID reconciliation. Supports whole-class and differentiated
-(variant-based) modes.
+(variant-based) modes. A plan that declares ``quiz_engine: "classic"`` routes to
+``quiz_classic`` at each branch point below; every other plan is untouched.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ import math
 from datetime import datetime, timezone
 
 from .. import models
-from . import differentiated_bridge, quiz_differentiated, quiz_whole
+from . import differentiated_bridge, quiz_classic, quiz_differentiated, quiz_whole, tier_pages
 from .adapter_support import (
     as_list as _as_list,
     build_result as _build_result,
@@ -78,12 +79,15 @@ class QuizAdapter:
         if not isinstance(quiz_payload, dict) or "quiz" not in quiz_payload:
             raise ValueError("plan missing quiz_payload")
 
-        return {
+        payload = {
             "mode": mode,
             "path": path,
             "settings": settings,
             "plan": plan,
         }
+        if plan.get("quiz_engine") == "classic" and plan.get("hub"):
+            quiz_classic.prepare_hub(payload)
+        return payload
 
     def _build_payload_differentiated(self, prepare_request: dict) -> dict:
         variants_in = prepare_request.get("variants")
@@ -106,6 +110,8 @@ class QuizAdapter:
             )
             if not isinstance(plan, dict):
                 raise ValueError("planner did not return a JSON object for variant")
+            if plan.get("quiz_engine") == "classic":
+                raise ValueError(quiz_classic.DIFFERENTIATED_REFUSAL)
             if plan.get("version") != 1:
                 raise ValueError(f"unsupported plan version {plan.get('version')}")
             if not plan.get("title"):
@@ -224,7 +230,7 @@ class QuizAdapter:
                 "unrestricted_tiers": payload.get("unrestricted_tiers"),
             })
         plan = payload.get("plan", {})
-        return models.sha256_dict({
+        digest_fields = {
             "version": plan.get("version"),
             "title": plan.get("title"),
             "quiz_payload": plan.get("quiz_payload"),
@@ -235,7 +241,12 @@ class QuizAdapter:
             "assignment_settings": plan.get("assignment_settings"),
             "module": plan.get("module"),
             "settings": payload.get("settings"),
-        })
+        }
+        if plan.get("quiz_engine") == "classic":
+            # Added only for classic so every New Quiz digest stays what it always was.
+            digest_fields["quiz_engine"] = "classic"
+            digest_fields["tiers"] = payload.get("tiers")
+        return models.sha256_dict(digest_fields)
 
     # ── Target verification ──────────────────────────────────────────────
 
@@ -286,6 +297,8 @@ class QuizAdapter:
             return baseline
         plan = payload.get("plan", {})
         title = plan.get("title", "")
+        if plan.get("quiz_engine") == "classic":
+            return self._capture_baseline_classic(payload, target)
         baseline: dict = {"existing_quiz": None}
 
         assignments, error = canvas_client.canvas_get(
@@ -307,6 +320,40 @@ class QuizAdapter:
                     "html_url": assignment.get("html_url"),
                 }
                 break
+        return baseline
+
+    def _capture_baseline_classic(self, payload: dict, target: dict) -> dict:
+        """Same-title check as a whole quiz, plus the live tag read and page collisions for a Hub."""
+        course_id = target["course_id"]
+        title = payload["plan"].get("title", "")
+        baseline: dict = {"existing_quiz": None}
+        assignments, error = canvas_client.canvas_get(
+            f"/api/v1/courses/{course_id}/assignments",
+            params={"per_page": 100, "search_term": title},
+        )
+        if error:
+            baseline["canvas_error"] = error
+            return baseline
+        for assignment in _as_list(assignments):
+            if _normalize(assignment.get("name")) == _normalize(title):
+                baseline["existing_quiz"] = {
+                    "id": str(assignment.get("id")),
+                    "name": assignment.get("name"),
+                    "new_quizzes": bool(assignment.get("new_quizzes")),
+                    "published": assignment.get("published"),
+                    "html_url": assignment.get("html_url"),
+                }
+                break
+        if payload.get("hub"):
+            initial = target.get("baseline") is None
+            hub = tier_pages.capture_hub_baseline(payload, target, read_tags=initial)
+            if hub.get("blocking_error") or hub.get("canvas_error"):
+                return hub
+            if initial:
+                # Frozen tag ids are part of the reviewed payload, so the keys follow them.
+                target["target_key"] = self.target_key(payload, course_id)
+                target["idempotency_key"] = self.idempotency_key(payload, course_id)
+            baseline.update(hub)
         return baseline
 
     def _capture_baseline_differentiated(self, course_id: str, payload: dict) -> dict:
@@ -365,6 +412,8 @@ class QuizAdapter:
                 if current - known:
                     return True
             return False
+        if payload.get("plan", {}).get("quiz_engine") == "classic":
+            return self._check_drift_classic(payload, target)
         existing = baseline.get("existing_quiz")
         if existing is None:
             return False
@@ -377,6 +426,21 @@ class QuizAdapter:
         if existing["id"] not in known_ids:
             return True  # unknown same-title drift
         return True  # known match still means drift (title collision)
+
+    def _check_drift_classic(self, payload: dict, target: dict) -> bool:
+        """A same-title quiz blocks unless this operation made it (or may have, unresolved)."""
+        fresh = self.capture_baseline(payload, target)
+        if "canvas_error" in fresh or fresh.get("blocking_error"):
+            return True
+        existing = fresh.get("existing_quiz")
+        if existing is None:
+            return False
+        steps = target.get("steps", [])
+        if existing["id"] in {str(step["assignment_id"]) for step in steps if step.get("assignment_id")}:
+            return False
+        create = next((step for step in steps if step.get("step_key") == "create_quiz:0"), {})
+        # An unknown-outcome create is settled by the executor's exact-title lookup, not here.
+        return not (create.get("outbound_started_at") and not create.get("returned_object_id"))
 
     # ── Review ───────────────────────────────────────────────────────────
 
@@ -398,6 +462,8 @@ class QuizAdapter:
             )
 
         plan = payload.get("plan", {})
+        if plan.get("quiz_engine") == "classic":
+            return quiz_classic.freeze_review(payload, target, baseline, course_name)
         items = plan.get("items", [])
         quiz_payload = plan.get("quiz_payload", {})
         quiz = quiz_payload.get("quiz", {})
@@ -522,6 +588,8 @@ class QuizAdapter:
                 context,
                 ordered_steps=_ordered_steps,
             )
+        if payload.get("plan", {}).get("quiz_engine") == "classic":
+            return quiz_classic.execute(payload, target, context)
         return quiz_whole.execute(payload, target, context, ordered_steps=_ordered_steps)
 
     # ── Reconciliation ───────────────────────────────────────────────────
@@ -529,6 +597,8 @@ class QuizAdapter:
     def reconcile(self, payload: dict, target: dict, baseline: dict) -> dict:
         if payload.get("mode") == "differentiated":
             return quiz_differentiated.reconcile(payload, target)
+        if payload.get("plan", {}).get("quiz_engine") == "classic":
+            return quiz_classic.reconcile(payload, target)
         return quiz_whole.reconcile(payload, target, ordered_steps=_ordered_steps)
 
     # ── Retry / reversal ─────────────────────────────────────────────────

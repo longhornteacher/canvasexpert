@@ -1,4 +1,4 @@
-"""QuizForge file -> live Canvas New Quiz.
+"""QuizForge file -> live Canvas New Quiz (or Classic Quiz when declared).
 
 Pipeline:
   1. Read the .txt, extract JSON from the <QUIZFORGE_JSON> envelope.
@@ -22,7 +22,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from api import codefmt, teks, transform
+from api import codefmt, teks, transform, transform_classic, validate_qf
 from api.student_text import normalize_student_text
 
 ENVELOPE = re.compile(r"<QUIZFORGE_JSON>(.*?)</QUIZFORGE_JSON>", re.DOTALL)
@@ -184,10 +184,123 @@ def _effective_quiz_settings(push_settings):
     return quiz_settings
 
 
+_CLASSIC_SCORING_POLICY = {"highest": "keep_highest", "latest": "keep_latest",
+                           "average": "keep_average"}
+
+
+def _classic_setting_problems(push_settings):
+    """Push settings Classic Quizzes cannot honor, one sentence each."""
+    problems = []
+    if push_settings.get("calculator_type"):
+        problems.append("calculator_type has no Classic Quiz equivalent; remove it.")
+    if push_settings.get("shuffle_questions") is True:
+        problems.append("shuffle_questions has no Classic Quiz equivalent; remove it.")
+    if push_settings.get("build_on_last_attempt"):
+        problems.append("build_on_last_attempt has no Classic Quiz equivalent; remove it.")
+    if int(push_settings.get("attempt_cooldown", 0) or 0) > 0:
+        problems.append("attempt_cooldown has no Classic Quiz equivalent; remove it.")
+    if push_settings.get("score_to_keep") == "first":
+        problems.append('score_to_keep "first" has no Classic Quiz equivalent; use highest, latest, or average.')
+    return problems
+
+
+def _classic_points(prepared):
+    """Per-item points for a classic quiz: writing keeps its own, autos share the rest."""
+    writing = [it for it in prepared if it["type"] in WRITING_TYPES]
+    auto = [it for it in prepared if it["type"] not in WRITING_TYPES]
+    if any(it.get("points") is not None for it in auto):
+        return distribute_points(prepared)
+    writing_total = sum(float(it["points"]) for it in writing)
+    shares = iter(distribute_points(auto, total=round(TOTAL_POINTS - writing_total, 2)))
+    return [float(it["points"]) if it["type"] in WRITING_TYPES else next(shares)
+            for it in prepared]
+
+
+def _classic_quiz_fields(data, title, push_settings, total):
+    attempts = 1
+    if push_settings.get("allow_multiple_attempts"):
+        raw = push_settings.get("allowed_attempts", -1)
+        attempts = -1 if str(raw) in ("-1", "unlimited") else int(raw)
+    hidden = bool(push_settings.get("hide_results"))
+    one_at_a_time = bool(push_settings.get("one_at_a_time"))
+    quiz = {
+        "title": title,
+        "description": normalize_student_text(data.get("instructions") or ""),
+        "quiz_type": "assignment",
+        "published": False,
+        "shuffle_answers": bool(push_settings.get("shuffle_answers", True)),
+        "allowed_attempts": attempts,
+        "scoring_policy": _CLASSIC_SCORING_POLICY.get(
+            push_settings.get("score_to_keep", "highest"), "keep_highest"),
+        "one_question_at_a_time": one_at_a_time,
+        "cant_go_back": one_at_a_time and not bool(push_settings.get("allow_backtracking", True)),
+        "show_correct_answers": not hidden,
+        "points_possible_expected": total,
+    }
+    minutes = int(push_settings.get("time_limit_minutes", 0) or 0)
+    if push_settings.get("has_time_limit") and minutes > 0:
+        quiz["time_limit"] = minutes
+    if push_settings.get("access_code"):
+        quiz["access_code"] = str(push_settings["access_code"]).strip()
+    if hidden:
+        quiz["hide_results"] = "always"
+    for key in ("due_at", "unlock_at", "lock_at"):
+        if push_settings.get(key):
+            quiz[key] = push_settings[key]
+    return quiz
+
+
+def _build_classic_plan(path, data, push_settings):
+    problems = _classic_setting_problems(push_settings)
+    if problems:
+        raise ValueError(problems[0])
+    title = normalize_student_text(data.get("title", os.path.basename(path))).strip()
+    prepared = prepare_items(data)
+    points = _classic_points(prepared)
+    items = []
+    for index, (qf_item, point) in enumerate(zip(prepared, points), 1):
+        payload = transform_classic.build_question(qf_item, index)
+        payload["question"]["points_possible"] = point
+        items.append({
+            "index": index,
+            "source_item_id": qf_item.get("id"),
+            "source_type": qf_item.get("type"),
+            "payload": payload,
+        })
+    plan = {
+        "version": 1,
+        "quiz_engine": "classic",
+        "title": title,
+        "metadata": data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
+        "source_path": str(path),
+        "quiz_payload": {"quiz": _classic_quiz_fields(
+            data, title, push_settings, round(sum(points), 2))},
+        "items": items,
+        "assignment_settings": {
+            key: push_settings[key]
+            for key in ("published", "assignment_group_id", "assignment_group_name", "post_to_sis")
+            if key in push_settings
+        },
+        "module": {
+            key: push_settings[key] for key in ("module_id", "module_name")
+            if push_settings.get(key) not in (None, "")
+        },
+    }
+    if data.get("differentiation") == "hub":
+        plan["hub"] = {"tiers": [{"label": tier["label"], "supports": tier["supports"]}
+                                 for tier in data["tiers"]]}
+    return plan
+
+
 def build_push_plan(path, settings=None):
     """Build the deterministic, JSON-safe no-network QuizForge push plan."""
     push_settings = _normalized_settings(settings or {})
     data = load_qf(path)
+    problems = validate_qf.engine_problems(data)
+    if problems:
+        raise ValueError(problems[0])
+    if data.get("quiz_engine") == "classic":
+        return _build_classic_plan(path, data, push_settings)
     _reject_writing_items(data)
     title = normalize_student_text(
         data.get("title", os.path.basename(path))
@@ -391,6 +504,14 @@ def push_file(path, dry_run=False):
     push_settings = json.loads(_settings_raw) if _settings_raw else {}
 
     plan = build_push_plan(path, push_settings)
+    if plan.get("quiz_engine") == "classic":
+        classic = plan["quiz_payload"]["quiz"]
+        print(f"\n=== {os.path.basename(path)} -> '{plan['title']}'  (Classic Quiz: "
+              f"{len(plan['items'])} questions, {classic['points_possible_expected']} points) ===")
+        if not dry_run:
+            print("  !! Classic Quizzes are pushed through the Canvas Expert runtime, "
+                  "not this script.")
+        return None
     data = load_qf(path)
     title = plan["title"]
     items = prepare_items(data)

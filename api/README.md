@@ -9,7 +9,7 @@ runtime returns the semantic data and safety boundaries behind them.
 
 The runtime supports:
 
-- **Push Quizzes** (QuizForge JSON → live New Quizzes)
+- **Push Quizzes** (QuizForge JSON → live New Quizzes, or a Classic Quiz when the file declares `quiz_engine: "classic"`)
 - **Push Assignments** (AssignmentForge JSON → live whole-class assignments)
 - **Push Pages** (PageForge JSON → live pages)
 - **Printable outputs** (QuizForge JSON → local DOCX + PDF files)
@@ -149,6 +149,20 @@ changed bridge grades in Canvas Live. The teacher reviews there and owns Canvas 
   populate the question-level correct/incorrect boxes for MC/MA — the durable
   idea lives in the correct-answer rationale, kept at one layer for simplicity.
 - Embeds a visible **TEKS** label per tagged item + prints a coverage report.
+- **Classic Quizzes** (`"quiz_engine": "classic"`, teacher-chosen, a stop-gap): one whole-class
+  Classic Quiz that also holds `ESSAY` and `FILEUPLOAD` items. Files without `quiz_engine`
+  behave exactly as above. `ORDERING`, `CATEGORIZATION`, wordbank/fuzzy/case-sensitive FITB,
+  percent/decimal NUMERICAL, and calculator/build-on-last/cooldown/keep-first settings are
+  refused with one sentence, at staging and again at preview. Apply is checkpointed:
+  create the unpublished quiz (its `assignment_id` differs from its quiz id), add each
+  question, save settings (this computes points, which are re-read and must match), patch the
+  assignment id for grading category or SIS, attach a `Quiz`-type module item, then publish
+  only if asked. Existence is proven through the assignment: a deleted classic quiz still
+  answers its own GET. `verify_live` takes the assignment id for `kind: "quiz"`.
+  A classic file may also declare `differentiation: "hub"` with `tiers` (supports only):
+  one restricted page per tier, tag-assigned like the AssignmentForge Hub, linked from the
+  quiz description. Push it with `preview_content_push`; `preview_differentiated_quiz_push`
+  refuses it. Canvas Expert cannot score classic quiz writing yet; the teacher grades it in SpeedGrader.
 - **Differentiated family**: two or more files with the same unsuffixed base title and
   canonical `metadata.variant` tier create exact `Base - <configured tag>` quizzes. Each
 source is published, group-only, omitted from the final grade, and SIS-disabled. One
@@ -223,8 +237,12 @@ ANTHROPIC_KEY=
 - A New Quiz's `assignment_id` **equals** its quiz `id`.
 - Live QuizForge has **10 auto-graded/structural item types**. `STIMULUS` is inlined as
   HTML and `STIMULUS_END` is dropped; the remaining eight types create Canvas items.
-  `ESSAY` and `FILEUPLOAD` are rejected before transformation or Canvas. Author each
-  writing portion as a separate 100-point AssignmentForge artifact.
+  `ESSAY` and `FILEUPLOAD` are rejected before transformation or Canvas unless the file
+  declares `quiz_engine: "classic"`; otherwise author each writing portion as a separate
+  100-point AssignmentForge artifact.
+- A **Classic Quiz's** `assignment_id` differs from its quiz id, and a deleted classic quiz
+  still answers 200 on its own GET while its assignment returns 404. See
+  `docs/reference/classic-quiz-design.md`.
 - `numeric` needs `scoring_algorithm:"Numeric"` + a `scoring_data.value` array;
   `rich-fill-blank` needs `edit_distance ≥ 1`.
 - Canvas supports per-student / per-group assignment overrides. Bridge AssignmentForge

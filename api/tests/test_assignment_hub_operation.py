@@ -3,7 +3,7 @@ import copy
 
 import pytest
 
-from api.operation_ledger.adapters import assignment_hub, assignment as assignment_adapter
+from api.operation_ledger.adapters import assignment_hub, assignment as assignment_adapter, tier_pages
 from api.platform_services import canvas_client
 
 
@@ -131,7 +131,7 @@ def test_live_tag_resolution_is_name_only_and_never_reads_membership(monkeypatch
     monkeypatch.setattr(canvas_client, "canvas_get_all_complete", complete)
     monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
     payload = {"hub": True, "tiers": [{"label": "Support", "tag": "Red", "title": "T - Red"}]}
-    assignment_adapter._capture_hub_baseline(payload, {"course_id": "42", "steps": []})
+    tier_pages.capture_hub_baseline(payload, {"course_id": "42", "steps": []})
     assert payload["tiers"][0]["tag_status"] == expected
     assert not any("membership" in path or "/users" in path for path, _ in fake.reads)
 
@@ -162,7 +162,7 @@ def test_existing_exact_tier_page_refuses_preview_without_ids(monkeypatch):
     monkeypatch.setattr(canvas_client, "canvas_get_all_complete", fake.get_all_complete)
     monkeypatch.setattr(canvas_client, "canvas_get_all", fake.get_all)
     payload = {"hub": True, "tiers": [{"label": "Support", "tag": "Red", "title": "Hub - Red"}]}
-    result = assignment_adapter._capture_hub_baseline(payload, {"course_id": "42", "steps": []})
+    result = tier_pages.capture_hub_baseline(payload, {"course_id": "42", "steps": []})
     assert result["blocking_error"] == "tier_page_exists"
     assert result["collision_titles"] == ["Hub - Red"]
     assert "999" not in str(result)
@@ -174,13 +174,13 @@ def test_publish_tier_page_refuses_public_visibility_and_unpublishes_if_postchec
     fake.pages["101"] = {"id": "101", "published": False}
     fake.dates["101"] = {"visible_to_everyone": True, "overrides": []}
     steps, ctx = [], Context()
-    refused = assignment_hub.publish_tier_page("42", "101", 0, steps, ctx)
+    refused = tier_pages.publish_tier_page("42", "101", 0, steps, ctx)
     assert refused["error_code"] == "tier_page_publish_visibility_refused"
     assert not fake.sends
 
     fake.dates["101"]["visible_to_everyone"] = False
     fake.make_public_after_publish = True
-    failed = assignment_hub.publish_tier_page("42", "101", 0, steps, ctx)
+    failed = tier_pages.publish_tier_page("42", "101", 0, steps, ctx)
     assert failed["error_code"] == "tier_page_visibility_law_violation"
     assert fake.pages["101"]["published"] is False
     assert fake.sends[-1][2]["wiki_page"]["published"] is False
@@ -199,7 +199,7 @@ def test_public_page_cleanup_checkpoint_reports_unverified_unpublish(monkeypatch
     fake.keep_published_after_unpublish = True
     steps, ctx = [], Context()
 
-    failed = assignment_hub.publish_tier_page("42", "101", 0, steps, ctx)
+    failed = tier_pages.publish_tier_page("42", "101", 0, steps, ctx)
 
     assert failed["state"] == "sent_unknown"
     assert failed["error_code"] == "tier_page_unpublish_unverified"
@@ -228,7 +228,7 @@ def test_unreadable_post_publish_visibility_is_compensated_and_verified(monkeypa
         return original_get(path, params, timeout)
     monkeypatch.setattr(canvas_client, "canvas_get", get)
 
-    result = assignment_hub.publish_tier_page("42", "101", 0, steps, ctx)
+    result = tier_pages.publish_tier_page("42", "101", 0, steps, ctx)
 
     assert result["state"] == "sent_unknown"
     assert result["error_code"] == "tier_page_publish_unverified"
@@ -251,7 +251,7 @@ def test_resume_with_published_page_and_unreadable_dates_unpublishes(monkeypatch
                          "attempts": 1, "payload_digest": "earlier-publish"})
     steps = copy.deepcopy(ctx.steps)
 
-    result = assignment_hub.publish_tier_page("42", "101", 0, steps, ctx)
+    result = tier_pages.publish_tier_page("42", "101", 0, steps, ctx)
 
     assert result["state"] == "sent_unknown"
     assert result["error_code"] == "tier_page_publish_visibility_unverified"
@@ -270,7 +270,7 @@ def test_mismatched_group_readback_uses_distinct_checkpointed_clear(monkeypatch)
             "matched_group_id": "11"}
     steps, ctx = [], Context()
 
-    result = assignment_hub._assign("42", tier, "101", 0, steps, ctx)
+    result = tier_pages._assign("42", tier, "101", 0, steps, ctx)
 
     assert result is None
     assert tier["tag_status"] == "unavailable"
@@ -299,7 +299,7 @@ def test_changed_group_on_resume_clears_previous_override(monkeypatch, field, va
     tier = {"tag": "Red", "tag_status": "matched", "matched_category_id": "5",
             "matched_group_id": "11"}
 
-    result = assignment_hub._assign("42", tier, "101", 0, steps, ctx)
+    result = tier_pages._assign("42", tier, "101", 0, steps, ctx)
 
     assert result is None
     assert tier["tag_status"] == "unavailable"

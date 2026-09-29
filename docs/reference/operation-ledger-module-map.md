@@ -23,7 +23,9 @@ results.
   may fill only those slots from checkpointed Canvas file IDs. The final outbound
   content request is write-ahead recorded after URL binding.
 - `api/operation_ledger/adapters/quiz.py` — `QuizAdapter` payload build, digest,
-  target verification, baseline/drift, review shaping, and retry/reversal.
+  target verification, baseline/drift, review shaping, and retry/reversal. A plan that
+  declares `quiz_engine: "classic"` branches to `quiz_classic.py` at payload, digest,
+  baseline, drift, review, execute, and reconcile; every other plan is untouched.
 - `api/operation_ledger/adapters/page.py` — page payload, teacher attachment upload
   steps and links, page create/reconcile, and Page-specific module-item behavior
   because Canvas page module attachment semantics differ from Assignment-type items.
@@ -38,9 +40,20 @@ results.
   assignment-draft creation, shared attachment uploads, each tier's printable upload,
   and exact-ID tiered reconcile. It performs no roster/group, override, module, or
   family-tail work.
-- `api/operation_ledger/adapters/assignment_hub.py` — restricted tier-page create,
-  visibility restriction, tag assignment, fail-closed publish, link substitution, and
-  exact-step reconciliation for Differentiated Hub AssignmentForge.
+- `api/operation_ledger/adapters/assignment_hub.py` — sequences the tier pages and
+  one whole-class assignment for Differentiated Hub AssignmentForge, over `tier_pages.py`.
+- `api/operation_ledger/adapters/tier_pages.py` — the shared Hub page owner (AssignmentForge
+  Hub and classic QuizForge Hub): restricted tier-page create, visibility restriction, tag
+  assignment, fail-closed publish and compensation, link substitution, exact-step page
+  reconciliation, the frozen review `hub` block, and the live tag read with its
+  title-collision refusal. It knows tier to tag, never tag membership.
+- `api/operation_ledger/adapters/quiz_classic.py` — Classic Quiz delivery for
+  `content.quiz` (`quiz_engine: "classic"`): Hub payload rendering, review, and the
+  checkpointed steps `create_quiz:0`, `create_question:0:<index>`, `save_quiz:0`,
+  `patch_assignment:0`, `attach_module:0` (a `Quiz`-type module item), `publish_quiz:0`, and
+  `rollback_quiz:0`, plus reconcile. Existence is proven by the quiz's assignment id, never
+  the quiz GET alone (a deleted classic quiz still answers 200). Its one Canvas write
+  helper, `_send`, is the sole mutation owner in the transport registry.
 - `api/operation_ledger/adapters/quiz_whole.py` — whole-class quiz coordinator and reconcile.
 - `api/operation_ledger/adapters/quiz_differentiated.py` — differentiated quiz
   coordinator, extra-time bucket handling, variant failure-state policy, shared
@@ -82,8 +95,9 @@ results.
   missing exact file IDs. Resume may reuse an applied upload only after exact-ID Canvas
   verification; filename or approximate match never proves completion, and uploads are
   not automatically deleted.
-- Keep Assignment/Page module-item behavior separate. `module_placement.py` is only for
-  Canvas Assignment-type module items.
+- Keep Assignment/Page module-item behavior separate. `module_placement.py` is for
+  Assignment-type module items and, through its `item_type` keyword, `Quiz`-type items
+  for classic quizzes; Page items stay in `page.py`.
 - The shared differentiated-family helper is the only differentiated owner allowed to
   attach exact source assignments (the bridge remains gradebook-only).
 - Grade projection starts from an exact linked family and may only write eligible
@@ -106,6 +120,9 @@ results.
 - `api/tests/test_printable_attach.py`
 - `api/tests/test_quiz_operation.py`
 - `api/tests/test_quiz_tier_operation.py`
+- `api/tests/operation_ledger/adapters/test_quiz_classic.py`
+- `api/tests/test_assignment_hub_operation.py` (tier-page visibility and no-membership laws)
+- `api/tests/test_qf_pusher.py`, `api/tests/test_transform_classic.py`
 - `api/tests/test_page_operation.py`
 - `api/tests/test_quick_assignment_operation.py`
 - `api/tests/test_operation_ledger.py`

@@ -181,8 +181,9 @@ def _attach_module_item(
     attach_step_key: str,
     returned_object_id: str,
     deterministic_failure_state: str,
+    item_type: str = "Assignment",
 ) -> dict:
-    """Attach or verify a Canvas Assignment-type module item.
+    """Attach or verify a Canvas module item (Assignment-type unless ``item_type`` says otherwise).
 
     Must be called after _resolve_or_create_module has returned a module_id.
     Preserves exact Canvas call order, checkpoint timing, result states, error codes,
@@ -216,7 +217,7 @@ def _attach_module_item(
     item_request = {
         "module_item": {
             "title": title,
-            "type": "Assignment",
+            "type": item_type,
             "content_id": int(content_id) if str(content_id).isdigit() else str(content_id),
         }
     }
@@ -285,8 +286,9 @@ def attach_assignment_type_module_item(
     returned_object_id: str,
     deterministic_failure_state: str,
     read_modules=None,
+    item_type: str = "Assignment",
 ) -> dict:
-    """Orchestrate module resolution and Canvas Assignment-type module item attachment.
+    """Orchestrate module resolution and Canvas module item attachment.
 
     Delegates to _resolve_or_create_module then _attach_module_item, preserving the
     exact Canvas call order, checkpoint timing, result states, and error codes.
@@ -315,4 +317,5 @@ def attach_assignment_type_module_item(
         attach_step_key=attach_step_key,
         returned_object_id=returned_object_id,
         deterministic_failure_state=deterministic_failure_state,
+        item_type=item_type,
     )

@@ -1524,6 +1524,14 @@ def _staging_appendix(kind: str) -> str:
     folder = runtime_paths.inbox_folder(kind)
     where = str(folder) if folder else (
         f"the {kind.capitalize()} Inbox folder in the Canvas Expert workspace")
+    quiz_note = (
+        "**Classic quizzes.** A quiz file may declare quiz_engine \"classic\" for writing "
+        "inside the quiz or Hub supports on the quiz. Ask the teacher before choosing it; "
+        "otherwise stay on New Quizzes. Push a classic file with preview_content_push and "
+        "apply_content_push (or push_content_live), never preview_differentiated_quiz_push, "
+        "which refuses it. Canvas Expert cannot score classic quiz writing yet: the teacher "
+        "grades it in SpeedGrader.\n\n"
+    ) if kind == "quiz" else ""
     return (
         "\n\n---\n\n"
         "## Getting this to the teacher\n\n"
@@ -1549,6 +1557,7 @@ def _staging_appendix(kind: str) -> str:
         "preview_content_push with this kind and the draft's label carries "
         "the dates, and apply_content_push with the three coordinates "
         "unchanged lands it.\n\n"
+        f"{quiz_note}"
         f"The Inbox for this kind is `{where}`. You do not need to write there "
         "yourself; stage_content handles the envelope and the byte-count marker "
         "that keeps a half-synced draft from being picked up.\n"
@@ -1708,9 +1717,10 @@ def preview_differentiated_quiz_push(
     lock_at: str = "",
     post_to_sis: bool = False, module_id: str = "", create_module: bool = False,
 ) -> dict:
-    """Freeze several staged QuizForge labels for unrestricted teacher-assigned tiers.
+    """Freeze several staged New Quiz QuizForge labels for unrestricted teacher-assigned tiers.
 
-    Legacy group fields in variant objects are ignored.
+    Legacy group fields in variant objects are ignored. A classic quiz file is refused:
+    classic quizzes differentiate with Hub through preview_content_push.
     """
     return _with_next("preview_differentiated_quiz_push", content_push.preview_differentiated_quiz_push(
         course_id, variants, published=published, module_name=module_name,

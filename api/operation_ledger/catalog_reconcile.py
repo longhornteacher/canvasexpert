@@ -10,8 +10,10 @@ minimal fix; the next catalog read or refresh repairs it wholesale.
 
 The kind -> scopes mapping is a conservative union (over-invalidating a
 possibly-unaffected scope is accepted); a kind absent from the map
-invalidates nothing. Two kinds are payload-sensitive:
+invalidates nothing. Some kinds are payload-sensitive:
 
+- A Differentiated Hub push (``content.assignment`` or a classic ``content.quiz``)
+  also creates tier pages, so it marks ``catalog.pages`` stale too.
 - ``content.page`` always creates or verifies a Canvas page, so it always
   marks ``catalog.pages`` stale, but a bare page (no ``module_name``) never
   touches Canvas module structure at all (see ``PageAdapter.execute``), so
@@ -49,7 +51,7 @@ _PAGE_KIND = "content.page"
 
 def _scopes_for(kind: str, payload: dict | None) -> frozenset[str]:
     payload = payload or {}
-    if kind == "content.assignment" and payload.get("hub"):
+    if kind in ("content.assignment", "content.quiz") and payload.get("hub"):
         return frozenset({"assignments", "modules", "pages"})
     if kind == _PAGE_KIND:
         scopes = {"pages"}

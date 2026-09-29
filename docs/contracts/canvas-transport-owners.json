@@ -159,7 +159,7 @@
       "reason": "Patches only the caller-supplied published/due_at/unlock_at/lock_at fields of an existing assignment; description, points_possible, and assignment_group_id are never read or resent. The central operation-ledger post-apply hook invalidates catalog.assignments after the confirmed operation succeeds."
     },
     {
-      "path": "api/operation_ledger/adapters/assignment_hub.py",
+      "path": "api/operation_ledger/adapters/tier_pages.py",
       "symbol": "_send",
       "detector": "attr:_canvas_send",
       "call_index": 1,
@@ -167,7 +167,18 @@
       "classification": "canvas_mutation",
       "scopes": ["catalog.assignments", "catalog.pages"],
       "reconciliation": "invalidate",
-      "reason": "Creates, secures, and compensates restricted Hub tier pages through distinct checkpointed steps; the operation ledger invalidates assignment and page catalog scopes after the complete Hub operation succeeds."
+      "reason": "Creates, secures, and compensates restricted Hub tier pages through distinct checkpointed steps, for both the AssignmentForge Hub and the classic QuizForge Hub; the operation ledger invalidates assignment and page catalog scopes after the complete Hub operation succeeds."
+    },
+    {
+      "path": "api/operation_ledger/adapters/quiz_classic.py",
+      "symbol": "_send",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(method, path, payload) [checkpointed classic quiz create, question create, settings save, publish, or bounded rollback delete]",
+      "classification": "canvas_mutation",
+      "scopes": ["catalog.assignments"],
+      "reconciliation": "invalidate",
+      "reason": "Every classic quiz write goes through this one write-ahead-marked helper: create the unpublished quiz, add each question, save settings (which computes points), publish, and delete only a quiz this same run created after a definitive question rejection. The central operation-ledger post-apply hook invalidates the assignment, module, and (for a Hub) page catalog scopes after the confirmed operation succeeds."
     },
     {
       "path": "api/operation_ledger/adapters/assignment_whole.py",

@@ -193,6 +193,21 @@ def test_differentiated_preview_refuses_baseline_error_before_persisting(_worksp
     assert "private transport error" not in json.dumps(result)
 
 
+def test_differentiated_preview_refuses_a_classic_file_and_points_at_hub(_workspace, monkeypatch):
+    classic = json.dumps({"version": "3.0-json", "quiz_engine": "classic", "title": "Check", "items": []})
+    _stage("quiz", "one", f"<QUIZFORGE_JSON>{classic}</QUIZFORGE_JSON>")
+    _stage("quiz", "two")
+    adapter = DifferentiatedAdapter()
+    monkeypatch.setattr(content_push.registry, "get_adapter", lambda _kind: adapter)
+
+    result = content_push.preview_differentiated_quiz_push(
+        "course-x", [{"label": "one"}, {"label": "two"}])
+
+    assert result["ok"] is False
+    assert "preview_content_push" in result["error"]
+    assert adapter.requests == []
+
+
 # --- what the pair can reach ---------------------------------------------------
 
 def test_preview_freezes_one_staged_draft_for_one_course(_adapter):

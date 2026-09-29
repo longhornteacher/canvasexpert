@@ -38,7 +38,9 @@ def verify_live(course_id: str, kind: str, id: str = "", title: str = "") -> dic
     ``kind="quiz"`` reads the quiz's own underlying Assignment-type record
     (New Quizzes and classic quizzes both publish through an Assignment),
     so its result carries the assignment projection, addressed by the
-    quiz's id.
+    assignment id. A New Quiz's id is its assignment id; for a classic quiz
+    pass its ``assignment_id`` (the push result's ``verify_hint`` does), not
+    the quiz id.
     """
     course_key = str(course_id or "").strip()
     content_kind = str(kind or "").strip().lower()

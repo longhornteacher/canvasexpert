@@ -120,6 +120,20 @@ def _rubric_html(rubric, palette):
     return f'<table style="width:100%;max-width:100%;border-collapse:collapse">{"".join(rows)}</table>'
 
 
+def render_tier_pages_line(tier_page_slots: list[dict], *, palette_key: str) -> str:
+    """Render the Hub tier pages line: **Supports:** plus one link per tier page.
+
+    Shared by hub assignments and classic quiz descriptions so the line has one
+    owner. ``palette_key`` shades the line; each link is drawn in its own tier's color.
+    """
+    palette = palette_for(palette_key)
+    links = " ".join(
+        f'<a href="{_e(slot["href"])}" style="color:{palette_for(slot["palette_key"])["dark"]}">{_e(slot["tag"])}</a>'
+        for slot in tier_page_slots
+    )
+    return f'<p style="margin:14px 0;padding:10px;background-color:{palette["tint"]}"><strong>Supports:</strong> {links}</p>'
+
+
 def render_assignment(model: dict, *, palette_key: str, tier: str | None, public_tag: str | None,
                       assignment_group: str | None, printable_link: str | None,
                       attachment_slots: list[dict] | None = None,
@@ -147,11 +161,7 @@ def render_assignment(model: dict, *, palette_key: str, tier: str | None, public
         out.append(f'<table style="max-width:100%;border-collapse:collapse"><tbody>{"".join(rows)}</tbody></table>')
     out.append(_section_html(model.get("sections"), palette))
     if tier_page_slots:
-        links = " ".join(
-            f'<a href="{_e(slot["href"])}" style="color:{palette_for(slot["palette_key"])["dark"]}">{_e(slot["tag"])}</a>'
-            for slot in tier_page_slots
-        )
-        out.append(f'<p style="margin:14px 0;padding:10px;background-color:{palette["tint"]}"><strong>Supports:</strong> {links}</p>')
+        out.append(render_tier_pages_line(tier_page_slots, palette_key=palette_key))
     rubric = _rubric_html(model.get("rubric"), palette)
     if rubric:
         out.append(_details("Rubric", rubric, palette))

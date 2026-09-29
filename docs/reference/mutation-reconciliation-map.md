@@ -88,12 +88,22 @@ teacher refreshes the catalog by hand. `content.page` invalidates
 `catalog.pages` unconditionally and reaches this through the same post-apply
 hook; nothing in the push path itself changed.
 
+**Classic QuizForge (2026-09-29):** a `content.quiz` operation whose plan declares
+`quiz_engine: "classic"` writes only through `quiz_classic.py _send` (create the
+unpublished quiz, add questions, save settings, publish, and delete only a quiz the same
+run created after a definitive question rejection), plus the existing
+`quiz_steps.patch_assignment` and `module_placement` owners. A classic Hub also uses the
+shared `tier_pages.py _send`. The kind maps to `catalog.assignments` and `catalog.modules`,
+and a classic Hub adds `catalog.pages`, exactly like the AssignmentForge Hub. A classic quiz
+is not `new_quiz.metadata`. Reconcile proves existence through the assignment id.
+
 **Differentiated Hub AssignmentForge:** one `content.assignment` operation creates
 `catalog.assignments` plus one restricted `catalog.pages` object per supplied tier.
 Its payload-sensitive scope includes assignments, modules (the hub may use ordinary
 module placement), and pages; each page is reported from its checkpointed
 `create_tier_page:<index>` step. Tag reads never fetch membership and do not invalidate
-private group scopes.
+private group scopes. The page and tag helpers live in `tier_pages.py`, shared with the
+classic QuizForge Hub.
 
 The `gradebook.sis_bridge` adapter is also covered: approved bridge creation or
 registration and grade writes map conservatively to `catalog.assignments`

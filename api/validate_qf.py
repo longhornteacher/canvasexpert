@@ -16,6 +16,11 @@ FOLDER = os.path.join("qf_materials", "qf quiz examples")
 ALL_TYPES = {"STIMULUS", "STIMULUS_END", "MC", "MA", "TF", "MATCHING", "FITB",
              "ORDERING", "CATEGORIZATION", "NUMERICAL"}
 WRITING_TYPES = {"ESSAY", "FILEUPLOAD"}
+# Declared target: absent means New Quizzes. Classic Quizzes are the only engine
+# that can hold writing items and Differentiated Hub supports.
+QUIZ_ENGINES = ("new", "classic")
+CLASSIC_UNSUPPORTED_TYPES = {"ORDERING", "CATEGORIZATION"}
+CLASSIC_UNSUPPORTED_NUMERIC_MODES = {"percent_margin", "decimal_places"}
 SCORED_SINGLE_RATIONALE = {"TF", "FITB", "MATCHING", "ORDERING", "NUMERICAL",
                             "CATEGORIZATION"}
 PER_CHOICE_RATIONALE = {"MC", "MA"}
@@ -72,9 +77,14 @@ def validate(path, seen_types):
         if isinstance(r, dict) and r.get("item_id") is not None:
             rationale_by_id[r["item_id"]] = r
 
+    classic = data.get("quiz_engine", "new") == "classic"
+    problems.extend(f"{name}: {problem}" for problem in engine_problems(data))
+
     for idx, it in enumerate(items, 1):
         t = it.get("type")
         seen_types.add(t)
+        if t in WRITING_TYPES and classic:
+            continue  # engine_problems owns the classic writing rules
         if t in WRITING_TYPES:
             problems.append(
                 f"{name}: {t} item {it.get('id')!r} cannot be pushed as a Canvas New Quiz. "
@@ -146,6 +156,96 @@ def validate(path, seen_types):
     print(f"       title: {title}")
     print(f"       group: {grp}  |  variant: {label}")
     print(f"       items: {summary}")
+    return problems
+
+
+def engine_problems(data):
+    """One-sentence refusals for the declared ``quiz_engine``.
+
+    Shared by ``validate`` (staging) and the planner (preview) so both agree.
+    A New Quiz file yields only the engine-value and Hub-key refusals; its
+    writing refusal stays where it always was.
+    """
+    if not isinstance(data, dict):
+        return []
+    engine = data.get("quiz_engine", "new")
+    if engine not in QUIZ_ENGINES:
+        return [f'quiz_engine must be "new" or "classic" (got {engine!r}).']
+    problems = []
+    if engine != "classic":
+        problems.extend(f'{key} is only allowed when quiz_engine is "classic".'
+                        for key in ("differentiation", "tiers") if key in data)
+        return problems
+    items = [it for it in data.get("items") or [] if isinstance(it, dict)]
+    rationale_ids = {r.get("item_id") for r in data.get("rationales") or []
+                     if isinstance(r, dict)}
+    for it in items:
+        problems.extend(classic_item_problems(it, rationale_ids))
+    problems.extend(_classic_points_problems(items))
+    problems.extend(_classic_hub_problems(data))
+    return problems
+
+
+def classic_item_problems(item, rationale_ids):
+    t = item.get("type")
+    label = f"{t} item {item.get('id')!r}"
+    if t in CLASSIC_UNSUPPORTED_TYPES:
+        return [f"{label} cannot be a Classic Quiz question; use MATCHING or MC instead."]
+    if t in WRITING_TYPES:
+        problems = []
+        if not str(item.get("prompt") or "").strip():
+            problems.append(f"{label} needs a prompt.")
+        points = item.get("points")
+        if isinstance(points, bool) or not isinstance(points, (int, float)) or points <= 0:
+            problems.append(f"{label} needs points greater than 0.")
+        if item.get("id") is not None and item.get("id") in rationale_ids:
+            problems.append(f"{label} takes no rationale; remove its rationales entry.")
+        return problems
+    if t == "FITB":
+        mode = str(item.get("answer_mode", "open_entry") or "open_entry").lower()
+        if mode == "wordbank":
+            return [f"{label} cannot use a word bank in a Classic Quiz; use answer_mode dropdown."]
+        if item.get("fuzzy_match"):
+            return [f"{label} cannot use fuzzy_match in a Classic Quiz."]
+        if item.get("case_sensitive") is True:
+            return [f"{label} cannot be case_sensitive in a Classic Quiz."]
+        if mode == "dropdown" and not re.search(r"\[blank\d*\]", str(item.get("prompt") or "")):
+            return [f"{label} needs a [blank] token in its prompt to hold the dropdown."]
+    if t == "NUMERICAL":
+        evaluation = item.get("evaluation")
+        mode = str((evaluation.get("mode") if isinstance(evaluation, dict) else None) or "exact")
+        if mode in CLASSIC_UNSUPPORTED_NUMERIC_MODES:
+            return [f"{label} cannot use {mode} in a Classic Quiz; use exact, absolute_margin, range, or significant_digits."]
+    return []
+
+
+def _classic_points_problems(items):
+    auto = [it for it in items if it.get("type") in ALL_TYPES - {"STIMULUS", "STIMULUS_END"}]
+    if not auto or any(it.get("points") is not None for it in auto):
+        return []
+    writing_total = sum(it["points"] for it in items
+                        if it.get("type") in WRITING_TYPES
+                        and isinstance(it.get("points"), (int, float))
+                        and not isinstance(it.get("points"), bool))
+    if writing_total >= 100:
+        return [f"The writing items total {writing_total:g} points, leaving nothing of the 100-point quiz for the auto-scored items."]
+    return []
+
+
+def _classic_hub_problems(data):
+    style, tiers = data.get("differentiation"), data.get("tiers")
+    if "differentiation" not in data and "tiers" not in data:
+        return []
+    if style == "bridge":
+        return ['differentiation "bridge" is not available in QuizForge; use "hub" for tier supports.']
+    if style != "hub":
+        return ['differentiation must be "hub" when a QuizForge file carries tiers.']
+    if "tiers" not in data:
+        return ['differentiation "hub" requires tiers.']
+    from api.webui import af  # lazy: keeps the CLI validator free of app imports
+
+    problems = []
+    af._validate_tiers(tiers, problems, style="hub")
     return problems
 
 
@@ -314,7 +414,7 @@ def _advise_text(label, text, advisories):
 def advise(data):
     """Return style suggestions for auto-graded rationales. Never blocks a push.
 
-    Writing items are rejected by ``validate`` and never reach this advisory path.
+    Writing items carry no rationale, so they never reach this advisory path.
     """
     advisories = []
     if not data:

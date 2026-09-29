@@ -22,9 +22,9 @@ import os
 import re
 from pathlib import Path
 
-from api import runtime_paths
+from api import runtime_paths, validate_qf
 from api.operation_ledger import batches, executor, models, operations, registry
-from api.operation_ledger.adapters import differentiated_bridge
+from api.operation_ledger.adapters import differentiated_bridge, quiz_classic
 from api.operation_ledger.adapters.assignment import KIND as ASSIGNMENT_KIND
 from api.operation_ledger.adapters.assignment_update import KIND as ASSIGNMENT_UPDATE_KIND
 from api.operation_ledger.adapters.page import KIND as PAGE_KIND
@@ -331,6 +331,10 @@ def preview_differentiated_quiz_push(
         path, resolve_error = _resolve_staged_draft("quiz", label)
         if resolve_error:
             return {"ok": False, "error": resolve_error}
+        _name, draft, _problems = validate_qf._load(path)
+        if isinstance(draft, dict) and (draft.get("quiz_engine") == "classic"
+                                        or "differentiation" in draft or "tiers" in draft):
+            return {"ok": False, "error": quiz_classic.DIFFERENTIATED_REFUSAL, "blocking": True}
         resolved_label = Path(path).name.casefold()
         if resolved_label in seen_labels:
             return {"ok": False, "error": "variant labels must be unique after resolution"}
@@ -667,7 +671,12 @@ def _content_kind(ledger_kind: str) -> str:
 
 
 def _verify_hint_kind(ledger_kind: str, *, is_quiz_variant: bool = False) -> str:
-    """AC2: the ``kind`` vocabulary verify_live accepts, from a ledger kind."""
+    """AC2: the ``kind`` vocabulary verify_live accepts, from a ledger kind.
+
+    ``kind="quiz"`` is answered from the quiz's assignment record, so the id that
+    goes with it is the *assignment* id: a New Quiz's id is that already, and a
+    classic quiz's is ``create_quiz:0``'s recorded ``assignment_id``.
+    """
     if is_quiz_variant or ledger_kind == QUIZ_KIND:
         return "quiz"
     if ledger_kind == PAGE_KIND:
@@ -690,6 +699,7 @@ def _result_projection(operation: dict, result: dict) -> dict:
         normalized.get("mode") == "differentiated" or bool(normalized.get("tiers"))
     )
     is_hub = bool(normalized.get("hub"))
+    classic_plan = (normalized.get("plan") or {}).get("quiz_engine") == "classic"
     is_quiz_variant = normalized.get("mode") == "differentiated"
     variants = normalized.get("variants") or normalized.get("tiers") or []
     for target_index, target in enumerate(result.get("target_results") or []):
@@ -722,6 +732,14 @@ def _result_projection(operation: dict, result: dict) -> dict:
         ]
         if steps:
             row["unfinished_steps"] = steps
+        classic_assignment_id = next(
+            (step.get("assignment_id") for step in (stored_target.get("steps") or [])
+             if step.get("step_key") == "create_quiz:0" and step.get("assignment_id")), None
+        ) if classic_plan else None
+        published_intent = (
+            bool(((normalized.get("plan") or {}).get("assignment_settings") or {}).get("published"))
+            if classic_plan else bool(normalized.get("published"))
+        )
         if is_hub:
             tier_rows = []
             actions = []
@@ -742,22 +760,29 @@ def _result_projection(operation: dict, result: dict) -> dict:
                     "tier": tier.get("label"), "tag": tier.get("tag"),
                     "title": tier.get("title"), "page_id": page_id,
                     "url": create.get("returned_object_url"),
-                    "published": bool(normalized.get("published") and
+                    "published": bool(published_intent and
                                       published.get("state") in {"applied", "skipped"}),
                     "tag_status": tier.get("tag_status"), "teacher_action": action,
                 })
                 if page_id:
                     verify_hint.append({"course_id": course_id, "kind": "page", "id": page_id})
+            # The hub object is an assignment for AssignmentForge and a classic quiz for
+            # QuizForge; verify_live reads both through their assignment record.
             assignment_step = next((step for step in step_source
-                                    if step.get("step_key") == "create_assignment"), {})
-            if assignment_step.get("returned_object_id"):
-                verify_hint.append({"course_id": course_id, "kind": "assignment",
-                                    "id": assignment_step["returned_object_id"]})
+                                    if step.get("step_key") == ("create_quiz:0" if classic_plan
+                                                                else "create_assignment")), {})
+            hub_object_id = (classic_assignment_id if classic_plan
+                             else assignment_step.get("returned_object_id"))
+            if hub_object_id:
+                verify_hint.append({"course_id": course_id,
+                                    "kind": "quiz" if classic_plan else "assignment",
+                                    "id": hub_object_id})
             row["hub"] = {
-                "assignment": {"title": normalized.get("name"),
-                               "assignment_id": assignment_step.get("returned_object_id"),
+                "assignment": {"title": ((normalized.get("plan") or {}).get("title") if classic_plan
+                                         else normalized.get("name")),
+                               "assignment_id": hub_object_id,
                                "url": assignment_step.get("returned_object_url"),
-                               "published": bool(normalized.get("published") and
+                               "published": bool(published_intent and
                                                  assignment_step.get("state") in {"applied", "skipped"})},
                 "tiers": tier_rows, "teacher_actions": actions,
             }
@@ -827,11 +852,13 @@ def _result_projection(operation: dict, result: dict) -> dict:
                 if repair_plan:
                     row["repair_plan"] = repair_plan
         elif row.get("state") in ("applied", "skipped") and target.get("returned_object_id"):
-            verify_hint.append({
-                "course_id": course_id,
-                "kind": _verify_hint_kind(ledger_kind),
-                "id": target["returned_object_id"],
-            })
+            hint_id = classic_assignment_id if classic_plan else target["returned_object_id"]
+            if hint_id:
+                verify_hint.append({
+                    "course_id": course_id,
+                    "kind": _verify_hint_kind(ledger_kind),
+                    "id": hint_id,
+                })
         targets.append(row)
 
     return {

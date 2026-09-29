@@ -16,7 +16,7 @@ from engine.rendering.physical.emit_pdf import html_to_pdf
 from engine.utils.text_utils import safe_filename_component
 
 from .. import models
-from . import assignment_tiered, assignment_whole, assignment_hub, differentiated_bridge
+from . import assignment_tiered, assignment_whole, assignment_hub, differentiated_bridge, tier_pages
 from . import forge_files
 from .adapter_support import (
     as_list as _as_list,
@@ -331,7 +331,7 @@ class AssignmentAdapter:
         name = payload.get("name", "")
         if payload.get("hub"):
             initial = target.get("baseline") is None
-            baseline = _capture_hub_baseline(payload, target, read_tags=initial)
+            baseline = tier_pages.capture_hub_baseline(payload, target, read_tags=initial)
             if initial and not baseline.get("blocking_error") and not baseline.get("canvas_error"):
                 target["target_key"] = self.target_key(payload, course_id)
                 target["idempotency_key"] = self.idempotency_key(payload, course_id)
@@ -491,28 +491,9 @@ class AssignmentAdapter:
             "printables": printables,
         }
         if payload.get("hub"):
-            hub_tiers = []
-            teacher_actions = []
-            steps = _ordered_steps(target)
-            for index, row in enumerate(payload.get("tiers", [])):
-                step = _find_step(steps, f"create_tier_page:{index}")
-                action = (f"Assign page '{row['title']}' to Canvas differentiation tag '{row['tag']}'."
-                          if row.get("tag_status") != "matched" else None)
-                if action:
-                    teacher_actions.append(action)
-                hub_tiers.append({
-                    "tier": row.get("label"), "tag": row.get("tag"), "title": row.get("title"),
-                    "page_id": step.get("returned_object_id"),
-                    "url": step.get("returned_object_url"),
-                    "published": bool(payload.get("published") and
-                                      _find_step(steps, f"publish_tier_page:{index}").get("state") in {"applied", "skipped"}),
-                    "tag_status": row.get("tag_status"), "teacher_action": action,
-                })
-            review["hub"] = {
-                "assignment": {"title": payload.get("name"), "published": payload.get("published")},
-                "tiers": hub_tiers,
-                "teacher_actions": teacher_actions,
-            }
+            review["hub"] = tier_pages.review_hub(
+                payload.get("tiers"), payload.get("published"),
+                _ordered_steps(target), payload.get("name"))
         elif payload.get("tiers"):
             review.update({
                 "tiered": True,
@@ -681,59 +662,6 @@ class AssignmentAdapter:
                 target.get("state", "pending")
             )
         ]
-
-
-def _capture_hub_baseline(payload: dict, target: dict, *, read_tags: bool = True) -> dict:
-    """Freeze exact live tag matches and refuse collisions with existing tier pages."""
-    course_id = target["course_id"]
-    if read_tags:
-        categories, error, complete = canvas_client.canvas_get_all_complete(
-            f"/api/v1/courses/{course_id}/group_categories",
-            {"collaboration_state": "non_collaborative", "per_page": 100},
-        )
-        groups = []
-        if error or not complete:
-            for tier in payload.get("tiers", []):
-                tier.update({"tag_status": "unavailable", "matched_group_id": None,
-                             "matched_category_id": None})
-        else:
-            for category in categories:
-                category_id = category.get("id")
-                rows, group_error, group_complete = canvas_client.canvas_get_all_complete(
-                    f"/api/v1/group_categories/{category_id}/groups", {"per_page": 100})
-                if group_error or not group_complete:
-                    groups = None
-                    break
-                groups.extend({"category_id": category_id, "id": row.get("id"),
-                               "name": str(row.get("name") or "")} for row in rows)
-            if groups is None:
-                for tier in payload.get("tiers", []):
-                    tier.update({"tag_status": "unavailable", "matched_group_id": None,
-                                 "matched_category_id": None})
-            else:
-                for tier in payload.get("tiers", []):
-                    matches = [group for group in groups
-                               if group["name"].strip().casefold() == str(tier.get("tag") or "").strip().casefold()]
-                    status = "matched" if len(matches) == 1 else "not_found" if not matches else "ambiguous"
-                    tier.update({"tag_status": status,
-                                 "matched_group_id": str(matches[0]["id"]) if status == "matched" else None,
-                                 "matched_category_id": str(matches[0]["category_id"]) if status == "matched" else None})
-    pages, page_error = canvas_client.canvas_get_all(
-        f"/api/v1/courses/{course_id}/pages", {"per_page": 100})
-    if page_error:
-        return {"canvas_error": "Canvas tier pages could not be read."}
-    created = {str(step.get("returned_object_id")) for step in target.get("steps", [])
-               if str(step.get("step_key", "")).startswith("create_tier_page:") and step.get("returned_object_id")}
-    desired = {tier["title"] for tier in payload.get("tiers", [])}
-    collisions = [str(row.get("title") or "") for row in pages or []
-                  if str(row.get("title") or "") in desired
-                  and str(row.get("page_id") or row.get("id") or row.get("url") or "") not in created]
-    if collisions:
-        titles = collisions[:len(desired)]
-        return {"blocking_error": "tier_page_exists", "collision_titles": titles,
-                "error": "A tier page already exists: " + "; ".join(titles)}
-    return {"hub_tiers": [{"tier": row.get("label"), "tag_status": row["tag_status"]}
-                           for row in payload.get("tiers", [])]}
 
 
 # ── Module-level helpers ─────────────────────────────────────────────────

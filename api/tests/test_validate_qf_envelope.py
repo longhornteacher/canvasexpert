@@ -8,6 +8,7 @@ to Canvas.
 from __future__ import annotations
 
 import json
+import re
 import textwrap
 
 import pytest
@@ -317,3 +318,96 @@ def test_advise_is_empty_for_a_clean_two_sentence_rationale(tmp_path):
     payload = _quiz([_tf_item("tf1")], [_single_rationale("tf1", text)])
     _, data, _ = validate_qf._load(_envelope(tmp_path, payload))
     assert validate_qf.advise(data) == []
+
+
+# --- Declared engine: quiz_engine, classic refusals, Hub tier rules ---
+#
+# One table drives both the staging validator and the planner, because a refusal
+# staging accepts but preview rejects (or the reverse) sends the teacher in circles.
+
+def _classic_quiz(items=None, rationales=None, **extra):
+    items = [_tf_item("tf1")] if items is None else items
+    rationales = [_single_rationale("tf1", "True because the sky scatters blue light.")] \
+        if rationales is None else rationales
+    return {**_quiz(items, rationales), "quiz_engine": "classic", **extra}
+
+
+def _hub(tiers, **extra):
+    return _classic_quiz(differentiation="hub", tiers=tiers, **extra)
+
+
+def _essay(item_id="w1", **fields):
+    return {"id": item_id, "type": "ESSAY", "prompt": "<p>Discuss.</p>", "points": 20, **fields}
+
+
+def _plain(item_type, **fields):
+    return {"id": "x1", "type": item_type, "prompt": "<p>Q [blank]</p>", **fields}
+
+
+_SUPPORTS = {"word_bank": ["claim"]}
+ENGINE_CASES = {
+    "engine absent": ({**ONE_GOOD_MC}, None),
+    "engine new": ({**ONE_GOOD_MC, "quiz_engine": "new"}, None),
+    "engine classic": (_classic_quiz(), None),
+    "engine unknown": ({**ONE_GOOD_MC, "quiz_engine": "bogus"}, 'quiz_engine must be "new" or "classic"'),
+    "engine null": ({**ONE_GOOD_MC, "quiz_engine": None}, 'quiz_engine must be "new" or "classic"'),
+    "differentiation without classic": (
+        {**ONE_GOOD_MC, "differentiation": "hub", "tiers": []}, 'only allowed when quiz_engine is "classic"'),
+    "tiers under new": (
+        {**ONE_GOOD_MC, "quiz_engine": "new", "tiers": [{"label": "Core", "supports": _SUPPORTS}]},
+        'only allowed when quiz_engine is "classic"'),
+    "classic essay": (_classic_quiz([_tf_item("tf1"), _essay()]), None),
+    "essay needs points": (_classic_quiz([_tf_item("tf1"), _essay(points=None)]), "needs points greater than 0"),
+    "essay points positive": (_classic_quiz([_tf_item("tf1"), _essay(points=0)]), "needs points greater than 0"),
+    "essay needs prompt": (_classic_quiz([_tf_item("tf1"), _essay(prompt="  ")]), "needs a prompt"),
+    "essay takes no rationale": (
+        _classic_quiz([_tf_item("tf1"), _essay()],
+                      [_single_rationale("tf1", "True because."), _single_rationale("w1", "No.")]),
+        "takes no rationale"),
+    "ordering refused": (_classic_quiz([_plain("ORDERING", items=["a", "b"])], []), "MATCHING or MC"),
+    "categorization refused": (_classic_quiz([_plain("CATEGORIZATION", categories=["a", "b"], items=[])], []),
+                               "MATCHING or MC"),
+    "wordbank refused": (
+        _classic_quiz([_plain("FITB", answer_mode="wordbank", options=["x"], accept=["x"])], []), "use answer_mode dropdown"),
+    "fuzzy refused": (_classic_quiz([_plain("FITB", accept=["x"], fuzzy_match=True)], []), "fuzzy_match"),
+    "case sensitive refused": (_classic_quiz([_plain("FITB", accept=["x"], case_sensitive=True)], []), "case_sensitive"),
+    "percent margin refused": (
+        _classic_quiz([_plain("NUMERICAL", answer=1, evaluation={"mode": "percent_margin", "value": 5})], []),
+        "percent_margin"),
+    "decimal places refused": (
+        _classic_quiz([_plain("NUMERICAL", answer=1, evaluation={"mode": "decimal_places", "value": 2})], []),
+        "decimal_places"),
+    "writing fills the quiz": (_classic_quiz([_tf_item("tf1"), _essay(points=100)]), "leaving nothing"),
+    "hub one tier": (_hub([{"label": "Support", "supports": _SUPPORTS}]), None),
+    "hub two tiers": (_hub([{"label": "support", "supports": _SUPPORTS},
+                            {"label": "Core", "supports": {"html": "<p>Hint</p>"}}]), None),
+    "bridge refused": (_classic_quiz(differentiation="bridge", tiers=[]), "not available in QuizForge"),
+    "tiers need a style": (_classic_quiz(tiers=[{"label": "Core", "supports": _SUPPORTS}]), 'must be "hub"'),
+    "hub needs tiers": (_classic_quiz(differentiation="hub"), "requires tiers"),
+    "hub needs a tier": (_hub([]), "at least 1 tier"),
+    "hub duplicate label": (_hub([{"label": "Core", "supports": _SUPPORTS},
+                                  {"label": "core", "supports": _SUPPORTS}]), "is duplicated"),
+    "hub unknown label": (_hub([{"label": "Extend", "supports": _SUPPORTS}]), "must be Support, Core, or Accelerate"),
+    "hub tier carries a full variant": (
+        _hub([{"label": "Core", "supports": _SUPPORTS, "overview": "<p>Hi</p>"}]), "unknown fields"),
+    "hub tier supports required": (_hub([{"label": "Core"}]), "supports is required"),
+    "hub supports non-empty": (_hub([{"label": "Core", "supports": {"word_bank": []}}]),
+                               "must contain sentence_frames, word_bank, or html"),
+}
+
+
+@pytest.mark.parametrize("label", ENGINE_CASES)
+def test_the_declared_engine_is_validated_and_the_planner_agrees(tmp_path, label):
+    from api import qf_pusher
+
+    payload, refusal = ENGINE_CASES[label]
+    path = _envelope(tmp_path, payload)
+
+    problems = validate_qf.validate(path, set())
+    if refusal is None:
+        assert problems == []
+        assert qf_pusher.build_push_plan(path)["version"] == 1
+        return
+    assert any(refusal in problem for problem in problems), problems
+    with pytest.raises(ValueError, match=re.escape(refusal)):
+        qf_pusher.build_push_plan(path)
