@@ -1,7 +1,7 @@
 # Classic Quiz stop-gap design
 
 **Decision date:** 2026-09-29
-**Status:** Current. Batch 1 (authoring and Hub) is briefed. Batch 2 (scoring) is next.
+**Status:** Current. Batch 1 (authoring and Hub) shipped 2026-09-29 (`e93fc5f`). Batch 2 (scoring) is next; see "Next batch".
 
 ## Why this exists
 
@@ -86,12 +86,38 @@ restricted to nobody while published and was then deleted.
   - its assignment `GET` returns **404**.
 
   Existence checks must use the assignment id, never the quiz `GET` alone.
+- **Module item (verified 2026-09-29 by the Batch 1 live smoke).** A `Quiz`-type module
+  item (`type:"Quiz"`, `content_id:<quiz id>`) attaches and reads back with that type and
+  content id.
 - **Not verified yet:**
-  - a `Quiz`-type module item (`type:"Quiz"`, `content_id:<quiz id>`);
   - whether short-answer and blank matching are case-insensitive;
   - how the Student View renders each type.
 
-  The Batch 1 live smoke confirms the module item and the Student View rendering.
+  Both wait for the first real classic quiz with students.
+
+## Next batch
+
+**Batch 2: score classic quiz writing.** Not briefed.
+- **Goal:** a Scoring Session scores a classic quiz's `essay_question` and
+  `file_upload_question` answers, and writes a **score and a comment per question**
+  through classic quiz grading, so the quiz total updates in Canvas.
+- **Today:** PowerGrader refuses classic quizzes (`api/powergrader/canvas_fetch.py`,
+  "Classic Quizzes are not supported").
+- **Before briefing, run a live probe** on an unpublished, restricted classic quiz with
+  the Test Student:
+  - read the answers from `GET .../submissions?include[]=submission_history`
+    `submission_data`, or `quiz_submissions/:id/questions`;
+  - write per-question `score` and `comment` with `PUT
+    /api/v1/courses/:c/quizzes/:q/submissions/:id` (`quiz_submissions:[{attempt,
+    questions:{<id>:{score, comment}}}]`);
+  - check posting-policy visibility and idempotent rewrites.
+- **Read first:** `docs/guides/scoring-sessions.md`,
+  `docs/reference/powergrader-scoring-map.md`, and
+  `docs/contracts/feedback-scoring-contract.md`.
+- **Carried decisions:** a score and a comment per question (teacher-confirmed
+  2026-09-29).
+- **Carried follow-up:** recovery maps a recovered module item to the `attach_module`
+  step key, not `attach_module:0` (all quiz kinds).
 
 ## New Quiz draft comments (probe run before 2026-09-29)
 
