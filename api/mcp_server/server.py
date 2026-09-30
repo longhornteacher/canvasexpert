@@ -254,6 +254,23 @@ def apply_grade_adjustment(
 
 
 @mcp.tool(structured_output=False)
+def preview_attempts_grant(course_id: str, assignment_id: str, grant: dict) -> str:
+    """Prepare a pseudonymized extra-attempts or reopen grant for review; no Canvas write.
+    grant: students "all" or pseudonyms; extra_attempts 1-100 or "unlimited"; reopen {due_at, lock_at}."""
+    return _compact(tools.preview_attempts_grant(course_id, assignment_id, grant))
+
+
+@mcp.tool(structured_output=False)
+def apply_attempts_grant(
+    operation_id: str, batch_id: str, review_digest: str
+) -> str:
+    """Write the exact frozen attempts grant to Canvas."""
+    return _compact(tools.apply_attempts_grant(
+        operation_id, batch_id, review_digest
+    ))
+
+
+@mcp.tool(structured_output=False)
 def preview_missing_sweep(course_id: str, revert_operation_id: str = "") -> str:
     """Prepare a pseudonymized course-wide missing-work-fill review, or its undo."""
     return _compact(tools.preview_missing_sweep(course_id, revert_operation_id))

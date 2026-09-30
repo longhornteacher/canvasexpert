@@ -70,6 +70,12 @@ results.
   baseline, assignment drift check, per-student prior-score guard, posted-grade
   write/readback, uncertainty reconciliation, and private receipt entries for
   `gradebook.grade_adjustment`.
+- `api/operation_ledger/adapters/attempts_grant.py` — `gradebook.attempts_grant`: the
+  per-kind transport table (`KIND_TABLE`: regular, Classic Quiz, New Quiz), the live
+  assignment classification read with base dates, per-step `observe` re-reads shared by
+  execute and reconcile, the single `_send` write owner, override adoption on resume, and
+  pseudonym-only receipt rows. Step keys: `patch_dates:0`, `patch_attempts:0`, `reopen:0`,
+  `grant:<index>`.
 
 ## Shared Support
 
@@ -129,6 +135,8 @@ results.
 - `api/tests/test_sis_grade_bridge_operation.py`
 - `api/tests/test_grade_adjustment_operation.py`
 - `api/tests/test_grade_adjustment.py`
+- `api/tests/test_attempts_grant.py`
+- `api/tests/operation_ledger/adapters/test_attempts_grant.py`
 - `api/tests/test_routines_builtin_sis_grade_bridge.py`
 - `api/tests/test_operation_routes.py`
 

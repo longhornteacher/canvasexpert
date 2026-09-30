@@ -3,7 +3,8 @@
 from .receipts import create_receipt, list_receipts, get_receipt, new_receipt
 from . import models, operations, batches, registry, executor, claims, recovery
 from .adapters import (
-    AssignmentAdapter, AssignmentUpdateAdapter, PageAdapter, QuickAssignmentAdapter,
+    AssignmentAdapter, AssignmentUpdateAdapter, AttemptsGrantAdapter, PageAdapter,
+    QuickAssignmentAdapter,
     GradeAdjustmentAdapter, MissingFillAdapter, QuizAdapter, SisGradeBridgeAdapter,
 )
 
@@ -11,7 +12,7 @@ __all__ = [
     "create_receipt", "list_receipts", "get_receipt", "new_receipt",
     "models", "operations", "batches", "registry", "executor", "claims",
     "recovery",
-    "AssignmentAdapter", "AssignmentUpdateAdapter", "PageAdapter",
+    "AssignmentAdapter", "AssignmentUpdateAdapter", "AttemptsGrantAdapter", "PageAdapter",
     "QuickAssignmentAdapter", "GradeAdjustmentAdapter", "MissingFillAdapter",
     "QuizAdapter", "SisGradeBridgeAdapter",
 ]
@@ -21,6 +22,7 @@ registry.register(AssignmentUpdateAdapter())
 registry.register(PageAdapter())
 registry.register(QuickAssignmentAdapter())
 registry.register(GradeAdjustmentAdapter())
+registry.register(AttemptsGrantAdapter())
 registry.register(MissingFillAdapter())
 registry.register(QuizAdapter())
 registry.register(SisGradeBridgeAdapter())

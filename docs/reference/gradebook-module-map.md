@@ -9,6 +9,10 @@ own teacher grading work.
 
 - `api/grade_adjustment.py` — mirror-backed previews and receipt-backed reviewed
   grade adjustments and reversals.
+- `api/attempts_grant.py` — reviewed extra-attempts and reopened-window grants for
+  one assignment (preview/apply service), with
+  `api/operation_ledger/adapters/attempts_grant.py` (kind `gradebook.attempts_grant`)
+  owning the per-kind Canvas transport, live re-reads, and checkpointed steps.
 - `api/missing_sweep.py` — missing-work preview/apply/undo service.
 - `api/operation_ledger/adapters/missing_fill.py` — reviewed per-assignment missing
   fill discovery and Canvas writes for the missing-work operation.
@@ -35,6 +39,8 @@ attention.
 
 - grade adjustment preview, apply, verification, or reversal:
   `api/grade_adjustment.py` and its Operation Ledger adapter
+- extra attempts or a reopened window:
+  `api/attempts_grant.py` and its Operation Ledger adapter
 - missing-work sweep or fill:
   `api/missing_sweep.py` and `api/operation_ledger/adapters/missing_fill.py`
 - aggregate snapshot or grading classification:
@@ -46,21 +52,22 @@ attention.
 
 ## Verified Canvas facts: attempts and reopening (2026-09-30)
 
-Canvas Expert has **no tool** that grants attempts or reopens an assignment for selected
-students yet. These facts were verified with a teacher token on the Test Student, using
-probe objects that were deleted afterward, unless marked otherwise.
+Canvas Expert grants attempts and reopens an assignment for selected students (or the
+whole class) through `preview_attempts_grant` and `apply_attempts_grant`. These facts were
+verified with a teacher token on the Test Student, using probe objects that were deleted
+afterward, unless marked otherwise.
 
 | Need | Mechanism | Verified behavior |
 |---|---|---|
 | Reopen a locked window, per student | `POST /api/v1/courses/:c/assignments/:a/overrides` with `{assignment_override:{student_ids, due_at, lock_at}}` | The per-user read (`GET /api/v1/users/:u/courses/:c/assignments`) shows the new dates and `locked_for_user:false`. The teacher's default assignment read reports override dates; read with `override_assignment_dates=false` for the base dates. Undo is `DELETE .../overrides/:id`. Used live on an ELA 7 ECR. |
 | Attempts for everyone, regular assignment | `PUT /api/v1/courses/:c/assignments/:a` with `allowed_attempts: N` (`-1` means unlimited) | Accepted. Changing it after submissions exist is documented but not probed. Only online upload, URL, and text-entry types enforce it. |
-| **Extra attempts, one student, regular assignment** | `POST /api/v1/courses/:c/assignments/:a/extensions` with `{assignment_extensions:[{user_id, extra_attempts}]}` | Works on an unpublished assignment before any submission. The value is **set, not added**: posting 1 twice leaves 1, so read the current value and write current + 1. The teacher's submission read returns `extra_attempts`. It has no effect when attempts are unlimited. |
+| **Extra attempts, one student, regular assignment** | `POST /api/v1/courses/:c/assignments/:a/extensions` with `{assignment_extensions:[{user_id, extra_attempts}]}` | Works before any submission, including on an unpublished assignment assigned to the student by an override. The value is **set, not added**: posting 1 twice leaves 1, so read the current value and write current + 1. The teacher's submission read returns `extra_attempts`. It has no effect when attempts are unlimited. Requires the student to have visibility; otherwise Canvas returns 200 with an empty list and applies nothing. |
 | **Extra attempts, one student, Classic Quiz** | `POST /api/v1/courses/:c/quizzes/:q/extensions` with `{quiz_extensions:[{user_id, extra_attempts}]}` | Works on an unpublished quiz. The value is **set, not added** (posting 1 then 2 gives 2). It creates a `settings_only` quiz submission whose `attempts_left` equals `allowed_attempts + extra_attempts`. The documented cap is 1000. |
 | Attempts for everyone, New Quiz | `PATCH /api/quiz/v1/courses/:c/quizzes/:a` with `quiz_settings.multiple_attempts` | `{multiple_attempts_enabled:true, attempt_limit:true, max_attempts:N, score_to_keep}` sets N. `attempt_limit:false` means unlimited. **`score_to_keep` is required** (400 without it). |
 | Extra attempts, one student, New Quiz | `POST /api/quiz/v1/courses/:c/quizzes/:a/accommodations` with a JSON array `[{user_id, extra_attempts}]` | **Unverified.** The Test Student returns 404 "not participants" even on a published quiz restricted to it, because New Quizzes does not count Student View. It needs a real enrollment, and whether the value replaces or adds is unknown. |
 | SpeedGrader "Reassign" | Web route `PUT /courses/:c/assignments/:a/submissions/:id/reassign` only | **Not available to an API token.** Canvas refuses it with a CSRF 422 ("Session Timeout"). There is no REST or GraphQL equivalent. |
 
-**Rules for a future agent tool.**
+**Rules the attempts-grant tools follow.**
 - Route every write through a reviewed preview and apply.
 - Select students from live Canvas reads (by score or submission state). Never select
   them from the Identity Vault.

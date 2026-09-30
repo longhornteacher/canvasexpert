@@ -546,6 +546,19 @@
       ],
       "reconciliation": "targeted",
       "reason": "The reviewed missing-sweep adapter verifies each successful fill or undo write by readback, then requests the same narrow per-course submissions refresh used by other grade writes."
+    },
+    {
+      "path": "api/operation_ledger/adapters/attempts_grant.py",
+      "symbol": "_send",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(method, path, payload) [checkpointed whole-class attempts or date patch, one assignment override for the selected students, or one per-student extension or accommodation]",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "catalog.assignments"
+      ],
+      "reconciliation": "invalidate",
+      "reason": "Every reviewed attempts-grant write goes through this one write-ahead-marked helper, after a live re-read proves the value is still the frozen before. Each write is read back except a New Quiz accommodation, which has no readback. The central operation-ledger post-apply hook invalidates catalog.assignments after the confirmed operation succeeds."
     }
   ]
 }

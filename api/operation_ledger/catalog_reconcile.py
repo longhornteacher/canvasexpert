@@ -44,6 +44,7 @@ _KIND_TO_CATALOG_SCOPES: dict[str, frozenset[str]] = {
     "content.quick_assignment": frozenset({"assignments"}),
     "gradebook.sis_bridge": frozenset({"assignments"}),
     "gradebook.grade_adjustment": frozenset({"assignments"}),
+    "gradebook.attempts_grant": frozenset({"assignments"}),
 }
 
 _PAGE_KIND = "content.page"

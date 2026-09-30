@@ -57,7 +57,12 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 65 (57 tools). Version 65 adds `preview_missing_sweep` and
+Tool schema version 66 (59 tools). Version 66 adds `preview_attempts_grant` and
+`apply_attempts_grant`, the reviewed extra-attempts and reopen grant for one assignment (regular
+online, Classic Quiz, or New Quiz): `grant` names `students` (`"all"` or an exact pseudonym list),
+`extra_attempts` (1 to 100, or `"unlimited"` for `"all"` only), and/or a `reopen` window. The
+review names attention items, and the result and receipt keep every pseudonym as granted,
+skipped, or failed with its before value. Version 65 adds `preview_missing_sweep` and
 `apply_missing_sweep`, the reviewed course-wide missing-work sweep: fills an eligible missing
 row with the policy's missing value and Canvas's explicit missing status after 15 school days
 (plus grace) past its due date, with an undo built from the receipt
@@ -114,6 +119,8 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state; exact saved family links label each bridge and differentiated source with its partner IDs | Yes, pseudonymized |
 | `preview_grade_adjustment(course_id, assignment_id, adjustment)` | Mirror-backed, pseudonymized before/after review for a points-based existing-grade adjustment, including rule, explicit, and revert previews | Yes, pseudonymized |
 | `apply_grade_adjustment(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grade-adjustment operation with live per-student score checks, readback, and a receipt | Yes, pseudonymized |
+| `preview_attempts_grant(course_id, assignment_id, grant)` | Pseudonymized review of extra attempts and/or a reopened window for an exact pseudonym list or the whole class on a regular online, Classic Quiz, or New Quiz assignment; classified from one live read with base dates, each student's live before value is frozen, and `attention` names `window_locked`, `new_quiz_unverified`, and `grades_unchanged`. Never infers students from scores | Yes, pseudonymized |
+| `apply_attempts_grant(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grant through the Operation Ledger, one checkpointed write per step and a live re-read before each (an extension is set to before + N only while the live value is still the frozen before); returns each pseudonym as granted, skipped, or failed with its before value. Apply only on the teacher's direct instruction | Yes, pseudonymized |
 | `preview_missing_sweep(course_id, revert_operation_id="")` | Mirror-prefiltered, live-per-assignment-checked, pseudonymized review of every eligible missing row past the policy's window (plus grace); pass `revert_operation_id` for an undo preview of a completed sweep | Yes, pseudonymized |
 | `apply_missing_sweep(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed sweep or undo with a live per-row check before each write, readback verification, and a receipt; one rejected row is skipped and the rest continue | Yes, pseudonymized |
 | `refresh_mirror(course_id)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |

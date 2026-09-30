@@ -143,6 +143,12 @@ deferred, bounded limitation rather than a reconciliation task, on this evidence
   Report within the window, which then shows the pre-override due date — a display
   blemish on one line, not a grade error.
 
+`gradebook.attempts_grant` (`api/operation_ledger/adapters/attempts_grant.py`, one `_send`
+owner) writes student overrides and per-student extensions under the same deferred
+limitation; its whole-class attempts and date patches and its overrides mark
+`catalog.assignments` stale through the central post-apply hook
+(`invalidate`), and it makes no submissions refresh call.
+
 Closing it would need new machinery not reused from any existing hook (a targeted
 per-assignment submissions force-refetch, or a new whole-scope submissions
 stale-mark). Given the low, bounded severity and the live fallback, that machinery

@@ -38,7 +38,7 @@ import re
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
-from api import content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, grading_policy, gradebook_queries, learning_objectives, live_verify, missing_sweep, operational_log, roster_context, roster_service, sis_grade_bridge
+from api import attempts_grant, content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, grading_policy, gradebook_queries, learning_objectives, live_verify, missing_sweep, operational_log, roster_context, roster_service, sis_grade_bridge
 from api.operation_ledger import claims as operation_claims
 from api.operation_ledger.adapters import forge_files
 from api.operation_ledger import executor as operation_executor
@@ -166,6 +166,11 @@ _NEXT_STEPS = {
         "Summarize the pseudonymized before/after review and get teacher confirmation, "
         "then call apply_grade_adjustment with operation_id, batch_id, and review_digest "
         "unchanged."
+    ),
+    "preview_attempts_grant": (
+        "Summarize the pseudonymized review and every attention item, and get teacher "
+        "confirmation, then call apply_attempts_grant with operation_id, batch_id, and "
+        "review_digest unchanged. Apply only on the teacher's direct instruction."
     ),
     "preview_missing_sweep": (
         "Summarize the pseudonymized per-assignment review and get teacher confirmation, "
@@ -334,6 +339,23 @@ def apply_grade_adjustment(
     )
 
 
+def preview_attempts_grant(course_id: str, assignment_id: str, grant: dict) -> dict:
+    """Prepare one exact, pseudonymized extra-attempts or reopen review."""
+    return _with_next(
+        "preview_attempts_grant",
+        attempts_grant.preview_attempts_grant(course_id, assignment_id, grant),
+    )
+
+
+def apply_attempts_grant(
+    operation_id: str, batch_id: str, review_digest: str
+) -> dict:
+    """Apply only the opaque, digest-protected attempts grant review."""
+    return attempts_grant.apply_attempts_grant(
+        operation_id, batch_id, review_digest
+    )
+
+
 def preview_missing_sweep(course_id: str, revert_operation_id: str = "") -> dict:
     """Prepare one exact, pseudonymized course-wide missing-work sweep review,
     or an undo of a completed one when revert_operation_id is given."""
@@ -401,6 +423,8 @@ def resume_operation(operation_id: str) -> dict:
     latest = operation_operations.get_operation(operation_key) or op
     if latest.get("kind") in content_push._LEDGER_KINDS.values() or latest.get("kind") == content_push.ASSIGNMENT_UPDATE_KIND:
         return content_push._result_projection(latest, result)
+    if latest.get("kind") == attempts_grant.KIND:
+        return attempts_grant.result_projection(operation_key, result, latest)
     return {"ok": bool(result.get("ok")), "operation_id": result.get("operation_id"),
             "status": result.get("status")}
 
@@ -1384,6 +1408,8 @@ _TOOL_GROUPS = {
         "get_gradebook_snapshot",
         "preview_grade_adjustment",
         "apply_grade_adjustment",
+        "preview_attempts_grant",
+        "apply_attempts_grant",
         "preview_missing_sweep",
         "apply_missing_sweep",
     ),

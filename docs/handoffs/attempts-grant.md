@@ -212,4 +212,95 @@ Preserve completed work and report evidence without guessing.
 
 ## Execution result
 
-Not started.
+**GREEN.** Commit: none (senior commits). Branch `dev` at `403c032`, equal to `origin/dev` after fetch.
+
+Changed files:
+- New: `api/attempts_grant.py`; `api/operation_ledger/adapters/attempts_grant.py`;
+  `api/mcp_server/tool_schema_v66.json`; `api/tests/test_attempts_grant.py`;
+  `api/tests/operation_ledger/adapters/test_attempts_grant.py`;
+  `api/tests/mcp_server/test_attempts_grant_tools.py`.
+- Wiring: `api/operation_ledger/__init__.py`, `api/operation_ledger/adapters/__init__.py`,
+  `api/operation_ledger/catalog_reconcile.py` (one-line kind map entry, see deviations),
+  `api/mcp_server/tools.py`, `server.py`, `contract.py` (schema 66).
+- Tests and shared setup: `api/tests/conftest.py` (fake Canvas, vault, step context, `attempts_world`),
+  `test_contract.py`, `test_server_instructions.py`, `test_tools.py`, `test_beta075_mcp.py`
+  (version, tool count 57 to 59, `_NEXT_STEPS` set, listing budget).
+- Docs: `docs/mcp-server.md`, `docs/contracts/canvas-transport-owners.json` (one `_send` owner),
+  `docs/reference/operation-ledger-module-map.md`, `mutation-reconciliation-map.md` (family 3),
+  `gradebook-module-map.md` (services list, symptom list, stale "no tool" sentence).
+
+Commands:
+- Focused gate, brief's list plus the new files: `py -m pytest -p no:randomly
+  api/tests/test_grade_adjustment*.py api/tests/test_missing_sweep*.py
+  api/tests/test_canvas_mutation_ownership.py api/tests/test_operation_ledger.py
+  api/tests/mcp_server api/tests/test_beta075_mcp.py api/tests/test_attempts_grant.py
+  api/tests/operation_ledger/adapters/test_attempts_grant.py`: 463 passed, 0 failed, 40 s.
+- Full: `py -m pytest -p no:randomly api/tests -q -x`: 2274 passed, 0 failed, 338 s. (`-x` was added
+  and never triggered.) The 5 warnings are a pre-existing `\C` SyntaxWarning in `api/mirror/store.py`
+  docstring text; both new modules compile clean under `-W error::SyntaxWarning`.
+- `git diff --check`: clean (exit 0).
+- New tests: 64 (service) + 54 (adapter) + 3 (MCP) = 121. A mutation that made the per-student
+  read always report `before` failed 3 tests (two law cases and the partial example); reverted.
+
+Numbers: `TOOL_SCHEMA_VERSION` 65 to 66 (next free); 57 to 59 tools; snapshot regenerated under a
+temporary pytest test (removed) in v65's format. `tools/list` budget 19,543 to 20,291 (measured
+20,291, +748 for the pair; descriptions 183 and 48 chars, under 343). No trimming was needed.
+
+Defects found: none in the brief's seams. Observations outside scope:
+1. `GradeAdjustmentAdapter.check_drift` receives the stored baseline from the executor and compares
+   it with itself, so it cannot detect drift. This adapter follows the `assignment_update` pattern
+   (re-captures live inside `check_drift`).
+2. `recovery._apply_recovered` marks a target applied when `reconcile` proves only the
+   ambiguous steps; this adapter's `reconcile` returns `applied` only when every step is applied.
+3. `resume_operation` returns only `{ok, operation_id, status}` for this kind, so a resumed grant
+   does not list the per-pseudonym outcomes (apply does).
+
+Deviations and interpretations:
+1. Added `gradebook.attempts_grant: {"assignments"}` to `catalog_reconcile._KIND_TO_CATALOG_SCOPES`
+   so whole-class dates and attempts invalidate the catalog (the transport owner is `invalidate`).
+   Not in the brief's owned list; one line, same as grade adjustment.
+2. Step order when both are present applies to both scopes: dates or reopen first (`patch_dates:0`
+   then `patch_attempts:0`; `reopen:0` then `grant:<i>`). The brief fixed the order for the list only.
+3. `already_unlimited` also refuses a whole-class numeric or "unlimited" request when attempts are
+   already unlimited (adding to unlimited is meaningless). A reopen alone stays allowed.
+4. A skipped-as-`changed_since_preview` row makes the target `partial` (operation `partial`, result
+   `ok:false`); a whole-class mismatch blocks as `drift_detected` (operation `attention`), with any
+   earlier completed step kept.
+5. Receipt rows (`failed_items`) carry pseudonyms and before values, not user ids. The override id
+   lives on the step as `override_id`, which `_safe_steps` drops from receipts.
+6. Mirror freshness gate applies only to a pseudonym list (to resolve "current student on the
+   assignment", requiring a submission row); `"all"` needs no student data and reads no mirror.
+7. New Quiz per-student grant is never reconciled (no readback): an unconfirmed or interrupted row
+   stays `sent_unknown` until the teacher checks Canvas or abandons the operation.
+8. Quiz-submission `extra_attempts` for Classic come from the quiz submissions list (one paged read
+   per check); the pseudonym resolver, vault, and mirror seam are unchanged.
+
+Unresolved decisions for the senior:
+- Whether `resume_operation` should project this kind through the attempts-grant result projection.
+- Live smoke (Test Student, regular and classic) is yours after acceptance; New Quiz per-student
+  behavior (replace versus add, response shape of `successful`/`failed`) is still unverified.
+- Untracked `stubbed-workspace/` was not touched. A stray `git stash` and `git stash pop` was run once
+  during verification; the tree was restored byte-for-byte (same diff stat, stash list empty).
+
+Correction: `resume_operation` now returns the attempts-grant per-pseudonym projection (new dispatch branch in `tools.resume_operation`, public `attempts_grant.result_projection`; one example test added). Focused gate rerun on `dev` 311a500: 464 passed, 0 failed; `git diff --check` clean.
+Correction: a 2xx extension response listing no row for the student now fails that row as `extension_not_applied` with a user-facing message (regular and classic, no readback; the fake Canvas now echoes applied rows); gradebook-module-map row gained the visibility note. Focused gate: 466 passed, 0 failed; `git diff --check` clean.
+
+**Senior acceptance (2026-09-30): GREEN, accepted.**
+- Reviewed seams:
+  - The never-blind law in `observe`: already at the target means skip; the frozen before means write; anything else fails the row as `changed_since_preview`.
+  - New Quiz is decided by Canvas's `successful`/`failed` lists.
+  - No user or override ids in projections.
+  - Resume uses the apply projection.
+  - The senior reran the focused gate after the corrections: 466 passed.
+- Deviations 1–7 are accepted. The resume decision is resolved (yes).
+- The drift observation on grade adjustment is flagged separately as its own task.
+- Live smoke on the Test Student in the teacher's CS course, via a temporary pytest harness (deleted) driving the committed service with a stub vault and mirror:
+  - regular per-student reopen: 1 override with the new dates;
+  - +1 twice: 0 → 1 → 2, with a live readback of 2;
+  - reopen conflict refused as `student_has_override`;
+  - whole-class +1: 1 → 2;
+  - classic per-student +2: live 2 extra and 3 attempts left;
+  - classic whole-class unlimited: live −1;
+  - no id in any output; cleanup confirmed by 404s.
+- Live finding that became a correction: Canvas returns 200 with an empty extensions list and applies nothing for a student without visibility, for example an unpublished assignment visible to everyone. That row now fails as `extension_not_applied` with a teacher-facing reason. It is also recorded in the facts table.
+- Not exercised live: New Quiz per-student accommodations (the Test Student is not a participant). The first real use is the live check.

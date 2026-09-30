@@ -56,7 +56,11 @@ INSTRUCTION_BUDGET = 2200
 # (preview_missing_sweep, apply_missing_sweep): a course-wide reviewed fill
 # of long-overdue missing work, separate from grade adjustment because its
 # revert and verification model does not fit a blank row.
-LISTING_BUDGET = 19543
+# Raised to the measured 20,291 for the reviewed attempts-grant pair
+# (preview_attempts_grant, apply_attempts_grant, +748): extra attempts and a
+# reopened window for a pseudonym list or the whole class, across regular,
+# Classic, and New Quiz assignments.
+LISTING_BUDGET = 20291
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
@@ -195,7 +199,7 @@ def test_next_procedures_are_static_bounded_and_gate_safe():
     expected_next = RESULT_NEXT_TOOLS | {
         "discover_scoring_work", "stage_scoring_results",
         "apply_staged_scoring_results", "preview_grade_adjustment",
-        "preview_missing_sweep",
+        "preview_attempts_grant", "preview_missing_sweep",
     }
     assert set(tools._NEXT_STEPS) == expected_next
     assert RESULT_NEXT_TOOLS < registered
@@ -253,7 +257,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 57
+    assert len(listed) == 59
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -357,9 +361,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 57
-    assert len(_synthetic_mcp["calls"]) == 57
-    assert len(_synthetic_mcp["gated"]) == 57
+    assert len(results) == 59
+    assert len(_synthetic_mcp["calls"]) == 59
+    assert len(_synthetic_mcp["gated"]) == 59
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"
