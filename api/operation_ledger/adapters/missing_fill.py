@@ -17,9 +17,10 @@ live read of every one.
 Per-row staleness is re-checked live immediately before each write inside
 ``execute`` (a submission, a score, an excuse, a custom grade status, or an
 extended late status all skip that one row as ``changed_since_preview``), so
-``check_drift`` only needs to report the baseline capture's own blocking
-errors -- a coarse course-level diff would be a weaker guarantee than the
-per-row check already gives.
+``check_drift`` only needs to re-check, per swept assignment, the two facts the
+reviewed missing value was computed from (``grading_type`` and
+``points_possible``) -- a coarse course-level diff would be a weaker guarantee
+than the per-row check already gives.
 """
 from __future__ import annotations
 
@@ -347,7 +348,30 @@ class MissingFillAdapter:
         ]
 
     def check_drift(self, payload: dict, target: dict, baseline: dict) -> bool:
-        return bool(baseline.get("blocking_error"))
+        # The executor passes the *stored* preview baseline here, so a blocking
+        # error from the apply-time capture never arrives, and that baseline
+        # carries no assignment facts. The reviewed missing_value was computed
+        # from each entry's points_possible, so re-read each swept assignment
+        # live and block if it is no longer that points assignment. Undo entries
+        # do not depend on assignment facts.
+        if baseline.get("blocking_error"):
+            return True
+        if payload.get("mode") == "undo":
+            return False
+        points_by_assignment: dict[str, object] = {}
+        for entry in payload.get("entries") or []:
+            points_by_assignment.setdefault(
+                str(entry.get("assignment_id")), entry.get("points_possible"))
+        for assignment_id, reviewed_points in points_by_assignment.items():
+            live, error = adapter_support.get_assignment(
+                target["course_id"], assignment_id)
+            if error:
+                return True
+            if (str(live.get("grading_type") or "") != "points"
+                    or not _numbers_equal(live.get("points_possible"),
+                                          reviewed_points)):
+                return True
+        return False
 
     @staticmethod
     def _entry_for_step(payload: dict, step_key: str) -> dict | None:

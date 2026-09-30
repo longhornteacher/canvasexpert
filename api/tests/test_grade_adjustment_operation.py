@@ -7,7 +7,7 @@ from contextlib import contextmanager
 import pytest
 
 from api import grade_adjustment
-from api.operation_ledger import models, paths, receipts
+from api.operation_ledger import models, operations, paths, receipts
 from api.operation_ledger.adapters import grade_adjustment as adapter_module
 from api.operation_ledger.adapters.grade_adjustment import GradeAdjustmentAdapter
 from api.platform_services import canvas_client, config
@@ -192,6 +192,64 @@ def test_flat_bump_apply_receipt_and_revert_preview_are_digest_protected(
     assert canvas.submissions["student-1"]["score"] == 5
     assert canvas.submissions["student-2"]["score"] == 8
     assert grade_adjustment.report_adjustments() == []
+
+
+@pytest.mark.parametrize(
+    ("live_change", "blocked"),
+    [
+        ({}, False),
+        ({"points_possible": 20}, True),
+        ({"grading_type": "percent"}, True),
+    ],
+    ids=["unchanged_applies", "points_possible_changed", "grading_type_changed"],
+)
+def test_assignment_change_between_preview_and_apply_blocks_with_no_grade_write(
+        monkeypatch, live_change, blocked):
+    """Law: if the assignment's points_possible or grading_type moved in Canvas
+    after preview, apply is blocked as drift_detected before any grade PUT --
+    the reviewed after-scores were computed against the old assignment."""
+    canvas = FakeCanvas()
+    monkeypatch.setattr(config, "active_courses",
+                        lambda: [{"id": "course-1", "name": "Synthetic Course"}])
+    monkeypatch.setattr(grade_adjustment, "_vault", lambda: FakeVault())
+    monkeypatch.setattr(canvas_client, "canvas_get", canvas.get)
+    monkeypatch.setattr(canvas_client, "_canvas_send", canvas.send)
+    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed",
+                        lambda _course: None)
+    monkeypatch.setattr(
+        adapter_module, "_mirror_baseline",
+        lambda payload, target: {
+            "course_id": "course-1", "assignment_id": "assignment-1",
+            "assignment": adapter_module._assignment_facts(canvas.assignment),
+            "entries": [
+                {"user_id": user_id, "eligible": True,
+                 "before": canvas.submissions[user_id]["score"],
+                 "before_excused": False, "skip_reason": None}
+                for user_id in ("student-1", "student-2")
+            ],
+            "roster": [{"id": "student-1"}, {"id": "student-2"}],
+            "synced_at": "2026-09-23T12:00:00Z",
+            "freshness": {"state": "current", "within_policy": True},
+        })
+    preview = grade_adjustment.preview_grade_adjustment(
+        "course-1", "assignment-1",
+        {"kind": "rule", "model": "flat_bump", "settings": {"bump": 2}},
+    )
+    assert preview["ok"] is True
+
+    canvas.assignment.update(live_change)
+    applied = grade_adjustment.apply_grade_adjustment(
+        preview["operation_id"], preview["batch_id"], preview["review_digest"])
+
+    target = operations.get_operation(preview["operation_id"])["targets"][0]
+    if blocked:
+        assert applied["ok"] is False
+        assert target["state"] == "blocked"
+        assert target["error_code"] == "drift_detected"
+        assert canvas.puts == []
+    else:
+        assert applied["ok"] is True
+        assert len(canvas.puts) == 2
 
 
 def test_curve_computes_from_and_verifies_against_entered_score(monkeypatch):

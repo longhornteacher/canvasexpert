@@ -243,11 +243,17 @@ class GradeAdjustmentAdapter:
         ]
 
     def check_drift(self, payload: dict, target: dict, baseline: dict) -> bool:
-        if baseline.get("blocking_error"):
+        # The executor passes the *stored* preview baseline here, not the fresh
+        # capture, so the live assignment is re-read here (capture_baseline's
+        # apply-time branch) and compared against the stored one.
+        stored = (baseline or {}).get("assignment")
+        if not stored:
             return True
-        stored = (target.get("baseline") or {}).get("assignment") or {}
-        fresh = baseline.get("assignment") or {}
-        return any(stored.get(field) != fresh.get(field)
+        fresh = self.capture_baseline(payload, target)
+        if fresh.get("blocking_error"):
+            return True
+        live = fresh.get("assignment") or {}
+        return any(stored.get(field) != live.get(field)
                    for field in ("grading_type", "points_possible"))
 
     @staticmethod

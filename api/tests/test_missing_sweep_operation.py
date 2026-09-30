@@ -9,7 +9,7 @@ import pytest
 
 from api import freshness_policy, missing_sweep
 from api.mirror import read_service
-from api.operation_ledger import models, receipts
+from api.operation_ledger import models, operations, receipts
 from api.operation_ledger.adapters import missing_fill as adapter_module
 from api.operation_ledger.adapters.missing_fill import MissingFillAdapter
 from api.platform_services import canvas_client, config
@@ -116,12 +116,10 @@ def _mirror_scope(records: list[dict]) -> dict:
     return {"records": records, "last_success_at": _SYNCED_AT, "state": "current"}
 
 
-def test_preview_to_apply_verifies_the_sweep_then_undo_returns_it_to_blank(
-    monkeypatch, grading_policy_files,
-):
-    """Example, once: preview -> apply -> verify (criterion 1), then undo
-    (criterion 6), against a fake Canvas exercising the real mirror-prefilter
-    plus live-per-assignment-GET discovery path."""
+@pytest.fixture
+def sweep_canvas(monkeypatch, grading_policy_files):
+    """One synthetic course with one eligible missing row, wired through the real
+    mirror-prefilter plus live-per-assignment-GET discovery path."""
     due = date(2026, 8, 3)
     no_school_dates: list[str] = []
     today = _add_school_days(due, 16, no_school_dates)  # exactly at the 15-day threshold + 1 slack
@@ -168,7 +166,16 @@ def test_preview_to_apply_verifies_the_sweep_then_undo_returns_it_to_blank(
     monkeypatch.setattr("api.webui.mirror_service.notify_course_changed",
                         lambda _course: None)
     monkeypatch.setattr(missing_sweep, "_vault", lambda: FakeVault())
+    return canvas
 
+
+def test_preview_to_apply_verifies_the_sweep_then_undo_returns_it_to_blank(
+    sweep_canvas,
+):
+    """Example, once: preview -> apply -> verify (criterion 1), then undo
+    (criterion 6), against a fake Canvas exercising the real mirror-prefilter
+    plus live-per-assignment-GET discovery path."""
+    canvas = sweep_canvas
     preview = missing_sweep.preview_missing_sweep("course-1")
     assert preview["ok"] is True
     assert preview["preview"]["row_count"] == 1
@@ -204,6 +211,40 @@ def test_preview_to_apply_verifies_the_sweep_then_undo_returns_it_to_blank(
     assert undo_request["submission"]["late_policy_status"] == "missing"
     assert canvas.rows["assignment-1:student-1"]["entered_score"] is None
     assert canvas.rows["assignment-1:student-1"]["late_policy_status"] == "missing"
+
+
+@pytest.mark.parametrize(
+    ("live_change", "blocked"),
+    [
+        ({}, False),
+        ({"points_possible": 50}, True),
+        ({"grading_type": "percent"}, True),
+    ],
+    ids=["unchanged_applies", "points_possible_changed", "grading_type_changed"],
+)
+def test_assignment_change_between_preview_and_apply_blocks_with_no_grade_write(
+    sweep_canvas, live_change, blocked,
+):
+    """Law: if a swept assignment's points_possible or grading_type moved in
+    Canvas after preview, apply is blocked as drift_detected before any PUT --
+    the reviewed missing value was computed from the old points_possible."""
+    canvas = sweep_canvas
+    preview = missing_sweep.preview_missing_sweep("course-1")
+    assert preview["ok"] is True
+
+    canvas.assignment.update(live_change)
+    applied = missing_sweep.apply_missing_sweep(
+        preview["operation_id"], preview["batch_id"], preview["review_digest"])
+
+    target = operations.get_operation(preview["operation_id"])["targets"][0]
+    if blocked:
+        assert applied["ok"] is False
+        assert target["state"] == "blocked"
+        assert target["error_code"] == "drift_detected"
+        assert canvas.puts == []
+    else:
+        assert applied["ok"] is True
+        assert len(canvas.puts) == 1
 
 
 def test_invalid_grading_policy_file_blocks_the_sweep_preview_with_a_message(
