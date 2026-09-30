@@ -76,8 +76,14 @@ segments concatenate in order to the exact original response and retain one resu
 `(pseudonym, item_id)`. `total`/`segment_total` count projected segment rows, while
 `source_response_total` counts original scorable responses.
 New sessions include only submissions Canvas still marks `submitted` or `pending_review`.
-Mirror preparation ignores only an unmatched row that is demonstrably historical already-
-graded work (`workflow_state="graded"`, numeric score present, and empty `submitted_at`).
+Mirror preparation ignores an unmatched row only when it is demonstrably historical already-
+graded work (`workflow_state="graded"`, numeric score present, and empty `submitted_at`),
+or a provably empty unsubmitted placeholder. The latter requires a non-empty identity string,
+`workflow_state="unsubmitted"`, no submitted/graded timestamp, score, entered score,
+grade, submission type, body, URL, or comments, no recorded attempt (null, empty, or
+integer zero), and an empty attempt-history dictionary. Missing or malformed proof
+never qualifies. Ignored rows never receive a SAFE identity or enter a scoring session;
+the mirror and its history remain unchanged.
 Any submitted, pending, or ambiguous identity mismatch fails closed with the structured
 `mirror_submission_identity_mismatch` error; no live Canvas recovery lookup is performed.
 If refreshed rows contain no eligible submission, preparation returns the typed

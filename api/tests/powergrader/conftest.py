@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import io
 import json
 import zipfile
@@ -7,6 +8,55 @@ from types import SimpleNamespace
 
 import pytest
 from docx import Document
+
+
+@pytest.fixture
+def mirror_assignment_input(tmp_path, monkeypatch):
+    """Synthetic normalized mirror rows for the assignment preparation boundary."""
+    from api.powergrader import assignment_refresh
+
+    assignment = {
+        "id": "assignment", "name": "Synthetic response", "points_possible": 10,
+        "description_text": "Explain your reasoning.", "quiz_id": "",
+        "is_quiz": False, "quiz_kind": "", "is_quiz_lti_assignment": False,
+    }
+    roster = {"state": "current", "records": [
+        {"id": "member", "name": "Synthetic learner"},
+        {"id": "waiting-member", "name": "Synthetic waiting learner"},
+    ]}
+    assignments = {"state": "current", "records": [assignment]}
+    scope = {"state": "current", "mirror_revision": 1, "snapshot_id": "synthetic:1"}
+    for projection in (roster, assignments):
+        projection.update(scope)
+    document = {"state": "current", "submissions": {}}
+
+    def entry(user_id="nonmember", **overrides):
+        raw = {
+            "assignment_id": "assignment", "user_id": user_id,
+            "workflow_state": "unsubmitted", "attempt": None,
+        }
+        raw.update(overrides)
+        _user_id, current, attempts = assignment_refresh.mirror_store.normalize_submission(raw)
+        return {"current": current, "attempts": attempts}
+
+    monkeypatch.setattr(assignment_refresh.workspace, "workspace_root", lambda: str(tmp_path))
+    monkeypatch.setattr(assignment_refresh.config, "course_display_name", lambda _: "Synthetic")
+    monkeypatch.setattr(assignment_refresh.scoring_local, "load_scoring_snapshot",
+                        lambda *args, **kwargs: {"snapshot": {}, "freshness": {"state": "current"}})
+    monkeypatch.setattr(assignment_refresh.read_service, "private_roster", lambda *a, **kw: roster)
+    monkeypatch.setattr(assignment_refresh.read_service, "private_assignments", lambda *a, **kw: assignments)
+    monkeypatch.setattr(assignment_refresh.read_service, "private_submissions", lambda *a, **kw: scope)
+    monkeypatch.setattr(assignment_refresh.mirror_store, "read_roster", lambda *a, **kw: roster)
+    monkeypatch.setattr(assignment_refresh.mirror_store, "read_assignments", lambda *a, **kw: assignments)
+    monkeypatch.setattr(assignment_refresh.mirror_store, "read_submissions", lambda *a, **kw: document)
+    monkeypatch.setattr(assignment_refresh.canvas_fetch, "fetch_submissions",
+                        lambda *a, **kw: pytest.fail("mirror preparation made a Canvas call"))
+
+    return SimpleNamespace(
+        entry=entry, document=document, assignment=assignment, roster=roster,
+        prepare=lambda: assignment_refresh.prepare_assignment_from_mirror("course", "assignment"),
+        snapshot=lambda: copy.deepcopy((document, roster, assignments, scope)),
+    )
 
 
 @pytest.fixture

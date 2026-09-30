@@ -22,8 +22,9 @@ MIRROR_PREPARATION_ERROR = (
 )
 
 # A mirror submission row whose user no longer matches the roster is an
-# identity mismatch unless it is a provably historical committed grade. The
-# outward code and message name no ID, name, count, or other student identity.
+# identity mismatch unless it is a provably empty unsubmitted placeholder or
+# a historical committed grade. The outward code and message name no ID,
+# name, count, or other student identity.
 MIRROR_SUBMISSION_IDENTITY_MISMATCH_CODE = "mirror_submission_identity_mismatch"
 MIRROR_SUBMISSION_IDENTITY_MISMATCH = (
     "The local CanvasMirror contains a submission row that does not match the "
@@ -40,13 +41,41 @@ def _is_historical_orphan(current: dict) -> bool:
     """A committed Canvas grade for a departed learner: safe to ignore.
 
     Only a row Canvas already graded, carrying a real score and no submission
-    timestamp, can be a historical orphan. Every other unmatched row --
-    submitted, pending, unscored, or ambiguous -- fails closed.
+    timestamp, can be a historical orphan. This exception is separate from
+    the proof required for an empty unsubmitted row.
     """
     return (
         current.get("workflow_state") == "graded"
         and current.get("score") is not None
         and not str(current.get("submitted_at") or "").strip()
+    )
+
+
+def _is_empty_unsubmitted_orphan(current: dict, attempts) -> bool:
+    """Ignore a non-roster placeholder only when the mirror proves no work exists."""
+    proof_fields = {
+        "user_id", "workflow_state", "submitted_at", "graded_at", "score",
+        "entered_score", "grade", "attempt", "submission_type", "body", "url",
+        "submission_comments",
+    }
+    if (not proof_fields.issubset(current)
+            or not isinstance(current["user_id"], str) or not current["user_id"].strip()
+            or current["workflow_state"] != "unsubmitted"
+            or not isinstance(attempts, dict) or attempts):
+        return False
+    attempt = current["attempt"]
+    no_attempt = (attempt is None or attempt == ""
+                  or (type(attempt) is int and attempt == 0))
+    return (
+        no_attempt
+        and current["score"] is None
+        and current["entered_score"] is None
+        and isinstance(current["submission_comments"], list)
+        and not current["submission_comments"]
+        and all(value is None or (isinstance(value, str) and not value.strip())
+                for value in (current[key] for key in (
+                    "submitted_at", "graded_at", "grade", "submission_type", "body", "url",
+                )))
     )
 
 
@@ -370,8 +399,11 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
         uid = str(current.get("user_id") or "")
         if not uid or uid not in roster_by_id:
             # A row that cannot be reconciled to the roster is an identity
-            # mismatch, never live Canvas work. Only a provably historical
-            # committed grade (graded, scored, never submitted) is ignored.
+            # mismatch, never live Canvas work. Ignore only a proven empty
+            # placeholder or a historical committed grade; neither gets an
+            # identity or enters the returned scoring rows.
+            if _is_empty_unsubmitted_orphan(current, entry.get("attempts")):
+                continue
             if _is_historical_orphan(current):
                 historical_orphans += 1
                 continue

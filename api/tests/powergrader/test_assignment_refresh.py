@@ -1,4 +1,4 @@
-"""Focused manifest laws for ordinary PowerGrader evidence refresh."""
+"""Focused evidence-manifest and mirror preparation laws."""
 from api.powergrader import assignment_refresh
 from api.platform_services import config
 import pytest
@@ -63,3 +63,88 @@ def test_submitted_media_boundary_failures_hold_manifest(tmp_path, monkeypatch, 
 def test_conflicted_manifest_remains_incomplete(tmp_path, monkeypatch):
     submission = {"user_id": "synthetic", "attempt": 1, "submission_type": "online_text_entry", "workflow_state": "submitted", "attachments": []}
     assert _refresh_result(tmp_path, monkeypatch, submission, conflicts=True)["status"] == "incomplete"
+
+
+def test_empty_unsubmitted_non_roster_row_does_not_block_submitted_work(mirror_assignment_input):
+    mirror = mirror_assignment_input
+    entries = mirror.document["submissions"]
+    entries.update({
+        "member": mirror.entry("member", workflow_state="submitted", attempt=1,
+                               submitted_at="2026-09-01T12:00:00Z",
+                               submission_type="online_text_entry", body="Synthetic reasoning."),
+        "waiting-member": mirror.entry("waiting-member"),
+        "nonmember": mirror.entry(),
+        "historical": mirror.entry("historical", workflow_state="graded", score=5, grade="5"),
+    })
+    before = mirror.snapshot()
+
+    rows, assignment, result = mirror.prepare()
+
+    assert result.get("error") is None
+    assert [row["user_id"] for row in rows] == ["member", "waiting-member"]
+    assert rows[0]["body"] == "Synthetic reasoning."
+    assert assignment["id"] == "assignment"
+    assert result["mirror_revision"] == 1
+    assert mirror.snapshot() == before
+
+
+@pytest.mark.parametrize("section, field, value, ignored", [
+    ("current", "attempt", None, True),
+    ("current", "attempt", 0, True),
+    ("current", "attempt", "", True),
+    ("current", "body", " \n\t", True),
+    ("current", "workflow_state", "submitted", False),
+    ("current", "workflow_state", "pending_review", False),
+    ("current", "workflow_state", "", False),
+    ("current", "workflow_state", "unknown", False),
+    ("current", "user_id", "", False),
+    ("current", "user_id", " ", False),
+    ("current", "user_id", ["nonmember"], False),
+    ("current", "submitted_at", "2026-09-01T12:00:00Z", False),
+    ("current", "graded_at", "2026-09-01T12:00:00Z", False),
+    ("current", "score", 0, False),
+    ("current", "entered_score", 0, False),
+    ("current", "grade", "0", False),
+    ("current", "body", "Synthetic evidence.", False),
+    ("current", "url", "https://example.invalid/response", False),
+    ("current", "submission_type", "online_upload", False),
+    ("current", "submission_type", "media_recording", False),
+    ("current", "attempt", 1, False),
+    ("current", "attempt", False, False),
+    ("current", "attempt", "0", False),
+    ("current", "body", 0, False),
+    ("current", "url", [], False),
+    ("current", "submitted_at", False, False),
+    ("current", "submission_comments", [{"comment": "Synthetic feedback."}], False),
+    ("current", "submission_comments", None, False),
+    ("attempts", None, {"1": {"attachment_names": ["synthetic.txt"]}}, False),
+    ("attempts", None, {"1": {}}, False),
+    ("attempts", None, None, False),
+    ("attempts", None, [], False),
+    ("missing", "entered_score", None, False),
+    ("missing", "submission_comments", None, False),
+])
+def test_only_provably_empty_unsubmitted_orphans_are_ignored(
+        mirror_assignment_input, section, field, value, ignored):
+    mirror = mirror_assignment_input
+    entry = mirror.entry()
+    if section == "missing":
+        entry["current"].pop(field)
+    elif section == "attempts":
+        entry["attempts"] = value
+    else:
+        entry[section][field] = value
+    mirror.document["submissions"]["nonmember"] = entry
+    before = mirror.snapshot()
+
+    rows, assignment, result = mirror.prepare()
+
+    if ignored:
+        assert rows == []
+        assert assignment["id"] == "assignment"
+        assert result.get("error") is None
+    else:
+        assert rows is None and assignment is None
+        assert result["code"] == "mirror_submission_identity_mismatch"
+        assert "nonmember" not in str(result)
+    assert mirror.snapshot() == before
