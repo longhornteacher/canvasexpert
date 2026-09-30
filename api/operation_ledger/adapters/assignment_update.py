@@ -127,8 +127,11 @@ class AssignmentUpdateAdapter:
     def capture_baseline(self, payload: dict, target: dict) -> dict:
         course_id = target["course_id"]
         assignment_id = payload.get("assignment_id")
+        # The teacher's default read reports an override's dates when overrides
+        # exist; this path patches the base dates, so it must read them.
         assignment, error = canvas_client.canvas_get(
-            _assignment_path(course_id, assignment_id)
+            _assignment_path(course_id, assignment_id),
+            params={"override_assignment_dates": "false"},
         )
         if error or not isinstance(assignment, dict):
             return {"canvas_error": error or "assignment not found"}

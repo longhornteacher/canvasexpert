@@ -121,6 +121,29 @@ def test_capture_baseline_reads_the_live_assignment(monkeypatch):
     assert "assignment_group_id" not in baseline["assignment"]
 
 
+def test_preview_from_dates_are_the_base_dates_not_an_overrides(monkeypatch):
+    """Law: Canvas reports an override's dates on the default teacher read, so the
+    frozen "from" values must come from the override_assignment_dates=false read."""
+    base = {**_LIVE_ASSIGNMENT, "due_at": "2026-09-29T21:00:00Z", "lock_at": "2026-09-29T21:00:00Z"}
+    overridden = {**base, "due_at": "2026-10-02T21:00:00Z", "lock_at": "2026-10-02T21:00:00Z"}
+
+    def canvas_get(path, params=None, timeout=20):
+        wants_base = (params or {}).get("override_assignment_dates") == "false"
+        return dict(base if wants_base else overridden), None
+
+    monkeypatch.setattr(
+        "api.operation_ledger.adapters.assignment_update.canvas_client.canvas_get", canvas_get)
+    monkeypatch.setattr(
+        "api.operation_ledger.adapters.assignment_update.config.active_courses", _fake_courses)
+    adapter = AssignmentUpdateAdapter()
+    payload = {"assignment_id": "24680", "fields": {
+        "due_at": "2026-10-02T21:00:00Z", "lock_at": "2026-10-02T21:00:00Z"}}
+    baseline = adapter.capture_baseline(payload, {"course_id": "42"})
+    review = adapter.freeze_review(payload, {"course_id": "42"}, baseline)
+    assert {"field": "due_at", "from": "2026-09-29T21:00:00Z", "to": "2026-10-02T21:00:00Z"} in review["changes"]
+    assert {"field": "lock_at", "from": "2026-09-29T21:00:00Z", "to": "2026-10-02T21:00:00Z"} in review["changes"]
+
+
 def test_capture_baseline_reports_a_canvas_error(monkeypatch):
     monkeypatch.setattr(
         "api.operation_ledger.adapters.assignment_update.canvas_client.canvas_get",
