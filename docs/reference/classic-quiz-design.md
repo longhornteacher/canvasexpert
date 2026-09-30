@@ -116,8 +116,6 @@ restricted to nobody while published and was then deleted.
   `docs/contracts/feedback-scoring-contract.md`.
 - **Carried decisions:** a score and a comment per question (teacher-confirmed
   2026-09-29).
-- **Carried follow-up:** recovery maps a recovered module item to the `attach_module`
-  step key, not `attach_module:0` (all quiz kinds).
 
 ## New Quiz draft comments (probe run before 2026-09-29)
 
