@@ -134,11 +134,17 @@ def _apply_recovered(operation_id: str, target_key: str, result: dict,
                 if result.get("returned_object_url"):
                     t["returned_object_url"] = result["returned_object_url"]
                 if result.get("module_item_id"):
-                    for step in t.get("steps", []):
-                        if step.get("step_key") == "attach_module":
-                            step["returned_object_id"] = result["module_item_id"]
-                            step["state"] = "applied"
-                            break
+                    # Assignment and page adapters key the step "attach_module";
+                    # quiz adapters key it "attach_module:0". Record the item only
+                    # when exactly one such step makes the owner unambiguous.
+                    attach_steps = [
+                        step for step in t.get("steps", [])
+                        if step.get("step_key") == "attach_module"
+                        or str(step.get("step_key") or "").startswith("attach_module:")
+                    ]
+                    if len(attach_steps) == 1:
+                        attach_steps[0]["returned_object_id"] = result["module_item_id"]
+                        attach_steps[0]["state"] = "applied"
                 for recovered_step in result.get("steps", []):
                     existing = next(
                         (step for step in t.get("steps", [])

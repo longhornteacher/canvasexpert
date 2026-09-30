@@ -491,6 +491,37 @@ def test_recovery_reconciles_claim_and_target_atomically(tmp_path, monkeypatch):
     assert new_claim["state"] == "claimed"
 
 
+@pytest.mark.parametrize("attach_key", ["attach_module", "attach_module:0"])
+def test_recovery_records_the_module_item_on_the_adapters_attach_step(
+        tmp_path, monkeypatch, attach_key):
+    """Law: a reconciled module item lands on the attach step whichever key the
+    adapter uses (assignment/page "attach_module", quiz "attach_module:0")."""
+    _root(tmp_path, monkeypatch)
+    from api.operation_ledger import recovery
+
+    target = models.new_target(
+        target_key="tk-module", idempotency_key="ik-module", course_id="101")
+    target["state"] = "sent_unknown"
+    create = models.new_step("create_quiz:0")
+    create.update({"step_key": "create_quiz:0", "state": "applied", "returned_object_id": "9001"})
+    attach = models.new_step(attach_key)
+    attach.update({"step_key": attach_key, "state": "sent_unknown",
+                   "outbound_started_at": "2026-09-30T12:00:00+00:00"})
+    target["steps"] = [create, attach]
+    operations.create_operation(_make_operation("op-module", targets=[target]))
+
+    class FakeAdapter:
+        kind = "content.quiz"
+        def reconcile(self, payload, target, baseline):
+            return {"state": "applied", "returned_object_id": "9001", "module_item_id": "555"}
+    monkeypatch.setattr(registry, "get_adapter", lambda kind: FakeAdapter())
+
+    assert recovery.recover_pending_operations()["recovered"] == 1
+    steps = {step["step_key"]: step for step in operations.get_operation("op-module")["targets"][0]["steps"]}
+    assert steps[attach_key]["state"] == "applied"
+    assert steps[attach_key]["returned_object_id"] == "555"
+
+
 def test_recovery_atomicity_no_gap_for_new_attempt(tmp_path, monkeypatch):
     """Negative test: if recovery only reconciled the claim without writing
     the target, a new attempt could re-acquire and re-send. This test verifies
