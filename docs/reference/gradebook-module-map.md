@@ -43,3 +43,28 @@ attention.
   `api/gradebook_queries.py`
 - SIS bridge preview, apply, recurring update, or recovery:
   [`docs/guides/sis-grade-bridges.md`](../guides/sis-grade-bridges.md)
+
+## Verified Canvas fact: a per-student second attempt (2026-09-30)
+
+Canvas Expert has **no tool** that reopens an assignment for selected students.
+
+**Verified mechanism.** When an assignment allows unlimited attempts but its `lock_at`
+has passed, a second attempt for chosen students is one assignment override:
+- **Call:** `POST /api/v1/courses/:c/assignments/:a/overrides` with
+  `{assignment_override:{student_ids:[...], due_at, lock_at}}`.
+- **What students see:** the per-user read (`GET /api/v1/users/:u/courses/:c/assignments`)
+  shows the new dates and `locked_for_user: false`. Everyone else keeps the base dates.
+- **Reading it back:** the teacher's default assignment read reports the override's dates.
+  Read with `override_assignment_dates=false` to see the base dates.
+- **Grades:** current grades stay until the teacher regrades the new attempt.
+- **Undo:** `DELETE .../overrides/:id`.
+- **Limited attempts:** this reopens the window only. It does not add attempts to an
+  assignment with a limited `allowed_attempts`.
+- **Not verified:** Classic Quiz extra attempts (`quizzes/:q/extensions`) and SpeedGrader
+  "Reassign".
+
+**First use.** It was first used on a live ELA 7 assignment through a raw API write,
+outside the Operation Ledger, so it has no receipt.
+
+**Before this becomes an agent tool:** a reviewed preview/apply operation owns it,
+selecting students by score from the live read, never from the Identity Vault.
