@@ -9,9 +9,7 @@ from engine.parsing.text_parser import TextOutlineParser
 from engine.validation.validator import QuizValidator, ValidationStatus
 from engine.rendering.canvas.canvas_packager import CanvasPackager
 from engine.importers import import_quiz_from_llm
-from engine.validation.point_calculator import calculate_points
 from engine.validation.answer_balancer import balance_answers
-from engine.rendering.physical.styles.default_styles import DEFAULT_QUIZ_POINTS
 from engine.packagers.packager import package_quiz
 from engine.packaging.folder_creator import create_quiz_folder
 from engine.feedback.log_generator import generate_log
@@ -24,6 +22,7 @@ def test_parse_all_question_types():
 
 ---
 Type: MC
+Points: 1
 Prompt: MC Question
 Choices:
 - [x] A
@@ -31,11 +30,13 @@ Choices:
 ---
 
 Type: TF
+Points: 1
 Prompt: TF Question
 Answer: true
 ---
 
 Type: MA
+Points: 1
 Prompt: MA Question
 Choices:
 - [x] A
@@ -44,15 +45,18 @@ Choices:
 ---
 
 Type: NUMERICAL
+Points: 1
 Prompt: Numerical Question
 Answer: 42
 ---
 
 Type: ESSAY
+Points: 1
 Prompt: Essay Question
 ---
 
 Type: MATCHING
+Points: 1
 Prompt: Matching Question
 Pairs:
 - Term1 => Definition1
@@ -60,6 +64,7 @@ Pairs:
 ---
 
 Type: FITB
+Points: 1
 Prompt: FITB [blank]
 Accept:
 - answer1
@@ -67,6 +72,7 @@ Accept:
 ---
 
 Type: ORDERING
+Points: 1
 Prompt: Ordering Question
 Header: Put in order
 Items:
@@ -76,6 +82,7 @@ Items:
 ---
 
 Type: CATEGORIZATION
+Points: 1
 Prompt: Categorization Question
 Categories:
 - Cat1
@@ -106,6 +113,7 @@ Title: Broken
 
 ---
 Type: MC
+Points: 1
 Prompt: Test
 ---
 """)
@@ -123,6 +131,7 @@ def test_canvas_package_structure():
 
 ---
 Type: MC
+Points: 1
 Prompt: Test
 Choices:
 - [x] A
@@ -155,6 +164,7 @@ def test_numerical_bounds_calculation():
 
 ---
 Type: NUMERICAL
+Points: 1
 Prompt: What is pi?
 Answer: 3.14159
 Tolerance: 0.01
@@ -186,6 +196,7 @@ def test_full_pipeline_parse_validate_package_and_log():
   "items": [
     {
       "type": "MC",
+      "points": 1,
       "prompt": "Test question",
       "choices": [
         {"id": "A", "text": "Correct", "correct": true},
@@ -197,7 +208,6 @@ def test_full_pipeline_parse_validate_package_and_log():
 </QUIZFORGE_JSON>
 """
         quiz = import_quiz_from_llm(valid_quiz).quiz
-        quiz.questions = calculate_points(quiz.questions, total_points=DEFAULT_QUIZ_POINTS)
         quiz.questions = balance_answers(quiz.questions)
         result = QuizValidator().validate(quiz)
         assert result.status != ValidationStatus.FAIL
@@ -219,6 +229,7 @@ def test_full_pipeline_parse_validate_package_and_log():
   "items": [
     {
       "type": "MC",
+      "points": 1,
       "prompt": "Missing choices"
     }
   ]
@@ -235,12 +246,13 @@ def test_full_pipeline_parse_validate_package_and_log():
         print("✓ Full parse -> validate -> package -> log pipeline works")
 
 
-def test_point_normalization():
-    """Test that points are normalized to 100."""
+def test_authored_points_are_preserved():
+    """A physical quiz keeps the authored, unequal point values."""
     quiz_text = """Title: Points Test
 
 ---
 Type: MC
+Points: 0.25
 Prompt: Q1
 Choices:
 - [x] A
@@ -248,6 +260,7 @@ Choices:
 ---
 
 Type: MC
+Points: 0.75
 Prompt: Q2
 Choices:
 - [x] A
@@ -261,10 +274,10 @@ Choices:
     quiz = parser.parse_text(quiz_text)
     result = validator.validate(quiz)
 
-    total = result.quiz.total_points()
-    assert 99 <= total <= 101  # Allow small rounding tolerance
+    assert [question.points for question in result.quiz.questions] == [0.25, 0.75]
+    assert result.quiz.total_points() == 1.0
 
-    print("✓ Points normalized to 100")
+    print("✓ Authored points preserved")
 
 
 def run_all_tests():
@@ -279,7 +292,7 @@ def run_all_tests():
     test_canvas_package_structure()
     test_numerical_bounds_calculation()
     test_full_pipeline_parse_validate_package_and_log()
-    test_point_normalization()
+    test_authored_points_are_preserved()
 
     print()
     print("=" * 60)

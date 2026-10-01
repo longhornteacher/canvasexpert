@@ -8,9 +8,15 @@
     var name = document.getElementById("qa-name")?.value.trim();
     if (!name) return alert("Give the assignment a name.");
 
+    var pointsText = document.getElementById("qa-points")?.value || "";
+    var points = Number(pointsText);
+    if (!pointsText.trim() || !Number.isFinite(points) || points < 0) {
+      return alert("Enter a finite, nonnegative points value.");
+    }
+
     var payload = {
       name: name,
-      points: parseFloat(document.getElementById("qa-points")?.value) || 100,
+      points: points,
       submission_type: document.getElementById("qa-subtype")?.value || "none",
       published: document.getElementById("qa-publish")?.checked || false,
     };

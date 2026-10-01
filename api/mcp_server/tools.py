@@ -136,8 +136,8 @@ _NEXT_STEPS = {
         "Read total as response rows and students_total as people. Keep the scoring "
         "contract and rubric on page zero; use next_offset for later pages. After "
         "reading every page, call stage_scoring_results with one "
-        "{pseudonym, item_id, score, explanation, glows, grows, fixes} row per packet "
-        "student row, the page-zero `exemplars`, and packet_digest as "
+        "{pseudonym, item_id, score, feedback} row per packet "
+        "student row and packet_digest as "
         "expected_packet_digest."
     ),
     "stage_scoring_results": (
@@ -2825,17 +2825,13 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
 def stage_scoring_results(scoring_session_id: str, results: list,
                           expected_packet_digest: str, review_digest: str = "",
                           answers: dict | None = None,
-                          exemplars: dict | None = None,
-                          disclosure: str = "",
                           grade_mode: str | None = None) -> dict:
     """Validate and freeze one exact scoring result set without Canvas I/O.
 
-    One {pseudonym, item_id, score, explanation, glows, grows} result per
-    packet row. ``exemplars`` maps item_id to one shared model answer, needed
-    for any item where a student scored below full marks or received a null
-    score. If the tool returns needs_teacher_input, ask the flagged questions
-    and resubmit unchanged with answers filled in. A successful call stores
-    the private write plan for a later explicit apply."""
+    One {pseudonym, item_id, score, feedback} result per packet row. If the
+    tool returns needs_teacher_input, ask the flagged questions and resubmit
+    unchanged with answers filled in. A successful call stores the private
+    write plan for a later explicit apply."""
     from api.powergrader import session_store
 
     if grade_mode is not None and grade_mode not in ("post_score", "feedback_only"):
@@ -2858,7 +2854,6 @@ def stage_scoring_results(scoring_session_id: str, results: list,
         return _stage_scoring_results_locked(
             scoring_session_id, results, expected_packet_digest,
             review_digest=review_digest, answers=answers,
-            exemplars=exemplars, disclosure=disclosure,
             grade_mode=grade_mode)
 
 
@@ -2866,8 +2861,6 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                                   expected_packet_digest: str,
                                   review_digest: str = "",
                                   answers: dict | None = None,
-                                  exemplars: dict | None = None,
-                                  disclosure: str = "",
                                   grade_mode: str | None = None) -> dict:
     """Validate SAFE results, ask bounded risk questions, then freeze locally.
 
@@ -2875,7 +2868,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
     No result content or real identity is returned, including on failure.
     """
     from api import feedback_pipeline as fp
-    from api.powergrader import corrections, scoring_packet as sp, session_store
+    from api.powergrader import scoring_packet as sp, session_store
 
     # The caller holds the scope lock from the first authoritative currentness
     # check through validation, planning, Canvas apply, and terminal recording.
@@ -2926,26 +2919,8 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                                "warnings": len(verdict.get("warnings") or []),
                                "fields": verdict.get("fields") or []}}
 
-    tier = str(session.get("assignmentforge_tier") or "")
-    corrections_by_item = {
-        item_id: corrections.correction_for_item(
-            session.get("assignmentforge_corrections") or {}, item_id, tier)
-        for item_id in {str(r.get("item_id") or "") for r in results}
-    }
-    exemplars = {str(k): str(v) for k, v in (exemplars or {}).items()}
-    missing = fp.missing_exemplar_item_ids(
-        results, bundle=safe_bundle, exemplars=exemplars,
-        corrections_by_item=corrections_by_item,
-    )
-    if missing:
-        return {"ok": False, "code": "missing_exemplars",
-                "error": "Every item where a student scored below full marks or "
-                         "received a null score needs a shared exemplar.",
-                "item_ids": missing}
-
     rendered = fp.render_results(
-        results, bundle=safe_bundle, exemplars=exemplars,
-        corrections_by_item=corrections_by_item, grade_mode=grade_mode,
+        results, bundle=safe_bundle, grade_mode=grade_mode,
     )
     try:
         rows = fp.reidentify(rendered, vault)
@@ -2963,7 +2938,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
         if label:
             names[str(entry.get("canvas_id"))] = label
             every_pseudonym.append(label)
-    by_uid = fp.merge_rows_by_uid(rows, disclosure=disclosure)
+    by_uid = fp.merge_rows_by_uid(rows)
     item_by_uid = fp.item_rows_by_uid(rows)
     previous_grade_mode = str(session.get("grade_mode") or "post_score")
     mode_feedback_updates = {}
@@ -2977,20 +2952,19 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                     and not str(prior.get("ai_feedback") or "").strip()):
                 continue
             prior_items = prior.get("ai_item_results") or []
-            scores = [item.get("score") for item in prior_items]
-            item_results = []
-            for item in prior_items:
-                revised = dict(item)
-                if "feedback" in revised:
-                    revised["feedback"] = fp.relabel_rendered_score_lines(
-                        revised.get("feedback") or "", grade_mode=grade_mode,
-                        scores=[item.get("score")])
-                item_results.append(revised)
+            if not prior_items or not all(item.get("feedback_is_authored") for item in prior_items):
+                continue
+            prior_rows = [{
+                "resolved": True,
+                "canvas_id": user_id,
+                "item_id": item.get("item_id", ""),
+                "score": item.get("score"),
+                "feedback": fp.item_feedback_for_mode(item, grade_mode),
+            } for item in prior_items]
+            rebuilt = fp.merge_rows_by_uid(prior_rows).get(user_id, {})
             mode_feedback_updates[user_id] = {
-                "ai_feedback": fp.relabel_rendered_score_lines(
-                    prior.get("ai_feedback") or "", grade_mode=grade_mode,
-                    scores=scores or [prior.get("ai_score")]),
-                "ai_item_results": item_results,
+                "ai_feedback": rebuilt.get("feedback", ""),
+                "ai_item_results": prior_items,
             }
     candidate = copy.deepcopy(session)
     candidate["grade_mode"] = grade_mode
@@ -3004,6 +2978,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
             student["ai_score"] = row.get("score")
             student["ai_feedback"] = row.get("feedback") or ""
             student["ai_item_results"] = item_by_uid.get(str(user_id), [])
+            student["_teacher_authored_feedback"] = True
 
     # Effort credit and teacher-confirmed late days -- Scoring Sessions only
     # (grading-policy-contract.md section 5). insincere/late_days are read
@@ -3136,6 +3111,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                         target["ai_score"] = staged.get("ai_score")
                         target["ai_feedback"] = staged.get("ai_feedback")
                         target["ai_item_results"] = staged.get("ai_item_results") or []
+                        target["_teacher_authored_feedback"] = True
                         if "grading" in staged:
                             target["grading"] = staged["grading"]
                         else:

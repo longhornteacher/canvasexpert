@@ -108,8 +108,7 @@ class TextOutlineParser:
         lines = [line.rstrip("\n") for line in quiz_text.split("\n")]
 
         title: Optional[str] = None
-        target_total_points: float = 100.0
-        keep_points: bool = False
+        target_total_points: Optional[float] = None
         blocks: List[List[str]] = []
         current_block: List[str] = []
 
@@ -129,12 +128,14 @@ class TextOutlineParser:
                 if lowered.startswith("totalpoints:"):
                     try:
                         target_total_points = float(line.split(":", 1)[1].strip())
-                    except ValueError:
-                        pass
+                    except ValueError as exc:
+                        raise ValueError("TotalPoints must be a finite, nonnegative number.") from exc
+                    if not math.isfinite(target_total_points) or target_total_points < 0:
+                        raise ValueError("TotalPoints must be a finite, nonnegative number.")
                     continue
                 if lowered.startswith("keeppoints:"):
-                    keep_value = line.split(":", 1)[1].strip().lower()
-                    keep_points = keep_value in ("true", "t", "1", "yes")
+                    # Retained as a recognized legacy header; authored values are never
+                    # rescaled based on this flag.
                     continue
 
             current_block.append(raw)
@@ -172,9 +173,24 @@ class TextOutlineParser:
         if not questions:
             raise ValueError("No questions parsed. Ensure the file contains at least one '---' block.")
 
-        scorable = [q for q in questions if not isinstance(q, StimulusItem)]
-        if scorable and not keep_points:
-            self._normalize_points(scorable, target_total_points)
+        scorable = [q for q in questions if not isinstance(q, (StimulusItem, StimulusEnd))]
+        for index, question in enumerate(scorable, 1):
+            try:
+                points = float(question.points)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    f"Scored question {question.forced_ident or index} needs explicit finite, nonnegative Points."
+                ) from exc
+            if (not question.points_set or not math.isfinite(points) or points < 0):
+                raise ValueError(
+                    f"Scored question {question.forced_ident or index} needs explicit finite, nonnegative Points."
+                )
+        if target_total_points is not None:
+            actual_total = sum(float(q.points) for q in scorable)
+            if not math.isclose(actual_total, target_total_points, rel_tol=1e-9, abs_tol=1e-9):
+                raise ValueError(
+                    f"TotalPoints ({target_total_points:g}) must equal authored question points ({actual_total:g})."
+                )
 
         return Quiz(title=title, questions=questions, rationales=rationales)
 
@@ -787,7 +803,6 @@ class TextOutlineParser:
         lower = answer - offset
         upper = answer + offset
         return lower, upper
-
     @staticmethod
     def _compute_decimal_place_bounds(answer: Decimal, decimal_places: int) -> tuple[Decimal, Decimal]:
         if decimal_places < 0:
@@ -796,47 +811,3 @@ class TextOutlineParser:
         lower = answer - offset
         upper = answer + offset
         return lower, upper
-
-    def _normalize_points(self, questions: List[Question], target_total: float) -> None:
-        current_total = sum(max(0.0, q.points) for q in questions)
-        if current_total <= 0.0:
-            raw = [target_total / len(questions) for _ in questions]
-        else:
-            factor = target_total / current_total
-            raw = [q.points * factor for q in questions]
-
-        rounded = [int(round(value)) for value in raw]
-        diff = int(round(target_total)) - sum(rounded)
-
-        if diff != 0:
-            indices = list(range(len(questions)))
-
-            def rank_add(i: int):
-                frac = raw[i] - rounded[i]
-                to_next5 = (5 - (rounded[i] % 5)) % 5
-                return (-frac, to_next5, i)
-
-            def rank_sub(i: int):
-                frac = rounded[i] - raw[i]
-                to_prev5 = rounded[i] % 5
-                return (-frac, to_prev5, i)
-
-            while diff != 0 and indices:
-                if diff > 0:
-                    indices.sort(key=rank_add)
-                    for idx in indices:
-                        rounded[idx] += 1
-                        diff -= 1
-                        if diff == 0:
-                            break
-                else:
-                    indices.sort(key=rank_sub)
-                    for idx in indices:
-                        if rounded[idx] > 1:
-                            rounded[idx] -= 1
-                            diff += 1
-                            if diff == 0:
-                                break
-
-        for question, value in zip(questions, rounded):
-            question.points = float(value)

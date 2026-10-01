@@ -36,6 +36,7 @@ ONE_GOOD_MC = {
             "id": "mc1",
             "type": "MC",
             "prompt": "<p>Why does dye spread evenly through still water?</p>",
+            "points": 2,
             "choices": [
                 {"id": "A", "text": "Diffusion down a concentration gradient", "correct": True},
                 {"id": "B", "text": "Osmosis across a selectively permeable membrane", "correct": False},
@@ -97,14 +98,13 @@ def test_mc_without_a_correct_choice_is_rejected(tmp_path):
     assert any("has 0 correct" in p for p in problems), problems
 
 
-def test_scored_item_without_a_rationale_is_rejected(tmp_path):
+def test_quiz_without_rationales_is_valid(tmp_path):
     payload = json.loads(json.dumps(ONE_GOOD_MC))
     payload.pop("rationales")
-    problems = validate_qf.validate(_envelope(tmp_path, payload), set())
-    assert any("no rationales entry" in p and "choices" in p for p in problems), problems
+    assert validate_qf.validate(_envelope(tmp_path, payload), set()) == []
 
 
-# --- Depth checks: helpers ---
+# --- Optional feedback shape checks: helpers ---
 #
 # These mirror the builder helpers from engine/tests/unit/test_rationale_rules.py
 # (the orphaned rule set being deleted in the same batch), but build raw
@@ -116,6 +116,7 @@ def _mc_item(item_id, n_choices):
         "id": item_id,
         "type": "MC",
         "prompt": "<p>Q?</p>",
+        "points": 1,
         "choices": [
             {"id": chr(65 + i), "text": f"c{i}", "correct": i == 0}
             for i in range(n_choices)
@@ -124,11 +125,11 @@ def _mc_item(item_id, n_choices):
 
 
 def _tf_item(item_id):
-    return {"id": item_id, "type": "TF", "prompt": "<p>Sky is blue?</p>", "answer": True}
+    return {"id": item_id, "type": "TF", "prompt": "<p>Sky is blue?</p>", "answer": True, "points": 1}
 
 
 def _writing_item(item_id, item_type):
-    return {"id": item_id, "type": item_type, "prompt": "<p>Discuss.</p>"}
+    return {"id": item_id, "type": item_type, "prompt": "<p>Discuss.</p>", "points": 10}
 
 
 def _per_choice_rationale(item_id, rationale_texts):
@@ -149,44 +150,17 @@ def _quiz(items, rationales):
     return {"version": "3.0-json", "title": "T", "items": items, "rationales": rationales}
 
 
-# --- Depth checks: ported from engine/tests/unit/test_rationale_rules.py ---
-#
-# All 9 original cases, ported onto the new gate before that file (and the rule
-# set it tested) is deleted.
+# --- Optional feedback shape checks ---
 
 def test_ported_mc_full_coverage_passes(tmp_path):
     payload = _quiz([_mc_item("q1", 4)], [_per_choice_rationale("q1", ["a", "b", "c", "d"])])
     assert validate_qf.validate(_envelope(tmp_path, payload), set()) == []
 
 
-def test_ported_mc_missing_entry_fails(tmp_path):
-    payload = _quiz([_mc_item("q1", 4)], [])
-    problems = validate_qf.validate(_envelope(tmp_path, payload), set())
-    assert any("no rationales entry" in p and "choices" in p for p in problems), problems
-
-
-def test_ported_mc_count_mismatch_fails(tmp_path):
-    payload = _quiz([_mc_item("q1", 4)], [_per_choice_rationale("q1", ["a", "b", "c"])])
-    problems = validate_qf.validate(_envelope(tmp_path, payload), set())
-    assert any("4 answer choices" in p and "lists 3" in p for p in problems), problems
-
-
-def test_ported_mc_empty_text_fails(tmp_path):
-    payload = _quiz([_mc_item("q1", 3)], [_per_choice_rationale("q1", ["a", "", "c"])])
-    problems = validate_qf.validate(_envelope(tmp_path, payload), set())
-    assert any("empty for choice(s) B" in p for p in problems), problems
-
-
-def test_ported_tf_with_single_rationale_passes(tmp_path):
-    payload = _quiz([_tf_item("tf1")],
-                     [_single_rationale("tf1", "True because the sky scatters blue light.")])
+def test_mc_partial_arbitrary_length_feedback_is_valid(tmp_path):
+    text = "Ask the teacher. This is incorrect. " + ("Additional authored context. " * 40)
+    payload = _quiz([_mc_item("q1", 4)], [_per_choice_rationale("q1", [text])])
     assert validate_qf.validate(_envelope(tmp_path, payload), set()) == []
-
-
-def test_ported_tf_without_rationale_fails(tmp_path):
-    payload = _quiz([_tf_item("tf1")], [])
-    problems = validate_qf.validate(_envelope(tmp_path, payload), set())
-    assert any("no rationales entry" in p and "why the correct answer is correct" in p for p in problems), problems
 
 
 @pytest.mark.parametrize("item_type", ["ESSAY", "FILEUPLOAD"])
@@ -196,13 +170,7 @@ def test_writing_items_are_routed_to_separate_assignments(tmp_path, item_type):
     [problem] = problems
     assert item_type in problem
     assert "separate AssignmentForge assignment" in problem
-    assert "100 points" in problem
-
-
-def test_ported_missing_id_fails(tmp_path):
-    payload = _quiz([_mc_item(None, 3)], [])
-    problems = validate_qf.validate(_envelope(tmp_path, payload), set())
-    assert any('has no "id"' in p for p in problems), problems
+    assert "teacher-chosen points" in problem
 
 
 # --- Depth checks: new coverage not in the ported set ---
@@ -210,33 +178,49 @@ def test_ported_missing_id_fails(tmp_path):
 def test_mc_rationale_missing_choices_array_is_rejected(tmp_path):
     payload = _quiz([_mc_item("q1", 2)], [{"item_id": "q1", "rationale": "wrong shape for MC"}])
     problems = validate_qf.validate(_envelope(tmp_path, payload), set())
-    assert any("no per-choice rationales" in p for p in problems), problems
+    assert any("needs a choices array" in p for p in problems), problems
+
+
+def test_per_choice_rationale_rejects_unmapped_top_level_text(tmp_path):
+    rationale = _per_choice_rationale("q1", ["Choice A context"])
+    rationale["rationale"] = "This extra text has no choice mapping."
+    payload = _quiz([_mc_item("q1", 4)], [rationale])
+    problems = validate_qf.validate(_envelope(tmp_path, payload), set())
+    assert any("cannot include a single rationale field" in p for p in problems), problems
 
 
 def test_mc_rationale_choice_id_mismatch_is_rejected(tmp_path):
     payload = _quiz([_mc_item("q1", 2)], [_per_choice_rationale("q1", ["a", "b"])])
     payload["rationales"][0]["choices"][1]["id"] = "Z"
     problems = validate_qf.validate(_envelope(tmp_path, payload), set())
-    assert any("does not match any choice" in p for p in problems), problems
+    assert any("does not match a choice" in p for p in problems), problems
 
 
-def test_mc_non_contiguous_choice_ids_are_rejected(tmp_path):
-    payload = _quiz([_mc_item("q1", 4)], [_per_choice_rationale("q1", ["a", "b", "c", "d"])])
+def test_mc_rationale_choice_id_duplicate_is_rejected(tmp_path):
+    payload = _quiz([_mc_item("q1", 4)], [_per_choice_rationale("q1", ["a", "b"])])
+    payload["rationales"][0]["choices"][1]["id"] = "A"
+    problems = validate_qf.validate(_envelope(tmp_path, payload), set())
+    assert any("duplicates choice id" in p for p in problems), problems
+
+
+def test_mc_item_non_contiguous_choice_ids_are_still_rejected(tmp_path):
+    payload = _quiz([_mc_item("q1", 4)], [])
     payload["items"][0]["choices"][3]["id"] = "E"
     problems = validate_qf.validate(_envelope(tmp_path, payload), set())
     assert any("choice ids must be contiguous" in p for p in problems), problems
 
 
-def test_single_rationale_whitespace_only_is_rejected(tmp_path):
+def test_supplied_single_rationale_whitespace_only_is_rejected(tmp_path):
     payload = _quiz([_tf_item("tf1")], [_single_rationale("tf1", "   ")])
     problems = validate_qf.validate(_envelope(tmp_path, payload), set())
-    assert any("rationale is empty" in p for p in problems), problems
+    assert any("non-empty rationale text" in p for p in problems), problems
 
 
 def test_fitb_wordbank_requires_options_before_push(tmp_path):
     payload = _quiz([{
         "id": "fitb-wordbank",
         "type": "FITB",
+        "points": 1,
         "prompt": "The powerhouse is the [blank].",
         "answer_mode": "wordbank",
         "accept": ["mitochondria"],
@@ -249,6 +233,7 @@ def test_fitb_multi_blank_shape_is_validated_by_item(tmp_path):
     payload = _quiz([{
         "id": "fitb-multi",
         "type": "FITB",
+        "points": 1,
         "prompt": "The [blank1] is near the [blank2].",
         "accept": [["school"], ["park"]],
     }], [_single_rationale("fitb-multi", "Each answer completes its linked blank in the sentence.")])
@@ -259,6 +244,7 @@ def test_fitb_single_blank_accepts_nested_accept_shape(tmp_path):
     payload = _quiz([{
         "id": "fitb-nested",
         "type": "FITB",
+        "points": 1,
         "prompt": "The powerhouse is the [blank1].",
         "accept": [["mitochondria", "the mitochondria"]],
     }], [_single_rationale("fitb-nested", "The accepted terms identify the organelle that produces cellular energy.")])
@@ -269,6 +255,7 @@ def test_fitb_multi_blank_rejects_more_than_three_blanks(tmp_path):
     payload = _quiz([{
         "id": "fitb-too-many",
         "type": "FITB",
+        "points": 1,
         "prompt": "[blank1] [blank2] [blank3] [blank4]",
         "accept": [["a"], ["b"], ["c"], ["d"]],
     }], [_single_rationale("fitb-too-many", "Each answer would complete a linked blank in the sentence.")])
@@ -276,46 +263,8 @@ def test_fitb_multi_blank_rejects_more_than_three_blanks(tmp_path):
     assert any("at most 3 linked blanks" in p for p in problems), problems
 
 
-# --- Advisories: never block, apply only to auto-graded rationales ---
-
-def test_advise_flags_non_two_sentence_rationale(tmp_path):
-    one_sentence = "Only one sentence here explaining the choice at reasonable length."
-    payload = _quiz([_mc_item("q1", 2)],
-                     [_per_choice_rationale("q1", [one_sentence, one_sentence])])
-    _, data, _ = validate_qf._load(_envelope(tmp_path, payload))
-    advisories = validate_qf.advise(data)
-    assert any("not the usual two" in a for a in advisories), advisories
-
-
-def test_advise_flags_word_count_outside_range(tmp_path):
-    payload = _quiz([_tf_item("tf1")], [_single_rationale("tf1", "Short one. Too brief.")])
-    _, data, _ = validate_qf._load(_envelope(tmp_path, payload))
-    advisories = validate_qf.advise(data)
-    assert any("outside the usual 15 to 40" in a for a in advisories), advisories
-
-
-def test_advise_flags_generic_distractor_text(tmp_path):
-    payload = _quiz([_tf_item("tf1")],
-                     [_single_rationale("tf1", "This is incorrect. This is incorrect for this item.")])
-    _, data, _ = validate_qf._load(_envelope(tmp_path, payload))
-    advisories = validate_qf.advise(data)
-    assert any("generic" in a for a in advisories), advisories
-
-
-def test_advise_flags_ask_the_teacher_language(tmp_path):
-    payload = _quiz([_tf_item("tf1")],
-                     [_single_rationale("tf1", "Not sure why. Ask the teacher for help with this one.")])
-    _, data, _ = validate_qf._load(_envelope(tmp_path, payload))
-    advisories = validate_qf.advise(data)
-    assert any("ask or see the" in a for a in advisories), advisories
-
-
-def test_advise_is_empty_for_a_clean_two_sentence_rationale(tmp_path):
-    text = (
-        "Light scatters more at shorter wavelengths as it passes through the atmosphere. "
-        "Blue light scatters the most, which is why the sky looks blue."
-    )
-    payload = _quiz([_tf_item("tf1")], [_single_rationale("tf1", text)])
+def test_advise_does_not_apply_automatic_feedback_style_rules(tmp_path):
+    payload = _quiz([_tf_item("tf1")], [_single_rationale("tf1", "Ask the teacher.")])
     _, data, _ = validate_qf._load(_envelope(tmp_path, payload))
     assert validate_qf.advise(data) == []
 
@@ -341,7 +290,7 @@ def _essay(item_id="w1", **fields):
 
 
 def _plain(item_type, **fields):
-    return {"id": "x1", "type": item_type, "prompt": "<p>Q [blank]</p>", **fields}
+    return {"id": "x1", "type": item_type, "prompt": "<p>Q [blank]</p>", "points": 1, **fields}
 
 
 _SUPPORTS = {"word_bank": ["claim"]}
@@ -357,13 +306,13 @@ ENGINE_CASES = {
         {**ONE_GOOD_MC, "quiz_engine": "new", "tiers": [{"label": "Core", "supports": _SUPPORTS}]},
         'only allowed when quiz_engine is "classic"'),
     "classic essay": (_classic_quiz([_tf_item("tf1"), _essay()]), None),
-    "essay needs points": (_classic_quiz([_tf_item("tf1"), _essay(points=None)]), "needs points greater than 0"),
-    "essay points positive": (_classic_quiz([_tf_item("tf1"), _essay(points=0)]), "needs points greater than 0"),
+    "essay needs points": (_classic_quiz([_tf_item("tf1"), _essay(points=None)]), "points"),
+    "essay zero points": (_classic_quiz([_tf_item("tf1"), _essay(points=0)]), None),
     "essay needs prompt": (_classic_quiz([_tf_item("tf1"), _essay(prompt="  ")]), "needs a prompt"),
     "essay takes no rationale": (
         _classic_quiz([_tf_item("tf1"), _essay()],
                       [_single_rationale("tf1", "True because."), _single_rationale("w1", "No.")]),
-        "takes no rationale"),
+        "does not support rationale feedback"),
     "ordering refused": (_classic_quiz([_plain("ORDERING", items=["a", "b"])], []), "MATCHING or MC"),
     "categorization refused": (_classic_quiz([_plain("CATEGORIZATION", categories=["a", "b"], items=[])], []),
                                "MATCHING or MC"),
@@ -377,7 +326,7 @@ ENGINE_CASES = {
     "decimal places refused": (
         _classic_quiz([_plain("NUMERICAL", answer=1, evaluation={"mode": "decimal_places", "value": 2})], []),
         "decimal_places"),
-    "writing fills the quiz": (_classic_quiz([_tf_item("tf1"), _essay(points=100)]), "leaving nothing"),
+    "writing keeps its authored points": (_classic_quiz([_tf_item("tf1"), _essay(points=100)]), None),
     "hub one tier": (_hub([{"label": "Support", "supports": _SUPPORTS}]), None),
     "hub two tiers": (_hub([{"label": "support", "supports": _SUPPORTS},
                             {"label": "Core", "supports": {"html": "<p>Hint</p>"}}]), None),

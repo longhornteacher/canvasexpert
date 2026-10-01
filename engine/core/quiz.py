@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List, TYPE_CHECKING
+from decimal import Decimal
 
 if TYPE_CHECKING:
     from .questions import Question, StimulusItem
@@ -29,7 +30,7 @@ class Quiz:
         Returns:
             Total point value (excludes StimulusItem which have 0 points)
         """
-        return sum(q.points for q in self.questions)
+        return float(sum((Decimal(str(q.points)) for q in self.questions), Decimal(0)))
     
     def scorable_questions(self) -> List['Question']:
         """Return only questions that contribute to the score.

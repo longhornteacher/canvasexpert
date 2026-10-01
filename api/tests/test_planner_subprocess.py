@@ -1,15 +1,4 @@
-"""The planner subprocess boundary itself: encoding, stdin, and diagnosis.
-
-Every other quiz test mocks ``run_json_object`` away, which is exactly how a
-boundary bug survived: the parent decoded the child's stdout as utf-8 while
-nothing told the child to produce it. On Windows a piped stdout encodes as
-cp1252 and the planners print with ``ensure_ascii=False``, so the checkmark
-and cross that QuizForge writes into every per-choice rationale raised
-UnicodeEncodeError inside the child. The push came back as the bare words
-"planner failed", and no quiz could be previewed or pushed at all.
-
-These tests run the real subprocess, so they hold that boundary.
-"""
+"""The planner subprocess boundary itself: encoding, stdin, and diagnosis."""
 import os
 import json
 import subprocess
@@ -19,46 +8,56 @@ import pytest
 from api.webui import runner
 from api import qf_pusher
 
-# Tracked QuizForge sample with per-choice rationales, so the plan carries the
-# glyphs the renderer adds rather than any character the author typed.
+# Tracked QuizForge sample with teacher-authored, optional per-choice feedback.
 QUIZ_FIXTURE = os.path.join(
     runner.API_DIR, "qf_materials", "qf quiz examples", "ela7_lantern_formA.txt"
 )
 RATIONALE_GLYPHS = ("\u2713", "\u2717")
 
 
-def _plan(**kwargs):
+def _plan(path=QUIZ_FIXTURE, **kwargs):
     return runner.run_json_object(
-        ["qf_pusher.py", QUIZ_FIXTURE, "--plan-json"],
+        ["qf_pusher.py", path, "--plan-json"],
         extra_env={"QF_PUSH_SETTINGS": "{}", **kwargs},
     )
 
 
-def test_the_fixture_still_exercises_the_glyph_path():
-    """Guard the guard: a sample that lost its rationales proves nothing."""
+def test_fixture_keeps_only_teacher_authored_feedback():
+    """Optional authored explanations reach the plan without generated verdicts."""
     plan = _plan()
 
-    for glyph in RATIONALE_GLYPHS:
-        assert glyph in str(plan["items"]), (
-            "the sample quiz no longer carries the rationale glyphs this test "
-            "exists to protect; point it at one that does"
-        )
+    rendered = str(plan["items"])
+    assert "A passage's central idea is the main point" in rendered
+    assert not any(glyph in rendered for glyph in RATIONALE_GLYPHS)
 
 
-def test_plan_round_trips_glyphs_the_windows_codepage_cannot_encode():
-    """The boundary's encoding is not the caller's or the host locale's choice.
-
-    ``PYTHONIOENCODING`` is passed as cp1252 here on purpose: the runner must
-    override it, because the parent hard-decodes utf-8. That makes this test
-    fail on any platform if the override is removed, rather than only on a
-    machine whose locale happens to be cp1252.
-    """
-    plan = _plan(PYTHONIOENCODING="cp1252")
+def test_plan_round_trips_author_supplied_glyph_feedback(tmp_path):
+    """Teacher-authored Unicode feedback survives the Windows child boundary."""
+    path = tmp_path / "authored-feedback.quizforge.txt"
+    path.write_text(
+        "<QUIZFORGE_JSON>\n" + json.dumps({
+            "version": "3.0-json",
+            "title": "Unicode feedback",
+            "items": [{
+                "id": "q1", "type": "MC", "points": 1,
+                "prompt": "Pick one.",
+                "choices": [
+                    {"id": "A", "text": "First", "correct": True},
+                    {"id": "B", "text": "Second", "correct": False},
+                ],
+            }],
+            "rationales": [{"item_id": "q1", "choices": [
+                    {"id": "A", "rationale": "✓ Authored explanation; keep it exact."},
+            ]}],
+        }, ensure_ascii=False) + "\n</QUIZFORGE_JSON>\n",
+        encoding="utf-8",
+    )
+    plan = _plan(str(path), PYTHONIOENCODING="cp1252")
 
     assert plan["version"] == 1
-    assert plan["items"]
-    for glyph in RATIONALE_GLYPHS:
-        assert glyph in str(plan["items"])
+    feedback = plan["items"][0]["payload"]["item"]["entry"]["answer_feedback"]
+    assert list(feedback.values()) == ["<p>✓ Authored explanation; keep it exact.</p>"]
+    assert "✗" not in str(feedback)
 
 
 def test_quiz_plan_normalizes_title_and_item_text(tmp_path):
@@ -69,6 +68,7 @@ def test_quiz_plan_normalizes_title_and_item_text(tmp_path):
             "title": "Unit \u2014 check",
             "items": [{
                 "id": "q1", "type": "TF",
+                "points": 1,
                 "prompt": "The claim \u2014 is it true?", "answer": True,
             }],
             "rationales": [],
@@ -133,7 +133,7 @@ def test_live_planner_rejects_writing_before_preparation_or_transform(
         "<QUIZFORGE_JSON>\n" + json.dumps({
             "version": "3.0-json",
             "title": "Major - Questions",
-            "items": [{"id": "writing-1", "type": item_type, "prompt": "Write."}],
+            "items": [{"id": "writing-1", "type": item_type, "points": 1, "prompt": "Write."}],
             "rationales": [],
         }) + "\n</QUIZFORGE_JSON>\n",
         encoding="utf-8",
@@ -156,7 +156,7 @@ def test_live_planner_rejects_writing_before_preparation_or_transform(
 
     assert item_type in str(excinfo.value)
     assert "separate AssignmentForge assignment" in str(excinfo.value)
-    assert "100 points" in str(excinfo.value)
+    assert "100 points" not in str(excinfo.value)
 
 
 @pytest.mark.parametrize("line, expected", [

@@ -57,7 +57,10 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 67 (59 tools). Version 67 adds optional `grade_mode` (`post_score` default, or
+Tool schema version 68 (59 tools). Version 68 replaces structured feedback fields and the
+`exemplars`/`disclosure` staging inputs with one teacher-authored `feedback` string per result.
+Canvas Expert preserves the string and adds `Draft score: X/Y` only in `feedback_only` mode.
+Version 67 adds optional `grade_mode` (`post_score` default, or
 `feedback_only`) to `stage_scoring_results`: `feedback_only` posts the numeric draft score in the
 feedback comment only and sends no gradebook score or grade-policy fields. Version 66 adds `preview_attempts_grant` and
 `apply_attempts_grant`, the reviewed extra-attempts and reopen grant for one assignment (regular
@@ -71,9 +74,7 @@ row with the policy's missing value and Canvas's explicit missing status after 1
 (`docs/contracts/grading-policy-contract.md`). Version 64 adds two optional `stage_scoring_results` result
 fields, `insincere` and `late_days`, for the scoring-lane effort-credit and teacher-confirmed
 late-day policy (`docs/contracts/grading-policy-contract.md`); no new tool. Version 63 replaces free-text scoring feedback with structured fields
-(`explanation`, `glows`, `grows`, `fixes`) that Canvas Expert renders into one fixed layout, and adds
-`exemplars` and `disclosure` to `stage_scoring_results`; no persona selection remains anywhere in the
-contract. Version 62 adds `stage_attachment(source_path)` for safely
+Version 63 replaced free-text scoring feedback with structured feedback fields. Version 62 adds `stage_attachment(source_path)` for safely
 staging teacher-posted files from chat into the private Forge attachment inbox. Version 61 removes the legacy group field from differentiated quiz variants
 and removes student-group data from roster settings. Version 60 adds the reviewed existing-grade adjustment
 pair. Version 59 added `verify_live`, `resume_operation`, and
@@ -133,14 +134,14 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `verify_live(course_id, kind, id="", title="")` | The one Live Canvas read an agent makes after a push: confirms one `assignment`/`page`/`quiz` by exact id or exact title. One Canvas call, or two only when `module_ids` isn't already on the object; writes nothing | No |
 | `resume_operation(operation_id)` | Continues one existing, teacher-approved operation from its last recorded step through the same executor retry path; refuses an operation that already applied, was abandoned, or is held by another attempt | No |
 | `abandon_operation(operation_id)` | Marks one existing, teacher-approved operation abandoned with no Canvas call; blocks later `resume_operation`/apply and returns a `repair_plan` of what was already created from recorded steps | No |
-| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input; the product-owned base feedback shape is always in page zero, with a selected contract file and any scoring guidance layered on top | No |
+| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input; page zero includes the selected teacher feedback guidance and scoring basis | No |
 | `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
 | `list_work_items()` | Shared work-item holders, sync progress, and orphan counts without private session contents | No |
 | `get_work_item(work_id)` | One shared work item's holder and sync status | No |
 | `handoff_work_item(work_id)` | Release this device's lease so another device can resume after sync | No |
 | `take_over_work_item(work_id, confirm_stale=false)` | Acquire a released item after sync, or explicitly confirm takeover after a stale lease | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
-| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, exemplars=None, disclosure="", grade_mode="post_score")` | Validate structured results (`explanation`, `glows`, `grows`, optional `fixes`, optional `insincere`/`late_days` in a grading-policy course), render Canvas Expert's one fixed feedback layout, and freeze locally; `exemplars` supplies one shared model answer per item below full marks or null-scored; refuses `missing_exemplars` by item id alone; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |
+| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, grade_mode="post_score")` | Validate one authored `feedback` string and numeric or null score per result, retain optional `insincere`/`late_days` grading flags, and freeze locally; numeric score-only work may have empty feedback; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |
 | `apply_staged_scoring_results(scoring_session_id, expected_stage_digest, idempotency_key="")` | Post only the unchanged private stage after a direct teacher instruction; preserves narrow transport and idempotency safeguards | Yes, pseudonymized |
 
 `get_course_assignments` and `get_modules` only read the local course catalog written by
@@ -225,6 +226,12 @@ Undo is another preview with `adjustment.kind = "revert"`, and completed, non-re
 receipts supply the private student-report projection and the built-in curve routine's
 already-adjusted guard.
 
+Rule previews include every eligible numeric entered score, including zero, Canvas-missing,
+and teacher-confirmed insincere rows. The teacher may pass eligible pseudonyms in
+`exclude_pseudonyms`; excluded rows leave the rule math and appear in preview counts. Rule
+models require their explicit input (`bump`, `target_avg_pct`, or `floor`); no target or
+floor is inferred. Explicit and revert behavior is unchanged.
+
 Reconciliation is the separate reviewed path for missing bridge links: it may create or
 register a bridge from exact local IDs, but never guesses from title alone or starts Canvas
 Grade Sync. Any invariant failure still stops the write.
@@ -295,17 +302,12 @@ work changed and either waits for an explicit refresh request or retries with
 continue locally from its immutable packet and do not prepare or refresh that
 assignment again. A repeated call returns `scoring_session_already_open`.
 
-AssignmentForge auto-scoring gates: An assignment qualifies for AI auto-scoring in a
-Scoring Session only when all four conditions are met: (1) the assignment text explicitly
-tells students HOW to submit (paper, text box, file, etc.); (2) the assignment text
-explicitly states the point value of each work piece; (3) the total is 0-100 points
-unless the teacher explicitly approved a different scale; (4) writing pieces (SCR/ECR)
-are weighted higher than shorter pieces. If any condition is unmet, the assignment
-is eligible for teacher review only - do not auto-score it.
-
-Non-empty assignment content is the scoring basis. A Canvas rubric is used only when
-assignment content is empty; teacher-authored directives layer on top. If neither
-exists, preparation returns `needs_teacher_input`
+Scoring preparation preserves the Canvas assignment's finite, nonnegative
+`points_possible`, including zero, and returns `assignment_points_unavailable` when that
+fact is missing or invalid. Assignment directions/content, the Canvas rubric, and explicit
+teacher direction appear as separately labeled basis components. Teacher direction controls
+scoring decisions; context remains available. If no context or teacher direction exists,
+preparation returns `needs_teacher_input`
 with `needs_scoring_norms` and a concise question. Ask for bounded guidance, then retry
 the same exact course and assignment. If no current work remains, it returns the typed
 `nothing_to_grade` blocker without creating a packet. Every other failed preparation
@@ -332,7 +334,7 @@ that assignment-scoped session is complete; continue through
 any remaining rows in the teacher-selected set without a new blanket confirmation per
 assignment. A newly discovered assignment requires new teacher direction. Existing New Quizzes with writing stop before a
 packet with `new_quiz_writing_requires_assignment`; the teacher grades them in Canvas and
-uses separate 100-point assignments for future writing portions. No transport type,
+uses separate AssignmentForge assignments with teacher-chosen points for future writing portions. No transport type,
 operation token, or private local id crosses the MCP boundary. A stale packet,
 changed review plan, invalid answer, or ambiguous write fails closed. Review and editing
 happen in Canvas Live; the teacher request authorizes only the exact selected assignment

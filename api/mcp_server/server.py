@@ -66,10 +66,7 @@ class ScoringResult(TypedDict):
     pseudonym: str
     item_id: str
     score: float | None
-    explanation: str
-    glows: list[str]
-    grows: list[str]
-    fixes: NotRequired[list[str]]
+    feedback: str
     writing_process_observations: NotRequired[str]
     insincere: NotRequired[bool]
     late_days: NotRequired[int]
@@ -663,8 +660,6 @@ def stage_scoring_results(
     expected_packet_digest: str,
     review_digest: str = "",
     answers: dict[str, str] | None = None,
-    exemplars: dict[str, str] | None = None,
-    disclosure: str = "",
     grade_mode: Literal["post_score", "feedback_only"] | None = None,
 ) -> str:
     """Validate and stage SAFE results locally; no Canvas write.
@@ -674,7 +669,7 @@ def stage_scoring_results(
     """
     return _compact(tools.stage_scoring_results(
         scoring_session_id, results, expected_packet_digest, review_digest, answers,
-        exemplars=exemplars, disclosure=disclosure, grade_mode=grade_mode))
+        grade_mode=grade_mode))
 
 
 @mcp.tool(structured_output=False)

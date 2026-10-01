@@ -1,68 +1,19 @@
-"""Point normalization fixer.
-
-Distributes points across scorable questions to total 100.
-"""
+"""Point validation fixer; authored values are never normalized."""
 
 from typing import List, Tuple
 from ...core.quiz import Quiz
 
 
 class PointNormalizer:
-    """Normalize quiz points to total 100."""
+    """Keep explicit quiz points and report rows that need teacher values."""
     
     def normalize(self, quiz: Quiz, target_total: float = 100.0) -> Tuple[Quiz, List[str]]:
-        """Normalize points across scorable questions.
-        
-        Only normalizes questions where points_set is False.
-        
-        Args:
-            quiz: Quiz to normalize
-            target_total: Target point total (default 100)
-            
-        Returns:
-            Tuple of (quiz, log_messages)
-        """
+        """Preserve authored values and identify missing values without filling them."""
         messages: List[str] = []
         scorable = quiz.scorable_questions()
-        
-        # Check if any questions need normalization
-        needs_normalization = any(not q.points_set for q in scorable)
-        if not needs_normalization:
-            return quiz, messages
-        
-        # Get questions to normalize (those without explicit points)
-        to_normalize = [q for q in scorable if not q.points_set]
-        
-        if not to_normalize:
-            return quiz, messages
-        
-        # Calculate current total of explicit points
-        explicit_total = sum(q.points for q in scorable if q.points_set)
-        remaining = target_total - explicit_total
-        
-        if remaining <= 0:
+        missing = [q for q in scorable if not q.points_set]
+        if missing:
             messages.append(
-                f"Warning: Explicit points total {explicit_total}, leaving {remaining} "
-                f"for auto-distribution. Using equal distribution anyway."
+                f"{len(missing)} scored question(s) need teacher-authored points."
             )
-            remaining = target_total
-        
-        # Distribute remaining points equally
-        points_each = remaining / len(to_normalize)
-        
-        for q in to_normalize:
-            q.points = round(points_each)
-        
-        # Adjust for rounding errors
-        actual_total = sum(q.points for q in scorable)
-        diff = int(target_total - actual_total)
-        
-        if diff != 0:
-            # Add/subtract from first question to hit target exactly
-            to_normalize[0].points += diff
-        
-        messages.append(
-            f"Normalized {len(to_normalize)} questions to total {target_total} points"
-        )
-        
         return quiz, messages

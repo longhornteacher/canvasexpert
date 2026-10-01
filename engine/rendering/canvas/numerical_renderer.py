@@ -26,7 +26,7 @@ def build_numerical_item(question: NumericalQuestion, index: int) -> ET.Element:
 
     meta_field("question_type", "numerical_question")
     meta_field("calculator_type", "none")
-    meta_field("points_possible", f"{question.points:.1f}")
+    meta_field("points_possible", str(question.points))
     if question.parent_stimulus_ident:
         meta_field("parent_stimulus_item_ident", question.parent_stimulus_ident)
 

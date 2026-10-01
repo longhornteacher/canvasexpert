@@ -11,6 +11,7 @@ Title: Scientific Notation
 
 ---
 Type: NUMERICAL
+Points: 1
 Prompt: Speed of light (m/s)
 Answer: 2.998e8
 Tolerance: 1%
@@ -36,6 +37,7 @@ Prompt: Read this passage: ...
 ---
 
 Type: MC
+Points: 1
 Prompt: Question about passage
 Choices:
 - [x] A
@@ -46,6 +48,7 @@ Type: STIMULUS_END
 ---
 
 Type: MC
+Points: 1
 Prompt: Unrelated question
 Choices:
 - [x] A
@@ -66,6 +69,7 @@ def test_empty_quiz_title():
     quiz = parser.parse_text("""
 ---
 Type: TF
+Points: 1
 Prompt: Test
 Answer: true
 ---

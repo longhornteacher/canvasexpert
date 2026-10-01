@@ -11,9 +11,11 @@ from api.operation_ledger import executor, operations
 from api.operation_ledger.adapters import quiz_classic
 
 MC = {"id": "mc1", "type": "MC", "prompt": "<p>Which comes first?</p>",
+      "points": 35,
       "choices": [{"id": "A", "text": "Alpha", "correct": True},
                   {"id": "B", "text": "Beta", "correct": False}]}
 DROPDOWN = {"id": "dd1", "type": "FITB", "prompt": "The [blank] is the powerhouse.",
+            "points": 35,
             "answer_mode": "dropdown", "options": ["mitochondria", "nucleus"],
             "accept": ["mitochondria"]}
 ESSAY = {"id": "es1", "type": "ESSAY", "prompt": "<p>Explain your choice.</p>", "points": 20}
@@ -151,6 +153,7 @@ def test_hub_push_links_restricted_tier_pages_from_the_quiz_description(classic_
         {"label": "Support", "supports": {"sentence_frames": ["I chose ___ because ___."]}},
         {"label": "Core", "supports": {"word_bank": ["claim", "evidence"]}},
     ])
+    hub["rationales"] = [RATIONALES[0]]
 
     adapter, operation_id, prepared = classic_push(hub, {"published": True}, apply=False)
     review = prepared["review"]

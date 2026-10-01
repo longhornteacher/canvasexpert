@@ -15,7 +15,7 @@ def test_canvas_packaging_pipeline():
     quiz_text = """Title: Simple Test Quiz
 ---
 Type: MC
-Points: 10
+Points: 0.25
 Prompt: Which of these is correct?
 Choices:
 - [x] Correct answer
@@ -23,7 +23,7 @@ Choices:
 - [ ] Also wrong
 ---
 Type: TF
-Points: 5
+Points: 0.125
 Prompt: This is true.
 Answer: true
 """
@@ -62,9 +62,11 @@ Answer: true
         assessment_content = zf.read(f"{guid}/{guid}.xml").decode('utf-8')
         assert "<assessment" in assessment_content
         assert "Simple Test Quiz" in assessment_content
+        assert "<fieldentry>0.25</fieldentry>" in assessment_content
+        assert "<fieldentry>0.125</fieldentry>" in assessment_content
 
         # Verify metadata content
         meta_content = zf.read(f"{guid}/assessment_meta.xml").decode('utf-8')
         assert "<quiz" in meta_content
         assert "Simple Test Quiz" in meta_content
-        assert "100.0" in meta_content  # Total points
+        assert "<points_possible>0.375</points_possible>" in meta_content

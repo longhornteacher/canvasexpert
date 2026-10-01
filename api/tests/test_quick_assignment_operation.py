@@ -71,9 +71,10 @@ def test_payload_build_minimal(monkeypatch):
     adapter = QuickAssignmentAdapter()
     payload = adapter.build_payload({
         "name": "Exit \u2014 Ticket",
+        "points": 0,
     })
     assert payload["name"] == "Exit - Ticket"
-    assert payload["points"] == 100.0
+    assert payload["points"] == 0.0
     assert payload["submission_type"] == "none"
     assert payload["published"] is False
     assert "due_at" not in payload
@@ -105,6 +106,12 @@ def test_payload_build_raises_on_empty_name():
         adapter.build_payload({"name": "   "})
 
 
+@pytest.mark.parametrize("points", [None, True, "10", -1, float("nan"), float("inf")])
+def test_payload_build_requires_finite_nonnegative_numeric_points(points):
+    with pytest.raises(ValueError, match="points"):
+        QuickAssignmentAdapter().build_payload({"name": "Exit", "points": points})
+
+
 def test_source_digest_is_deterministic():
     adapter = QuickAssignmentAdapter()
     payload = {"name": "Exit", "points": 100, "submission_type": "none",
@@ -125,7 +132,7 @@ def test_verify_targets_valid(monkeypatch):
         _fake_courses,
     )
     adapter = QuickAssignmentAdapter()
-    payload = adapter.build_payload({"name": "Quiz 1"})
+    payload = adapter.build_payload({"name": "Quiz 1", "points": 10})
     targets = adapter.verify_targets(payload, [{"course_id": "101"}, {"course_id": "202"}])
     assert len(targets) == 2
     assert targets[0]["course_id"] == "101"
@@ -140,7 +147,7 @@ def test_verify_targets_rejects_unknown_course(monkeypatch):
         _fake_courses,
     )
     adapter = QuickAssignmentAdapter()
-    payload = adapter.build_payload({"name": "Quiz 1"})
+    payload = adapter.build_payload({"name": "Quiz 1", "points": 10})
     with pytest.raises(ValueError, match="not in active courses"):
         adapter.verify_targets(payload, [{"course_id": "999"}])
 
@@ -151,7 +158,7 @@ def test_verify_targets_rejects_missing_course_id(monkeypatch):
         _fake_courses,
     )
     adapter = QuickAssignmentAdapter()
-    payload = adapter.build_payload({"name": "Quiz 1"})
+    payload = adapter.build_payload({"name": "Quiz 1", "points": 10})
     with pytest.raises(ValueError, match="target missing course_id"):
         adapter.verify_targets(payload, [{}])
 
@@ -164,7 +171,7 @@ def test_capture_baseline_no_existing(monkeypatch):
         _fakecanvas_get,
     )
     adapter = QuickAssignmentAdapter()
-    payload = adapter.build_payload({"name": "New Assignment"})
+    payload = adapter.build_payload({"name": "New Assignment", "points": 10})
     baseline = adapter.capture_baseline(payload, {"course_id": "42"})
     assert baseline["existing_assignment"] is None
 
@@ -175,7 +182,7 @@ def test_capture_baseline_finds_existing(monkeypatch):
         _fakecanvas_get,
     )
     adapter = QuickAssignmentAdapter()
-    payload = adapter.build_payload({"name": "Existing Quiz"})
+    payload = adapter.build_payload({"name": "Existing Quiz", "points": 10})
     baseline = adapter.capture_baseline(payload, {"course_id": "42"})
     assert baseline["existing_assignment"] is not None
     assert baseline["existing_assignment"]["id"] == "999"
@@ -224,7 +231,7 @@ def test_freeze_review_with_existing(monkeypatch):
         _fake_courses,
     )
     adapter = QuickAssignmentAdapter()
-    payload = adapter.build_payload({"name": "Exit Ticket"})
+    payload = adapter.build_payload({"name": "Exit Ticket", "points": 10})
     review = adapter.freeze_review(
         payload, {"course_id": "101"},
         {"existing_assignment": {"id": "999", "html_url": "https://c/a/999"}},
@@ -237,9 +244,13 @@ def test_freeze_review_with_existing(monkeypatch):
 
 def test_execute_creates_assignment(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
+    sent = []
+    def send(method, path, payload, timeout=30):
+        sent.append((method, path, payload))
+        return _fake_canvas_send(method, path, payload, timeout)
     monkeypatch.setattr(
         "api.operation_ledger.adapters.quick_assignment.canvas_client._canvas_send",
-        _fake_canvas_send,
+        send,
     )
     monkeypatch.setattr(
         "api.operation_ledger.adapters.quick_assignment.canvas_client.canvas_get",
@@ -252,7 +263,7 @@ def test_execute_creates_assignment(tmp_path, monkeypatch):
 
     adapter = QuickAssignmentAdapter()
     payload = adapter.build_payload({
-        "name": "Exit Ticket", "points": 10, "published": True,
+        "name": "Exit Ticket", "points": 0, "published": True,
     })
 
     # Create an operation to satisfy the ledger plumbing
@@ -296,6 +307,7 @@ def test_execute_creates_assignment(tmp_path, monkeypatch):
     assert result["state"] == "applied"
     assert result["returned_object_id"] == "24680"
     assert "assignments/24680" in (result.get("returned_object_url") or "")
+    assert sent[0][2]["assignment"]["points_possible"] == 0.0
 
 
 def test_execute_handles_canvas_error(tmp_path, monkeypatch):
@@ -314,7 +326,7 @@ def test_execute_handles_canvas_error(tmp_path, monkeypatch):
     )
 
     adapter = QuickAssignmentAdapter()
-    payload = adapter.build_payload({"name": "Fail Assignment"})
+    payload = adapter.build_payload({"name": "Fail Assignment", "points": 10})
 
     op = models.new_operation(
         operation_id="op-qa-fail",
@@ -364,7 +376,7 @@ def test_reconcile_finds_assignment(monkeypatch):
     )
     adapter = QuickAssignmentAdapter()
     result = adapter.reconcile(
-        {"name": "Exit Ticket"},
+        {"name": "Exit Ticket", "points": 10},
         {"course_id": "42", "returned_object_id": "24680"},
         {},
     )

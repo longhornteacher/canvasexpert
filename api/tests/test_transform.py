@@ -23,16 +23,10 @@ def test_new_quiz_student_payload_contains_no_em_dashes():
     assert "\u2014" not in repr(build_item(item, 1))
 
 
-def test_per_choice_feedback_reads_as_sentences_not_a_because_clause():
-    """A two-sentence rationale must not be spliced after "because".
-
-    The rationale shape is a concept sentence followed by a sentence tying it to
-    this choice, so the verdict has to stand as its own sentence. Splicing gives
-    "is correct because Each HTML element...", which is not English.
-    """
+def test_mc_feedback_maps_only_supplied_choice_text_without_generated_prose():
     from api.transform import t_mc
 
-    concept = "Each HTML element has one specific job."
+    authored = "One sentence in my chosen voice."
     item = {
         "id": "q1",
         "type": "MC",
@@ -44,31 +38,35 @@ def test_per_choice_feedback_reads_as_sentences_not_a_because_clause():
         "_rationale": {
             "item_id": "q1",
             "choices": [
-                {"id": "A", "correct": True, "rationale": f"{concept} The anchor links, so it fits."},
-                {"id": "B", "correct": False, "rationale": f"{concept} A paragraph holds text, so it does not fit."},
+                {"id": "A", "correct": True, "rationale": authored},
             ],
         },
     }
 
-    feedback = " ".join(t_mc(item, 1)["item"]["entry"]["answer_feedback"].values())
+    entry = t_mc(item, 1)["item"]["entry"]
+    answer_feedback = entry["answer_feedback"]
+    choice_id = entry["interaction_data"]["choices"][0]["id"]
 
-    assert "because" not in feedback
-    assert '"anchor" is correct.' in feedback
-    assert '"paragraph" is wrong.' in feedback
-    assert concept in feedback
+    assert answer_feedback == {choice_id: f"<p>{authored}</p>"}
+    assert entry["scoring_data"]["value"] == choice_id
 
 
-def test_repeated_concept_sentence_is_said_once_per_feedback_box():
-    """One box can show several rows; the shared concept sentence belongs once.
+def test_mc_without_authored_feedback_emits_no_feedback_prose():
+    from api.transform import t_mc
 
-    Rationales repeat their concept sentence across an item's choices on purpose,
-    so whichever row a student lands on teaches on its own. A single feedback box
-    shows the correct answer plus the choice they picked, and there the repeat is
-    noise. MA is the sharp case: every correct choice contributes a row.
-    """
+    item = {"id": "q1", "type": "MC", "prompt": "<p>Pick one.</p>",
+            "choices": [{"id": "A", "text": "Alpha", "correct": True},
+                        {"id": "B", "text": "Beta", "correct": False}]}
+    entry = t_mc(item, 1)["item"]["entry"]
+
+    assert entry["answer_feedback"] == {}
+    assert entry["scoring_data"]["value"]
+
+
+def test_ma_feedback_maps_authored_choices_without_recombining_them():
     from api.transform import t_ma
 
-    concept = "A multi-answer item needs every true option chosen."
+    authored = "This is incorrect. Ask the teacher, or explain your own approach."
     item = {
         "id": "m1",
         "type": "MA",
@@ -81,26 +79,19 @@ def test_repeated_concept_sentence_is_said_once_per_feedback_box():
         "_rationale": {
             "item_id": "m1",
             "choices": [
-                {"id": "A", "correct": True, "rationale": f"{concept} Alpha is true, so it fits."},
-                {"id": "B", "correct": True, "rationale": f"{concept} Beta is true, so it fits."},
-                {"id": "C", "correct": False, "rationale": f"{concept} Gamma is false, so it does not fit."},
+                {"id": "C", "correct": False, "rationale": authored},
             ],
         },
     }
 
     built = t_ma(item, 1)["item"]["entry"]
     labels = {c["id"]: c["item_body"] for c in built["interaction_data"]["choices"]}
-    wrong_box = next(fb for cid, fb in built["answer_feedback"].items()
-                     if "gamma" in labels[cid])
+    gamma_id = next(cid for cid, label in labels.items() if "gamma" in label)
 
-    assert wrong_box.count(concept) == 1
-    # Every row's own applied sentence survives the dedupe.
-    for tail in ("Alpha is true", "Beta is true", "Gamma is false"):
-        assert tail in wrong_box
+    assert built["answer_feedback"] == {gamma_id: f"<p>{authored}</p>"}
 
 
-def test_one_sentence_rationale_survives_dedupe_intact():
-    """Dropping the lead must never empty a rationale that is only a lead."""
+def test_one_sentence_rationale_survives_intact():
     from api.transform import t_mc
 
     shared = "Same single sentence."
@@ -121,10 +112,8 @@ def test_one_sentence_rationale_survives_dedupe_intact():
         },
     }
 
-    wrong_box = next(fb for cid, fb in t_mc(item, 1)["item"]["entry"]["answer_feedback"].items()
-                     if "wrong" in fb)
-
-    assert '"wrong" is wrong. Same single sentence.' in wrong_box
+    entry = t_mc(item, 1)["item"]["entry"]
+    assert all(feedback == f"<p>{shared}</p>" for feedback in entry["answer_feedback"].values())
 
 
 def test_fitb_wordbank_uses_canvas_choice_id_scoring():

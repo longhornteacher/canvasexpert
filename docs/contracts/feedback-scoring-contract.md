@@ -1,4 +1,4 @@
-# Feedback Scoring Contract - v1
+# Feedback Scoring Contract - v2
 
 The data contract between the MCP-connected scoring agent and Canvas Expert's
 private scoring engine. Canvas Expert has no hosted grader. The agent prepares one
@@ -25,7 +25,7 @@ Canvas/SIS IDs, signed URLs, credentials, and private paths remain in the local
 application and are never part of this contract. Pseudonymized does not mean
 anonymous.
 
-`contract_version` is `"1.0"`. The validator checks the major version; a breaking
+`contract_version` is `"2.0"`. The validator checks the major version; a breaking
 shape change requires a major bump.
 
 ## Direction 1 - SAFE bundle (Canvas Expert -> agent)
@@ -37,20 +37,21 @@ size. `prepare_scoring_session(course_id, assignment_id, scoring_guidance="",
 use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")`
 requires one exact Current course and assignment and prepares it from valid
 local projections. It performs no refresh, Canvas write, or direct Canvas read.
-The base feedback shape (required fields, minimums, and the rendered layout) is
-product-owned Python text in `api/feedback_contract.py` and is always present in
-page zero; no selection ever replaces it. An explicit `feedback_contract_id`
-selects one workspace contract file, which layers on top of the base shape under
-one heading: judgment, tone, and emphasis are overridable, the fields and layout
-are not. The selected body is carried verbatim in page zero and is bound to the
-private session by a digest. Non-empty `scoring_guidance` is not a second copy
+The product-owned result shape in `api/feedback_contract.py` requires only
+`pseudonym`, `item_id`, `score`, and `feedback`, with optional writing-process
+observations and grading flags. It appears on page zero. An explicit
+`feedback_contract_id` selects one workspace contract file; its body is carried
+verbatim in page zero and bound to the private session by a digest. It may guide
+pedagogy, length, structure, headings, exemplars, revision tasks, tone, and
+emphasis. It cannot change privacy, identity, scope, score shape or range, or
+posting boundaries. Non-empty `scoring_guidance` is not a second copy
 under that heading: it layers onto the scoring basis instead, as the existing
 teacher-directive rubric block described below, so it appears exactly once in
 page zero.
-Non-empty assignment content is authoritative. A Canvas assignment rubric is used
-only when assignment content is empty. Teacher-authored directives layer on top of
-that basis; inherited, defaulted, or unknown guidance never overrides it. Teacher
-guidance is retained privately
+Usable assignment directions/content, the Canvas rubric, and explicit teacher direction
+appear as separately labeled scoring-basis components. Teacher direction controls scoring
+decisions; assignment content and rubric remain available as context. Inherited, defaulted,
+or unknown guidance never overrides explicit teacher direction. Teacher guidance is retained privately
 in full; when it exceeds the effective transport ceiling, the model and SAFE packet use
 a deterministic compacted projection with an explicit marker and original/effective/
 omitted character and unit counts. No basis returns a
@@ -92,48 +93,37 @@ remains an error rather than being recast as completed grading. Every other fail
 preparation returns a stable code, stage, retryability, and identity-safe user action.
 Existing New Quizzes with writing stop before SAFE packet creation with
 `new_quiz_writing_requires_assignment`. The teacher grades that writing in Canvas and
-authors future writing portions as separate 100-point AssignmentForge assignments.
+authors future writing portions as separate AssignmentForge assignments with teacher-chosen points.
 
 ## Direction 2 - Results (agent -> Canvas Expert)
 
 The agent stages one result per `(pseudonym, item_id)` supplied by the packet, using
 `stage_scoring_results(scoring_session_id, results, expected_packet_digest,
-review_digest="", answers=None, exemplars=None, disclosure="",
-grade_mode="post_score")`. `grade_mode` accepts `post_score` or
+review_digest="", answers=None, grade_mode="post_score")`. `grade_mode` accepts `post_score` or
 `feedback_only`; an omitted mode keeps the session's stored selection, or defaults
 to `post_score` when the session has no selection. A separate
 `apply_staged_scoring_results(scoring_session_id, expected_stage_digest,
 idempotency_key="")` applies only the unchanged private stage after a direct,
 contemporaneous teacher request to post it.
 
-The model no longer writes plain-text feedback. It supplies structured fields, and
-Canvas Expert renders them into one fixed plain-text layout (score, explanation,
-Glows, Grows, and, unless the row is at full marks, an Extra credit section with
-numbered fixes and a hand-copy exemplar). No persona and no AI identity or
-disclosure line is ever invented; `disclosure` is appended once, as the final
-line, only when the teacher asked for one this session. In `feedback_only`, the
-numeric result remains validated against the packet and appears in feedback as
-`Draft score: X/Y`; `post_score` retains the existing `Score: X/Y` layout.
+The agent authors the complete `feedback` string. Canvas Expert preserves it
+exactly through staging and `post_score` posting. No headings, examples,
+signatures, or revision tasks are added or removed. A numeric score with empty
+feedback is valid score-only work; a null score requires non-empty feedback.
+In `feedback_only`, Canvas Expert prefixes the authored text with its explicit
+numeric `Draft score: X/Y` line and sends only the comment. Mode changes rebuild
+that prefix from structured item state, leaving authored score-looking lines
+unchanged.
 
 | Field | Required | Shape and meaning |
 |---|---:|---|
 | `pseudonym` | yes | Exact stand-in from the SAFE packet. |
 | `item_id` | yes | Exact response item from that pseudonym's packet rows. |
 | `score` | yes | Number or `null`. On ordinary assignments, `null` may permit comment-only posting after explicit teacher confirmation. |
-| `explanation` | yes | 1-3 sentences explaining the score. |
-| `glows` | yes | 2-3 specific strengths, at least one non-empty string. |
-| `grows` | yes | 1-2 specific areas to improve, at least one non-empty string. |
-| `fixes` | required when the row is not at full marks | 2-4 concrete changes doable by hand in a second draft. |
+| `feedback` | yes | Complete authored student-facing text. Any string is valid with a numeric score; it must be non-empty when `score` is null. |
 | `writing_process_observations` | no | Separate, teacher-only local observation; never student feedback or a score input. |
 | `insincere` | no | A sincere-attempt proposal used only in `post_score`, in a course with a grading policy; must agree across every item row of one pseudonym. |
 | `late_days` | no | An integer 0-60 used only in `post_score`, in a course with a grading policy; must agree across every item row of one pseudonym. |
-
-`exemplars` is a separate `{item_id: text}` argument to `stage_scoring_results`,
-not a per-result field: one shared model answer per item, written once and used
-for every student, required for any item where a row is not at full marks unless
-a teacher AssignmentForge correction already covers that item. A missing exemplar
-fails closed with typed code `missing_exemplars` and the affected item ids only --
-no response content or identity.
 
 Duplicates, unknown pseudonyms/items, malformed values, and stale packet digests fail
 closed. The complete result set is validated before re-identification. A field-shape
@@ -204,21 +194,14 @@ stage/apply refusal occurs before result validation, re-identification, Canvas p
 call. Activation and final apply are serialized by one deterministic course/assignment
 scope lock, and the lock order is scope, then session.
 
-AssignmentForge corrections are a private, teacher-authored scoring aid. When a
-row is not at full marks and the private authored envelope contains an exact
-`item_id` correction, the renderer uses it as Extra credit Part 2 instead of the
-model's exemplar: the correction's `answer`, a blank line, then `Why: {why}`.
-Shared corrections are used for prompt-identical parts; tier-specific corrections
-are selected from the exact AssignmentForge tier/tag associated with the created
-assignment. Missing corrections fall back to the model's own exemplar for that
-item; full-credit results render no Extra credit section at all. The correction
-library never enters the SAFE packet or MCP response.
+AssignmentForge corrections remain private teacher materials. They are not
+injected into staging or feedback and never enter the SAFE packet or MCP response.
 
 Teacher guidance remains available privately in full for the session record. When oversized,
 its effective model and packet projection carries the compaction marker and counts above;
 those counts are the signal that effective text was omitted. Ordinary assignments use the
 public prepare -> packet -> stage -> explicit apply flow and write through one narrow lane. In the
-default `post_score` mode, the reviewed raw score (`submission.posted_grade`) and one plain-text
+default `post_score` mode, the reviewed score (`submission.posted_grade`) and one plain-text
 submission comment (`comment.text_comment`) go to the existing Canvas Submissions endpoint once.
 In `feedback_only`, only the plain-text comment (`comment.text_comment`) goes to that endpoint;
 the whole `submission` object is omitted. That endpoint is
@@ -228,7 +211,10 @@ packet/result identity and correction-selection key, not a separate writable Can
 field for ordinary Assignments. A direct teacher request to post a named staged result
 authorizes apply for that exact stage; a review-only or no-submit direction stops before apply.
 
-Canvas Expert does not read the resulting grade back. There is no post-write GET, no mirror
+Newly authored Scoring Session feedback is sent verbatim with no automatic gradebook or
+late-policy footer. A numeric score-only row sends no comment, even when effort credit changes
+the posted mark. Frozen stages that predate teacher-authored feedback retain their established
+legacy payload behavior. Canvas Expert does not read the resulting grade back. There is no post-write GET, no mirror
 refresh, no score equality comparison, no comment-count or latest-comment comparison, no
 `points_deducted` use, and no grade or score values, late-policy values, Canvas-returned
 grade outcomes, or raw Canvas response bodies in MCP results or receipts. MCP results

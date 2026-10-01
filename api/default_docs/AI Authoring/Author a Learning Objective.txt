@@ -1,20 +1,16 @@
 # Author a Learning Objective
 
-Write one reviewed, TEKS-aligned learning objective for the teacher's current local
-course catalog. Name the TEKS student expectation the objective serves. Let that
-expectation's verb drive the objective verb, but do not restate the TEKS verbatim.
-State what students will do, using an active verb and concrete evidence of learning.
+Write one reviewed learning objective for the teacher's current local course catalog.
+The teacher chooses its standard, learning goal, and wording. If the teacher supplies a
+standard or expectation, connect the objective to it without inventing or restating course
+facts. State what students will do with an observable verb and concrete evidence of learning.
 No fixed district format is required.
 
 ## Observable active verbs
 
-Organize observable active verbs by cognitive demand:
-
-- Identify, describe, or summarize for foundational recall and comprehension.
-- Analyze, compare, or explain for examining relationships and meaning.
-- Evaluate, justify, synthesize, or create for reasoning, judgment, and production.
-
-Other precise active verbs may fit the expectation. Avoid vague verbs such as know,
+Choose an observable verb that fits the teacher's intended level and work. Examples include
+identify, describe, summarize, analyze, compare, explain, evaluate, justify, synthesize, and
+create. Other precise active verbs may fit. Avoid vague verbs such as know,
 understand, learn, or be familiar with unless the observable performance is also stated.
 
 ## Mechanical limits

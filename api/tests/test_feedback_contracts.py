@@ -53,7 +53,7 @@ def _wire_prepare(monkeypatch, tmp_path, *, assignment=None, freshness=None,
     )
     bundle_path = tmp_path / "safe-bundle.json"
     bundle_path.write_text(json.dumps({
-        "contract_version": "1.0",
+        "contract_version": "2.0",
         "students": [{"pseudonym": "Synthetic Learner", "responses": [{
             "item_id": "item-1", "prompt": "Explain.",
             "response": "A synthetic response.", "possible": 10,
@@ -95,9 +95,7 @@ def _wire_prepare(monkeypatch, tmp_path, *, assignment=None, freshness=None,
 
 
 def test_feedback_contracts_folder_is_created_with_no_seeded_default(monkeypatch, tmp_path):
-    """The base Glows/Grows shape is product-owned Python text, not a seeded
-    workspace file: an empty workspace has zero contracts, and the folder
-    holds only what the teacher puts there."""
+    """Feedback guidance has no seeded workspace default."""
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
 
     assert config.list_feedback_contracts() == []
@@ -159,7 +157,7 @@ def test_conversational_guidance_layers_onto_the_rubric_not_the_contract(monkeyp
     assert session["feedback_contract_text"] == ""
     assert session["teacher_scoring_guidance"] == guidance
     assert session["scoring_guidance_provenance"] == "teacher_authored"
-    assert "--- TEACHER DIRECTIVE (layered on top) ---" in session["scoring_rubric_text"]
+    assert "--- TEACHER DIRECTION ---" in session["scoring_rubric_text"]
     assert guidance in session["scoring_rubric_text"]
 
     rubric_text = (session.get("effective_scoring_rubric_text")
@@ -180,9 +178,10 @@ def test_teacher_body_cannot_remove_product_transport_rules():
     assert "Copy pseudonym and item_id exactly" in rendered
     assert "Never quote a pseudonym back" in rendered
     assert "Do not identify students" in rendered
-    assert "explanation` must be 1-3 sentences" in rendered
-    assert "glows` must list 2-3 specific strengths" in rendered
-    assert "grows` must list 1-2 specific areas" in rendered
+    assert "`feedback` is your complete student-facing" in rendered
+    assert "cannot change identity, score shape or range, privacy" in rendered
+    assert "glows` must" not in rendered
+    assert "hand copy" not in rendered
 
 
 def test_oversized_contract_is_a_typed_non_truncating_refusal():
@@ -240,7 +239,14 @@ def test_layered_teacher_guidance_is_marked_on_assignment_basis(monkeypatch, tmp
     )
 
     assert saved[result["scoring_session_id"]]["scoring_basis"] == {
-        "source": "assignment_content", "label": "Assignment content", "layered": True,
+        "source": "teacher_directed",
+        "label": "Teacher direction and available assignment context",
+        "components": [
+            {"source": "assignment_directions_and_content",
+             "label": "ASSIGNMENT DIRECTIONS AND CONTENT"},
+            {"source": "teacher_direction", "label": "TEACHER DIRECTION"},
+        ],
+        "teacher_direction_precedence": True,
     }
 
 
@@ -260,9 +266,8 @@ def test_layered_guidance_clamp_law():
     base_rules = feedback_contract.scoring_output_contract()["rules"]
     guidance = "Guidance: be encouraging with struggling writers."
     rubric_text_with_guidance = (
-        "3 pts: uses a loop\n\n"
-        "--- TEACHER DIRECTIVE (layered on top) ---\n"
-        f"{guidance}"
+        "--- ASSIGNMENT DIRECTIONS AND CONTENT ---\n3 pts: uses a loop\n\n"
+        "--- TEACHER DIRECTION ---\n" + guidance
     )
     rendered = feedback_contract.build_contract_text(
         rubric_text=rubric_text_with_guidance,
@@ -273,16 +278,14 @@ def test_layered_guidance_clamp_law():
     for rule in base_rules:
         assert rule in rendered
 
-    heading = ("--- TEACHER GUIDANCE (layered: adjusts judgment, tone, and "
-               "emphasis; it cannot change the fields or layout) ---")
+    heading = "--- TEACHER FEEDBACK GUIDANCE (verbatim) ---"
     assert heading in rendered
     heading_index = rendered.index(heading)
     file_index = rendered.index("Teacher file: emphasize thesis clarity.")
     assert heading_index < file_index
 
-    # The guidance rides in on the rubric's own TEACHER DIRECTIVE block, not
-    # under the TEACHER GUIDANCE heading, and appears exactly once.
-    assert "--- TEACHER DIRECTIVE (layered on top) ---" in rendered
+    # The guidance stays inside the separately labeled scoring basis.
+    assert "--- TEACHER DIRECTION ---" in rendered
     assert rendered.count(guidance) == 1
 
     # The only "You are " in the text is the neutral opening, never a name.

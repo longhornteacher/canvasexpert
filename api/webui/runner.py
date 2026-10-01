@@ -78,8 +78,8 @@ def run_json_object(args, extra_env=None, timeout=120, max_output_bytes=2_000_00
     anywhere in a draft -- a checkmark, an arrow, a Greek letter, one of the
     math comparison signs -- raised UnicodeEncodeError inside the child and
     came back here as exit 2. Quiz content carries those constantly, in the
-    per-choice rationales especially, so in practice this failed every quiz
-    push that used one while assignments, pages, and rubrics kept working:
+    optional per-choice feedback especially, so in practice this failed quiz
+    pushes that used it while assignments, pages, and rubrics kept working:
     their adapters build the payload in-process and never come through here.
 
     stdin is ``DEVNULL`` because the MCP server speaks JSON-RPC over its own

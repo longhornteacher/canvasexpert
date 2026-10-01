@@ -24,6 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from api import codefmt, teks, transform, transform_classic, validate_qf
 from api.student_text import normalize_student_text
+from engine.validation.authored_points import authored_points, authored_total
 
 ENVELOPE = re.compile(r"<QUIZFORGE_JSON>(.*?)</QUIZFORGE_JSON>", re.DOTALL)
 STATE_PATH = ".experiment_state.json"
@@ -35,7 +36,6 @@ QUIZ_SETTINGS = {
     "shuffle_questions": False,
 }
 
-TOTAL_POINTS = 100  # QuizForge requires a 100-point total
 WRITING_TYPES = {"ESSAY", "FILEUPLOAD"}
 
 SETTING_KEYS = (
@@ -49,19 +49,9 @@ SETTING_KEYS = (
 )
 
 
-def distribute_points(items, total=TOTAL_POINTS):
-    """Per-item points. Respect explicit QF `points` if any item sets them;
-    otherwise split `total` as evenly as possible (remainder on the last item)."""
-    explicit = [it.get("points") for it in items]
-    if any(p is not None for p in explicit):
-        return [float(p) if p is not None else 0.0 for p in explicit]
-    n = len(items)
-    if n == 0:
-        return []
-    base = round(total / n, 2)
-    pts = [base] * n
-    pts[-1] = round(total - base * (n - 1), 2)  # absorb rounding drift
-    return pts
+def distribute_points(items, total=None):
+    """Return authored scored-item values without inferring or rescaling them."""
+    return authored_points(items, total)
 
 
 def load_qf(path):
@@ -79,8 +69,8 @@ def _reject_writing_items(data):
         if item_type in WRITING_TYPES:
             raise ValueError(
                 f"{item_type} cannot be pushed as a Canvas New Quiz. Author each "
-                "writing portion as a separate AssignmentForge assignment worth "
-                "100 points (for example, a matching ' - ECR' assignment)."
+                "writing portion as a separate AssignmentForge assignment with "
+                "teacher-chosen points (for example, a matching ' - ECR' assignment)."
             )
 
 
@@ -205,15 +195,8 @@ def _classic_setting_problems(push_settings):
 
 
 def _classic_points(prepared):
-    """Per-item points for a classic quiz: writing keeps its own, autos share the rest."""
-    writing = [it for it in prepared if it["type"] in WRITING_TYPES]
-    auto = [it for it in prepared if it["type"] not in WRITING_TYPES]
-    if any(it.get("points") is not None for it in auto):
-        return distribute_points(prepared)
-    writing_total = sum(float(it["points"]) for it in writing)
-    shares = iter(distribute_points(auto, total=round(TOTAL_POINTS - writing_total, 2)))
-    return [float(it["points"]) if it["type"] in WRITING_TYPES else next(shares)
-            for it in prepared]
+    """Return explicit points for every scored Classic Quiz item."""
+    return distribute_points(prepared)
 
 
 def _classic_quiz_fields(data, title, push_settings, total):
@@ -274,7 +257,7 @@ def _build_classic_plan(path, data, push_settings):
         "metadata": data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
         "source_path": str(path),
         "quiz_payload": {"quiz": _classic_quiz_fields(
-            data, title, push_settings, round(sum(points), 2))},
+            data, title, push_settings, authored_total(points))},
         "items": items,
         "assignment_settings": {
             key: push_settings[key]
@@ -317,7 +300,7 @@ def build_push_plan(path, settings=None):
             "source_type": qf_item.get("type"),
             "payload": payload,
         })
-    quiz_points = round(sum(points), 2) if points else 1
+    quiz_points = authored_total(points)
     assignment_keys = (
         "due_at", "unlock_at", "lock_at", "assignment_group_id",
         "assignment_group_name", "post_to_sis", "published",

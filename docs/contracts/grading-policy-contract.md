@@ -29,15 +29,17 @@ complex. This design keeps that decision:
 
 ## 3. Decisions
 
-- **Score and mark.** The *score* is the honest rubric result and always appears in the
-  feedback. The *mark* is what `posted_grade` carries.
+- **Score and mark.** The *score* is the teacher/agent-authored rubric result. The *mark*
+  is what `posted_grade` carries. The teacher and agent choose whether feedback mentions
+  the score or mark.
 - **Effort credit (compressed scale) for sincere attempts.** `mark = F * P + (1 - F) * score`,
   `F = 0.30`. 15/100 marks 40.5 before rounding; 100 stays 100. This is a fixed per-student
   formula applied at scoring time. It is not class-relative; a class-relative curve is the
   separate grade-adjustment lane.
-- **Only real effort is curve-eligible.** Effort credit and every later curve apply only to
-  sincere attempts with a score above 0. Junk (a 0 or a teacher-confirmed insincere attempt)
-  and missing work are never lifted. Junk may mark below missing work; that is intended.
+- Effort-credit eligibility remains limited to sincere attempts with a score above 0.
+  Rule curves use every eligible numeric `entered_score`, including zero, missing, and
+  teacher-confirmed insincere rows, unless the teacher excludes selected pseudonyms in the
+  reviewed adjustment.
 - **Curves work on the entered score, before any late deduction.** Canvas treats
   `posted_grade` as the entered value and subtracts the late penalty after, so effort credit
   is pre-late by construction. A later curve reads `entered_score`, not `score` (section 6a).
@@ -117,9 +119,9 @@ projected payload in the plan digest is exactly what is sent:
   `ceil(seconds / 86400)`, so whole days map exactly.
 - Late days of 0: `submission.late_policy_status = "none"` (manual not-late; Canvas ignores
   any override then).
-- Feedback: when the mark differs from the score, append a final paragraph
-  `Entered in the gradebook: <mark>/<P>.`, with ` Canvas applies the late penalty to that.`
-  when late days are above 0. The rendered `Score:` line stays as the rubric score.
+- Newly authored Scoring Session feedback is sent unchanged with no automatic gradebook or
+  late-policy footer; numeric score-only rows send no comment. Frozen legacy stages retain
+  their established payload behavior. Effort-credit and late-policy payload math is unchanged.
 
 Unchanged: one write per student, no readback, no verification GET, no reading of Canvas's
 deduction. The session student record gains `cached_due_date`, `canvas_late`, and
@@ -140,9 +142,11 @@ writes. The fix:
 - The mirror submission row stores `entered_score` (Canvas includes it in submission JSON).
 - Eligibility, rule math, the pre-write check, verification, and revert all use
   `entered_score`.
-- New skip reasons: `missing` (Canvas `missing` true, which covers swept rows), `zero`
-  (entered score 0), and `insincere` (the teacher confirmed it in a Scoring Session for that
-  assignment; read from the local session store, never sent to the agent as a reason).
+- Rule curves include all eligible numeric rows, including Canvas-missing, zero, and
+  teacher-confirmed insincere rows. The teacher may provide `exclude_pseudonyms` in the
+  adjustment; each exclusion must resolve to an eligible roster pseudonym. Exclusions are
+  removed from rule math and reported in preview. Each rule requires its model input:
+  `bump`, `target_avg_pct`, or `floor`, as appropriate. No target or floor is inferred.
 
 ## 6. Missing sweep
 

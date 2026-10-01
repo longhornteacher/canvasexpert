@@ -81,11 +81,16 @@ def _payload(student: dict, *, grade_mode: str = "post_score") -> dict:
     # See docs/reference/powergrader-scoring-map.md (Guardrails: single grading surface).
     score = student.get("teacher_score")
     grading = student.get("grading")
-    feedback = normalize_student_text(
-        attribution.attribute(
-            _strip_draft_banner((student.get("teacher_feedback") or "").strip())
+    if student.get("_teacher_authored_feedback"):
+        # Scoring Session feedback has already passed the outbound privacy gate.
+        # Preserve every authored character, including signatures and Markdown.
+        feedback = student.get("teacher_feedback") or ""
+    else:
+        feedback = normalize_student_text(
+            attribution.attribute(
+                _strip_draft_banner((student.get("teacher_feedback") or "").strip())
+            )
         )
-    )
 
     # Feedback-only scoring keeps the numeric draft in the rendered comment,
     # but must never send a grade or policy field to Canvas.
@@ -107,7 +112,9 @@ def _payload(student: dict, *, grade_mode: str = "post_score") -> dict:
                 days = grading.get("late_days")
                 if days is None:
                     days = grading.get("suggested_late_days")
-            if posted_grade is not None and score is not None and float(posted_grade) != float(score):
+            if (not student.get("_teacher_authored_feedback")
+                    and posted_grade is not None and score is not None
+                    and float(posted_grade) != float(score)):
                 line = (f"Entered in the gradebook: {_format_number(posted_grade)}"
                         f"/{_format_number(points_possible)}.")
                 if days is not None and days > 0:

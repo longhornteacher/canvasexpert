@@ -95,7 +95,7 @@ def _fake_safe_bundle(people: list[dict], items: int = 2) -> dict:
             ],
         })
     return {
-        "contract_version": "1.0",
+        "contract_version": "2.0",
         "quiz_title": "Test Quiz",
         "students": students_list,
     }
@@ -171,7 +171,9 @@ def test_build_packet_happy_path():
     assert "next_offset" not in result
     assert result["included_context"] is True
     assert "contract" in result
-    assert "glows" in result["contract"] and "grows" in result["contract"]
+    assert "`feedback` is your complete student-facing" in result["contract"]
+    assert "choose its pedagogy, length, structure" in result["contract"]
+    assert "must list" not in result["contract"]
     assert "&" not in result["contract"]
     assert "Autofeedback from an automated assistant" not in result["contract"]
     assert "Drafted by Sage" not in result["contract"]

@@ -21,6 +21,7 @@
     {
       "id": "mc_theme",
       "type": "MC",
+      "points": 33.33,
       "stimulus_id": "stim_lantern",
       "prompt": "<p>Which statement best expresses a central idea of the passage?</p>",
       "choices": [
@@ -33,6 +34,7 @@
     {
       "id": "mc_vocab_dusk",
       "type": "MC",
+      "points": 33.33,
       "stimulus_id": "stim_lantern",
       "prompt": "<p>The passage says the keeper climbed the stair when <em>the sky turned the color of ash</em>. This phrase most nearly describes:</p>",
       "choices": [
@@ -45,6 +47,7 @@
     {
       "id": "fitb_setting",
       "type": "FITB",
+      "points": 33.34,
       "stimulus_id": "stim_lantern",
       "prompt": "<p>The events of the passage take place at a [blank].</p>",
       "accept": ["lighthouse", "the lighthouse"],

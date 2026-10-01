@@ -43,10 +43,8 @@ INSTRUCTION_BUDGET = 2200
 # masking this one: shared work-item handoff (85ce67a, 4 tools, +982), push
 # verification and tiered recovery (149c2a4, 3 tools, +1,097), and reviewed
 # grade adjustment (23f32c9, 2 tools, +652). Held at 15,950 through b2f28b7.
-# Raised again to the measured 18,841 for consistent scoring feedback: the
-# model now supplies structured fields (explanation, glows, grows, fixes)
-# instead of one free-text feedback string, and stage_scoring_results gained
-# exemplars/disclosure. No persona field survives to offset the cost.
+# The v2 scoring result removes compulsory pedagogy and staging inputs; its
+# live schema size remains under the existing measured ceiling.
 # Raised to the measured 18,902 when that work landed on top of the v62
 # stage_attachment tool, which had fit under the older ceiling by itself.
 # Raised to the measured 18,964 for the scoring-lane effort-credit brief:
@@ -319,7 +317,7 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
         "status": "ready",
     }
     (tmp_path / "bundle.json").write_text(json.dumps({
-        "contract_version": "1.0",
+        "contract_version": "2.0",
         "quiz_title": "Quiz",
         "students": [{
             "pseudonym": pseudonym,

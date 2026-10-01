@@ -1,89 +1,10 @@
-"""Feedback tools result parsing, validation, rendering, and re-identification.
-
-The model supplies structured fields only (explanation, glows, grows, fixes,
-an optional exemplar per item). Canvas Expert renders those fields into the
-one fixed plain-text layout -- see ``render_feedback_item``. No persona and
-no AI identity or disclosure is ever invented here.
-"""
+"""Feedback result parsing, validation, and private identity projection."""
 import json
 import re
 
 from api.feedback_vault import Vault
 from api.feedback_contract import CONTRACT_VERSION
 from api.powergrader import writing_timeline
-
-_AI_SIGNATURE_LINE_RE = re.compile(
-    r"(?im)^\s*(?:[-–—]\s*)?[\w .,'&-]{1,100}\s+"
-    r"\((?:AI|AI teaching assistant)\)\.?\s*$"
-)
-_DRAFTED_BY_LINE_RE = re.compile(r"(?im)^[ \t]*Drafted by\b[^\n]*$")
-_TRAILING_NAME_SIGNATURE_RE = re.compile(r"\n[ \t]*[-–—][ \t]*[A-Z][A-Za-z' .-]{0,40}[ \t]*$")
-
-_CODE_FENCE_RE = re.compile(r"```[^\n]*\n?")
-_INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
-_HEADING_MARKER_RE = re.compile(r"(?m)^[ \t]{0,3}#{1,6}[ \t]*")
-_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*|__([^_]+)__")
-_ITALIC_RE = re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)")
-_RULE_LINE_RE = re.compile(r"(?m)^[ \t]{0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*$")
-_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-_LIST_MARKER_RE = re.compile(r"^(?:[-*•]|\d+\.)[ \t]+")
-_AMP_RE = re.compile(r"&amp;|&")
-
-
-def flatten_text(value: object, *, list_item: bool = False,
-                 strip_signatures: bool = True) -> str:
-    """Strip markdown decoration and signatures from one model-supplied field.
-
-    Applies to explanation, every glow/grow/fix, and an exemplar or
-    disclosure. List items collapse to one line; explanation and exemplar
-    text keeps its line breaks, with blank runs capped at one.
-
-    ``strip_signatures`` drops a lingering "Drafted by ...", AI signature, or
-    trailing "- Name" line that a model wrote despite the contract. The
-    teacher's own requested disclosure text is exempt: it is legitimately a
-    signature line, so callers rendering it pass ``strip_signatures=False``.
-    """
-    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
-    text = _CODE_FENCE_RE.sub("", text)
-    text = _INLINE_CODE_RE.sub(r"\1", text)
-    text = _HEADING_MARKER_RE.sub("", text)
-    text = _BOLD_RE.sub(lambda m: m.group(1) or m.group(2) or "", text)
-    text = _ITALIC_RE.sub(r"\1", text)
-    text = _RULE_LINE_RE.sub("", text)
-    text = _LINK_RE.sub(r"\1", text)
-    if strip_signatures:
-        text = _DRAFTED_BY_LINE_RE.sub("", text)
-        text = _AI_SIGNATURE_LINE_RE.sub("", text)
-        text = _TRAILING_NAME_SIGNATURE_RE.sub("", text)
-    text = _AMP_RE.sub(" and ", text)
-    text = re.sub(r"[ \t]+", " ", text)
-
-    if list_item:
-        text = _LIST_MARKER_RE.sub("", text.strip())
-        text = re.sub(r"\s*\n+\s*", " ", text)
-        return text.strip()
-
-    lines = [line.strip() for line in text.split("\n")]
-    text = "\n".join(lines)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-def _extra_credit_applies(score, possible) -> bool:
-    """Whether Extra credit Part 1/2 belongs on this row.
-
-    Shown unless score and possible are both numeric and score meets or beats
-    possible. A null score, or an unknown possible, always shows it.
-    """
-    if score is None or possible is None:
-        return True
-    if isinstance(score, bool) or isinstance(possible, bool):
-        return True
-    try:
-        return not (float(score) >= float(possible))
-    except (TypeError, ValueError):
-        return True
-
 
 def _format_number(value) -> str | None:
     if value is None:
@@ -97,65 +18,14 @@ def _format_number(value) -> str | None:
     return str(number)
 
 
-def _score_line(score, possible, *, grade_mode: str = "post_score") -> str | None:
+def _draft_score_prefix(score, possible) -> str | None:
     if score is None:
         return None
-    label = "Draft score" if grade_mode == "feedback_only" else "Score"
     formatted = _format_number(score)
     possible_formatted = _format_number(possible) if possible is not None else None
     if possible_formatted is None:
-        return f"{label}: {formatted}"
-    return f"{label}: {formatted}/{possible_formatted}"
-
-
-_DIVIDER = "-" * 40
-
-
-def render_feedback_item(result: dict, *, possible=None, exemplar: str = "",
-                         correction: dict | None = None,
-                         grade_mode: str = "post_score") -> str:
-    """Render one SAFE result's structured fields into the fixed plain-text layout.
-
-    ``possible`` is the item's max score from the SAFE bundle. ``correction``
-    is the teacher-authored AssignmentForge correction for this item, when
-    one exists; it wins as Extra credit Part 2 over the model's ``exemplar``.
-    """
-    score = result.get("score")
-    explanation = flatten_text(result.get("explanation") or "")
-    glows = [flatten_text(g, list_item=True) for g in (result.get("glows") or [])
-             if str(g or "").strip()]
-    grows = [flatten_text(g, list_item=True) for g in (result.get("grows") or [])
-             if str(g or "").strip()]
-
-    blocks = []
-    score_line = _score_line(score, possible, grade_mode=grade_mode)
-    if score_line:
-        blocks.append(score_line)
-    if explanation:
-        blocks.append(explanation)
-    if glows:
-        blocks.append("Glows\n" + "\n".join(f"- {g}" for g in glows))
-    if grows:
-        blocks.append("Grows\n" + "\n".join(f"- {g}" for g in grows))
-
-    if _extra_credit_applies(score, possible):
-        fixes = [flatten_text(f, list_item=True) for f in (result.get("fixes") or [])
-                 if str(f or "").strip()]
-        if isinstance(correction, dict) and str(correction.get("answer") or "").strip():
-            answer = flatten_text(correction.get("answer") or "")
-            why = flatten_text(correction.get("why") or "")
-            exemplar_text = f"{answer}\n\nWhy: {why}" if why else answer
-        else:
-            exemplar_text = flatten_text(exemplar or "")
-        part1_lines = "\n".join(f"{i}. {fix}" for i, fix in enumerate(fixes, 1))
-        blocks.append(
-            f"{_DIVIDER}\n"
-            "Extra credit Part 1: Fix these in a handwritten second draft\n"
-            f"{part1_lines}"
-        )
-        blocks.append("Extra credit Part 2: Hand copy this exemplar\n" + exemplar_text)
-
-    return "\n\n".join(blocks)
+        return f"Draft score: {formatted}"
+    return f"Draft score: {formatted}/{possible_formatted}"
 
 
 def _possible_by_key(bundle: dict | None) -> dict:
@@ -166,104 +36,32 @@ def _possible_by_key(bundle: dict | None) -> dict:
     return possible
 
 
-def relabel_rendered_score_lines(feedback: str, *, grade_mode: str,
-                                 scores: list | None = None) -> str:
-    """Change only rendered score-line labels in an existing draft comment.
-
-    Item sections start with ``Item N of M`` and each item's score line is its
-    first following line. Preserve every other character and line ending so a
-    mode change does not rewrite prior feedback or its numeric values.
-    """
-    label = "Draft score" if grade_mode == "feedback_only" else "Score"
-    lines = str(feedback or "").splitlines(keepends=True)
-    previous = ""
-    score_index = 0
-    scores = scores or []
-    for index, line in enumerate(lines):
-        content = line.rstrip("\r\n")
-        ending = line[len(content):]
-        is_score_position = index == 0 or re.fullmatch(r"Item \d+ of \d+", previous)
-        if is_score_position:
-            score = scores[score_index] if score_index < len(scores) else None
-            score_index += 1
-            for old_label in ("Score", "Draft score"):
-                prefix = f"{old_label}: "
-                expected = _format_number(score)
-                numeric_suffix = content[len(prefix):] if content.startswith(prefix) else ""
-                matches_score = (
-                    score is not None
-                    and numeric_suffix.startswith(str(expected))
-                    and re.fullmatch(
-                        re.escape(str(expected))
-                        + r"(?:/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)?",
-                        numeric_suffix,
-                    ) is not None
-                )
-                if matches_score:
-                    content = f"{label}: " + content[len(prefix):]
-                    break
-        lines[index] = content + ending
-        previous = content
-    return "".join(lines)
-
-
 def render_results(results: list, *, bundle: dict | None = None,
-                   exemplars: dict | None = None,
-                   corrections_by_item: dict | None = None,
                    grade_mode: str = "post_score") -> list:
-    """Render every validated SAFE result's fields into final feedback text.
-
-    Returns new result dicts carrying a rendered ``feedback`` string built
-    from ``render_feedback_item``. ``pseudonym``, ``item_id``, ``score``, and
-    ``writing_process_observations`` pass through unchanged for ``reidentify``.
-    """
+    """Preserve authored feedback, adding only the explicit feedback-only score prefix."""
     possible = _possible_by_key(bundle)
-    exemplars = exemplars or {}
-    corrections_by_item = corrections_by_item or {}
     rendered = []
     for r in results:
         row = dict(r)
         item_id = str(row.get("item_id", ""))
         key = (row.get("pseudonym"), item_id)
-        row["feedback"] = render_feedback_item(
-            row,
-            possible=possible.get(key),
-            exemplar=exemplars.get(item_id, ""),
-            correction=corrections_by_item.get(item_id),
-            grade_mode=grade_mode,
-        )
+        authored = row.get("feedback", "")
+        row["authored_feedback"] = authored
+        row["possible"] = possible.get(key)
+        if grade_mode == "feedback_only" and row.get("score") is not None:
+            prefix = _draft_score_prefix(row.get("score"), row["possible"])
+            row["feedback"] = prefix if authored == "" else f"{prefix}\n\n{authored}"
         rendered.append(row)
     return rendered
 
 
-def missing_exemplar_item_ids(results: list, *, bundle: dict | None = None,
-                              exemplars: dict | None = None,
-                              corrections_by_item: dict | None = None) -> list[str]:
-    """Item ids that need a shared exemplar no correction or supplied exemplar covers.
-
-    Checked only for rows where Extra credit would actually render (a row at
-    or above full marks needs no exemplar). Returns sorted item ids only --
-    no response content or student identity.
-    """
-    possible = _possible_by_key(bundle)
-    exemplars = exemplars or {}
-    corrections_by_item = corrections_by_item or {}
-    missing: set[str] = set()
-    for r in results or []:
-        if not isinstance(r, dict):
-            continue
-        item_id = str(r.get("item_id", ""))
-        if not item_id or item_id in missing:
-            continue
-        key = (r.get("pseudonym"), item_id)
-        if not _extra_credit_applies(r.get("score"), possible.get(key)):
-            continue
-        if corrections_by_item.get(item_id):
-            continue
-        if str(exemplars.get(item_id) or "").strip():
-            continue
-        missing.add(item_id)
-    return sorted(missing)
+def item_feedback_for_mode(item: dict, grade_mode: str) -> str:
+    """Render a saved authored item from structure, never by rewriting its text."""
+    feedback = item.get("feedback", "")
+    if grade_mode != "feedback_only" or item.get("score") is None:
+        return feedback
+    prefix = _draft_score_prefix(item.get("score"), item.get("possible"))
+    return prefix if feedback == "" else f"{prefix}\n\n{feedback}"
 
 
 def _top_level_json_blocks(text: str):
@@ -338,8 +136,7 @@ def _unwrap_dict_results(data: dict) -> list:
         return results
 
     # A dict carrying its own `pseudonym` is one bare result object, not a
-    # wrapper -- even though structured fields like `glows`/`grows` are
-    # themselves lists and would otherwise confuse the wrapper heuristic below.
+    # wrapper whose list-valued optional fields should be considered results.
     if isinstance(data.get("pseudonym"), str) and data.get("pseudonym"):
         return [data]
 
@@ -378,19 +175,17 @@ def parse_results(text: str) -> list:
 
 def validate_results(results, bundle: dict = None, vault: Vault = None,
                      *, contract_version: str = CONTRACT_VERSION) -> dict:
-    """Validate scoring output against the Feedback Scoring Contract (v1).
+    """Validate scoring output against the Feedback Scoring Contract (v2).
 
     See docs/contracts/feedback-scoring-contract.md. Accepts either the wrapped
     object ({contract_version, results:[...]}) or a bare array. `bundle` and
     `vault` are optional cross-checks: with them we confirm every result maps to
-    a real (pseudonym, item_id) the LLM was actually given, that scores fit the
-    item's max, and (only when a bundle establishes `possible`) that `fixes` is
-    present wherever Extra credit would render. Returns {ok, errors:[...],
+    a real (pseudonym, item_id) the LLM was actually given and scores fit the
+    item's max. Returns {ok, errors:[...],
     warnings:[...], n:int, fields:[...]}. `fields` names the distinct fields
     behind the errors. `ok` is False only on hard errors -- out-of-range scores
     and uncovered students are warnings, since the teacher reviews before any
-    push. Exemplar coverage is a separate, later check: see
-    `missing_exemplar_item_ids`.
+    push.
     """
     errors, warnings = [], []
     fields: set[str] = set()
@@ -427,21 +222,12 @@ def validate_results(results, bundle: dict = None, vault: Vault = None,
         if not it:
             _error(where, "item_id", "missing 'item_id'")
 
-        explanation = r.get("explanation")
-        if not isinstance(explanation, str) or not explanation.strip():
-            _error(where, "explanation", "'explanation' must be non-empty text")
+        if "score" not in r:
+            _error(where, "score", "missing 'score'")
 
-        glows = r.get("glows")
-        if not isinstance(glows, list) or not any(
-            isinstance(g, str) and g.strip() for g in glows
-        ):
-            _error(where, "glows", "'glows' must be a list of at least one non-empty string")
-
-        grows = r.get("grows")
-        if not isinstance(grows, list) or not any(
-            isinstance(g, str) and g.strip() for g in grows
-        ):
-            _error(where, "grows", "'grows' must be a list of at least one non-empty string")
+        feedback = r.get("feedback")
+        if not isinstance(feedback, str):
+            _error(where, "feedback", "'feedback' must be text")
 
         if "writing_process_observations" in r and not isinstance(
             r.get("writing_process_observations"), str
@@ -458,9 +244,11 @@ def validate_results(results, bundle: dict = None, vault: Vault = None,
                     or not (0 <= late_days <= 60)):
                 _error(where, "late_days", "'late_days' must be an integer from 0 to 60")
 
-        sc = r.get("score", None)
-        if sc is not None and not isinstance(sc, (int, float)):
+        sc = r.get("score")
+        if sc is not None and (not isinstance(sc, (int, float)) or isinstance(sc, bool)):
             _error(where, "score", "'score' must be a number or null")
+        if sc is None and isinstance(feedback, str) and not feedback.strip():
+            _error(where, "feedback", "'feedback' must be non-empty when 'score' is null")
 
         key = (ps, it)
         if key in seen:
@@ -476,13 +264,6 @@ def validate_results(results, bundle: dict = None, vault: Vault = None,
                 if isinstance(sc, (int, float)) and isinstance(pmax, (int, float)) \
                         and not (0 <= sc <= pmax):
                     warnings.append(f"{where}: score {sc} is outside 0..{pmax}")
-                if _extra_credit_applies(sc, pmax):
-                    fixes = r.get("fixes")
-                    if not isinstance(fixes, list) or not any(
-                        isinstance(f, str) and f.strip() for f in fixes
-                    ):
-                        _error(where, "fixes",
-                               "'fixes' must be a list of at least one non-empty string")
 
     # A confirmed-insincere mark and a confirmed late-day count are per
     # student, not per item: every item row for one pseudonym must agree, or
@@ -515,13 +296,7 @@ def validate_results(results, bundle: dict = None, vault: Vault = None,
 
 
 def reidentify(results: list, vault: Vault) -> list:
-    """Map pseudonymous, already-rendered results back to real students.
-
-    Unknown pseudonyms are marked `resolved: False` rather than dropped.
-    `feedback` must already be the final rendered text (see `render_results`);
-    this function performs no further feedback formatting or disclosure
-    handling -- that is `merge_rows_by_uid`'s job, once per student.
-    """
+    """Map pseudonymous results to private ids without editing authored feedback."""
     out = []
     for r in results:
         who = vault.reverse(r.get("pseudonym", ""))
@@ -539,13 +314,15 @@ def reidentify(results: list, vault: Vault) -> list:
             "sis_id":    (who or {}).get("sis_id", ""),
             "item_id":   r.get("item_id", ""),
             "score":     r.get("score"),
-            "feedback":  str(r.get("feedback") or ""),
+            "feedback":  r.get("feedback", ""),
+            "authored_feedback": r.get("authored_feedback", r.get("feedback", "")),
+            "possible": r.get("possible"),
             "writing_process_observations": writing_observation,
         })
     return out
 
 
-def merge_rows_by_uid(rows: list, *, disclosure: str = "") -> dict:
+def merge_rows_by_uid(rows: list) -> dict:
     """Combine per-item reidentified rows into one draft per student.
 
     Multi-item work (a New Quiz with an essay item and an upload item, for
@@ -554,9 +331,6 @@ def merge_rows_by_uid(rows: list, *, disclosure: str = "") -> dict:
     a plain ``{canvas_id: row}`` dict silently keeps only the last item, and
     each item renders fully under a header ``Item {n} of {m}``.
 
-    ``disclosure`` is appended once, as the final line after a blank line, to
-    every student's combined feedback (single item or multi-item alike) --
-    only when the teacher asked for one this session. Never by default.
     Returns ``{canvas_id: row}`` with unresolved rows excluded.
     """
     grouped: dict[str, list] = {}
@@ -565,18 +339,13 @@ def merge_rows_by_uid(rows: list, *, disclosure: str = "") -> dict:
             continue
         grouped.setdefault(str(row.get("canvas_id") or ""), []).append(row)
 
-    disclosure_text = (
-        flatten_text(disclosure, strip_signatures=False)
-        if str(disclosure or "").strip() else ""
-    )
-
     merged: dict[str, dict] = {}
     for uid, items in grouped.items():
         if len(items) == 1:
             base = dict(items[0])
         else:
             sections = [
-                f"Item {index} of {len(items)}\n{str(item.get('feedback') or '')}".strip()
+                f"Item {index} of {len(items)}\n{item.get('feedback', '')}"
                 for index, item in enumerate(items, 1)
             ]
             scores = [item.get("score") for item in items]
@@ -596,8 +365,6 @@ def merge_rows_by_uid(rows: list, *, disclosure: str = "") -> dict:
                     if str(item.get("writing_process_observations") or "").strip()
                 ),
             }
-        if disclosure_text:
-            base["feedback"] = f"{str(base.get('feedback') or '')}\n\n{disclosure_text}".strip()
         merged[uid] = base
     return merged
 
@@ -616,6 +383,8 @@ def item_rows_by_uid(rows: list) -> dict[str, list[dict]]:
         grouped.setdefault(str(row.get("canvas_id") or ""), []).append({
             "item_id": str(row.get("item_id")),
             "score": row.get("score"),
-            "feedback": row.get("feedback") or "",
+            "feedback": row.get("authored_feedback", row.get("feedback", "")),
+            "possible": row.get("possible"),
+            "feedback_is_authored": True,
         })
     return grouped

@@ -29,9 +29,9 @@ Content authoring and delivery use three canonical Forge artifacts:
   tiers, configured public tags, and module/due-date requirements.
 - AssignmentForge authors submitted assignments, validates them, and delivers ordinary
   assignments with their submission settings, points, dates, grading category, and SIS or
-  final-grade options. Its fixed pedagogical labels are Support, Core, and Accelerate. They
-  describe authored versions of the same target; only scaffolding, language, or rigor changes.
-  Tier assignment to students and pods is managed directly in Canvas.
+  final-grade options. Its canonical delivery labels are Support, Core, and Accelerate;
+  the teacher and assistant choose each tier's learning target and rigor. Tier assignment to
+  students and pods is managed directly in Canvas.
 - PageForge authors reference pages with rich text, resource placeholders, optional module
   placement, and publish state.
 
@@ -48,7 +48,7 @@ AssignmentForge tier delivery is a reviewed differentiated family. Each used tie
 module, and creates/verifies the shared bridge and family link. The assistant must not
 infer placement or expose raw membership IDs. This is the same renderer-neutral family path
 used by differentiated QuizForge delivery. QuizForge does not author ESSAY or FILEUPLOAD
-items; author each writing portion as a separate 100-point AssignmentForge assignment.
+items; author each writing portion as a separate AssignmentForge assignment with teacher-chosen points.
 
 Connected assistants can read the student-free Course Catalog's assignments, modules,
 assignment groups, and published pages, plus reviewed Learning Objectives. Catalog reads
@@ -108,7 +108,7 @@ reconfirmation, read every page of each SAFE pseudonymized packet, and submit on
 results bound to that packet. Each SAFE packet and write remains assignment-bounded.
 Ordinary assignment scores and comments use the guarded write lane. Existing New Quiz writing stops with
 `new_quiz_writing_requires_assignment`: the teacher grades it in Canvas, and future
-writing belongs in separate 100-point AssignmentForge work. CanvasExpert never writes New
+writing belongs in separate AssignmentForge work with teacher-chosen points. CanvasExpert never writes New
 Quiz item scores, per-item feedback, assignment totals, or fallback comments.
 
 ## Fresh-session starting routine

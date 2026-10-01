@@ -6,6 +6,9 @@ and URL.  No module or rubric support — those belong to the full AssignmentFor
 adapter.
 """
 
+import math
+from numbers import Real
+
 from .. import models
 from .adapter_support import (
     as_list as _as_list,
@@ -33,7 +36,15 @@ class QuickAssignmentAdapter:
         name = normalize_student_text(prepare_request.get("name") or "").strip()
         if not name:
             raise ValueError("name is required")
-        points = float(prepare_request.get("points") or 100)
+        raw_points = prepare_request.get("points")
+        if isinstance(raw_points, bool) or not isinstance(raw_points, Real):
+            raise ValueError("points must be a finite, nonnegative number")
+        try:
+            points = float(raw_points)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("points must be a finite, nonnegative number") from exc
+        if not math.isfinite(points) or points < 0:
+            raise ValueError("points must be a finite, nonnegative number")
         submission_type = str(
             prepare_request.get("submission_type") or "none"
         ).strip()
@@ -223,7 +234,7 @@ class QuickAssignmentAdapter:
         assignment_data = {
             "name": name,
             "submission_types": [payload.get("submission_type") or "none"],
-            "points_possible": float(payload.get("points") or 100),
+            "points_possible": float(payload["points"]),
         }
         if payload.get("due_at"):
             assignment_data["due_at"] = payload["due_at"]

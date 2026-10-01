@@ -21,6 +21,7 @@
       "id": "mc_snippet_out",
       "metadata": { "teks": "126.34(c)(4)(A)" },
       "type": "MC",
+      "points": 12.5,
       "stimulus_id": "stim_snippet",
       "prompt": "<p>What does the program above print?</p>",
       "choices": [
@@ -33,6 +34,7 @@
     {
       "id": "tf_indent",
       "type": "TF",
+      "points": 12.5,
       "prompt": "<p>In Python, indentation is part of the syntax and changes how code runs.</p>",
       "answer": true
     },
@@ -40,6 +42,7 @@
       "id": "ma_outputs",
       "metadata": { "teks": "126.34(c)(5)(A)" },
       "type": "MA",
+      "points": 12.5,
       "prompt": "<p>Which of the following are ways a program can show information to a user? Select all that apply.</p>",
       "choices": [
         { "id": "A", "text": "print() to the screen", "correct": true },
@@ -51,6 +54,7 @@
     {
       "id": "match_symbols",
       "type": "MATCHING",
+      "points": 12.5,
       "prompt": "<p>Match each Python symbol to its meaning.</p>",
       "pairs": [
         { "left": "=", "right": "Assigns a value to a variable" },
@@ -63,6 +67,7 @@
       "id": "fitb_variable",
       "metadata": { "teks": "126.34(c)(4)(A)" },
       "type": "FITB",
+      "points": 12.5,
       "prompt": "<p>A [blank] is a named container that stores a value you can use later.</p>",
       "accept": ["variable"],
       "answer_mode": "open_entry",
@@ -72,6 +77,7 @@
       "id": "num_modulo",
       "metadata": { "teks": "126.34(c)(4)(C)" },
       "type": "NUMERICAL",
+      "points": 12.5,
       "prompt": "<p>In Python, what is the result of <code>7 % 3</code>?</p>",
       "answer": 1,
       "evaluation": { "mode": "exact", "value": 1 }
@@ -79,6 +85,7 @@
     {
       "id": "order_steps",
       "type": "ORDERING",
+      "points": 12.5,
       "header": "First step at top, last step at bottom",
       "prompt": "<p>Put the steps of writing and running a Python program in the correct order.</p>",
       "items": [
@@ -92,6 +99,7 @@
       "id": "cat_tokens",
       "metadata": { "teks": "126.34(c)(4)(A)" },
       "type": "CATEGORIZATION",
+      "points": 12.5,
       "prompt": "<p>Sort each Python piece into the correct group.</p>",
       "categories": ["Keyword", "Operator"],
       "items": [

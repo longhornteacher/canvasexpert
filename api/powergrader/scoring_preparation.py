@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import os
 import re
 import uuid
@@ -357,10 +358,19 @@ def prepare_scoring_session(
 
     assignment_name = str(assignment.get("name") or assignment_id)
     assignment_description = html_to_text(assignment.get("description") or "")
+    raw_points_possible = assignment.get("points_possible")
     try:
-        points_possible = float(assignment.get("points_possible") or 100)
-    except (TypeError, ValueError):
-        points_possible = 100.0
+        points_possible = float(raw_points_possible)
+    except (TypeError, ValueError, OverflowError):
+        points_possible = None
+    if (isinstance(raw_points_possible, bool) or points_possible is None
+            or not math.isfinite(points_possible) or points_possible < 0):
+        return _typed_failure(
+            "assignment_points_unavailable", "points", retryable=True,
+            user_action="Refresh the Current course mirror and retry after Canvas provides a finite, nonnegative points_possible value.",
+            error="Canvas assignment points are missing or invalid; no total was inferred.",
+            assignment_name=assignment_name,
+        )
 
     is_new_quiz = (
         assignment.get("is_quiz_lti_assignment") is True
@@ -369,7 +379,7 @@ def prepare_scoring_session(
     if is_new_quiz:
         message = (
             "Grade this New Quiz writing in Canvas. For future assessments, "
-            "author each writing portion as a separate 100-point AssignmentForge assignment."
+            "author each writing portion as a separate AssignmentForge assignment with teacher-chosen points."
         )
         return _typed_failure(
             "new_quiz_writing_requires_assignment", "classify", retryable=False,
@@ -467,20 +477,16 @@ def prepare_scoring_session(
         contract_body = str(selected_contract.get("body") or "")
 
     canvas_rubric = scoring_rubric_text(assignment.get("rubric"))
+    basis_sections = []
     if assignment_description.strip():
-        rubric_name = "Assignment content"
-        rubric_text_override = assignment_description.strip()
-        scoring_basis = {"source": "assignment_content", "label": "Assignment content"}
-    elif canvas_rubric:
-        rubric_name = "Canvas rubric"
-        rubric_text_override = canvas_rubric
-        scoring_basis = {"source": "canvas_rubric", "label": "Canvas rubric"}
-    elif authoritative_guidance:
+        basis_sections.append(("ASSIGNMENT DIRECTIONS AND CONTENT", assignment_description.strip()))
+    if canvas_rubric:
+        basis_sections.append(("CANVAS RUBRIC", canvas_rubric))
+    if authoritative_guidance:
         complete_guidance = authoritative_guidance
-        rubric_text_override, guidance_projection = project_teacher_scoring_guidance(complete_guidance)
-        rubric_name = "Teacher directive"
-        scoring_basis = {"source": "teacher_directive", "label": "Teacher directive"}
-    else:
+        projected_guidance, guidance_projection = project_teacher_scoring_guidance(complete_guidance)
+        basis_sections.append(("TEACHER DIRECTION", projected_guidance))
+    if not basis_sections:
         question = "What bounded scoring guidance should I follow for this assignment?"
         return {
             "ok": True,
@@ -492,17 +498,20 @@ def prepare_scoring_session(
             "question": question,
             "assignment_name": assignment_name,
         }
-
-    # A teacher-authored directive layers on top of the assignment basis.  A
-    # default/inherited/unknown value is retained privately for provenance but
-    # can never replace the assignment's own content or rubric.
-    if authoritative_guidance and scoring_basis["source"] != "teacher_directive":
-        complete_guidance = authoritative_guidance
-        projected_guidance, guidance_projection = project_teacher_scoring_guidance(complete_guidance)
-        rubric_text_override = "\n\n--- TEACHER DIRECTIVE (layered on top) ---\n".join(
-            [rubric_text_override or "", projected_guidance]
-        )
-        scoring_basis["layered"] = True
+    rubric_name = "Scoring basis"
+    rubric_text_override = "\n\n".join(
+        f"--- {label} ---\n{text}" for label, text in basis_sections
+    )
+    scoring_basis = {
+        "source": "teacher_directed" if authoritative_guidance else "assignment_context",
+        "label": "Teacher direction and available assignment context" if authoritative_guidance
+        else "Assignment directions and Canvas rubric",
+        "components": [
+            {"source": label.casefold().replace(" ", "_"), "label": label}
+            for label, _text in basis_sections
+        ],
+        "teacher_direction_precedence": bool(authoritative_guidance),
+    }
 
     writing_timeline_tracked = writing_timeline.is_tracked_assignment(assignment)
     if writing_timeline_tracked:

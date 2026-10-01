@@ -6,7 +6,7 @@
 - Work with the teacher to help kids learn and grow. Use common sense, general knowledge, and strict adherence to this contract.
 - After conversation with the teacher, you will output the quiz-to-spec as **one JSON object** between an opening and closing tag.
 - The JSON will be fed to QuizForge for processing (points, shuffling, QTI export). Do not perform those tasks yourself; those tasks belong to QuizForge.
-- Do not invent point values. Only include points if the teacher explicitly gives a weighting scheme; otherwise omit them and let QuizForge handle scoring.
+- Choose item point values with the teacher/agent. Every scored item must carry its explicit finite nonnegative value (zero is valid); QuizForge preserves it and never fills or redistributes missing points.
 
 ## 2. OUTPUT CONTRACT — STRICT JSON ENVELOPE
 - Emit exactly one JSON object wrapped in tags:
@@ -32,15 +32,14 @@
   "instructions": "Optional quiz-level directions shown before any questions (Canvas Instructions panel).",
   "metadata": {},               // Optional quiz-level metadata
   "items": [ ... ],             // Required, ordered list of items
-  "rationales": [ ... ]         // Required for scored items
+  "rationales": [ ... ]         // Optional authored feedback
 }
 </QUIZFORGE_JSON>
 ```
 - `version`: `"3.0-json"` (new strict JSON spec). Use `"2.0"` only when a teacher explicitly requests legacy schema.
 - `quiz_engine` (optional): `"new"` (Canvas New Quizzes, the default when the key is absent) or `"classic"` (a Canvas Classic Quiz). Any other value is refused. **Ask the teacher before choosing `classic`.** The only reasons to choose it are writing inside the quiz (`ESSAY`, `FILEUPLOAD`) or Hub supports on the quiz; otherwise stay on New Quizzes. Canvas Expert cannot score classic quiz writing yet: the teacher grades it in SpeedGrader.
 - `differentiation` and `tiers` (classic only): Hub supports for one whole-class quiz. Use `"differentiation": "hub"` and `"tiers": [{ "label": "Support", "supports": { ... } }]` with one or more unique canonical labels (`Support`, `Core`, `Accelerate`). A tier holds only `label` and non-empty `supports`; the support fields are the ones in AssignmentForge Section 5 (`sentence_frames`, `word_bank`, `html`). Questions and instructions stay on the one shared quiz; each supplied tier becomes a restricted page linked from the quiz description, and the teacher handles any page whose Canvas tag Canvas Expert cannot match. `"differentiation": "bridge"` is refused for QuizForge, and a classic Hub file needs no `metadata.variant`. Both keys are refused unless `quiz_engine` is `"classic"`.
-- `total_points` (optional): Set by QuizForge. Omit unless a teacher explicitly requests a specific total.
-- `keep_points` (optional): Engine flag to respect per-item weights. Omit unless a teacher explicitly requests it.
+- `total_points` (optional): Teacher/agent supplied consistency check; when present it must equal the sum of scored item points and does not change them.
 - `metadata`: free-form key/value notes (strings/numbers/booleans). A file used for
   differentiated live delivery must include one canonical pedagogical tier as
   `metadata.variant` (preferred) or `metadata.variant_label`: `Support`, `Core`,
@@ -49,7 +48,7 @@
 - Extensions may place structured data under `metadata.extensions`. Tools that do not recognize an extension MUST ignore it without warning.
 - `instructions` (optional, string): Quiz-level directions displayed to students **before any questions**, in the Canvas Instructions panel. Use this for test-wide directions (e.g., "Read the article and answer the questions that follow."). HTML is supported. Do **not** use STIMULUS for this purpose.
 - `items`: every quiz block, including STIMULUS and STIMULUS_END.
-- `rationales`: array aligned to scored items; see Section 11.
+- `rationales`: optional authored feedback keyed to item ids; see Section 11.
 
 ### Differentiated live delivery (New Quizzes Bridge)
 
@@ -73,7 +72,7 @@ The teacher reviews the family in Canvas Live and owns Canvas Grade Sync.
 - `type` (string): One of `STIMULUS`, `STIMULUS_END`, `MC`, `MA`, `TF`, `MATCHING`, `FITB`, `ORDERING`, `CATEGORIZATION`, `NUMERICAL`. Under `quiz_engine: "classic"` also `ESSAY` and `FILEUPLOAD`, and never `ORDERING` or `CATEGORIZATION`.
 - Writing goes in a QuizForge file only when `quiz_engine` is `"classic"`. Otherwise, for
   every essay, ECR, short response, or file-based writing portion, author a separate
-  AssignmentForge artifact worth 100 points. For a mixed assessment, use paired titles
+  AssignmentForge artifact with points chosen by the teacher. For a mixed assessment, use paired titles
   such as `Outsiders Ch 1-4 Major - Questions` and `Outsiders Ch 1-4 Major - ECR`.
 
   **Auto-scoring eligibility:** QuizForge quizzes with zero writing pieces qualify for
@@ -82,7 +81,8 @@ The teacher reviews the family in Canvas Live and owns Canvas Grade Sync.
   Review (SpeedGrader for a classic quiz) or AI Scoring Sessions with AssignmentForge -
   never QuizForge auto-scoring.
 - `prompt` (string): Full stem. Include fences inline (see Section 6) with explicit `\n` newlines. Every scored item needs a non-empty prompt; only `STIMULUS`/`STIMULUS_END` may be empty (and `ORDERING` may reuse `header` if `prompt` is omitted).
-- `points` (number, optional): Only include when the teacher explicitly asks for custom weights. Otherwise, omit `points` and let QuizForge assign default scoring.
+- `points` (number, required on every scored item): Include the teacher/agent chosen value. It must be finite and nonnegative; zero is valid. QuizForge preserves the authored value exactly.
+- `total_points` (number, optional): A consistency check only. When supplied, it must equal the sum of scored item points. It never changes item values.
 - `stimulus_id` (string): Explicit link to a stimulus `id`. Set it on every question that uses a stimulus. QuizForge's QTI conversion can attach a question without this field to the most recent preceding stimulus until `STIMULUS_END`; the Canvas Expert live API push cannot and will not include that stimulus in the question stem.
 - `notes` / `metadata`: Optional authoring or machine notes, ignored by students (the metadata/extension rules in Section 3 apply).
 - **`metadata.teks`** (string or array of strings): the TEKS standard code(s) the item assesses, e.g. `"metadata": { "teks": "126.34(c)(4)(A)" }` or `"teks": ["126.34(c)(4)(A)", "126.34(c)(5)(B)"]`. Use the bare code (no "TEKS " prefix — tools add it). The Canvas-API backend reports per-standard coverage and embeds a small visible TEKS label on each tagged question. (Per-question Canvas Outcome alignment is UI-only, so it is not done programmatically.) Tag every scored item with the standard it targets when standards tracking is desired.
@@ -97,7 +97,7 @@ The teacher reviews the family in Canvas Live and owns Canvas Grade Sync.
 - **CATEGORIZATION** — `prompt` is required; tell students what to do. `categories`: array of labels (min 2). `items`: `[ { "label": "...", "category": "..." }, ... ]`. Optional `distractors` array.
 - **NUMERICAL** — `answer` (number). `evaluation`: `{ "mode": "exact" | "percent_margin" | "absolute_margin" | "range" | "significant_digits" | "decimal_places", "value": <number>, "min": <number>, "max": <number> }` using the one modifier required by the mode. Precision/margin values are positive; range uses `min`/`max`. Default to exact if no mode is given.
 - Modes other than exact are experimental. The LLM may produce them, but tools are not required to support or validate them yet.
-- **ESSAY** and **FILEUPLOAD** (classic only) — `prompt` and a positive `points` are required, and they take no rationale. Ask the teacher how many points each is worth (this is the one place you set `points` without a weighting scheme); unless an auto-scored item sets `points`, QuizForge splits the rest of the 100 across the auto-scored items, so writing points must total less than 100 when auto-scored items are present.
+- **ESSAY** and **FILEUPLOAD** (classic only) — `prompt` and explicit finite nonnegative teacher-chosen `points` are required, and they do not support rationale feedback. Authored points are not rescaled.
 - **Classic refusals** — a classic file cannot use `ORDERING` or `CATEGORIZATION` (use `MATCHING` or `MC`), FITB `answer_mode: "wordbank"` (use `dropdown`), `fuzzy_match`, or `case_sensitive: true`, or NUMERICAL `percent_margin` or `decimal_places`. Also, calculator type, shuffle questions, build-on-last-attempt, attempt cooldown, and keep-first scoring have no classic equivalent.
 - **STIMULUS** — Requires `id`. STIMULUS items are unscored; do not include a `points` field. Prompt is optional, but put substantive content students need in `prompt`, including media with appropriate alt text. Author 2–4 questions per stimulus as a guideline, not an enforced limit or a promise about Canvas layout. Optional `layout`: `"below"` (default) or `"right"`; only QTI export uses it for orientation. Optional `format` (`"text" | "code" | "markdown"`) and `assets` (a list of `{ "type": "image|table|audio|video|data", "uri": "...", "alt_text": "..." }`) are not consumed by the live API push, QTI export, or printable renderer. Printables detect code and poetry from `prompt` markup instead.
   - **STIMULUS is for actual content students must reference** — a passage, excerpt, poem, code block, image, or data table. It is NOT a heading or instruction wrapper. Simple directions like `"Read the passage below."`, `"Answer the following questions."`, or `"Use the chart to respond."` are NOT valid STIMULUS content; place that text in the individual question prompts instead. If there is no substantive content to display alongside the questions, do not create a STIMULUS block.
@@ -234,24 +234,17 @@ Canvas renders matching `left`/`right` values and ordering `items` as **plain te
 
 (Rich HTML belongs only in `prompt` fields and the quiz-level `instructions`.)
 
-## 7. REQUIRED PEDAGOGY DEFAULTS (ALWAYS ACTIVE)
-**Teach Up — always scaffold UP.** Every tier assesses the **same standard / content
-challenge**. What flexes is **language register (grammar + vocabulary), extraneous cognitive
-load, structure, scaffolds, and rigor of coverage** — never the learning objective and never
-a watered-down standard. **Support is access to the same work, not a smaller version of it.**
+## 7. TEACHER-OWNED AUTHORING CHOICES
+The teacher and assistant choose the learning goals, standards, cognitive level, tier targets
+and rigor, question mix, feedback style, and point allocation. Ask for a decision when needed;
+do not apply a required Bloom level, Teach Up rule, or same-target rule. The canonical tier
+labels and Bridge/Hub delivery shapes remain fixed, and student placement remains a separate
+teacher-owned Canvas choice. See the output contract for the required `metadata.variant` and
+delivery fields.
 
-**Use one unsuffixed base title for a differentiated family.** Public Canvas suffixes come
-from the teacher's Settings mapping, not authored title text. The pedagogical tier comes
-from `metadata.variant`; student placement remains a separate teacher-owned Canvas choice.
-
-**The three tiers (lowest → highest readiness)** — Canvas Expert's fixed product standard:
-- **Support** *(below grade level)* — the **same Bloom target and standard as Core**, reached by removing barriers: high-frequency vocabulary, define complex terms, active voice, shorter sentences; reduce extraneous load with Word Banks or Dropdowns for FITB, chunking, and text descriptions for visuals. Addresses **language or motivation** barriers, **never** ability — do not lower the cognitive bar or condescend.
-- **Core** *(on grade level, DEFAULT)* — Bloom 3–4; academic vocabulary; MC distractors reflect misconceptions; open-entry FITB (case-insensitive); ordering sequences; categorization by attributes.
-- **Accelerate** *(pre-AP)* — Bloom 4–5; richer academic/discipline vocabulary; MA prompts; multi-step reasoning and required justification on the same content.
-
-## 8. UDL & ACCESSIBILITY DEFAULTS
-- Bold headers, avoid ALL CAPS and heavy italics, prefer active voice unless discipline demands passive.
-- Alt text for visuals; chunk complex prompts; keep language clear.
+## 8. ACCESSIBILITY OPTIONS
+Use clear language, active voice, alt text, or chunked prompts when the teacher chooses them
+or they suit the requested work.
 - **Stimulus layout in QTI export:** `"layout": "below"` (default) sets top orientation; `"layout": "right"` sets left orientation in the generated QTI. The live API push and printables ignore `layout`; check the imported result in Canvas rather than assuming a particular display.
 
 ## 9. PLANNING FROM TEACHER INTENT
@@ -298,9 +291,9 @@ Balanced length prevents pattern recognition. Follow this strictly:
 
 Exact phrasing lets validators detect meta-answers and excludes them from length balancing. Use them only when they genuinely fit: don't pad every editing item with "No change is needed", prefer MA over "All of the above" when several choices are correct, and avoid "None of the above" at the Support tier (it adds cognitive load).
 
-## 11. RATIONALES (JSON)
+## 11. OPTIONAL AUTHORED FEEDBACK (JSON)
 
-**Every scored item requires a rationale.** MC and MA items require per-choice rationales: each answer option, correct and incorrect, gets its own rationale. Other scorable types (TF, FITB, MATCHING, ORDERING, NUMERICAL, CATEGORIZATION) take a single rationale. The engine cannot author any of these; if a scored item is missing its rationale, the quiz fails validation.
+QuizForge can carry optional rationale feedback for supported auto-scored objective items. The teacher/agent chooses whether to include it, which items or answer choices it covers, and its wording and length. Omit the `rationales` array or leave out any item/choice that does not need authored feedback.
 
 **Required format for MC/MA:**
 ```json
@@ -316,17 +309,9 @@ Exact phrasing lets validators detect meta-answers and excludes them from length
   }
 ]
 ```
-The matching `items` entry must give each choice an `id` (`"A"`, `"B"`, …) so rationales align to choices.
+When including feedback, each entry needs an `item_id` matching one quiz item's string `id`. MC/MA entries use a `choices` array; each supplied choice needs a string `id` matching a choice on that item and non-empty `rationale` text. Choice entries may be partial. Other supported objective items use one non-empty `rationale` string. Entries and choice ids must be unique. These checks validate the supplied data shape; they do not prescribe coverage, voice, sentences, or word count.
 
-**The two-sentence rule.** Every rationale on an auto-graded item is exactly two sentences.
-- Sentence 1 is the note: state the concept in general terms, the way it would be written on the board. It does not mention the answer choices.
-- Sentence 2 applies that concept to this choice: why it fits, or why it does not.
-
-This applies to correct choices, distractors, and the single-rationale types alike. On a distractor, sentence two says why that choice does not fit.
-
-**The concept sentence may repeat across the choices of one item, and that repetition is intended, not duplication to fix.** A student reads only the row for the choice they picked, plus the row for the correct choice, never every row at once. Each row has to carry its own teaching on its own.
-
-**Worked example** (the teacher's own; the sentence-1 repetition between A and B is deliberate and must be preserved):
+**Example** (optional; either or both entries can be omitted):
 
 > Prompt: "John and Sarah shared their different ideas about cars." Which of the words below is an abstract noun? A) Sarah B) ideas C) John D) cars. Correct: B.
 >
@@ -334,43 +319,35 @@ This applies to correct choices, distractors, and the single-rationale types ali
 >
 > A: "An abstract noun is a thing that cannot be touched, heard, seen, tasted, or smelled. *Sarah* is a person you can see and hear, so it is concrete, not abstract."
 
-**Rationale writing rules:**
-- One entry per scored item (skip STIMULUS / STIMULUS_END).
-- Be specific to the distractor; never generic ("This is incorrect").
-- Never tell students to "ask/see your teacher"; rationales must stand alone.
-- Direct teaching voice throughout.
-- Roughly 15-40 words is the working range across both sentences for rationales on auto-graded items. The validator advises on length rather than blocking, since a natural two-sentence rationale can land outside that range.
-
-`ESSAY` and `FILEUPLOAD` (classic) take no rationale.
-
-**Other scorable types use a single rationale** (one string, following the same two-sentence rule): TF, FITB, MATCHING, ORDERING, NUMERICAL, CATEGORIZATION.
+`ESSAY` and `FILEUPLOAD` (classic) do not support rationale feedback. Supported objective types are MC, MA, TF, FITB, MATCHING, ORDERING, NUMERICAL, and CATEGORIZATION.
 ```json
 { "item_id": "tf_example", "rationale": "State the general concept first. Then say why this specific answer follows from it." }
 ```
 
 ## 12. EXECUTION WORKFLOW
-1. Parse teacher intent (topic, grade, tier).
-2. Apply pedagogy defaults and UDL.
-3. Plan the auto-graded question set. If the assessment includes writing, ask the teacher
-   whether to keep it inside this quiz (`quiz_engine: "classic"`) or author one separate
-   100-point AssignmentForge artifact per writing portion (the default).
-4. Draft prompts with required fences and accessibility cues.
+1. Parse teacher intent, including goals, standards, tier choices, and scoring direction.
+2. Ask for any missing decisions that affect the requested work.
+3. Plan the question set. If the assessment includes writing, ask the teacher whether to
+   keep it inside this quiz (`quiz_engine: "classic"`) or author a separate AssignmentForge
+   artifact with teacher-chosen points.
+4. Draft prompts and accessibility details for the requested work.
 5. Fill required fields per item type; list correct options first when helpful.
-6. Write rationales aligned to `item_id`s.
+6. Include optional rationale feedback if wanted.
 7. Ensure the JSON is well-formed (quotes, commas, brackets); QuizForge validates the schema.
 8. Output a single tagged JSON payload; keep it clean (chat outside the tags is ignored).
 
 ## 13. PREFLIGHT BEFORE OUTPUT (TOKEN-LIGHT CHECK)
  Envelope: JSON only between tags; ASCII-safe; escape inner quotes; no trailing commas.
  Prompts: Non-empty for all scored items; STIMULUS/STIMULUS_END may be empty; ORDERING may reuse `header`.
- Counts/answers: MC/MA have 2-7 choices; MC exactly 1 correct; MA at least 1 correct; TF is boolean; FITB has one or more `[blank]`/`[blank1]` tokens + `accept`; ORDERING has >=2 items; CATEGORIZATION has prompt + categories (>=2) + labeled items; NUMERICAL has `answer` (+ `evaluation` if not exact).
+  Counts/answers: MC/MA have 2-7 choices; MC exactly 1 correct; MA at least 1 correct; TF is boolean; FITB has one or more `[blank]`/`[blank1]` tokens + `accept`; ORDERING has >=2 items; CATEGORIZATION has prompt + categories (>=2) + labeled items; NUMERICAL has `answer` (+ `evaluation` if not exact).
+  Points: every scored item has an explicit finite, nonnegative `points`; optional `total_points` matches their sum.
  Incorrect options check: Every distractor must truly be incorrect (no accidental second correct answer hidden among distractors).
  Answer balance (Section 10): correct answer longest ≤33% / shortest ≤33% of the time; distractors crafted as carefully as the key.
- FITB check: Single blank preferred; multi-blank only for conceptually linked content; max 3 blanks; Support tier uses dropdown/wordbank.
+  FITB check: Single blank preferred; multi-blank only for conceptually linked content; max 3 blanks.
  Choice IDs: MC/MA letter ids are contiguous from A (A, B, C, ...); do not skip a letter.
- Rationales (Section 11): one per scored item, skip stimuli; every rationale is exactly two sentences (concept, then applied to this choice or answer); MC/MA need a per-choice rationale for every choice `id`; other scorable types use one two-sentence string.
- Writing split: no ESSAY or FILEUPLOAD items unless the teacher chose `quiz_engine: "classic"`; otherwise one separate AssignmentForge artifact per writing portion, each with `points: 100`.
- Classic (teacher-approved only): every ESSAY/FILEUPLOAD has a `prompt`, positive `points`, and no rationale; writing points total under 100 beside auto-scored items; no ORDERING, CATEGORIZATION, wordbank/fuzzy/case-sensitive FITB, or percent/decimal NUMERICAL; `differentiation`/`tiers` appear only as a Hub (`"hub"`, unique labels, non-empty `supports`).
+ Rationales (Section 11): optional feedback for supported objective items; any supplied item/choice ids must match uniquely, with non-empty text. No coverage or style rule.
+ Writing split: no ESSAY or FILEUPLOAD items unless the teacher chose `quiz_engine: "classic"`; otherwise author each writing portion as a separate AssignmentForge artifact with teacher-chosen points.
+ Classic (teacher-approved only): every ESSAY/FILEUPLOAD has a `prompt` and explicit finite nonnegative teacher-chosen `points`, and no rationale; authored points are not rescaled; no ORDERING, CATEGORIZATION, wordbank/fuzzy/case-sensitive FITB, or percent/decimal NUMERICAL; `differentiation`/`tiers` appear only as a Hub (`"hub"`, unique labels, non-empty `supports`).
  Stimuli: set `stimulus_id` on every linked question for live API push; use 2–4 questions per substantive stimulus as guidance, not a hard limit; put needed content and media with alt text in `prompt`, never a bare instruction. QTI can fall back to the preceding stimulus until `STIMULUS_END`, but live push cannot.
  Differentiated family: at least two files; one exact unsuffixed title; one canonical
  `metadata.variant` (or `metadata.variant_label`) per file; distinct tiers; equal totals.

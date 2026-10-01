@@ -28,7 +28,8 @@ def _write(tmp_path, payload):
 
 
 def _tf(item_id, **extra):
-    return {"id": item_id, "type": "TF", "prompt": "<p>True?</p>", "answer": True, **extra}
+    return {"id": item_id, "type": "TF", "prompt": "<p>True?</p>", "answer": True,
+            "points": 1, **extra}
 
 
 def _essay(item_id, points):
@@ -66,21 +67,64 @@ def test_writing_never_reaches_a_new_quiz_plan(tmp_path, engine, item_type):
 
 
 @pytest.mark.parametrize(("items", "expected_points"), [
-    ([_tf("a"), _tf("b"), _tf("c")], [33.33, 33.33, 33.34]),
-    ([_tf("a"), _tf("b"), _essay("w", 40)], [30.0, 30.0, 40.0]),
-    ([_tf("a", points=5), _tf("b"), _essay("w", 20)], [5.0, 0.0, 20.0]),
+    ([_tf("a", points=0.25), _tf("b", points=0), _tf("c", points=2.125)], [0.25, 0.0, 2.125]),
+    ([_tf("a", points=0.5), _tf("b", points=1.25), _essay("w", 40)], [0.5, 1.25, 40.0]),
+    ([_tf("a", points=5), _tf("b", points=0), _essay("w", 20)], [5.0, 0.0, 20.0]),
     ([_essay("w", 30)], [30.0]),
 ])
-def test_classic_points_split_the_remainder_after_writing(tmp_path, items, expected_points):
+def test_classic_plan_preserves_each_authored_point_value(tmp_path, items, expected_points):
     plan = qf_pusher.build_push_plan(_write(tmp_path, _classic(items)))
 
     assert [row["payload"]["question"]["points_possible"] for row in plan["items"]] == expected_points
-    assert plan["quiz_payload"]["quiz"]["points_possible_expected"] == round(sum(expected_points), 2)
+    assert plan["quiz_payload"]["quiz"]["points_possible_expected"] == pytest.approx(sum(expected_points))
 
 
-def test_classic_writing_that_fills_the_quiz_leaves_no_room_for_auto_items(tmp_path):
-    with pytest.raises(ValueError, match="leaving nothing of the 100-point quiz"):
-        qf_pusher.build_push_plan(_write(tmp_path, _classic([_tf("a"), _essay("w", 100)])))
+def test_new_quiz_preserves_authored_fractional_zero_points_without_rationales(tmp_path):
+    payload = {"version": "3.0-json", "title": "Fractions", "items": [
+        _tf("a", points=0.25), _tf("b", points=0), _tf("c", points=2.125),
+    ]}
+    plan = qf_pusher.build_push_plan(_write(tmp_path, payload))
+
+    assert [row["payload"]["item"]["points_possible"] for row in plan["items"]] == [0.25, 0, 2.125]
+    assert plan["quiz_payload"]["quiz"]["points_possible"] == pytest.approx(2.375)
+
+
+def test_new_quiz_preserves_optional_partial_authored_feedback(tmp_path):
+    authored = "Ask the teacher. " + ("This is incorrect. " * 40)
+    payload = {"version": "3.0-json", "title": "Feedback", "items": [{
+        "id": "q1", "type": "MC", "prompt": "<p>Pick one.</p>", "points": 0.25,
+        "choices": [{"id": "A", "text": "Alpha", "correct": True},
+                    {"id": "B", "text": "Beta", "correct": False}],
+    }], "rationales": [{"item_id": "q1", "choices": [
+        {"id": "A", "rationale": authored},
+    ]}]}
+
+    plan = qf_pusher.build_push_plan(_write(tmp_path, payload))
+
+    item = qf_pusher.prepare_items(payload)[0]
+    assert item["_rationale"]["choices"][0]["rationale"] == authored
+    feedback = plan["items"][0]["payload"]["item"]["entry"]["answer_feedback"]
+    assert authored.strip() in json.dumps(feedback)
+
+
+def test_new_quiz_rejects_malformed_optional_feedback_references(tmp_path):
+    payload = {"version": "3.0-json", "title": "Feedback", "items": [
+        _tf("q1"),
+    ], "rationales": [{"item_id": "missing", "rationale": "Optional text."}]}
+
+    with pytest.raises(ValueError, match="must match exactly one quiz item"):
+        qf_pusher.build_push_plan(_write(tmp_path, payload))
+
+
+def test_classic_optional_total_points_is_only_a_consistency_check(tmp_path):
+    payload = _classic([_tf("a", points=0.25), _tf("b", points=0)], total_points=0.25)
+    plan = qf_pusher.build_push_plan(_write(tmp_path, payload))
+    assert plan["quiz_payload"]["quiz"]["points_possible_expected"] == 0.25
+
+    payload["total_points"] = 100
+    path = _write(tmp_path, payload)
+    with pytest.raises(ValueError, match="total_points"):
+        qf_pusher.build_push_plan(path)
 
 
 @pytest.mark.parametrize("setting", [
@@ -107,7 +151,7 @@ def test_classic_plan_maps_push_settings_onto_classic_quiz_fields(tmp_path):
         "title": "Unit Check", "description": "<p>Read all.</p>", "quiz_type": "assignment",
         "published": False, "shuffle_answers": False, "allowed_attempts": 3,
         "scoring_policy": "keep_average", "one_question_at_a_time": True, "cant_go_back": True,
-        "show_correct_answers": False, "points_possible_expected": 100.0, "time_limit": 45,
+        "show_correct_answers": False, "points_possible_expected": 1.0, "time_limit": 45,
         "access_code": "open", "hide_results": "always", "due_at": "2026-10-01T23:59:00Z"}
     assert plan["assignment_settings"] == {
         "published": True, "assignment_group_name": "Quizzes", "post_to_sis": False}

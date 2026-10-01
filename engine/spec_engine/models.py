@@ -59,6 +59,7 @@ class QuizPayload:
     items: List[Dict[str, Any]] = field(default_factory=list)
     rationales: List[RationalesEntry] = field(default_factory=list)
     instructions: Optional[str] = None
+    total_points: Any = None
 
 
 @dataclass
@@ -72,3 +73,4 @@ class PackagedQuiz:
     rationales: List[RationalesEntry]
     experimental: List[Dict[str, Any]] = field(default_factory=list)
     instructions: Optional[str] = None
+    total_points: Any = None

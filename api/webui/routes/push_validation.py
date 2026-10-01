@@ -75,7 +75,6 @@ def register_validation_routes(
             from engine.importers import import_quiz_from_llm
             from engine.validation.point_calculator import calculate_points
             from engine.validation.answer_balancer import balance_answers
-            from engine.rendering.physical.styles.default_styles import DEFAULT_QUIZ_POINTS
             from engine.packagers.physical_handler import generate_physical_outputs
             from engine.packaging.folder_creator import create_quiz_folder
         except Exception as e:
@@ -90,11 +89,8 @@ def register_validation_routes(
         try:
             from pathlib import Path as _Path
             quiz = import_quiz_from_llm(text).quiz
-            try:
-                quiz.questions = calculate_points(quiz.questions, total_points=DEFAULT_QUIZ_POINTS)
-                quiz.questions = balance_answers(quiz.questions)
-            except Exception as exc:
-                operational_log.emit("quiz.points_recalculate", "failed", error_class=type(exc))
+            quiz.questions = calculate_points(quiz.questions)
+            quiz.questions = balance_answers(quiz.questions)
             base = printables_dir_func()
             os.makedirs(base, exist_ok=True)
             folder = create_quiz_folder(_Path(base), quiz.title)

@@ -18,7 +18,7 @@ PSEUDONYM = "Pikachu"
 def _wire(monkeypatch, tmp_path, _set_active_courses):
     _set_active_courses(["course-1"])
     from api.powergrader import session_store
-    bundle = {"contract_version": "1.0", "students": [{"pseudonym": PSEUDONYM,
+    bundle = {"contract_version": "2.0", "students": [{"pseudonym": PSEUDONYM,
         "responses": [{"item_id": "item-1", "prompt": "Explain.",
                         "response": "A sufficiently long synthetic answer.", "possible": 10}]}]}
     bundle_path = tmp_path / "safe-bundle.json"
@@ -50,13 +50,7 @@ def _wire(monkeypatch, tmp_path, _set_active_courses):
 
 def _result(score=8):
     return [{"pseudonym": PSEUDONYM, "item_id": "item-1", "score": score,
-             "explanation": "Clear reasoning throughout the response.",
-             "glows": ["Strong topic sentence.", "Concrete supporting detail."],
-             "grows": ["Add a closing sentence."],
-             "fixes": ["Add one more supporting detail.", "Write a closing sentence."]}]
-
-
-EXEMPLARS = {"item-1": "A short model answer a student could hand copy."}
+             "feedback": "Clear reasoning throughout the response."}]
 
 
 def _digest(bundle):
@@ -65,10 +59,10 @@ def _digest(bundle):
 
 
 def _stage_then_apply(session_id, results, packet_digest, *, review_digest="", answers=None,
-                      exemplars=EXEMPLARS):
+                      grade_mode=None):
     staged = tools.stage_scoring_results(session_id, results, packet_digest,
                                          review_digest=review_digest, answers=answers,
-                                         exemplars=exemplars)
+                                         grade_mode=grade_mode)
     if staged.get("status") != "staged":
         return staged
     return tools.apply_staged_scoring_results(session_id, staged["stage_digest"])
@@ -88,8 +82,7 @@ def test_stage_is_local_and_apply_is_the_only_canvas_lane(monkeypatch, tmp_path,
     monkeypatch.setattr(scoring_apply, "apply_plan", lambda **_kw: (
         writes.append(True) or ({"ok": True, "pushed": [REAL_ID],
         "results": [{"user_id": REAL_ID, "status": "pushed"}]}, 200)))
-    staged = tools.stage_scoring_results("session-1", _result(), _digest(bundle),
-                                         exemplars=EXEMPLARS)
+    staged = tools.stage_scoring_results("session-1", _result(), _digest(bundle))
     assert staged["status"] == "staged"
     assert writes == []
     assert sessions["session-1"]["status"] == "staged"
@@ -97,23 +90,6 @@ def test_stage_is_local_and_apply_is_the_only_canvas_lane(monkeypatch, tmp_path,
     assert writes == [True]
     assert result["counts"]["finalized"] == 1
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
-
-
-def test_staging_injects_private_assignmentforge_correction(monkeypatch, tmp_path, _set_active_courses):
-    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
-    session["assignmentforge_corrections"] = {"item-1": {"shared": {
-        "answer": "Use walk.", "why": "Present tense."}, "by_tier": None}}
-    from api.powergrader import scoring_apply
-    monkeypatch.setattr(scoring_apply, "build_plan", lambda *_a, **_kw: {
-        "ok": True, "candidate_ids": [REAL_ID], "questions": [],
-        "digest": "frozen-review", "notes": []})
-    monkeypatch.setattr(scoring_apply, "apply_plan", lambda **_kw: (
-        {"ok": True, "pushed": [REAL_ID], "results": [{"user_id": REAL_ID, "status": "pushed"}]}, 200))
-    result = _stage_then_apply("session-1", _result(), _digest(bundle))
-    assert result["counts"]["finalized"] == 1
-    feedback = session["students"][0]["ai_feedback"]
-    assert "Extra credit Part 2: Hand copy this exemplar" in feedback
-    assert "Use walk." in feedback and "Why: Present tense." in feedback
 
 
 def test_questions_block_stage_then_matching_digest_allows_apply(monkeypatch, tmp_path, _set_active_courses):
@@ -146,7 +122,7 @@ def test_stale_stage_digest_and_malformed_results_fail_closed(monkeypatch, tmp_p
         "ok": True, "candidate_ids": [REAL_ID], "questions": [],
         "digest": "frozen-review", "notes": []})
     digest = _digest(bundle)
-    staged = tools.stage_scoring_results("session-1", _result(), digest, exemplars=EXEMPLARS)
+    staged = tools.stage_scoring_results("session-1", _result(), digest)
     assert tools.apply_staged_scoring_results("session-1", "wrong")["code"] == "stage_changed"
     assert tools.stage_scoring_results("session-1", [{"pseudonym": PSEUDONYM}], digest)["code"] == "invalid_results"
     assert staged["stage_digest"] != "wrong"
@@ -180,55 +156,107 @@ def test_transport_unknown_is_projected_without_grade_facts(monkeypatch, tmp_pat
     assert "grade" not in _blob({k: v for k, v in result.items() if k != "grade_mode"})
 
 
-def test_stage_scoring_results_example_renders_structured_fields_onto_the_session(
-    monkeypatch, tmp_path, _set_active_courses,
-):
-    """EXAMPLE: structured results in, one rendered plain-text layout out."""
-    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
-
-    staged = tools.stage_scoring_results(
-        "session-1", _result(8), _digest(bundle), exemplars=EXEMPLARS,
-        disclosure="Drafted by AI, reviewed by your teacher.",
-    )
-
-    assert staged["status"] == "staged"
-    feedback = session["students"][0]["ai_feedback"]
-    assert feedback == (
-        "Score: 8/10\n\n"
-        "Clear reasoning throughout the response.\n\n"
-        "Glows\n- Strong topic sentence.\n- Concrete supporting detail.\n\n"
-        "Grows\n- Add a closing sentence.\n\n"
-        f"{'-' * 40}\n"
-        "Extra credit Part 1: Fix these in a handwritten second draft\n"
-        "1. Add one more supporting detail.\n2. Write a closing sentence.\n\n"
-        "Extra credit Part 2: Hand copy this exemplar\n"
-        "A short model answer a student could hand copy.\n\n"
-        "Drafted by AI, reviewed by your teacher."
-    )
-    assert session["students"][0]["ai_score"] == 8
-
-    # The posted comment text is exactly the rendered layout: no AI label, no
-    # persona name, no disclosure beyond the one explicitly staged above. The
-    # plan digest already covers these bytes (scoring_apply.py's
-    # _projected_payload mirrors what approve_rows copies before posting).
+def _fake_plan_and_canvas(monkeypatch, writes):
     from api.powergrader import scoring_apply
-    payload = scoring_apply._projected_payload(session["students"][0])
-    assert payload["comment"]["text_comment"] == feedback
+
+    def build_plan(session, *, pseudonyms=()):
+        candidates = [student for student in session.get("students", [])
+                     if student.get("ai_score") is not None or student.get("ai_feedback")]
+        return {"ok": True,
+                "candidate_ids": [str(student["user_id"]) for student in candidates],
+                "questions": [], "digest": "frozen-review", "notes": [],
+                "grade_mode": str(session.get("grade_mode") or "post_score")}
+
+    monkeypatch.setattr(scoring_apply, "build_plan", build_plan)
+    monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
+        lambda method, path, payload, timeout=30: (
+            writes.append((method, path, payload)) or ({"id": 1}, None))
+    ))
 
 
-def test_stage_scoring_results_missing_exemplar_refuses_with_item_ids_only(
+def test_authored_feedback_reaches_canvas_unchanged_and_score_only_omits_comment(
     monkeypatch, tmp_path, _set_active_courses,
 ):
-    """EXAMPLE: a below-full-marks item with no exemplar and no correction
-    fails closed. No response content or identity is returned."""
-    _session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    """EXAMPLE: arbitrary authored feedback is exact; numeric score-only sends no comment."""
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    writes = []
+    _fake_plan_and_canvas(monkeypatch, writes)
+    feedback = ("# Teacher's heading & notes\n\n**Keep this Markdown.**\n\n"
+                "Draft score: teacher-selected line\nScore: another chosen heading.\n\n"
+                "Revise the conclusion.\n\n- Ms. Teacher")
+    authored = _result(8)
+    authored[0]["feedback"] = feedback
+    staged = tools.stage_scoring_results("session-1", authored, _digest(bundle))
+    assert staged["status"] == "staged"
+    assert session["students"][0]["ai_score"] == 8
+    applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+    assert applied["counts"]["finalized"] == 1
+    assert writes[0][2]["comment"]["text_comment"] == feedback
 
-    result = tools.stage_scoring_results("session-1", _result(8), _digest(bundle))
+    (tmp_path / "score-only").mkdir()
+    score_session, score_bundle, _score_sessions = _wire(
+        monkeypatch, tmp_path / "score-only", _set_active_courses,
+    )
+    score_writes = []
+    _fake_plan_and_canvas(monkeypatch, score_writes)
+    score_only = _result(6)
+    score_only[0]["feedback"] = ""
+    score_stage = tools.stage_scoring_results(
+        "session-1", score_only, _digest(score_bundle),
+    )
+    assert score_stage["status"] == "staged"
+    score_apply = tools.apply_staged_scoring_results("session-1", score_stage["stage_digest"])
+    assert score_apply["counts"]["finalized"] == 1
+    assert "comment" not in score_writes[0][2]
 
-    assert result["ok"] is False
-    assert result["code"] == "missing_exemplars"
-    assert result["item_ids"] == ["item-1"]
-    assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
+
+def test_feedback_only_prefix_and_mode_changes_preserve_authored_score_lines(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    writes = []
+    _fake_plan_and_canvas(monkeypatch, writes)
+    feedback = "Score: authored heading\nDraft score: authored note\n\nSignature"
+    result = _result(8)
+    result[0]["feedback"] = feedback
+
+    post_score = tools.stage_scoring_results("session-1", result, _digest(bundle))
+    assert session["students"][0]["ai_feedback"] == feedback
+    feedback_only = tools.stage_scoring_results(
+        "session-1", result, _digest(bundle), grade_mode="feedback_only",
+    )
+    assert feedback_only["status"] == "staged"
+    assert session["students"][0]["ai_feedback"] == f"Draft score: 8/10\n\n{feedback}"
+    post_again = tools.stage_scoring_results(
+        "session-1", result, _digest(bundle), grade_mode="post_score",
+    )
+    assert post_again["status"] == "staged"
+    assert session["students"][0]["ai_feedback"] == feedback
+    assert post_score["stage_digest"] != feedback_only["stage_digest"]
+
+
+def test_feedback_only_apply_posts_prefixed_comment_without_submission_fields(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    (tmp_path / "feedback-only").mkdir()
+    session, bundle, _sessions = _wire(
+        monkeypatch, tmp_path / "feedback-only", _set_active_courses,
+    )
+    writes = []
+    _fake_plan_and_canvas(monkeypatch, writes)
+    feedback = "A chosen paragraph & heading."
+    result = _result(8)
+    result[0]["feedback"] = feedback
+    staged = tools.stage_scoring_results(
+        "session-1", result, _digest(bundle), grade_mode="feedback_only",
+    )
+    assert staged["status"] == "staged"
+    applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+    assert applied["counts"]["finalized"] == 1
+    assert writes[0][2] == {
+        "comment": {"text_comment": f"Draft score: 8/10\n\n{feedback}"}
+    }
+    assert session["grade_mode"] == "feedback_only"
 
 
 def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fields(
@@ -258,8 +286,7 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
     result_with_grading = _result(6)
     result_with_grading[0]["late_days"] = 1
     digest = _digest(bundle)
-    first = tools.stage_scoring_results("session-1", result_with_grading, digest,
-                                        exemplars=EXEMPLARS)
+    first = tools.stage_scoring_results("session-1", result_with_grading, digest)
     assert first["status"] == "needs_teacher_input"
     assert [q["id"] for q in first["questions"]] == ["late_days"]
     # Pseudonymized, with a per-row count -- criterion 6.
@@ -269,7 +296,7 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
     assert REAL_ID not in _blob(first) and REAL_NAME not in _blob(first)
 
     staged = tools.stage_scoring_results(
-        "session-1", result_with_grading, digest, exemplars=EXEMPLARS,
+        "session-1", result_with_grading, digest,
         review_digest=first["review_digest"], answers={"late_days": "post_late_days"})
     assert staged["status"] == "staged"
 
@@ -281,9 +308,7 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
     assert payload["submission"]["posted_grade"] == "7"
     assert payload["submission"]["late_policy_status"] == "late"
     assert payload["submission"]["seconds_late_override"] == 86400
-    assert payload["comment"]["text_comment"].endswith(
-        "Entered in the gradebook: 7/10. Canvas applies the late penalty to that."
-    )
+    assert payload["comment"]["text_comment"] == "Clear reasoning throughout the response."
     assert REAL_ID not in _blob(applied) and REAL_NAME not in _blob(applied)
 
 
@@ -298,7 +323,7 @@ def test_stage_scoring_results_refuses_when_grading_policy_file_is_invalid(
         "floor_percent: 10\nmissing_percent: 20\nsweep_after_school_days: 15\n")
 
     result = tools.stage_scoring_results(
-        "session-1", _result(8), _digest(bundle), exemplars=EXEMPLARS)
+        "session-1", _result(8), _digest(bundle))
 
     assert result == {"ok": False, "code": "grading_policy_file_invalid",
                       "error": ("Grading Policy.txt's floor_percent must be at or "
@@ -314,7 +339,7 @@ def _wire_two_students(monkeypatch, tmp_path, _set_active_courses):
     """A two-student variant of ``_wire`` for the earlier-candidate law below."""
     _set_active_courses(["course-1"])
     from api.powergrader import session_store
-    bundle = {"contract_version": "1.0", "students": [
+    bundle = {"contract_version": "2.0", "students": [
         {"pseudonym": PSEUDONYM_A, "responses": [
             {"item_id": "item-1", "prompt": "Explain.",
              "response": "A sufficiently long synthetic answer.", "possible": 10}]},
@@ -355,10 +380,7 @@ def _wire_two_students(monkeypatch, tmp_path, _set_active_courses):
 
 def _result_for(pseudonym, score=10, **extra):
     return {"pseudonym": pseudonym, "item_id": "item-1", "score": score,
-            "explanation": "Clear reasoning throughout the response.",
-            "glows": ["Strong topic sentence.", "Concrete supporting detail."],
-            "grows": ["Add a closing sentence."],
-            "fixes": ["Add one more supporting detail.", "Write a closing sentence."],
+            "feedback": "Clear reasoning throughout the response.",
             **extra}
 
 
@@ -400,7 +422,7 @@ def test_a_students_earlier_stamp_and_question_survive_staging_only_b_again(
 
     # Stage only B this time -- A is left out of the results entirely.
     b_only = [_result_for(PSEUDONYM_B, 9)]
-    second = tools.stage_scoring_results("session-1", b_only, digest, exemplars=EXEMPLARS)
+    second = tools.stage_scoring_results("session-1", b_only, digest)
     assert second["status"] == "needs_teacher_input"
     # A is still a candidate (staged, unposted) with its earlier insincere
     # mark, so the plan still asks about it -- the bug this corrects would
@@ -409,7 +431,7 @@ def test_a_students_earlier_stamp_and_question_survive_staging_only_b_again(
     assert second["questions"][0]["students"] == [PSEUDONYM_A]
 
     second_staged = tools.stage_scoring_results(
-        "session-1", b_only, digest, exemplars=EXEMPLARS,
+        "session-1", b_only, digest,
         review_digest=second["review_digest"], answers={"insincere_attempt": "confirm_insincere"})
     assert second_staged["status"] == "staged"
 

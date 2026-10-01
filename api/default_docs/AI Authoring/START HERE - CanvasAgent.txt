@@ -411,7 +411,8 @@ Appendix F. Troubleshooting
 
 File will not validate. Ask for the exact error and correct that specific
 thing. The validator names the problem, for example a multiple-choice question
-with no correct answer marked, or a scored question missing its rationale.
+with no correct answer marked, or invalid feedback references when optional
+rationales are supplied.
 
 A quiz with no questions is rejected on purpose. If you produced an empty
 items list, that is your bug, not the app's.

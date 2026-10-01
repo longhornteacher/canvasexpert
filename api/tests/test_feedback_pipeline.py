@@ -144,9 +144,7 @@ def test_submissions_round_trip_reidentify(tmp_path):
 # --------------------------------------------------------------------------
 
 def _score_like_an_llm(bundle):
-    """Stand in for the scoring LLM: emit one contract-conforming result per
-    response in the bundle (below full marks, so fixes are required). This is
-    the self-test proving the contract is concrete enough to author against."""
+    """Stand in for the scoring LLM: return teacher-authored feedback per row."""
     out = []
     for s in bundle["students"]:
         for r in s["responses"]:
@@ -154,12 +152,9 @@ def _score_like_an_llm(bundle):
                 "pseudonym": s["pseudonym"],
                 "item_id": r["item_id"],
                 "score": (r["possible"] or 10) - 1,
-                "explanation": "Clear thesis with one concrete example.",
-                "glows": ["Clear thesis.", "Concrete example."],
-                "grows": ["Connect the middle back to the prompt."],
-                "fixes": ["Add one cited quote.", "Restate the thesis in the closing line."],
+                "feedback": "# Evidence & analysis\n\nClear thesis & support.",
             })
-    return {"contract_version": "1.0", "results": out}
+    return {"contract_version": "2.0", "results": out}
 
 
 def test_self_authored_results_conform_to_contract(tmp_path):
@@ -172,20 +167,17 @@ def test_self_authored_results_conform_to_contract(tmp_path):
     assert verdict["ok"], verdict["errors"]
     assert verdict["warnings"] == []                   # full coverage, in-range scores
 
-    item_ids = {r["item_id"] for r in payload["results"]}
-    exemplars = {item_id: "A short model answer to hand copy." for item_id in item_ids}
-    rendered = fp.render_results(payload["results"], bundle=bundle, exemplars=exemplars)
+    rendered = fp.render_results(payload["results"], bundle=bundle)
     rows = fp.reidentify(rendered, v)                  # push-ready, re-identified
     assert rows and all(r["resolved"] for r in rows)
-    assert all("Drafted by" not in r["feedback"] for r in rows)
-    assert all("Extra credit Part 2: Hand copy this exemplar" in r["feedback"] for r in rows)
+    assert all(r["feedback"] == "# Evidence & analysis\n\nClear thesis & support."
+               for r in rows)
 
 
 def test_merge_rows_by_uid_combines_multi_item_drafts():
     """Two items for one student merge into one draft (regression: a plain
     {canvas_id: row} dict kept only the last item, so a New Quiz essay draft
-    was silently overwritten by the photo-upload draft). A disclosure is
-    appended once to the combined draft, never per item."""
+    was silently overwritten by the photo-upload draft)."""
     rows = [
         {"resolved": True, "canvas_id": "42", "item_id": "essay-1", "score": 4,
          "feedback": "Strong ideas."},
@@ -196,17 +188,16 @@ def test_merge_rows_by_uid_combines_multi_item_drafts():
         {"resolved": False, "canvas_id": "", "item_id": "essay-1", "score": 1,
          "feedback": "?"},
     ]
-    merged = fp.merge_rows_by_uid(rows, disclosure="Drafted by AI, reviewed by your teacher.")
+    merged = fp.merge_rows_by_uid(rows)
     assert set(merged) == {"42", "7"}
     combined = merged["42"]
     assert combined["score"] == 4
     assert combined["feedback"] == (
         "Item 1 of 2\nStrong ideas.\n\n"
-        "Item 2 of 2\nTeacher will review the image.\n\n"
-        "Drafted by AI, reviewed by your teacher."
+        "Item 2 of 2\nTeacher will review the image."
     )
     assert combined["item_id"] == "essay-1,photo-2"
-    assert merged["7"]["feedback"] == "Nice.\n\nDrafted by AI, reviewed by your teacher."
+    assert merged["7"]["feedback"] == "Nice."
 
 
 def test_merge_rows_by_uid_leaves_total_blank_when_an_item_is_unscored():
@@ -221,7 +212,7 @@ def test_merge_rows_by_uid_leaves_total_blank_when_an_item_is_unscored():
     assert merged["42"]["feedback"] == "Item 1 of 2\nGood.\n\nItem 2 of 2\nTeacher reviews the image."
 
 
-def test_merge_rows_by_uid_never_adds_a_disclosure_by_default():
+def test_merge_rows_by_uid_preserves_authored_text():
     rows = [{"resolved": True, "canvas_id": "42", "item_id": "a", "score": 4, "feedback": "Good."}]
     merged = fp.merge_rows_by_uid(rows)
     assert merged["42"]["feedback"] == "Good."
@@ -267,23 +258,21 @@ def test_upsert_roster_captures_preferred_name_as_nickname(tmp_path):
 
 
 def test_build_contract_text_inlines_rubric():
-    """With a rubric, the server-authored contract is self-contained."""
+    """With a scoring basis, the server-authored contract is self-contained."""
     with_rubric = fp.build_contract_text(rubric_text="3 pts: uses a loop")
     assert "3 pts: uses a loop" in with_rubric
-    assert "RUBRIC" in with_rubric
+    assert "SCORING BASIS" in with_rubric
     without = fp.build_contract_text()
-    assert "No scoring rubric was provided" in without
+    assert "No assignment directions or Canvas rubric were available" in without
     assert "3 pts: uses a loop" not in without
 
 
-def test_build_contract_text_defaults_to_glows_and_grows_without_ai_label():
+def test_build_contract_text_leaves_pedagogy_and_signatures_to_the_teacher():
     contract = fp.build_contract_text()
-    assert "glows" in contract and "grows" in contract
-    assert "must list 2-3 specific strengths" in contract
-    assert "Do not name yourself, sign off, or mention AI" in contract
-    assert "Drafted by" not in contract
-    assert "Sage" not in contract and "Coach Vale" not in contract
-    assert "&" not in contract
+    assert "feedback" in contract
+    assert "choose its pedagogy, length, structure" in contract
+    assert "must list" not in contract
+    assert "hand copy" not in contract
 
 
 def test_validate_results_catches_violations(tmp_path):
@@ -291,19 +280,18 @@ def test_validate_results_catches_violations(tmp_path):
     v = Vault(str(tmp_path / "vault.json"))
     bundle = fp.pseudonymize(parsed, v, "THG")
     bad = [
-        {"pseudonym": "S001", "item_id": "does-not-exist", "score": "high", "explanation": ""},
-        {"item_id": "x", "score": 5, "explanation": "ok", "glows": ["g"], "grows": ["g"]},  # no pseudonym
+        {"pseudonym": "S001", "item_id": "does-not-exist", "score": "high", "feedback": ""},
+        {"item_id": "x", "score": 5, "feedback": "ok"},  # no pseudonym
         {"pseudonym": "S404", "item_id": "y", "score": 1,
-         "explanation": "ok", "glows": ["g"], "grows": ["g"]},  # not in vault
+         "feedback": "ok"},  # not in vault
     ]
     out = fp.validate_results(bad, bundle, v)
     assert out["ok"] is False
     blob = " | ".join(out["errors"])
     assert "'score' must be a number" in blob
-    assert "'explanation' must be non-empty text" in blob
     assert "not in the vault" in blob
     assert "not in the bundle" in blob
-    assert "explanation" in out["fields"]
+    assert "score" in out["fields"]
 
 
 def test_validate_results_warns_on_partial_coverage(tmp_path):

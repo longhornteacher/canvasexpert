@@ -36,62 +36,6 @@ def _neutral_feedback(item):
 
 
 # --------------------------------------------------------------------------- #
-def _because(text, rationale, correct):
-    """Compose the points-back norm: '"answer" is correct/wrong. <rationale>'.
-
-    Returns an HTML <span> colored green (correct) or red (wrong) with a ✓/✗ glyph.
-    The verdict and the answer text are added here; the authored rationale follows
-    as its own sentences. An API-presentation detail, not a QuizForge-contract
-    requirement. HTML in `text` (e.g. <em>) is preserved.
-
-    The verdict is a complete sentence rather than a trailing "because" clause: a
-    rationale is now two sentences (a concept sentence, then a sentence tying it to
-    this choice), and "is correct because Each HTML element has one job..." does not
-    read as English. Keeping them as separate sentences composes with both shapes.
-    """
-    verb = "is correct" if correct else "is wrong"
-    reason = (rationale or "").strip()
-    color = "#1a6b1a" if correct else "#a50000"
-    glyph = "✓" if correct else "✗"
-    stmt = f'"{text}" {verb}.' + (f" {reason}" if reason else "")
-    return f'<span style="color:{color}">{glyph} {stmt}</span>'
-
-
-_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
-
-
-def _drop_lead_if_seen(rationale, seen):
-    """Drop a rationale's opening concept sentence if this box already said it.
-
-    Every rationale on an item opens with the same concept sentence on purpose, so
-    whichever row a student lands on carries its own teaching. One feedback box can
-    show several rows at once (the correct answer plus the choice they picked), and
-    there the repetition is just noise. Keep the first occurrence, drop the rest.
-
-    Never returns empty: a one-sentence rationale has nothing after the lead, so it
-    is left alone.
-    """
-    text = (rationale or "").strip()
-    if not text:
-        return text
-    parts = _SENTENCE_SPLIT.split(text, 1)
-    lead = parts[0].strip()
-    rest = parts[1].strip() if len(parts) > 1 else ""
-    if lead in seen and rest:
-        return rest
-    seen.add(lead)
-    return text
-
-
-def _compose_feedback(parts):
-    """Join (choice_text, rationale, is_correct) rows into one feedback box."""
-    seen = set()
-    return " ".join(
-        _because(text, _drop_lead_if_seen(rationale, seen), correct)
-        for text, rationale, correct in parts
-    )
-
-
 def t_mc(item, pos):
     rat = {c["id"]: c.get("rationale", "")
            for c in (item.get("_rationale") or {}).get("choices", [])}
@@ -102,20 +46,12 @@ def t_mc(item, pos):
         choices.append({"id": cu, "position": i, "item_body": _p(c["text"])})
         if c.get("correct"):
             correct_qid = c["id"]
-    correct_text = next(c["text"] for c in item["choices"] if c.get("correct"))
-    correct_row = (correct_text, rat.get(correct_qid, ""), True)
-
-    # Wrong choice -> "<correct> is correct. ... <this> is wrong. ..."
-    # Correct choice -> just the correct statement.
     answer_feedback = {}
     for c in item["choices"]:
         cu = idmap[c["id"]]
-        if c.get("correct"):
-            answer_feedback[cu] = _p(_compose_feedback([correct_row]))
-        else:
-            answer_feedback[cu] = _p(_compose_feedback(
-                [correct_row, (c["text"], rat.get(c["id"], ""), False)]
-            ))
+        rationale = rat.get(c["id"])
+        if rationale:
+            answer_feedback[cu] = _p(rationale)
     entry = {
         "title": item.get("id", "MC"),
         "item_body": item["prompt"],
@@ -138,20 +74,12 @@ def t_ma(item, pos):
         choices.append({"id": cu, "position": i, "item_body": _p(c["text"])})
         if c.get("correct"):
             correct.append(cu)
-    # All correct statements, so a wrong selection still gets the full set.
-    correct_rows = [(c["text"], rat.get(c["id"], ""), True)
-                    for c in item["choices"] if c.get("correct")]
     answer_feedback = {}
     for c in item["choices"]:
         cu = idmap[c["id"]]
-        if c.get("correct"):
-            answer_feedback[cu] = _p(_compose_feedback(
-                [(c["text"], rat.get(c["id"], ""), True)]
-            ))
-        else:
-            answer_feedback[cu] = _p(_compose_feedback(
-                correct_rows + [(c["text"], rat.get(c["id"], ""), False)]
-            ))
+        rationale = rat.get(c["id"])
+        if rationale:
+            answer_feedback[cu] = _p(rationale)
     entry = {
         "title": item.get("id", "MA"),
         "item_body": item["prompt"],
@@ -165,10 +93,6 @@ def t_ma(item, pos):
 
 
 def t_tf(item, pos):
-    correct_text = "True" if bool(item["answer"]) else "False"
-    rationale = (item.get("_rationale") or {}).get("rationale", "")
-    feedback = {"neutral": _p(_because(correct_text, rationale, True))} if rationale \
-        else {}
     entry = {
         "title": item.get("id", "TF"),
         "item_body": item["prompt"],
@@ -176,7 +100,7 @@ def t_tf(item, pos):
         "interaction_data": {"true_choice": "True", "false_choice": "False"},
         "scoring_data": {"value": bool(item["answer"])},
         "scoring_algorithm": "Equivalence",
-        "feedback": feedback,
+        "feedback": _neutral_feedback(item),
     }
     return _wrap(entry, pos)
 

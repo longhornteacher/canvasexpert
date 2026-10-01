@@ -11,6 +11,7 @@ TEXT_SPEC = """Title: Test Quiz
 
 ---
 Type: MC
+Points: 1
 Prompt: What is 2+2?
 Choices:
 - [x] 4
@@ -29,6 +30,7 @@ JSON_SPEC = """chatter
     {
       "id": "mc1",
       "type": "MC",
+      "points": 0.5,
       "prompt": "What is 2+2?",
       "choices": [
         {"text": "4", "correct": true},
@@ -38,13 +40,17 @@ JSON_SPEC = """chatter
     {
       "id": "tf1",
       "type": "TF",
+      "points": 0.5,
       "prompt": "Sky is blue.",
       "answer": true
     },
     { "id": "e1", "type": "STIMULUS_END", "prompt": "" }
   ],
   "rationales": [
-    {"item_id": "mc1", "correct": "2+2=4", "distractor": "3 is too low"}
+    {"item_id": "mc1", "choices": [
+      {"id": "A", "rationale": "2+2=4"},
+      {"id": "B", "rationale": "3 is too low"}
+    ]}
   ]
 }
 </QUIZFORGE_JSON>
@@ -82,8 +88,8 @@ def test_json_mode_tf_and_stimulus_end_scoring():
   _set_spec_mode("json")
   imported = import_quiz_from_llm(JSON_SPEC)
   quiz = imported.quiz
-  # After point calc, stimulus end should remain 0
-  quiz.questions = calculate_points(quiz.questions, total_points=DEFAULT_QUIZ_POINTS)
+  # Validation with an explicit total retains scored allocations and excludes stimuli.
+  quiz.questions = calculate_points(quiz.questions, total_points=1)
   stim_end = quiz.questions[-1]
   assert stim_end.qtype == "STIMULUS_END"
   assert stim_end.points == 0.0

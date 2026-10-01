@@ -17,6 +17,6 @@ def build_assessment_meta_xml(title: str, total_points: float, guid: str, instru
         "  <calculator_type>none</calculator_type>\n"
         "  <scoring_policy>keep_highest</scoring_policy>\n"
         "  <allowed_attempts>1</allowed_attempts>\n"
-        f"  <points_possible>{total_points:.1f}</points_possible>\n"
+        f"  <points_possible>{total_points}</points_possible>\n"
         "</quiz>\n"
     )

@@ -80,23 +80,22 @@ def test_validate_mc_no_correct_answer_fails():
     assert "exactly 1 correct choice" in result.errors[0]
 
 
-def test_validate_applies_point_normalization():
-    """Test that validator normalizes points."""
+def test_validate_preserves_authored_points():
+    """Validation does not rescale authored item point values."""
     validator = QuizValidator()
     quiz = Quiz(
         title="Test",
         questions=[
-            MCQuestion(qtype="MC", prompt="Q1", points=10.0, points_set=False, choices=[
+            MCQuestion(qtype="MC", prompt="Q1", points=10.0, points_set=True, choices=[
                 MCChoice(text="A", correct=True),
                 MCChoice(text="B", correct=False)
             ]),
-            TFQuestion(qtype="TF", prompt="Q2", points=10.0, points_set=False, answer_true=True)
+            TFQuestion(qtype="TF", prompt="Q2", points=10.0, points_set=True, answer_true=True)
         ]
     )
     
     result = validator.validate(quiz)
-    # Points should be normalized to ~50 each
-    assert result.quiz.questions[0].points + result.quiz.questions[1].points == 100.0
+    assert [question.points for question in result.quiz.questions] == [10.0, 10.0]
 
 
 def test_validate_allows_empty_stimulus_prompts():
@@ -109,6 +108,8 @@ def test_validate_allows_empty_stimulus_prompts():
             MCQuestion(
                 qtype="MC",
                 prompt="Q under stimulus",
+                points=1.0,
+                points_set=True,
                 choices=[MCChoice(text="A", correct=True), MCChoice(text="B", correct=False)],
             ),
             StimulusEnd(qtype="STIMULUS_END", prompt=""),

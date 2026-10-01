@@ -16,7 +16,7 @@ The runtime supports:
 - **Gradebook services** — reviewed grade adjustments, missing-work operations, and bounded runtime reads
 - **Scoring Sessions** — MCP-connected agent discovers work across every Current course,
   waits for teacher direction, then prepares one exact assignment at a time using an
-  assignment-bounded SAFE packet and writes the reviewed raw score and one plain-text
+  assignment-bounded SAFE packet and writes the reviewed score/mark and authored plain-text
   comment to Canvas once. The teacher reviews the result in Canvas Live.
 - **MCP server:** local pseudonymized reads, guarded writes, and Scoring Sessions
 - **Daily Writing:** longitudinal Writing Record and tracked-assignment Writing Timeline
@@ -139,19 +139,17 @@ changed bridge grades in Canvas Live. The teacher reviews there and owns Canvas 
   question stem; the push does not create one shared/native Canvas stimulus item.
   Questions without `stimulus_id` do not inherit the preceding stimulus;
   `STIMULUS_END` is omitted.
-- Distributes a **100-point** total across items.
+- Preserves each scored item's authored points exactly; every scored item requires a finite,
+  nonnegative value, and an optional `total_points` must match their sum.
 - Posts each item with **retry on transient failures** (429/500/502/503/504,
   exponential backoff) so a flaky gateway can't silently drop a question.
 - Sets quiz settings: **shuffle answers**, and a **results view that SHOWS the
-  rationales** by default (see the result_view_settings note under "Confirmed
-  facts" — this is core QF pedagogy). Optional: hide results, access code,
+  Canvas item feedback** by default when the author supplied it (see the
+  result_view_settings note under "Confirmed facts"). Optional: hide results, access code,
   multiple attempts, time limit, one-at-a-time, calculator type.
-- Composes **per-choice colored feedback** — the targeted layer (an API detail):
-  `✓ "choice" is correct. <rationale>` (green), `✗ "choice" is wrong.
-  <rationale>` (red). MC/MA use per-choice `answer_feedback`; the other
-  scored types use question-level `feedback.neutral`. We deliberately do **not**
-  populate the question-level correct/incorrect boxes for MC/MA — the durable
-  idea lives in the correct-answer rationale, kept at one layer for simplicity.
+- Forwards only feedback explicitly authored in the QuizForge file: MC/MA
+  rationales map to their selected choice's `answer_feedback`; other supported
+  objective types map to `feedback.neutral`. Missing feedback stays absent.
 - Embeds a visible **TEKS** label per tagged item + prints a coverage report.
 - **Classic Quizzes** (`"quiz_engine": "classic"`, teacher-chosen, a stop-gap): one whole-class
   Classic Quiz that also holds `ESSAY` and `FILEUPLOAD` items. Files without `quiz_engine`
@@ -245,7 +243,7 @@ ANTHROPIC_KEY=
   The remaining eight types create Canvas items.
   `ESSAY` and `FILEUPLOAD` are rejected before transformation or Canvas unless the file
   declares `quiz_engine: "classic"`; otherwise author each writing portion as a separate
-  100-point AssignmentForge artifact.
+  AssignmentForge artifact with teacher-chosen points.
 - A **Classic Quiz's** `assignment_id` differs from its quiz id, and a deleted classic quiz
   still answers 200 on its own GET while its assignment returns 404. See
   `docs/reference/classic-quiz-design.md`.
@@ -304,7 +302,7 @@ ANTHROPIC_KEY=
   courses where your enrollment has concluded.
 - **Scoring Sessions do not score New Quiz writing.** Preparation returns
   `new_quiz_writing_requires_assignment` before scoring norms or packet work. Grade existing
-  writing in Canvas; use a separate 100-point AssignmentForge artifact for each future
+  writing in Canvas; use a separate AssignmentForge artifact with teacher-chosen points for each future
   writing portion. Canvas Expert never writes New Quiz item scores, per-item feedback,
   assignment totals, or fallback comments.
 - **Common Cartridge import is the zero-auth power path** (Settings → Import Course

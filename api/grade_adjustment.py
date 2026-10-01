@@ -52,8 +52,8 @@ def _freshness_refusal(baseline: dict) -> dict:
 
 
 def _as_float(value, field: str):
-    if not _is_number(value):
-        raise ValueError(f"invalid_adjustment: field '{field}' must be numeric")
+    if not _is_number(value) or not math.isfinite(float(value)):
+        raise ValueError(f"invalid_adjustment: field '{field}' must be a finite number")
     return float(value)
 
 
@@ -90,13 +90,32 @@ def _canonical_adjustment(adjustment: dict) -> dict:
         }
     if not isinstance(settings, dict):
         raise ValueError("invalid_adjustment: field 'settings' must be an object")
+    exclusions = adjustment.get("exclude_pseudonyms", [])
+    if not isinstance(exclusions, list):
+        raise ValueError("invalid_adjustment: field 'exclude_pseudonyms' must be a list")
+    if any(not isinstance(value, str) or not value.strip() for value in exclusions):
+        raise ValueError("invalid_adjustment: exclusions must be non-empty pseudonym strings")
+    if len(exclusions) != len(set(exclusions)):
+        raise ValueError("invalid_adjustment: exclude_pseudonyms contains a duplicate")
     normalized = {"kind": "rule", "model": model, "settings": copy.deepcopy(settings)}
+    normalized["exclude_pseudonyms"] = [value.strip() for value in exclusions]
     for key in ("do_no_harm", "cap"):
         if key in adjustment and key not in normalized["settings"]:
             normalized["settings"][key] = adjustment[key]
     normalized["settings"].setdefault("do_no_harm", True)
     if "cap" not in normalized["settings"]:
         normalized["settings"]["cap"] = None
+    required = {
+        "flat_bump": "bump",
+        "target_average": "target_avg_pct",
+        "proportional": "target_avg_pct",
+        "floor_cap": "floor",
+    }[model]
+    if required not in normalized["settings"]:
+        raise ValueError(f"invalid_adjustment: field '{required}' is required for {model}")
+    _as_float(normalized["settings"][required], required)
+    if normalized["settings"].get("cap") not in (None, ""):
+        _as_float(normalized["settings"]["cap"], "cap")
     return normalized
 
 
@@ -107,12 +126,12 @@ def _rule_score(score: float, model: str, settings: dict,
            else _as_float(settings["cap"], "cap"))
     do_no_harm = bool(settings.get("do_no_harm", True))
     if model == "flat_bump":
-        candidate = score + _as_float(settings.get("bump", 0), "bump")
+        candidate = score + _as_float(settings["bump"], "bump")
     elif model == "target_average":
-        target_pct = _as_float(settings.get("target_avg_pct", 75), "target_avg_pct")
+        target_pct = _as_float(settings["target_avg_pct"], "target_avg_pct")
         candidate = score + (points_possible * target_pct / 100 - current_average)
     elif model == "proportional":
-        target_pct = _as_float(settings.get("target_avg_pct", 75), "target_avg_pct")
+        target_pct = _as_float(settings["target_avg_pct"], "target_avg_pct")
         total_lift = (points_possible * target_pct / 100 - current_average) * total_count
         weights = max_score - score + 1
         total_weight = sum(
@@ -120,7 +139,7 @@ def _rule_score(score: float, model: str, settings: dict,
         ) or 1
         candidate = score + weights / total_weight * total_lift
     else:
-        floor = _as_float(settings.get("floor", 0), "floor")
+        floor = _as_float(settings["floor"], "floor")
         candidate = max(min(score, cap), floor)
     candidate = min(candidate, cap)
     if do_no_harm:
@@ -129,8 +148,11 @@ def _rule_score(score: float, model: str, settings: dict,
     return candidate, candidate >= cap and score < cap
 
 
-def _summary(baseline: dict, entries: list[dict], *, extra_skipped=None) -> dict:
-    eligible = [row for row in baseline.get("entries") or [] if row.get("eligible")]
+def _summary(baseline: dict, entries: list[dict], *, extra_skipped=None,
+             excluded_ids=None) -> dict:
+    excluded_ids = {str(value) for value in excluded_ids or set()}
+    eligible = [row for row in baseline.get("entries") or []
+                if row.get("eligible") and str(row.get("user_id")) not in excluded_ids]
     before_scores = [float(row["before"]) for row in eligible]
     changed = [row for row in entries if row.get("changed")]
     after_by_user = {str(row["user_id"]): row.get("after") for row in changed}
@@ -195,7 +217,7 @@ def _pseudonyms(vault, roster: list[dict]) -> dict[str, str]:
     }
 
 
-def _prepare_entries(baseline: dict, adjustment: dict, vault) -> tuple[list[dict], dict]:
+def _prepare_entries(baseline: dict, adjustment: dict, vault) -> tuple[list[dict], dict, set[str]]:
     roster = baseline.get("roster") or []
     pseudo_by_id = _pseudonyms(vault, roster)
     by_user = {str(row["user_id"]): row for row in baseline.get("entries") or []}
@@ -203,19 +225,24 @@ def _prepare_entries(baseline: dict, adjustment: dict, vault) -> tuple[list[dict
     kind = adjustment["kind"]
     proposed = {}
     extra_skipped = {}
+    excluded_ids = set()
 
     if kind == "rule":
-        insincere_ids = session_store.posted_insincere_user_ids(
-            baseline.get("course_id"), baseline.get("assignment_id"))
+        eligible_ids = {str(row.get("user_id")) for row in eligible}
+        for requested in adjustment.get("exclude_pseudonyms", []):
+            user_id = pseudonym.resolve_pseudonym(vault, roster, requested)
+            if not user_id or str(user_id) not in eligible_ids:
+                raise ValueError(
+                    f"invalid_adjustment: pseudonym '{requested}' is not eligible for exclusion"
+                )
+            if str(user_id) in excluded_ids:
+                raise ValueError("invalid_adjustment: exclude_pseudonyms resolves to a duplicate")
+            excluded_ids.add(str(user_id))
+        if excluded_ids:
+            extra_skipped["excluded_by_teacher"] = len(excluded_ids)
         rule_rows = []
         for row in eligible:
-            if row.get("missing"):
-                extra_skipped["missing"] = extra_skipped.get("missing", 0) + 1
-            elif _numbers_equal(row.get("before"), 0):
-                extra_skipped["zero"] = extra_skipped.get("zero", 0) + 1
-            elif str(row.get("user_id")) in insincere_ids:
-                extra_skipped["insincere"] = extra_skipped.get("insincere", 0) + 1
-            else:
+            if str(row.get("user_id")) not in excluded_ids:
                 rule_rows.append(row)
         scores = [float(row["before"]) for row in rule_rows]
         settings = copy.deepcopy(adjustment["settings"])
@@ -289,7 +316,7 @@ def _prepare_entries(baseline: dict, adjustment: dict, vault) -> tuple[list[dict
             "capped": bool(capped),
         })
     entries.sort(key=lambda row: row.get("pseudonym") or row["user_id"])
-    return entries, extra_skipped
+    return entries, extra_skipped, excluded_ids
 
 
 def _report_operations() -> list[dict]:
@@ -413,7 +440,7 @@ def preview_grade_adjustment(course_id: str, assignment_id: str,
             return _freshness_refusal(baseline)
         vault = _vault()
         with vault.transaction():
-            entries, extra_skipped = _prepare_entries(baseline, normalized, vault)
+            entries, extra_skipped, excluded_ids = _prepare_entries(baseline, normalized, vault)
         entries = [row for row in entries if row.get("changed")]
         if not entries:
             return {"ok": False, "code": "no_changes",
@@ -424,7 +451,8 @@ def preview_grade_adjustment(course_id: str, assignment_id: str,
             "assignment_title": payload["assignment_name"],
             "points_possible": payload["points_possible"],
             "adjustment": copy.deepcopy(normalized),
-            "summary": _summary(baseline, entries, extra_skipped=extra_skipped),
+            "summary": _summary(baseline, entries, extra_skipped=extra_skipped,
+                                 excluded_ids=excluded_ids),
             "changed": [{"pseudonym": row["pseudonym"],
                          "before": row["before"], "after": row["after"]}
                         for row in entries],

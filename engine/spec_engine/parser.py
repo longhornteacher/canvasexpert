@@ -252,4 +252,5 @@ def parse_news_json(text: str) -> QuizPayload:
         items=sanitized_items,
         rationales=rationales,
         instructions=instructions,
+        total_points=data.get("total_points"),
     )

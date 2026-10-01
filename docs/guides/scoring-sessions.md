@@ -23,18 +23,20 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
 
 ## Agent workflow
 
-1. The base Glows and Grows feedback shape is always in effect; no selection
-   replaces it. If the teacher wants to add a saved judgment/feedback contract,
-   call `list_feedback_contracts()` first. After the teacher selects an exact
+1. Teacher and host agent author feedback. If the teacher wants to select a
+   saved feedback contract, call `list_feedback_contracts()` first. After the teacher selects an exact
    row, call `prepare_scoring_session(course_id, assignment_id,
    scoring_guidance="", feedback_contract_id="")`. An explicit contract id layers
    on top of the base shape; neither is required. Non-empty conversational
    guidance is not a second copy there: it layers onto the scoring basis instead,
    as the existing teacher-directive rubric block, so it appears exactly once.
    Preparation consumes only valid local `current` roster, assignment, and
-   submission projections. Non-empty assignment content is authoritative; a Canvas
-   rubric is used only when assignment content is empty. Otherwise missing norms return
-   `needs_scoring_norms` with a bounded teacher question.
+   submission projections. Usable assignment directions/content, the Canvas rubric, and
+   explicit teacher direction appear as separately labeled scoring-basis components.
+   Teacher direction controls scoring decisions; assignment content and rubric remain
+   available as context. If no context or teacher direction exists, preparation returns
+   `needs_scoring_norms` with a bounded teacher question. Missing or invalid Canvas points
+   return `assignment_points_unavailable`; zero is preserved.
 
    During Monday-Friday 07:00-16:30 America/Chicago, a valid current snapshot may
    be silently up to 60 minutes old; outside those hours the threshold is 600
@@ -55,18 +57,25 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
    instructions.
 
 4. Score only the SAFE pseudonymized ordinary-assignment responses. New Quiz
-   writing stays in Canvas; future writing portions use separate 100-point
-   AssignmentForge assignments.
+   writing stays in Canvas; future writing portions use separate AssignmentForge
+   assignments with teacher-chosen points.
 
 5. Call `stage_scoring_results(scoring_session_id, results,
-   expected_packet_digest, review_digest="", answers=null)`. The default
+   expected_packet_digest, review_digest="", answers=null)`. Each result has
+   `pseudonym`, `item_id`, `score`, and authored `feedback`; no feedback
+   structure or length is required. Numeric score-only rows use an empty string.
+   A null score requires non-empty feedback. The default
    `grade_mode` is `post_score`. When the teacher directs a numeric draft score
    in feedback without a gradebook score, pass `grade_mode="feedback_only"`;
-   Canvas Expert keeps and validates the numeric score, renders `Draft score: X/Y`,
-   and sends only the comment, with no gradebook or late-policy fields.
+   Canvas Expert keeps and validates the numeric score, prefixes the comment
+   with `Draft score: X/Y`, and sends only the comment, with no gradebook or
+   late-policy fields. In `post_score`, authored feedback reaches Canvas
+   unchanged, with no automatic grading-policy footer. Numeric score-only rows send no
+   comment, even when effort credit changes the grade. Selected feedback guidance can choose pedagogy, length, structure,
+   headings, exemplars, revision tasks, tone, and emphasis, subject to privacy,
+   scope, score, and posting boundaries.
    Feedback-only scoring skips effort-credit calculations and late-day or
-   insincere-attempt questions. Validation,
-   correction injection, privacy checks, and bounded review questions happen
+   insincere-attempt questions. Validation, privacy checks, and bounded review questions happen
    locally. A successful stage performs zero Canvas calls and returns an opaque
    `stage_digest` plus aggregate counts.
 

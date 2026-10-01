@@ -198,7 +198,7 @@ def _on_disk_scoring_session(tmp_path, monkeypatch):
 
         bundle_path = tmp_path / "bundle.json"
         bundle_path.write_text(json.dumps({
-            "contract_version": "1.0",
+            "contract_version": "2.0",
             "quiz_title": "Test Quiz",
             "students": [{
                 "pseudonym": pseudonym_value,

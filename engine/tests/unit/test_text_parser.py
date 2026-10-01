@@ -13,6 +13,7 @@ def test_parse_simple_mc_question():
 
 ---
 Type: MC
+Points: 1
 Prompt: What is 2+2?
 Choices:
 - [x] 4
@@ -40,6 +41,7 @@ def test_parse_tf_question():
 
 ---
 Type: TF
+Points: 1
 Prompt: Python is a programming language.
 Answer: true
 ---
@@ -59,6 +61,7 @@ def test_parse_numerical_exact():
 
 ---
 Type: NUMERICAL
+Points: 1
 Prompt: What is pi to 2 decimal places?
 Answer: 3.14
 ---
@@ -79,6 +82,7 @@ def test_parse_numerical_with_tolerance():
 
 ---
 Type: NUMERICAL
+Points: 1
 Prompt: What is the speed of light in m/s?
 Answer: 299792458
 Tolerance: 1%
@@ -100,6 +104,7 @@ def test_parse_numerical_with_range():
 
 ---
 Type: NUMERICAL
+Points: 1
 Prompt: Estimate the population of Texas.
 Range: 25000000 to 35000000
 ---
@@ -120,16 +125,19 @@ def test_parse_multiple_questions():
 
 ---
 Type: MC
+Points: 1
 Prompt: Question 1
 Choices:
 - [x] A
 - [ ] B
 ---
 Type: TF
+Points: 1
 Prompt: Question 2
 Answer: false
 ---
 Type: MC
+Points: 1
 Prompt: Question 3
 Choices:
 - [ ] A
@@ -173,27 +181,27 @@ Answer: true
     assert quiz.questions[1].points_set is True
 
 
-def test_parse_normalizes_points():
-    """Test that parser normalizes points to 100 when not explicitly set."""
+def test_parse_preserves_explicit_points():
+    """Text import keeps each authored point value without rescaling it."""
     text = """Title: Auto Points
-
-TotalPoints: 100
-KeepPoints: false
 
 ---
 Type: MC
+Points: 0.25
 Prompt: Q1
 Choices:
 - [x] A
 - [ ] B
 ---
 Type: MC
+Points: 0.25
 Prompt: Q2
 Choices:
 - [x] A
 - [ ] B
 ---
 Type: MC
+Points: 0.5
 Prompt: Q3
 Choices:
 - [x] A
@@ -203,9 +211,8 @@ Choices:
     parser = TextOutlineParser()
     quiz = parser.parse_text(text)
     
-    # Parser should normalize to ~33 points each (totaling 100)
-    total = sum(q.points for q in quiz.questions)
-    assert 99 <= total <= 101  # Allow rounding tolerance
+    assert [q.points for q in quiz.questions] == [0.25, 0.25, 0.5]
+    assert [q.points_set for q in quiz.questions] == [True, True, True]
 
 
 def test_parse_title_override():
@@ -214,6 +221,7 @@ def test_parse_title_override():
 
 ---
 Type: TF
+Points: 1
 Prompt: Question
 Answer: true
 ---
@@ -228,6 +236,7 @@ def test_parse_missing_title_uses_default():
     """Test that missing title gets default value."""
     text = """---
 Type: TF
+Points: 1
 Prompt: Question
 Answer: true
 ---

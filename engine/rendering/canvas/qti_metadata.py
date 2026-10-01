@@ -54,7 +54,7 @@ def add_item_metadata(item: ET.Element, question: Question) -> None:
     if isinstance(question, StimulusItem):
         _add_field(qtimetadata, "points_possible", "0.0")
     else:
-        _add_field(qtimetadata, "points_possible", f"{question.points:.1f}")
+        _add_field(qtimetadata, "points_possible", str(question.points))
 
     if _uses_calculator_none(question):
         _add_field(qtimetadata, "calculator_type", "none")

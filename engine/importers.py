@@ -37,6 +37,7 @@ from engine.spec_engine import packager as news_packager
 from engine.spec_engine import parser as news_parser
 from engine.spec_engine import parser as spec_parser
 from engine.utils.json_lint import lint_json_syntax, repair_json
+from engine.validation.authored_points import authored_point_problems
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,9 @@ class JsonImporter:
             raise JsonImportError(f"JSON import failed: {e}", lint_errors=lint_errors) from e
         except Exception as e:
             raise JsonImportError(f"JSON import failed: {e}") from e
+        point_problems = authored_point_problems(payload.items, payload.total_points)
+        if point_problems:
+            raise JsonImportError(f"QuizForge point validation failed: {point_problems[0]}")
         logger.debug("Parsed JSON payload version=%s", payload.version)
 
         packaged = news_packager.package_quiz(payload, context="default")

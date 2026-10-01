@@ -15,6 +15,7 @@ def test_large_quiz_performance():
         questions.append(f"""
 ---
 Type: MC
+Points: 1
 Prompt: Question {i+1}
 Choices:
 - [x] Correct

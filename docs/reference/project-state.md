@@ -46,6 +46,11 @@ slice-specific.
 - **One source of truth per artifact.** Never ship a static copy *and* a
   generated copy of the same thing (e.g. an authoring contract or a scoring
   skill). Pick the one canonical source; generate or read from it everywhere.
+- **Teacher-owned pedagogy and points.** The teacher and assistant choose teaching
+  approach, standards, cognitive level, tier targets and rigor, feedback style, revision
+  tasks, point values, and curve target/selection. Canvas Expert enforces delivery shapes,
+  tier privacy, explicit review boundaries, and technical validity without prescribing
+  those instructional choices.
 - **Lean, and don't reinvent host interfaces.** The authoring contracts and teacher
   docs must be lean and un-wordy. Do not invent bespoke personas, make whole-file
   instructions the default for a connected agent, or add step-by-step orchestration

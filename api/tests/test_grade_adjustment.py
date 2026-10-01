@@ -122,10 +122,9 @@ def test_invalid_pseudonym_is_named_and_no_changes_are_refused(service_harness):
     }
 
 
-def test_rule_curve_never_lifts_a_missing_zero_or_insincere_row(monkeypatch):
-    """Law: a rule curve never changes a missing, zero, or posted
-    confirmed-insincere row; an explicit adjustment (the teacher fixing named
-    rows) may still target them."""
+def test_rule_curve_includes_all_eligible_rows_unless_teacher_excludes(monkeypatch):
+    """LAW: missing, zero, and previously insincere grades remain in the
+    rule population unless the teacher explicitly excludes a pseudonym."""
     baseline = {
         "course_id": "course-1", "assignment_id": "assignment-1",
         "assignment": {"id": "assignment-1", "name": "Curve Lab",
@@ -152,21 +151,30 @@ def test_rule_curve_never_lifts_a_missing_zero_or_insincere_row(monkeypatch):
     monkeypatch.setattr(grade_adjustment, "_vault", lambda: vault)
     monkeypatch.setattr(adapter_module, "_mirror_baseline",
                         lambda payload, target: copy.deepcopy(baseline))
-    from api.powergrader import session_store
-    monkeypatch.setattr(session_store, "posted_insincere_user_ids",
-                        lambda course_id, assignment_id: {"student-4"})
-
     rule_preview = grade_adjustment.preview_grade_adjustment(
         "course-1", "assignment-1",
         {"kind": "rule", "model": "flat_bump", "settings": {"bump": 5}},
     )
     assert rule_preview["ok"] is True
     assert rule_preview["preview"]["changed"] == [
+        {"pseudonym": "Charmander", "before": 5, "after": 10},
+        {"pseudonym": "Eevee", "before": 0, "after": 5},
         {"pseudonym": "Pikachu", "before": 4, "after": 9},
+        {"pseudonym": "Snorlax", "before": 0, "after": 5},
     ]
-    assert rule_preview["preview"]["summary"]["skipped"]["zero"] == 1
-    assert rule_preview["preview"]["summary"]["skipped"]["missing"] == 1
-    assert rule_preview["preview"]["summary"]["skipped"]["insincere"] == 1
+    assert rule_preview["preview"]["summary"]["eligible"] == 4
+    assert rule_preview["preview"]["summary"]["skipped"] == {}
+
+    excluded_preview = grade_adjustment.preview_grade_adjustment(
+        "course-1", "assignment-1",
+        {"kind": "rule", "model": "flat_bump", "settings": {"bump": 5},
+         "exclude_pseudonyms": ["Snorlax"]},
+    )
+    assert [row["pseudonym"] for row in excluded_preview["preview"]["changed"]] == [
+        "Charmander", "Eevee", "Pikachu",
+    ]
+    assert excluded_preview["preview"]["summary"]["eligible"] == 3
+    assert excluded_preview["preview"]["summary"]["skipped"] == {"excluded_by_teacher": 1}
 
     explicit_preview = grade_adjustment.preview_grade_adjustment(
         "course-1", "assignment-1",
