@@ -57,7 +57,9 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 66 (59 tools). Version 66 adds `preview_attempts_grant` and
+Tool schema version 67 (59 tools). Version 67 adds optional `grade_mode` (`post_score` default, or
+`feedback_only`) to `stage_scoring_results`: `feedback_only` posts the numeric draft score in the
+feedback comment only and sends no gradebook score or grade-policy fields. Version 66 adds `preview_attempts_grant` and
 `apply_attempts_grant`, the reviewed extra-attempts and reopen grant for one assignment (regular
 online, Classic Quiz, or New Quiz): `grant` names `students` (`"all"` or an exact pseudonym list),
 `extra_attempts` (1 to 100, or `"unlimited"` for `"all"` only), and/or a `reopen` window. The
@@ -138,7 +140,7 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `handoff_work_item(work_id)` | Release this device's lease so another device can resume after sync | No |
 | `take_over_work_item(work_id, confirm_stale=false)` | Acquire a released item after sync, or explicitly confirm takeover after a stale lease | No |
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
-| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, exemplars=None, disclosure="")` | Validate structured results (`explanation`, `glows`, `grows`, optional `fixes`, optional `insincere`/`late_days` in a grading-policy course), render Canvas Expert's one fixed feedback layout, and freeze locally; `exemplars` supplies one shared model answer per item below full marks or null-scored; refuses `missing_exemplars` by item id alone; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |
+| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, exemplars=None, disclosure="", grade_mode="post_score")` | Validate structured results (`explanation`, `glows`, `grows`, optional `fixes`, optional `insincere`/`late_days` in a grading-policy course), render Canvas Expert's one fixed feedback layout, and freeze locally; `exemplars` supplies one shared model answer per item below full marks or null-scored; refuses `missing_exemplars` by item id alone; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |
 | `apply_staged_scoring_results(scoring_session_id, expected_stage_digest, idempotency_key="")` | Post only the unchanged private stage after a direct teacher instruction; preserves narrow transport and idempotency safeguards | Yes, pseudonymized |
 
 `get_course_assignments` and `get_modules` only read the local course catalog written by

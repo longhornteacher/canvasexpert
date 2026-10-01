@@ -74,7 +74,7 @@ def _strip_draft_banner(feedback: str) -> str:
     return _DRAFT_BANNER_RE.sub("", feedback, count=1).strip()
 
 
-def _payload(student: dict) -> dict:
+def _payload(student: dict, *, grade_mode: str = "post_score") -> dict:
     # Single grading surface: PowerGrader is the only writer of an AI-feedback
     # submission comment (``comment[text_comment]``). Gradebook may adjust
     # ``posted_grade`` (curve/late/extension) but never writes feedback here.
@@ -87,28 +87,34 @@ def _payload(student: dict) -> dict:
         )
     )
 
+    # Feedback-only scoring keeps the numeric draft in the rendered comment,
+    # but must never send a grade or policy field to Canvas.
+    if grade_mode == "feedback_only":
+        posted_grade = None
+        days = None
     # This is the only place the mark and late fields are computed, so the
     # projected payload in a plan digest is exactly what gets sent (see
     # docs/contracts/grading-policy-contract.md section 5). Without a
     # ``grading`` stamp this function is byte-identical to today.
-    days = None
-    if grading:
-        points_possible = grading.get("points_possible")
-        posted_grade = grading_policy.mark(
-            score, points_possible, grading.get("floor_percent"), bool(grading.get("insincere")),
-        )
-        if student.get("canvas_late"):
-            days = grading.get("late_days")
-            if days is None:
-                days = grading.get("suggested_late_days")
-        if posted_grade is not None and score is not None and float(posted_grade) != float(score):
-            line = (f"Entered in the gradebook: {_format_number(posted_grade)}"
-                    f"/{_format_number(points_possible)}.")
-            if days is not None and days > 0:
-                line += " Canvas applies the late penalty to that."
-            feedback = f"{feedback}\n\n{line}" if feedback else line
     else:
-        posted_grade = score
+        days = None
+        if grading:
+            points_possible = grading.get("points_possible")
+            posted_grade = grading_policy.mark(
+                score, points_possible, grading.get("floor_percent"), bool(grading.get("insincere")),
+            )
+            if student.get("canvas_late"):
+                days = grading.get("late_days")
+                if days is None:
+                    days = grading.get("suggested_late_days")
+            if posted_grade is not None and score is not None and float(posted_grade) != float(score):
+                line = (f"Entered in the gradebook: {_format_number(posted_grade)}"
+                        f"/{_format_number(points_possible)}.")
+                if days is not None and days > 0:
+                    line += " Canvas applies the late penalty to that."
+                feedback = f"{feedback}\n\n{line}" if feedback else line
+        else:
+            posted_grade = score
 
     payload: dict = {}
     if posted_grade is not None:
@@ -187,6 +193,7 @@ def push_grades(
     save_session,
     canvas_send,
     idempotency_key: str = "",
+    grade_mode: str = "post_score",
 ) -> tuple[dict, int]:
     """Send the reviewed raw score and comment once, then record the outcome.
 
@@ -211,13 +218,13 @@ def push_grades(
     pushed = 0
     for user_id in requested:
         student = students.get(user_id)
-        if not student or not _payload(student):
+        if not student or not _payload(student, grade_mode=grade_mode):
             return {"ok": False, "code": "payload_changed",
                     "error": "The reviewed grade or feedback changed. Review again."}, 409
         if student.get("status") != "approved" or student.get("posted"):
             return {"ok": False, "code": "payload_changed",
                     "error": "The reviewed grade or feedback changed. Review again."}, 409
-        payload = _payload(student)
+        payload = _payload(student, grade_mode=grade_mode)
         payload_digest = _digest(payload)
         target_digest = _digest({"user_id": user_id, "payload": payload})
         idem_slot = f"{request_key}:{user_id}" if request_key else user_id

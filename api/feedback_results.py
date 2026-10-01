@@ -97,21 +97,23 @@ def _format_number(value) -> str | None:
     return str(number)
 
 
-def _score_line(score, possible) -> str | None:
+def _score_line(score, possible, *, grade_mode: str = "post_score") -> str | None:
     if score is None:
         return None
+    label = "Draft score" if grade_mode == "feedback_only" else "Score"
     formatted = _format_number(score)
     possible_formatted = _format_number(possible) if possible is not None else None
     if possible_formatted is None:
-        return f"Score: {formatted}"
-    return f"Score: {formatted}/{possible_formatted}"
+        return f"{label}: {formatted}"
+    return f"{label}: {formatted}/{possible_formatted}"
 
 
 _DIVIDER = "-" * 40
 
 
 def render_feedback_item(result: dict, *, possible=None, exemplar: str = "",
-                         correction: dict | None = None) -> str:
+                         correction: dict | None = None,
+                         grade_mode: str = "post_score") -> str:
     """Render one SAFE result's structured fields into the fixed plain-text layout.
 
     ``possible`` is the item's max score from the SAFE bundle. ``correction``
@@ -126,7 +128,7 @@ def render_feedback_item(result: dict, *, possible=None, exemplar: str = "",
              if str(g or "").strip()]
 
     blocks = []
-    score_line = _score_line(score, possible)
+    score_line = _score_line(score, possible, grade_mode=grade_mode)
     if score_line:
         blocks.append(score_line)
     if explanation:
@@ -164,9 +166,51 @@ def _possible_by_key(bundle: dict | None) -> dict:
     return possible
 
 
+def relabel_rendered_score_lines(feedback: str, *, grade_mode: str,
+                                 scores: list | None = None) -> str:
+    """Change only rendered score-line labels in an existing draft comment.
+
+    Item sections start with ``Item N of M`` and each item's score line is its
+    first following line. Preserve every other character and line ending so a
+    mode change does not rewrite prior feedback or its numeric values.
+    """
+    label = "Draft score" if grade_mode == "feedback_only" else "Score"
+    lines = str(feedback or "").splitlines(keepends=True)
+    previous = ""
+    score_index = 0
+    scores = scores or []
+    for index, line in enumerate(lines):
+        content = line.rstrip("\r\n")
+        ending = line[len(content):]
+        is_score_position = index == 0 or re.fullmatch(r"Item \d+ of \d+", previous)
+        if is_score_position:
+            score = scores[score_index] if score_index < len(scores) else None
+            score_index += 1
+            for old_label in ("Score", "Draft score"):
+                prefix = f"{old_label}: "
+                expected = _format_number(score)
+                numeric_suffix = content[len(prefix):] if content.startswith(prefix) else ""
+                matches_score = (
+                    score is not None
+                    and numeric_suffix.startswith(str(expected))
+                    and re.fullmatch(
+                        re.escape(str(expected))
+                        + r"(?:/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)?",
+                        numeric_suffix,
+                    ) is not None
+                )
+                if matches_score:
+                    content = f"{label}: " + content[len(prefix):]
+                    break
+        lines[index] = content + ending
+        previous = content
+    return "".join(lines)
+
+
 def render_results(results: list, *, bundle: dict | None = None,
                    exemplars: dict | None = None,
-                   corrections_by_item: dict | None = None) -> list:
+                   corrections_by_item: dict | None = None,
+                   grade_mode: str = "post_score") -> list:
     """Render every validated SAFE result's fields into final feedback text.
 
     Returns new result dicts carrying a rendered ``feedback`` string built
@@ -186,6 +230,7 @@ def render_results(results: list, *, bundle: dict | None = None,
             possible=possible.get(key),
             exemplar=exemplars.get(item_id, ""),
             correction=corrections_by_item.get(item_id),
+            grade_mode=grade_mode,
         )
         rendered.append(row)
     return rendered

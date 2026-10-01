@@ -118,7 +118,7 @@ _PAGE_COLUMNS = ("id", "title", "body_text", "published", "front_page", "updated
 _STAGED_CONTENT_COLUMNS = ("kind", "label")
 _SCORING_SESSION_COLUMNS = (
     "scoring_session_id", "created", "status", "assignment_name",
-    "total", "approved", "posted",
+    "total", "approved", "posted", "grade_mode",
 )
 _PACKET_ITEM_COLUMNS = ("item_id", "prompt", "possible")
 _PACKET_STUDENT_COLUMNS = (
@@ -141,7 +141,11 @@ _NEXT_STEPS = {
         "expected_packet_digest."
     ),
     "stage_scoring_results": (
-        "Stage validated results locally. Summarize the staged aggregate and wait for "
+        "Stage validated results locally. Use grade_mode='feedback_only' only when "
+        "the teacher directed a numeric draft score in feedback without a gradebook "
+        "score; otherwise omit grade_mode for the existing post_score behavior. A "
+        "selected mode is stored with this assignment session, so omit it on a review "
+        "resubmission to keep that choice. Summarize the staged aggregate and wait for "
         "a direct teacher request to post this exact stage before applying it."
     ),
     "apply_staged_scoring_results": (
@@ -2564,11 +2568,12 @@ def list_scoring_sessions() -> dict:
     active_course_ids = {str(c.get("id") or "") for c in config.active_courses()}
     rows = []
     for summary in session_store.current_actionable_sessions(course_ids=active_course_ids):
+        session = session_store.load_session(summary.get("session_id")) or {}
         rows.append([
             summary.get("session_id"), summary.get("created"),
             summary.get("status"), summary.get("assignment_name"),
             summary.get("total", 0), summary.get("approved", 0),
-            summary.get("posted", 0),
+            summary.get("posted", 0), session.get("grade_mode") or "post_score",
         ])
     rows.sort(key=lambda row: str(row[1] or ""), reverse=True)
     return {"ok": True, "sessions": {
@@ -2821,7 +2826,8 @@ def stage_scoring_results(scoring_session_id: str, results: list,
                           expected_packet_digest: str, review_digest: str = "",
                           answers: dict | None = None,
                           exemplars: dict | None = None,
-                          disclosure: str = "") -> dict:
+                          disclosure: str = "",
+                          grade_mode: str | None = None) -> dict:
     """Validate and freeze one exact scoring result set without Canvas I/O.
 
     One {pseudonym, item_id, score, explanation, glows, grows} result per
@@ -2831,6 +2837,10 @@ def stage_scoring_results(scoring_session_id: str, results: list,
     and resubmit unchanged with answers filled in. A successful call stores
     the private write plan for a later explicit apply."""
     from api.powergrader import session_store
+
+    if grade_mode is not None and grade_mode not in ("post_score", "feedback_only"):
+        return {"ok": False, "code": "invalid_grade_mode",
+                "error": "grade_mode must be 'post_score' or 'feedback_only'."}
 
     lease_error = _scoring_work_lease_refusal(scoring_session_id)
     if lease_error:
@@ -2848,7 +2858,8 @@ def stage_scoring_results(scoring_session_id: str, results: list,
         return _stage_scoring_results_locked(
             scoring_session_id, results, expected_packet_digest,
             review_digest=review_digest, answers=answers,
-            exemplars=exemplars, disclosure=disclosure)
+            exemplars=exemplars, disclosure=disclosure,
+            grade_mode=grade_mode)
 
 
 def _stage_scoring_results_locked(scoring_session_id: str, results: list,
@@ -2856,7 +2867,8 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                                   review_digest: str = "",
                                   answers: dict | None = None,
                                   exemplars: dict | None = None,
-                                  disclosure: str = "") -> dict:
+                                  disclosure: str = "",
+                                  grade_mode: str | None = None) -> dict:
     """Validate SAFE results, ask bounded risk questions, then freeze locally.
 
     The Canvas transport stays below this MCP boundary and is never reached.
@@ -2874,6 +2886,11 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                 "error": "The assignment-scoped Scoring Session was not found."}
     if not _is_current_scoring_session(session):
         return _session_superseded(scoring_session_id)
+    grade_mode = str(grade_mode if grade_mode is not None
+                     else session.get("grade_mode") or "post_score")
+    if grade_mode not in ("post_score", "feedback_only"):
+        return {"ok": False, "code": "invalid_grade_mode",
+                "error": "grade_mode must be 'post_score' or 'feedback_only'."}
     gate_error = _course_gate_check(str(session.get("course_id") or ""))
     if gate_error:
         return {"ok": False, "code": "course_unavailable", "error": gate_error}
@@ -2928,7 +2945,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
 
     rendered = fp.render_results(
         results, bundle=safe_bundle, exemplars=exemplars,
-        corrections_by_item=corrections_by_item,
+        corrections_by_item=corrections_by_item, grade_mode=grade_mode,
     )
     try:
         rows = fp.reidentify(rendered, vault)
@@ -2948,8 +2965,39 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
             every_pseudonym.append(label)
     by_uid = fp.merge_rows_by_uid(rows, disclosure=disclosure)
     item_by_uid = fp.item_rows_by_uid(rows)
+    previous_grade_mode = str(session.get("grade_mode") or "post_score")
+    mode_feedback_updates = {}
+    if previous_grade_mode != grade_mode:
+        for prior in session.get("students") or []:
+            user_id = str(prior.get("user_id") or "")
+            if (not user_id or prior.get("posted") or prior.get("status") == "posted"
+                    or prior.get("push_state") == "sent_unknown"):
+                continue
+            if (prior.get("ai_score") is None
+                    and not str(prior.get("ai_feedback") or "").strip()):
+                continue
+            prior_items = prior.get("ai_item_results") or []
+            scores = [item.get("score") for item in prior_items]
+            item_results = []
+            for item in prior_items:
+                revised = dict(item)
+                if "feedback" in revised:
+                    revised["feedback"] = fp.relabel_rendered_score_lines(
+                        revised.get("feedback") or "", grade_mode=grade_mode,
+                        scores=[item.get("score")])
+                item_results.append(revised)
+            mode_feedback_updates[user_id] = {
+                "ai_feedback": fp.relabel_rendered_score_lines(
+                    prior.get("ai_feedback") or "", grade_mode=grade_mode,
+                    scores=scores or [prior.get("ai_score")]),
+                "ai_item_results": item_results,
+            }
     candidate = copy.deepcopy(session)
+    candidate["grade_mode"] = grade_mode
     students_by_uid = {str(st.get("user_id")): st for st in candidate.get("students") or []}
+    for user_id, update in mode_feedback_updates.items():
+        if user_id in students_by_uid:
+            students_by_uid[user_id].update(update)
     for user_id, row in by_uid.items():
         student = students_by_uid.get(str(user_id))
         if student:
@@ -2961,7 +3009,8 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
     # (grading-policy-contract.md section 5). insincere/late_days are read
     # straight from the incoming results, index-aligned with rows by canvas_id,
     # and never threaded through reidentify or merge_rows_by_uid.
-    if session.get("session_kind") == "scoring_assignment":
+    if (session.get("session_kind") == "scoring_assignment"
+            and grade_mode == "post_score"):
         try:
             policy = grading_policy.load_policy()
         except grading_policy.GradingPolicyFileError as exc:
@@ -3015,6 +3064,9 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
             for user_id, student in students_by_uid.items():
                 if user_id in by_uid:
                     student.pop("grading", None)
+    elif session.get("session_kind") == "scoring_assignment":
+        for student in students_by_uid.values():
+            student.pop("grading", None)
 
     # Ordinary assignment risk planning. Its internal user ids are translated
     # before any question can cross MCP. Planning performs no Canvas read.
@@ -3041,6 +3093,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                                  and not st.get("posted"))
                 response = {"ok": True, "status": "needs_teacher_input",
                     "review_digest": plan["digest"], "questions": safe["questions"],
+                    "grade_mode": grade_mode,
                     "counts": {"ready": len(plan["candidate_ids"]),
                                "held": held_count}}
                 with session_store.scope_lock(session.get("course_id"),
@@ -3049,11 +3102,17 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                             _load_scoring_assignment_session(scoring_session_id) or {}):
                         return _session_superseded(scoring_session_id)
                     return _record_scoring_session_result(
-                        scoring_session_id, pseudonym.gate(response, vault))
+                        scoring_session_id, pseudonym.gate(response, vault),
+                        grade_mode=grade_mode,
+                        draft_updates=mode_feedback_updates)
             if str(review_digest) != str(plan.get("digest")):
-                return _review_changed_response(plan, names, candidate)
+                return _review_changed_response(
+                    plan, names, candidate, scoring_session_id=scoring_session_id,
+                    draft_updates=mode_feedback_updates)
         elif review_digest:
-            return _review_changed_response(plan, names, candidate)
+            return _review_changed_response(
+                plan, names, candidate, scoring_session_id=scoring_session_id,
+                draft_updates=mode_feedback_updates)
 
         resolved = scoring_apply.resolve_answers(plan, answers)
         if not resolved.get("ok"):
@@ -3081,6 +3140,12 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                             target["grading"] = staged["grading"]
                         else:
                             target.pop("grading", None)
+                    elif target and uid in mode_feedback_updates:
+                        target["ai_feedback"] = staged.get("ai_feedback") or ""
+                        target["ai_item_results"] = staged.get("ai_item_results") or []
+                if grade_mode == "feedback_only":
+                    for target in current_by_uid.values():
+                        target.pop("grading", None)
                 normalized_answers = {str(key): str(value) for key, value in (answers or {}).items()}
                 selected_ids = [str(uid) for uid in resolved.get("user_ids") or []]
                 stage_identity = {
@@ -3089,13 +3154,17 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                     "selected_user_ids": selected_ids,
                     "answers": {key: normalized_answers[key] for key in sorted(normalized_answers)},
                 }
+                if grade_mode == "feedback_only":
+                    stage_identity["grade_mode"] = grade_mode
                 stage_digest = _canonical_digest(stage_identity)
                 current["staged_scoring_apply"] = {
                     **stage_identity,
+                    "grade_mode": grade_mode,
                     "stage_digest": stage_digest,
                     "skipped_user_ids": [str(uid) for uid in resolved.get("skipped") or []],
                     "candidate_user_ids": [str(uid) for uid in plan.get("candidate_ids") or []],
                 }
+                current["grade_mode"] = grade_mode
                 current["status"] = "staged"
                 session_store.save_session(current)
             held_user_ids = {str(st.get("user_id") or "") for st in session.get("students") or []
@@ -3105,6 +3174,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                 "ok": True, "status": "staged",
                 "scoring_session_id": scoring_session_id,
                 "stage_digest": stage_digest,
+                "grade_mode": grade_mode,
                 "counts": {"ready": len(selected_ids), "held": len(held_user_ids)},
             }
             return _with_next("stage_scoring_results", pseudonym.gate(response, vault))
@@ -3155,12 +3225,20 @@ def _apply_staged_scoring_results_locked(scoring_session_id: str,
     if not isinstance(stage, dict):
         return {"ok": False, "code": "stage_invalid",
                 "error": "The exact scoring stage is malformed and cannot be applied."}
+    stage_grade_mode = str(stage.get("grade_mode") or "post_score")
+    session_grade_mode = str(session.get("grade_mode") or "post_score")
+    if (stage_grade_mode not in ("post_score", "feedback_only")
+            or stage_grade_mode != session_grade_mode):
+        return {"ok": False, "code": "stage_changed",
+                "error": "The scoring grade mode changed. Stage the exact results again."}
     identity = {
         "expected_packet_digest": str(stage.get("expected_packet_digest") or ""),
         "plan_digest": str(stage.get("plan_digest") or ""),
         "selected_user_ids": [str(uid) for uid in stage.get("selected_user_ids") or []],
         "answers": {str(key): str(value) for key, value in (stage.get("answers") or {}).items()},
     }
+    if stage_grade_mode == "feedback_only":
+        identity["grade_mode"] = stage_grade_mode
     if not identity["expected_packet_digest"] or not identity["plan_digest"]:
         return {"ok": False, "code": "stage_invalid",
                 "error": "The exact scoring stage is malformed and cannot be applied."}
@@ -3249,7 +3327,9 @@ def _apply_staged_scoring_results_locked(scoring_session_id: str,
     return _with_next("apply_staged_scoring_results", result)
 
 
-def _record_scoring_session_result(scoring_session_id: str, result: dict) -> dict:
+def _record_scoring_session_result(scoring_session_id: str, result: dict,
+                                   *, grade_mode: str | None = None,
+                                   draft_updates: dict | None = None) -> dict:
     """Persist terminal outcome on only the exact assignment session."""
     from api.powergrader import session_store
 
@@ -3258,6 +3338,15 @@ def _record_scoring_session_result(scoring_session_id: str, result: dict) -> dic
         if not session:
             return {"ok": False, "code": "session_not_found",
                     "error": "The assignment-scoped Scoring Session was not found."}
+        if grade_mode is not None:
+            session["grade_mode"] = grade_mode
+        students_by_uid = {str(student.get("user_id")): student
+                           for student in session.get("students") or []}
+        for user_id, update in (draft_updates or {}).items():
+            target = students_by_uid.get(str(user_id))
+            if target:
+                target["ai_feedback"] = update.get("ai_feedback") or ""
+                target["ai_item_results"] = update.get("ai_item_results") or []
         if result.get("status") == "needs_teacher_input":
             session["status"] = "needs_teacher_input"
         elif result.get("ok"):
@@ -3267,12 +3356,18 @@ def _record_scoring_session_result(scoring_session_id: str, result: dict) -> dic
             session["status"] = "ready"
             session["last_failure"] = str(result.get("code") or "write_failed")
         session_store.save_session(session)
-    return {**result, "scoring_session_id": scoring_session_id}
+        grade_mode = str(session.get("grade_mode") or "post_score")
+    return {**result, "scoring_session_id": scoring_session_id,
+            "grade_mode": grade_mode}
 
 
-def _review_changed_response(plan: dict, names: dict, session: dict) -> dict:
+def _review_changed_response(plan: dict, names: dict, session: dict, *,
+                             scoring_session_id: str,
+                             draft_updates: dict | None = None) -> dict:
     """Return the current pseudonym-only review state after a stale digest."""
     safe = _scoring_apply_safe(plan, names)
+    grade_mode = str(plan.get("grade_mode") or "post_score")
+    _persist_scoring_grade_mode(scoring_session_id, grade_mode, draft_updates)
     candidate_ids = {str(uid) for uid in plan.get("candidate_ids") or []}
     held = sum(
         1 for student in session.get("students") or []
@@ -3284,6 +3379,7 @@ def _review_changed_response(plan: dict, names: dict, session: dict) -> dict:
         "code": "review_changed",
         "error": "The scoring review changed. Submit the current review again.",
         "review_digest": str(plan.get("digest") or ""),
+        "grade_mode": grade_mode,
         "questions": safe["questions"],
         "counts": {"ready": len(candidate_ids), "held": held},
     }
@@ -3396,4 +3492,29 @@ def _scoring_apply_safe(plan: dict, names: dict) -> dict:
         "students": sorted(label(uid) for uid in plan["candidate_ids"]),
         "questions": [safe_question(question) for question in plan["questions"]],
         "notes": plan["notes"],
+        "grade_mode": str(plan.get("grade_mode") or "post_score"),
     }
+
+
+def _persist_scoring_grade_mode(scoring_session_id: str, grade_mode: str,
+                                draft_updates: dict | None = None) -> None:
+    """Persist the selected mode while the caller holds the exact scope lock.
+
+    This keeps review_changed responses resumable without changing session
+    status or saving the newly submitted result rows before review succeeds.
+    """
+    from api.powergrader import session_store
+
+    with session_store.session_lock(scoring_session_id):
+        session = session_store.load_session(scoring_session_id)
+        if not session:
+            return
+        session["grade_mode"] = grade_mode
+        students_by_uid = {str(student.get("user_id")): student
+                           for student in session.get("students") or []}
+        for user_id, update in (draft_updates or {}).items():
+            target = students_by_uid.get(str(user_id))
+            if target:
+                target["ai_feedback"] = update.get("ai_feedback") or ""
+                target["ai_item_results"] = update.get("ai_item_results") or []
+        session_store.save_session(session)

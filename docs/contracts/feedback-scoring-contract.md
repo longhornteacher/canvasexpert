@@ -98,7 +98,10 @@ authors future writing portions as separate 100-point AssignmentForge assignment
 
 The agent stages one result per `(pseudonym, item_id)` supplied by the packet, using
 `stage_scoring_results(scoring_session_id, results, expected_packet_digest,
-review_digest="", answers=None, exemplars=None, disclosure="")`. A separate
+review_digest="", answers=None, exemplars=None, disclosure="",
+grade_mode="post_score")`. `grade_mode` accepts `post_score` or
+`feedback_only`; an omitted mode keeps the session's stored selection, or defaults
+to `post_score` when the session has no selection. A separate
 `apply_staged_scoring_results(scoring_session_id, expected_stage_digest,
 idempotency_key="")` applies only the unchanged private stage after a direct,
 contemporaneous teacher request to post it.
@@ -108,7 +111,9 @@ Canvas Expert renders them into one fixed plain-text layout (score, explanation,
 Glows, Grows, and, unless the row is at full marks, an Extra credit section with
 numbered fixes and a hand-copy exemplar). No persona and no AI identity or
 disclosure line is ever invented; `disclosure` is appended once, as the final
-line, only when the teacher asked for one this session.
+line, only when the teacher asked for one this session. In `feedback_only`, the
+numeric result remains validated against the packet and appears in feedback as
+`Draft score: X/Y`; `post_score` retains the existing `Score: X/Y` layout.
 
 | Field | Required | Shape and meaning |
 |---|---:|---|
@@ -120,8 +125,8 @@ line, only when the teacher asked for one this session.
 | `grows` | yes | 1-2 specific areas to improve, at least one non-empty string. |
 | `fixes` | required when the row is not at full marks | 2-4 concrete changes doable by hand in a second draft. |
 | `writing_process_observations` | no | Separate, teacher-only local observation; never student feedback or a score input. |
-| `insincere` | no | A sincere-attempt proposal, in a course with a grading policy; must agree across every item row of one pseudonym. |
-| `late_days` | no | An integer 0-60, in a course with a grading policy; must agree across every item row of one pseudonym. |
+| `insincere` | no | A sincere-attempt proposal used only in `post_score`, in a course with a grading policy; must agree across every item row of one pseudonym. |
+| `late_days` | no | An integer 0-60 used only in `post_score`, in a course with a grading policy; must agree across every item row of one pseudonym. |
 
 `exemplars` is a separate `{item_id: text}` argument to `stage_scoring_results`,
 not a per-result field: one shared model answer per item, written once and used
@@ -144,6 +149,23 @@ the allowed answers, and a review digest without writing. The agent asks the tea
 then resubmits the unchanged results and packet digest with every explicit answer and
 the exact review digest. A successful stage returns an opaque stage digest and
 aggregate counts. A changed review plan or invalid answer fails closed.
+
+The selected grade mode is private, assignment-session-wide state. The review digest
+and frozen stage identity bind the non-default `feedback_only` mode, so changing
+between modes invalidates the prior review or stage. A legacy stage with no stored
+mode means `post_score` and retains its original digest shape. Review responses,
+successful stage/apply outcomes, and identity-free actionable session listings
+report the selected mode without exposing score values, Canvas identifiers, or
+Canvas responses. Omitting `grade_mode` when resubmitting a review retains the
+stored selection.
+
+`feedback_only` does not calculate effort-credit marks or ask the `insincere_attempt`
+and `late_days` grading-policy questions. It retains the score-above-possible,
+feedback privacy, held-work, and explicit teacher-apply checks. Its Canvas
+Submissions request contains only `comment`; it omits the entire `submission`
+object, including `posted_grade`, `late_policy_status`, and
+`seconds_late_override`. This is a comment-only write with a numeric draft score
+in the rendered feedback; it does not null or discard the structured numeric score.
 ## Session consumption and write safety
 
 One exact course-and-assignment scope has at most one actionable Scoring Session. Before starting
@@ -195,9 +217,11 @@ library never enters the SAFE packet or MCP response.
 Teacher guidance remains available privately in full for the session record. When oversized,
 its effective model and packet projection carries the compaction marker and counts above;
 those counts are the signal that effective text was omitted. Ordinary assignments use the
-public prepare -> packet -> stage -> explicit apply flow and write through one narrow lane: the reviewed raw
-score (`submission.posted_grade`) and one plain-text submission comment
-(`comment.text_comment`) go to the existing Canvas Submissions endpoint once. That endpoint is
+public prepare -> packet -> stage -> explicit apply flow and write through one narrow lane. In the
+default `post_score` mode, the reviewed raw score (`submission.posted_grade`) and one plain-text
+submission comment (`comment.text_comment`) go to the existing Canvas Submissions endpoint once.
+In `feedback_only`, only the plain-text comment (`comment.text_comment`) goes to that endpoint;
+the whole `submission` object is omitted. That endpoint is
 the API counterpart of entering the raw score in SpeedGrader; it is not the LTI Score API and
 adds no rubric-assessment or New Quiz item-score write. `item_id` remains the SAFE
 packet/result identity and correction-selection key, not a separate writable Canvas score
@@ -206,17 +230,20 @@ authorizes apply for that exact stage; a review-only or no-submit direction stop
 
 Canvas Expert does not read the resulting grade back. There is no post-write GET, no mirror
 refresh, no score equality comparison, no comment-count or latest-comment comparison, no
-`points_deducted` use, and no grade/score/late-policy fact in MCP results or receipts. Canvas
-may apply a late/missing policy or any other gradebook adjustment; CE neither changes that
-policy nor asks about, reads, calculates, displays, or treats the adjusted result as a write
+`points_deducted` use, and no grade or score values, late-policy values, Canvas-returned
+grade outcomes, or raw Canvas response bodies in MCP results or receipts. MCP results
+may report the selected write mode as safe operation metadata and the existing
+aggregate transport statuses. Canvas may apply a late/missing policy or any other
+gradebook adjustment; CE neither changes that policy nor asks about, reads, calculates,
+displays, or treats the adjusted result as a write
 failure. The teacher reviews the result in Canvas and may edit it there; that review is not an
 automated CE responsibility. CE sends no `excuse` or other policy/gradebook adjustment field,
 and requests no course late policy. In a course with a grading policy
 (`docs/contracts/grading-policy-contract.md`), `posted_grade` is the effort-credit mark rather
 than the raw rubric score, and a Scoring Session sends `late_policy_status` and
 `seconds_late_override` for the teacher-confirmed late-day count -- the only two exceptions to
-"no policy/gradebook adjustment field." Without a grading policy, CE sends neither field and
-the posted value stays the raw score, exactly as before.
+"no policy/gradebook adjustment field" in `post_score`. Without a grading policy, CE sends neither field and
+the posted value stays the raw score, exactly as before. `feedback_only` does not calculate or send a gradebook mark or late-policy fields, regardless of course policy.
 
 A Canvas HTTP success means the write was accepted; CE records that compact receipt and moves
 on. A non-HTTP transport error is `write_transport_unknown`: it performs no later verification

@@ -60,7 +60,10 @@ INSTRUCTION_BUDGET = 2200
 # (preview_attempts_grant, apply_attempts_grant, +748): extra attempts and a
 # reopened window for a pseudonym list or the whole class, across regular,
 # Classic, and New Quiz assignments.
-LISTING_BUDGET = 20291
+# Raised to the measured 20,535 for stage_scoring_results grade_mode
+# (post_score or feedback_only, +244): a numeric draft score in feedback
+# with no gradebook score.
+LISTING_BUDGET = 20535
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {

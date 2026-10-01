@@ -61,6 +61,12 @@ def scoring_output_contract(
         "noun. Quote around it, or paraphrase.",
         "Do not identify students.",
         "`score` may be a number or null for comment-only feedback.",
+        "Ordinary Assignment Scoring Sessions default to `grade_mode=post_score`. "
+        "Use `grade_mode=feedback_only` only when the teacher directs that the "
+        "numeric draft score appear in feedback without a gradebook score; keep the "
+        "numeric `score` unchanged. Canvas Expert renders `Draft score: X/Y` and "
+        "sends only the comment in that mode. Omit `grade_mode` on a review "
+        "resubmission to keep the mode already stored for this session.",
         "`explanation` must be 1-3 sentences explaining the score.",
         "`glows` must list 2-3 specific strengths.",
         "`grows` must list 1-2 specific areas to improve.",

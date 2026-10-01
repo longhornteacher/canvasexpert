@@ -474,9 +474,9 @@ def test_list_scoring_sessions_uses_compact_neutral_columns(monkeypatch, tmp_pat
 
     assert list(result["sessions"]["columns"]) == list(tools._SCORING_SESSION_COLUMNS)
     assert row[0] == "s1"
-    assert len(row) == 7
+    assert len(row) == 8
     assert row[4] == 3
-    assert row[5:] == [0, 0]
+    assert row[5:] == [0, 0, "post_score"]
 
 
 def test_list_scoring_sessions_hides_terminal_and_superseded_history(monkeypatch, tmp_path):

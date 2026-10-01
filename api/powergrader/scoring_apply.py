@@ -78,7 +78,7 @@ def _staged(student: dict) -> bool:
         (student.get("ai_feedback") or "").strip())
 
 
-def _projected_payload(student: dict) -> dict:
+def _projected_payload(student: dict, *, grade_mode: str = "post_score") -> dict:
     """What ``_payload`` will build once the staged values are approved.
 
     Mirrors the approval copy in ``approve_rows`` so the plan digest covers the
@@ -89,7 +89,7 @@ def _projected_payload(student: dict) -> dict:
         projected["teacher_score"] = student.get("ai_score")
     if not (student.get("teacher_feedback") or "").strip():
         projected["teacher_feedback"] = student.get("ai_feedback") or ""
-    return session_actions._payload(projected)
+    return session_actions._payload(projected, grade_mode=grade_mode)
 
 
 def default_transports():
@@ -124,6 +124,10 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
     contains one would reach a real student as a stranger's fake name, or as
     their own -- which they have never seen either.
     """
+    grade_mode = str(session.get("grade_mode") or "post_score")
+    if grade_mode not in {"post_score", "feedback_only"}:
+        return {"ok": False, "code": "invalid_grade_mode",
+                "error": "The scoring grade mode is invalid."}
     students = [s for s in session.get("students", []) if s.get("user_id") is not None]
     if any(s.get("push_state") == "sent_unknown" for s in students):
         return {
@@ -139,7 +143,7 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
 
     for student in candidates:
         user_id = str(student["user_id"])
-        payload = _projected_payload(student)
+        payload = _projected_payload(student, grade_mode=grade_mode)
 
         score = student.get("ai_score") if student.get("teacher_score") is None \
             else student.get("teacher_score")
@@ -163,9 +167,12 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
 
     # Grading-policy facts, stamped only on candidates in a policy course
     # (docs/contracts/grading-policy-contract.md section 5).
-    insincere = [str(s["user_id"]) for s in candidates if (s.get("grading") or {}).get("insincere")]
-    late_candidates = [s for s in candidates
-                       if s.get("grading") and s.get("canvas_late")]
+    insincere = ([str(s["user_id"]) for s in candidates
+                  if (s.get("grading") or {}).get("insincere")]
+                 if grade_mode == "post_score" else [])
+    late_candidates = ([s for s in candidates
+                        if s.get("grading") and s.get("canvas_late")]
+                       if grade_mode == "post_score" else [])
 
     questions = []
     if above:
@@ -219,22 +226,30 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
             "in_session": len(students),
             "already_posted": sum(1 for s in students if s.get("posted")),
         },
-        "digest": _plan_digest(candidate_ids, candidates, questions),
+        "digest": _plan_digest(candidate_ids, candidates, questions, grade_mode=grade_mode),
+        "grade_mode": grade_mode,
     }
 
 
-def _plan_digest(candidate_ids, candidates, questions) -> str:
+def _plan_digest(candidate_ids, candidates, questions, *, grade_mode: str = "post_score") -> str:
     """Covers the rows, the exact bytes to be pushed, and what was asked.
 
     A staged score edited between preview and apply, a question that appears or
     disappears, or a row entering or leaving the set all change this, so apply
     refuses rather than landing something the teacher never read.
     """
-    return session_actions._digest({
+    identity = {
         "user_ids": candidate_ids,
-        "payloads": {str(s["user_id"]): _projected_payload(s) for s in candidates},
+        "payloads": {str(s["user_id"]): _projected_payload(s, grade_mode=grade_mode)
+                     for s in candidates},
         "questions": [{"kind": q["kind"], "user_ids": q["user_ids"]} for q in questions],
-    })
+    }
+    # Missing/default post_score deliberately retains the established digest
+    # shape so actionable pilot stages remain valid. The non-default mode is
+    # explicit because it changes the outbound payload and approval questions.
+    if grade_mode == "feedback_only":
+        identity["grade_mode"] = grade_mode
+    return session_actions._digest(identity)
 
 
 def resolve_answers(plan: dict, answers: dict | None) -> dict:
@@ -328,6 +343,7 @@ def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
         session_id, user_ids=json.dumps(user_ids),
         load_session=load_session, save_session=save_session,
         canvas_send=canvas_send, idempotency_key=idempotency_key,
+        grade_mode=plan["grade_mode"],
     )
     if pushed.get("ok"):
         pushed = dict(pushed)

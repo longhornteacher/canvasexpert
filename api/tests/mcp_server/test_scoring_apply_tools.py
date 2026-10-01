@@ -175,7 +175,9 @@ def test_transport_unknown_is_projected_without_grade_facts(monkeypatch, tmp_pat
     result = _stage_then_apply("session-1", _result(), _digest(bundle))
     assert result["code"] == "write_transport_unknown"
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
-    assert "grade" not in _blob(result)
+    # grade_mode is safe mode metadata, not a grade fact.
+    assert result["grade_mode"] == "post_score"
+    assert "grade" not in _blob({k: v for k, v in result.items() if k != "grade_mode"})
 
 
 def test_stage_scoring_results_example_renders_structured_fields_onto_the_session(

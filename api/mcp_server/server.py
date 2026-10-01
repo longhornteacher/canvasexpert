@@ -21,7 +21,7 @@ import json
 import sys
 import threading
 import time
-from typing import NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from mcp.server.fastmcp import FastMCP
 
@@ -665,11 +665,16 @@ def stage_scoring_results(
     answers: dict[str, str] | None = None,
     exemplars: dict[str, str] | None = None,
     disclosure: str = "",
+    grade_mode: Literal["post_score", "feedback_only"] | None = None,
 ) -> str:
-    """Validate and stage SAFE results locally; no Canvas write."""
+    """Validate and stage SAFE results locally; no Canvas write.
+
+    ``grade_mode`` defaults to the mode already selected for this session,
+    or ``post_score`` for a session with no stored choice.
+    """
     return _compact(tools.stage_scoring_results(
         scoring_session_id, results, expected_packet_digest, review_digest, answers,
-        exemplars=exemplars, disclosure=disclosure))
+        exemplars=exemplars, disclosure=disclosure, grade_mode=grade_mode))
 
 
 @mcp.tool(structured_output=False)

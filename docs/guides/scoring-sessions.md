@@ -59,13 +59,22 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
    AssignmentForge assignments.
 
 5. Call `stage_scoring_results(scoring_session_id, results,
-   expected_packet_digest, review_digest="", answers=null)`. Validation,
+   expected_packet_digest, review_digest="", answers=null)`. The default
+   `grade_mode` is `post_score`. When the teacher directs a numeric draft score
+   in feedback without a gradebook score, pass `grade_mode="feedback_only"`;
+   Canvas Expert keeps and validates the numeric score, renders `Draft score: X/Y`,
+   and sends only the comment, with no gradebook or late-policy fields.
+   Feedback-only scoring skips effort-credit calculations and late-day or
+   insincere-attempt questions. Validation,
    correction injection, privacy checks, and bounded review questions happen
    locally. A successful stage performs zero Canvas calls and returns an opaque
    `stage_digest` plus aggregate counts.
 
 6. If staging returns `needs_teacher_input`, ask exactly those questions and
    resubmit the unchanged results with the review digest and explicit answers.
+   The selected mode is stored on the assignment session and shown in review
+   responses and `list_scoring_sessions`; omit `grade_mode` on a review retry to
+   keep the stored selection. Changing modes changes the review and stage digest.
    After staging succeeds, summarize the aggregate and wait for a direct,
    contemporaneous teacher request to post that exact staged work.
 
