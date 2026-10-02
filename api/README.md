@@ -19,6 +19,18 @@ The runtime supports:
   assignment-bounded SAFE packet and writes the reviewed score/mark and authored plain-text
   comment to Canvas once. The teacher reviews the result in Canvas Live.
 - **MCP server:** local pseudonymized reads, guarded writes, and Scoring Sessions
+- **Feedback revisions:** reopen already graded ordinary assignment comments for
+  concise teacher-controlled feedback while preserving scores. The private owner
+  `powergrader/feedback_revision.py` uses `platform_services.canvas_client._canvas_send`
+  only for a PUT to the existing Submission Comments endpoint with `{"comment": text}`.
+  It sends no grade/status/late fields, makes no submission/grade reads or refreshes, and keeps
+  original evidence plus durable send intents/outcomes in shared private work history.
+  An optional exact staged teacher file is separately uploaded for each revised
+  student and attached once through a short native submission comment. Only exact
+  uploaded-file completion metadata may be read; no Canvas Files search occurs.
+  `refresh_mirror(include_comments=true)` deliberately acquires full comment IDs
+  and staff proof; the default refresh remains unchanged.
+  See `docs/guides/scoring-sessions.md` for prepare/read/stage/apply and blocker recovery.
 - **Daily Writing:** longitudinal Writing Record and tracked-assignment Writing Timeline
 - **Download** — submission bundles by assignment or by student
 

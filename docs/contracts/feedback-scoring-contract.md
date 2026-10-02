@@ -158,6 +158,43 @@ object, including `posted_grade`, `late_policy_status`, and
 in the rendered feedback; it does not null or discard the structured numeric score.
 ## Session consumption and write safety
 
+Feedback-only reopening is a separate ordinary-assignment lane:
+`prepare_feedback_revision` -> `get_feedback_revision_packet` ->
+`stage_feedback_revisions` -> `apply_staged_feedback_revisions`. Its immutable
+packet carries complete scrubbed response/staff feedback, existing finite score,
+pseudonym, validated comment creation timestamp (or blank), and an opaque comment key. Transport-size or privacy blockers withhold
+complete text rather than truncating it. Staff authorship is proved privately by
+course-filtered active teacher/TA enrollment during a deliberate comment mirror
+refresh; student/unknown-role comments are excluded. Missing stored comment IDs
+require an explicit fresh comment acquisition, never inference or migration.
+
+Revision rows contain exactly `{pseudonym, comment_key, feedback}`. This lane
+accepts concise teacher-controlled plain text and does not invoke the ordinary
+grading feedback renderer. Stage validates all selected rows without Canvas I/O;
+the frozen digest covers exact private endpoint coordinates and feedback. Apply
+uses the existing Submission Comments PUT endpoint with only `{"comment": text}`;
+it cannot send grade, status, or late-policy fields. Without an attachment it
+never appends a new comment.
+The optional `attachment_file` names one exact already-staged local teacher file;
+no Canvas Files search occurs. Its private path/name/SHA-256/size/content type are
+frozen in the stage digest and verified for the full batch before any send, then
+again per upload. For each revised student, this explicit option uploads a native
+submission-comment file and appends exactly one attachment-only comment labeled
+"Reference document for your revision." This is the sole no-append exception.
+The new comment payload contains only `comment.text_comment` and `comment.file_ids`,
+with no submission/grade/status/late fields. Separate upload/comment intents and
+outcomes drive replay; accepted edits with incomplete attachments remain partial.
+Each private intent is durable before its send; each accepted/rejected outcome is
+durable before the next send. Unknown transport or unresolved intent blocks all
+automatic retry/restaging/new preparation. Replay returns the durable outcomes.
+Only the exact configured-origin uploaded-file completion GET is permitted when
+needed; no submission/grade/comment read-back or mirror refresh occurs in prepare,
+stage, or apply. Deliberate `refresh_mirror(..., include_comments=true)` opts into
+the full comment-bearing acquisition/staff-proof scope; its default stays unchanged.
+Shared work ownership and
+the existing assignment scope lock apply; original evidence and prior runs remain
+in append-only private snapshots/history. The existing scoring lane is unchanged.
+
 One exact course-and-assignment scope has at most one actionable Scoring Session. Before starting
 another full scoring refresh, preparation checks that exact scope. When a usable actionable
 record exists (`ready` or staging `needs_teacher_input` with a valid SAFE packet), it

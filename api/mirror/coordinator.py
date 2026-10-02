@@ -21,6 +21,7 @@ _PRIORITY_VALUE = {name: index for index, name in enumerate(PRIORITIES)}
 PRODUCTION_SCOPES = (
     "course.refresh", "course_context", "roster", "groups",
     "course.scoring_refresh", "course.scoring_discovery_refresh",
+    "course.feedback_refresh",
     "submissions.course_delta", "new_quizzes.metadata",
     "course.structure_refresh",
 )

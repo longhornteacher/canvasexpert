@@ -28,14 +28,12 @@ from mcp.server.fastmcp import FastMCP
 from . import tools
 
 _SERVER_INSTRUCTIONS = (
-    "Local teacher-controlled runtime. Real names, Canvas/SIS ids, credentials and private "
-    "paths stay local; student rows use stable pseudonyms. Never read Identity Vault or "
-    "teacher-only Web UI routes. Use only within_policy catalog/mirror; otherwise "
-    "(including catalog_not_current/unavailable), ask if Canvas changed. Never "
-    "refresh without an explicit teacher request. "
-    "For broad grading, call discover_scoring_work first: reads every Current course mirror and "
-    "returns the complete assignment and attention set. Report all rows, wait for teacher "
-    "direction, then use selected exact rows. Call prepare_scoring_session once per exact "
+    "Local teacher-controlled runtime. Real identities, credentials and private paths stay local; "
+    "student rows use stable pseudonyms. Never read Identity Vault or teacher-only Web UI routes. "
+    "Use within_policy catalog/mirror; otherwise ask if Canvas changed. Never refresh "
+    "without an explicit teacher request. "
+    "For broad grading, discover_scoring_work reads every Current course mirror. Report all "
+    "assignment and attention rows; wait for teacher direction. Call prepare_scoring_session once per exact "
     "assignment. If snapshot exceeds threshold, ask whether Canvas work changed; refresh only after an "
     "explicit teacher request or retry with use_existing_mirror=true. On "
     "scoring_session_already_open, use that session; do not prepare or refresh the assignment "
@@ -49,12 +47,14 @@ _SERVER_INSTRUCTIONS = (
     "apply_staged_scoring_results only on direct teacher instruction; never read back "
     "grades. For needs_teacher_input, ask only its questions; resubmit the same results to "
     "stage_scoring_results with its review digest and answers. Canvas Live is the review "
-    "surface; list_scoring_sessions resumes work; list_feedback_contracts gives feedback "
-    "rules. Across devices: handoff_work_item before switching, take_over_work_item after sync; "
+    "surface; list_scoring_sessions resumes work; list_feedback_contracts gives rules. "
+    "Graded feedback: prepare_feedback_revision, get_feedback_revision_packet, stage_feedback_revisions, "
+    "then apply_staged_feedback_revisions on teacher instruction; scores stay fixed. "
+    "Across devices: handoff_work_item before switching, take_over_work_item after sync; "
     "confirm stale takeover only once prior device stopped. Content: "
     "get_authoring_contract or get_product_guide. Attachments: canvas_file by exact name or "
-    "stage_attachment(source_path); never list course files or pass bytes. No local path: "
-    "suggest Canvas Files; ask teacher to choose preview candidates."
+    "stage_attachment(source_path); never list course files or pass bytes. No path: teacher "
+    "chooses Canvas Files."
 )
 
 mcp = FastMCP("canvas-expert", instructions=_SERVER_INSTRUCTIONS)
@@ -593,10 +593,9 @@ def abandon_operation(operation_id: str) -> str:
 
 
 @mcp.tool(structured_output=False)
-def refresh_mirror(course_id: str) -> str:
-    """Refresh a saved course's local CanvasMirror only after a read refuses as stale.
-    It reports sync status, never data; after a successful sync, retry the refused read."""
-    return _compact(tools.refresh_mirror(course_id))
+def refresh_mirror(course_id: str, include_comments: bool = False) -> str:
+    """Refresh a saved course mirror on teacher request; include_comments acquires full staff comments."""
+    return _compact(tools.refresh_mirror(course_id, include_comments))
 
 
 @mcp.tool(structured_output=False)
@@ -627,6 +626,38 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
     return _compact(tools.prepare_scoring_session(
         course_id, assignment_id, scoring_guidance, use_existing_mirror,
         scoring_guidance_provenance, feedback_contract_id))
+
+
+@mcp.tool(structured_output=False)
+def prepare_feedback_revision(course_id: str, assignment_id: str,
+                              use_existing_mirror: bool = False) -> str:
+    """Reopen graded ordinary feedback; preserve scores."""
+    return _compact(tools.prepare_feedback_revision(course_id, assignment_id, use_existing_mirror))
+
+
+@mcp.tool(structured_output=False)
+def get_feedback_revision_packet(work_id: str, offset: int = 0, limit: int = 10) -> str:
+    """Read complete scrubbed work and existing staff feedback."""
+    return _compact(tools.get_feedback_revision_packet(work_id, offset, limit))
+
+
+class FeedbackRevision(TypedDict):
+    pseudonym: str
+    comment_key: str
+    feedback: str
+
+
+@mcp.tool(structured_output=False)
+def stage_feedback_revisions(work_id: str, expected_packet_digest: str, revisions: list[FeedbackRevision],
+                             attachment_file: str | None = None) -> str:
+    """Freeze feedback rows and an optional exact staged attachment filename."""
+    return _compact(tools.stage_feedback_revisions(work_id, expected_packet_digest, revisions, attachment_file))
+
+
+@mcp.tool(structured_output=False)
+def apply_staged_feedback_revisions(work_id: str, expected_stage_digest: str) -> str:
+    """Apply frozen feedback and optional attachment on teacher instruction; no grades or retries."""
+    return _compact(tools.apply_staged_feedback_revisions(work_id, expected_stage_digest))
 
 
 @mcp.tool(structured_output=False)

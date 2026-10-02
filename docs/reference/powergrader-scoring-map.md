@@ -9,6 +9,18 @@ write authorization. Canvas Live is the only review/edit surface.
 
 ## Current ownership
 
+- `feedback_revision.py` owns feedback-only reopening of already graded ordinary
+  assignments. Four thin MCP tools prepare/read/stage/apply existing staff comments;
+  the numeric score is read-only packet context. It uses the existing scope lock,
+  SharedWorkStore leases and append-only snapshots, complete text or typed blockers,
+  exact frozen comment-only PUTs, and durable intents/outcomes without read-back or
+  blind retry. It preserves ordinary scoring behavior and private pilot history.
+  An optional exact staged attachment freezes file metadata and adds separate
+  per-student native upload/comment receipts; incomplete attachments are partial.
+  The multipart/completion helper is shared with `assignment_whole.py`, without
+  changing existing course-file upload behavior. Explicit comment acquisition
+  uses `refresh_mirror(include_comments=true)` and `course.feedback_refresh`.
+
 - `session_store.py` is the single lifecycle owner for assignment-scoped
   Scoring Sessions. It holds the deterministic scope lock (order: scope, then
   session) and resolves the one current session per exact

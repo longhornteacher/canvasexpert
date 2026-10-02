@@ -683,7 +683,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 60
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 64
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -1689,6 +1689,18 @@ def test_refresh_mirror_enqueues_roster_pass(monkeypatch, _set_active_courses):
     assert "course.refresh" in captured["scopes"]
 
 
+@pytest.mark.parametrize("include_comments,scope", [(False, "course.refresh"), (True, "course.feedback_refresh")])
+def test_refresh_mirror_comment_acquisition_is_explicit_and_status_only(monkeypatch, include_comments, scope):
+    calls = []
+    monkeypatch.setattr(tools, "_enqueue_sync", lambda cid, scopes: calls.append((cid, scopes)) or "plan")
+    monkeypatch.setattr(tools, "_wait_for_plan", lambda *a, **kw: {"state": "succeeded"})
+    result = tools.refresh_mirror("111", include_comments=include_comments)
+    assert result["ok"] and result["status"] == "synced"
+    assert calls == [("111", [scope, "roster", "groups"])]
+    assert ("staff comment identities" in result["message"]) == include_comments
+    assert not any(key in result for key in ("students", "submissions", "comments", "records"))
+
+
 def test_refresh_mirror_reports_syncing_while_running(monkeypatch, _set_active_courses):
     _set_active_courses(["111"])
     monkeypatch.setattr(tools, "_enqueue_sync", lambda course_id, scopes=None: "plan-1")
@@ -1752,6 +1764,8 @@ def test_server_registers_the_expected_tool_set():
                     "list_feedback_contracts", "prepare_scoring_session", "list_scoring_sessions", "get_scoring_packet",
                 "stage_scoring_results", "apply_staged_scoring_results",
         "reset_scoring_review",
+        "prepare_feedback_revision", "get_feedback_revision_packet",
+        "stage_feedback_revisions", "apply_staged_feedback_revisions",
                 "discover_scoring_work",
                 "list_work_items", "get_work_item", "handoff_work_item", "take_over_work_item",
         }

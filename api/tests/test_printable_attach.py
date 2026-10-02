@@ -9,6 +9,7 @@ from api.operation_ledger import models
 from api.operation_ledger.adapters import assignment as assignment_adapter
 from api.operation_ledger.adapters import page as page_adapter
 from api.operation_ledger.adapters import forge_files
+from api.operation_ledger.adapters import assignment_whole
 from api.platform_services import canvas_client
 from api import runtime_paths
 from api.webui import af, pf
@@ -125,6 +126,20 @@ def test_upload_failure_is_reported_without_adopting_an_old_file(monkeypatch, tm
     result, error = assignment_adapter._upload_course_file("42", pdf)
     assert result is None
     assert "HTTP 500" in error
+
+
+def test_opened_upload_stream_must_match_frozen_bytes_before_multipart(monkeypatch, tmp_path):
+    path = tmp_path / "Practice Exemplars.docx"
+    path.write_bytes(b"synthetic original")
+    expected = forge_files.sha256_file(path)
+    size = path.stat().st_size
+    path.write_bytes(b"synthetic changed")
+    sent = []
+    monkeypatch.setattr(assignment_whole.requests, "post", lambda *a, **kw: sent.append((a, kw)))
+    file_info, error = assignment_whole.upload_initialized_file(
+        {"upload_url": "https://signed.invalid", "upload_params": {}}, path,
+        filename=path.name, content_type="application/octet-stream", expected_sha256=expected, expected_size=size)
+    assert error == "file_drift" and file_info is None and not sent
 
 
 def test_assignment_and_page_attachment_shape_validation():

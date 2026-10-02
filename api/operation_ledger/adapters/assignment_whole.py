@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import hashlib
 import os
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -370,12 +371,30 @@ def upload_course_file(course_id: str, pdf_path: Path, *, allowed_roots=None,
     init, error = canvas_client._canvas_send("POST", f"/api/v1/courses/{course_id}/files", init_payload)
     if error:
         return None, error
+    return upload_initialized_file(init, source, filename=filename, content_type=content_type)
+
+
+def upload_initialized_file(init, source: Path, *, filename: str, content_type: str,
+                            expected_sha256=None, expected_size=None):
+    """Send signed multipart bytes without credentials; complete only at Canvas's exact origin.
+
+    The caller validates/freezes the source and owns durable intent. This helper
+    is shared by existing course-file uploads and submission-comment uploads.
+    """
     upload_url = (init or {}).get("upload_url")
     upload_params = (init or {}).get("upload_params") or {}
     if not upload_url:
         return None, "Canvas did not return a file upload URL"
     try:
         with source.open("rb") as handle:
+            if expected_sha256 is not None:
+                digest, size = hashlib.sha256(), 0
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    size += len(chunk)
+                if digest.hexdigest() != expected_sha256 or size != expected_size:
+                    return None, "file_drift"
+                handle.seek(0)
             response = requests.post(
                 upload_url,
                 data=upload_params,

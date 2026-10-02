@@ -8,12 +8,45 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from api import course_catalog
 from api.mirror import read_service, store, sync
 
 COURSE = "111"
 NOW = "2026-07-16T12:00:00Z"
 NOW_MINUS_OVERLAP = "2026-07-16T11:50:00Z"
+
+
+@pytest.mark.parametrize("proof,role", [
+    ("teacher", "teacher"), ("ta", "ta"), ("student", ""), ("unknown", ""),
+    ("wrong_course", ""), ("wrong_user", ""), ("inactive", ""),
+    ("nested_mismatch", ""), ("unavailable", ""), ("no_comments", ""),
+])
+def test_comment_staff_proof_is_course_scoped_and_fail_closed(proof, role):
+    calls = []
+    comment = {"id": 500001, "author_id": 900099, "author_role": "teacher", "comment": "Feedback."}
+    if proof == "nested_mismatch": comment["author"] = {"id": 900098, "role": "teacher"}
+    submission = {"user_id": 900001, "submission_comments": [comment]}
+    enrollment = {"course_id": 111, "user_id": 900099, "type": "TeacherEnrollment", "enrollment_state": "active"}
+    if proof == "ta": enrollment["type"] = "TaEnrollment"
+    if proof == "student": submission["user_id"] = 900099
+    if proof == "unknown": enrollment["type"] = "StudentEnrollment"
+    if proof == "wrong_course": enrollment["course_id"] = 222
+    if proof == "wrong_user": enrollment["user_id"] = 900098
+    if proof == "inactive": enrollment["enrollment_state"] = "inactive"
+    def read(path, params, timeout):
+        calls.append((path, params))
+        if path.endswith("/students/submissions"): return [submission], None
+        if proof == "unavailable": return None, "unavailable"
+        return [{"id": 900099, "enrollments": [enrollment]}], None
+    rows, error = sync._fetch_submissions("111", read, with_comments=proof != "no_comments")
+    assert error is None
+    assert len(calls) == (1 if proof == "no_comments" else 2)
+    if proof != "no_comments":
+        assert calls[1][1]["enrollment_type[]"] == ["teacher", "ta"]
+        assert rows[0]["submission_comments"][0]["author_role"] == role
+        assert rows[0]["submission_comments"][0]["id"] == 500001
 
 USERS = [
     {"id": 900001, "name": "Learner One", "sortable_name": "One, Learner",
@@ -202,7 +235,7 @@ def test_full_pass_captures_submission_comments(tmp_path):
     assert result["ok"] is True
     entry = store.read_submissions(COURSE, "700010", root=str(tmp_path))["submissions"]["900001"]
     assert entry["current"]["submission_comments"] == [
-        {"author_id": "900099", "author_role": "", "comment": "Nice work.",
+        {"id": "", "author_id": "900099", "author_role": "", "comment": "Nice work.",
          "created_at": "2026-07-01T11:00:00Z"},
     ]
     assert "author_name" not in entry["current"]["submission_comments"][0]
@@ -225,7 +258,7 @@ def test_delta_after_full_does_not_erase_stored_comments(tmp_path):
     assert result["ok"] is True
     entry = store.read_submissions(COURSE, "700010", root=str(tmp_path))["submissions"]["900001"]
     assert entry["current"]["submission_comments"] == [
-        {"author_id": "900099", "author_role": "", "comment": "Nice work.",
+        {"id": "", "author_id": "900099", "author_role": "", "comment": "Nice work.",
          "created_at": "2026-07-01T11:00:00Z"},
     ]
     assert entry["current"]["attempt"] == 2

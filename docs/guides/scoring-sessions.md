@@ -101,6 +101,51 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
 9. Continue through other rows only when they were part of the teacher-selected
    set. A newly discovered assignment requires new teacher direction.
 
+## Feedback-only reopening
+
+Already graded ordinary assignments can be reopened for **feedback only** with
+`prepare_feedback_revision(course_id, assignment_id)`. Read every page through
+`get_feedback_revision_packet(work_id)`: it includes the existing numeric score,
+complete scrubbed response, staff feedback, validated creation timestamps, and opaque comment keys. Scores are
+context only. Held and excluded counts must be reported; oversized complete text
+returns `feedback_packet_too_large`, rather than silently omitting text.
+
+Stage selected `{pseudonym, comment_key, feedback}` rows with
+`stage_feedback_revisions(work_id, expected_packet_digest, revisions, attachment_file=null)`. Feedback
+is teacher-controlled concise plain text, without the ordinary grading renderer's
+Glows/Grows or extra-credit requirements. Report selected and untouched counts.
+On direct teacher instruction, call
+`apply_staged_feedback_revisions(work_id, expected_stage_digest)` to edit those
+existing comments. It sends only comment text, preserves scores and gradebook
+status by omission, and performs no submission/grade/comment read-back.
+Repeat apply returns durable outcomes without resending accepted or rejected rows.
+
+To attach a teacher-selected reference document, first use `stage_attachment`
+and pass its exact staged filename as `attachment_file`. The stage freezes its
+bytes/hash/size and returns only filename/size plus the selected-student count.
+Apply uploads a separate native submission-comment file per revised student,
+then adds one short attachment comment, "Reference document for your revision."
+No grade fields are sent. Multiple revised comments for one student still produce
+only one file upload and one attachment comment. Original feedback edits and
+upload/comment steps have separate durable receipts; accepted edits with an
+incomplete attachment are reported as partial. File drift blocks before the first
+send and is checked again before every upload; unknown transport or a crash intent
+blocks blind retry. Exact uploaded-file completion metadata is the sole permitted
+live GET; no Canvas Files search or submission/grade read-back occurs.
+
+Preparation uses the local mirror only. `feedback_comment_identity_missing` means
+the stored comments predate identity retention: ask for an explicit course refresh
+with `refresh_mirror(course_id, include_comments=true)`, then retry. This explicit
+opt-in performs a full comment-bearing refresh and obtains staff enrollment proof;
+the default refresh remains status-only. Missing/noncurrent comment projections cannot be
+acknowledged away. An old current snapshot returns
+`mirror_freshness_confirmation_required` and its oldest timestamp; ask whether
+Canvas work changed, then refresh only on teacher direction, or acknowledge unchanged
+work with `use_existing_mirror=true`. Unknown/student comments cannot be edited.
+`write_transport_unknown` or `canvas_write_attention` requires teacher review in
+Canvas; it blocks retry, restaging, and a new packet. Original evidence, scores,
+send intents, outcomes, and earlier runs remain in private append-only work history.
+
 ## Failure modes
 
 | Signal | Meaning | What to do |

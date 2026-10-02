@@ -1407,6 +1407,10 @@ _TOOL_GROUPS = {
         "stage_scoring_results",
         "apply_staged_scoring_results",
         "reset_scoring_review",
+        "prepare_feedback_revision",
+        "get_feedback_revision_packet",
+        "stage_feedback_revisions",
+        "apply_staged_feedback_revisions",
     ),
     "Gradebook": (
         "get_gradebook_snapshot",
@@ -2394,7 +2398,7 @@ def _refresh_identity(plan: dict) -> dict:
     return identity
 
 
-def refresh_mirror(course_id: str) -> dict:
+def refresh_mirror(course_id: str, include_comments: bool = False) -> dict:
     """Ask Canvas Expert to sync this course's local CanvasMirror from Canvas
     (a submissions delta plus a roster refresh), then report freshness — the
     response is a sync STATUS, never Canvas data. Call this after
@@ -2404,7 +2408,8 @@ def refresh_mirror(course_id: str) -> dict:
     outbound safety scan. It accepts any saved course (Current or Previous)."""
 
     try:
-        plan_id = _enqueue_sync(course_id, _REFRESH_SCOPES)
+        scopes = ["course.feedback_refresh", "roster", "groups"] if include_comments else _REFRESH_SCOPES
+        plan_id = _enqueue_sync(course_id, scopes)
     except ValueError as error:
         return {"ok": False, "error": str(error)}
     except Exception as error:
@@ -2415,7 +2420,8 @@ def refresh_mirror(course_id: str) -> dict:
     state = plan.get("state", "failed")
     if state == "succeeded":
         result = {"ok": True, "status": "synced",
-                  "message": "Mirror refreshed (roster, groups, assignments, and submissions status only). Re-read the refused tool now."}
+                  "message": ("Mirror refreshed (roster, groups, assignments, submissions, and staff comment identities). Re-read the refused tool now."
+                              if include_comments else "Mirror refreshed (roster, groups, assignments, and submissions status only). Re-read the refused tool now.")}
         result.update(identity)
         return result
     if state in ("queued", "running"):
@@ -2700,6 +2706,43 @@ def _ensure_session_usable(session: dict) -> dict:
         except Exception:
             pass
     return verdict
+
+
+def _feedback_revision_call(operation, *args, **kwargs):
+    from api.powergrader import feedback_revision
+    vault, error = _open_vault()
+    if error:
+        return {"ok": False, "code": "identity_unavailable"}
+    try:
+        with _vault_transaction(vault):
+            return getattr(feedback_revision, operation)(
+                *args, vault=vault, course_gate=_course_gate_check, **kwargs)
+    except Exception as error:
+        from api.shared_work import WorkItemError
+        from api.shared_storage import SharedStoreConflictError
+        if isinstance(error, (WorkItemError, SharedStoreConflictError)):
+            return _work_item_error(error)
+        return {"ok": False, "code": "feedback_revision_unavailable"}
+
+
+def prepare_feedback_revision(course_id: str, assignment_id: str,
+                              use_existing_mirror: bool = False) -> dict:
+    return _feedback_revision_call("prepare", course_id, assignment_id,
+                                   use_existing_mirror=use_existing_mirror)
+
+
+def get_feedback_revision_packet(work_id: str, offset: int = 0, limit: int = 10) -> dict:
+    return _feedback_revision_call("packet", work_id, offset, limit)
+
+
+def stage_feedback_revisions(work_id: str, expected_packet_digest: str, revisions: list,
+                             attachment_file: str | None = None) -> dict:
+    return _feedback_revision_call("stage", work_id, expected_packet_digest, revisions,
+                                   attachment_file=attachment_file)
+
+
+def apply_staged_feedback_revisions(work_id: str, expected_stage_digest: str) -> dict:
+    return _feedback_revision_call("apply", work_id, expected_stage_digest)
 
 
 def list_scoring_sessions() -> dict:

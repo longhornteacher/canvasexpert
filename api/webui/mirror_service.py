@@ -206,6 +206,19 @@ def _run_scoring_course_refresh(course_id: str):
         )
 
 
+def _run_feedback_course_refresh(course_id: str):
+    """Acquire complete comment identities/staff proof only on teacher opt-in."""
+    with _telemetry("course.feedback_refresh"):
+        course = next((item for item in config.saved_courses()
+                       if str(item.get("id")) == str(course_id)), None)
+        if not course:
+            return {"ok": False, "error_class": "course_unavailable"}
+        return sync.refresh(
+            course_id, canvas_get_all=canvas_get_all,
+            canvas_get_all_complete=canvas_get_all_complete,
+            course_name=course.get("name"), force=True, full=True, with_comments=True)
+
+
 def _run_scoring_discovery_refresh(course_id: str):
     """Run the discovery-owned full refresh scope.
 
@@ -236,6 +249,7 @@ def coordinator_instance() -> coordinator.MirrorCoordinator:
         "roster": _run_roster,
         "groups": _run_groups,
         "course.scoring_refresh": _run_scoring_course_refresh,
+        "course.feedback_refresh": _run_feedback_course_refresh,
         "course.scoring_discovery_refresh": _run_scoring_discovery_refresh,
         "submissions.course_delta": _run_submission_delta,
         "new_quizzes.metadata": _run_new_quiz_metadata,

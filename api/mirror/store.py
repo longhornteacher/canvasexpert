@@ -754,6 +754,7 @@ def _comment_record(entry: dict, replacement_map=None, vault=None) -> dict:
     # still no names, avatars, or attachments.
     author = entry.get("author") if isinstance(entry.get("author"), dict) else {}
     return {
+        "id": str(entry.get("id") or ""),
         "author_id": (_pseudonym_for(vault, entry.get("author_id"))
                       if vault is not None and entry.get("author_id") not in (None, "")
                       else ""),

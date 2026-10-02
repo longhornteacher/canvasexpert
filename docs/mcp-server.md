@@ -57,7 +57,21 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 69 (60 tools). Version 69 adds `get_submission_history`, a bounded
+Tool schema version 70 (64 tools). Version 70 adds `prepare_feedback_revision`,
+`get_feedback_revision_packet`, `stage_feedback_revisions`, and
+`apply_staged_feedback_revisions` for revising selected existing staff comments
+on graded ordinary assignments while preserving scores. `stage_feedback_revisions`
+optionally accepts an exact staged `attachment_file`, frozen/validated before any
+send and attached once per revised student through the native comment-file lane.
+Separate durable upload/comment receipts prevent resends and expose partial work.
+`refresh_mirror(include_comments=true)` opts into a full comment-bearing refresh;
+the default remains a status-only delta. Revision rows are exactly
+`{pseudonym, comment_key, feedback}`. This path edits comments with concise plain
+text, uses immutable local packets/shared work leases, and persists each send
+intent/outcome without submission/grade read-back or blind retry. Missing comment IDs require
+teacher-directed comment refresh; old current data needs an explicit age acknowledgement.
+See `docs/guides/scoring-sessions.md` for the concrete continuations.
+Version 69 adds `get_submission_history`, a bounded
 read of retained local submission evidence that remains historical after mirror pruning.
 Version 68 replaces structured feedback fields and the
 `exemplars`/`disclosure` staging inputs with one teacher-authored `feedback` string per result.
@@ -129,7 +143,7 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `apply_attempts_grant(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grant through the Operation Ledger, one checkpointed write per step and a live re-read before each (an extension is set to before + N only while the live value is still the frozen before); returns each pseudonym as granted, skipped, or failed with its before value. Apply only on the teacher's direct instruction | Yes, pseudonymized |
 | `preview_missing_sweep(course_id, revert_operation_id="")` | Mirror-prefiltered, live-per-assignment-checked, pseudonymized review of every eligible missing row past the policy's window (plus grace); pass `revert_operation_id` for an undo preview of a completed sweep | Yes, pseudonymized |
 | `apply_missing_sweep(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed sweep or undo with a live per-row check before each write, readback verification, and a receipt; one rejected row is skipped and the rest continue | Yes, pseudonymized |
-| `refresh_mirror(course_id)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |
+| `refresh_mirror(course_id, include_comments=false)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |
 | `list_feedback_contracts()` | List teacher-authored judgment and feedback-shape contracts available in the private workspace; returns ids, summaries, and projected sizes only | No |
 | `discover_scoring_work()` | Read every Current course locally and return student-free assignment, freshness, and attention tables; no refresh, preparation, or Canvas write | No |
 | `preview_workspace_reset()` | Dry-runs the explicitly authorized local cleanup and reports classified paths, counts, and refusals | No |
@@ -146,6 +160,10 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
 | `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, grade_mode="post_score")` | Validate one authored `feedback` string and numeric or null score per result, retain optional `insincere`/`late_days` grading flags, and freeze locally; numeric score-only work may have empty feedback; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |
 | `apply_staged_scoring_results(scoring_session_id, expected_stage_digest, idempotency_key="")` | Post only the unchanged private stage after a direct teacher instruction; preserves narrow transport and idempotency safeguards | Yes, pseudonymized |
+| `prepare_feedback_revision(course_id, assignment_id, use_existing_mirror=false)` | Reopen a graded ordinary assignment for feedback-only revision from the local mirror; scores are preserved and never sent | No |
+| `get_feedback_revision_packet(work_id, offset=0, limit=10)` | Complete scrubbed responses, existing staff feedback, and opaque comment keys; scores are context only | Yes, pseudonymized |
+| `stage_feedback_revisions(work_id, expected_packet_digest, revisions, attachment_file=null)` | Freeze `{pseudonym, comment_key, feedback}` rows and an optional exact staged attachment filename; never calls Canvas | Yes, pseudonymized |
+| `apply_staged_feedback_revisions(work_id, expected_stage_digest)` | On direct teacher instruction, edit only the frozen comments (plus one optional attachment per student) with durable receipts and no grade fields, read-back, or blind retry | Yes, pseudonymized |
 
 `get_course_assignments` and `get_modules` only read the local course catalog written by
 the CanvasExpert runtime/control console — neither ever falls back to a live Canvas call.

@@ -460,6 +460,22 @@ def test_scoring_refresh_runs_a_full_pass_without_comments(monkeypatch, _configu
     assert captured["bypass_new_quiz_cooldown"] is True
 
 
+def test_feedback_refresh_is_opted_in_full_comment_bearing_scope(monkeypatch, _configure):
+    _configure(courses=({"id": "111", "name": "Course One"},))
+    captured = {}
+    def refresh(course_id, **kwargs):
+        captured.update(course_id=course_id, **kwargs)
+        return {"ok": True}
+    monkeypatch.setattr(mirror_service.sync, "refresh", refresh)
+    assert mirror_service._run_feedback_course_refresh("111") == {"ok": True}
+    assert captured["course_id"] == "111"
+    assert captured["force"] is True and captured["full"] is True and captured["with_comments"] is True
+    assert captured["canvas_get_all"] is mirror_service.canvas_get_all
+    assert captured["canvas_get_all_complete"] is mirror_service.canvas_get_all_complete
+    monkeypatch.setattr(mirror_service.coordinator, "configure_default", lambda runners: runners)
+    assert mirror_service.coordinator_instance()["course.feedback_refresh"] is mirror_service._run_feedback_course_refresh
+
+
 def test_scoring_discovery_refresh_uses_a_distinct_full_refresh_runner(monkeypatch, _configure):
     _configure(courses=({"id": "111", "name": "Course One"},))
     captured = {}

@@ -95,27 +95,52 @@ restricted to nobody while published and was then deleted.
 
   Both wait for the first real classic quiz with students.
 
+## Verified Canvas facts: Classic Quiz grading (2026-09-30)
+
+Verified with a teacher token on a Test Student submission to a probe classic quiz. The
+quiz had MC 5, two essays of 10 each, and a file upload of 5. It was assigned to the
+Test Student only and deleted afterward.
+
+- **Reading answers.** `GET /api/v1/courses/:c/assignments/:a/submissions/:u?include[]=submission_history`
+  returns `submission_history[-1].submission_data`, one row per question:
+  - `question_id` (the quiz question id);
+  - `points`;
+  - `correct`, which is `"undefined"` for manually graded types;
+  - essay `text` (HTML);
+  - upload `attachment_ids`.
+
+  The attachment downloads through `GET /api/v1/files/:id` and its `url` with the token.
+  Question text, types, and points come from `GET /quizzes/:q/questions`.
+- **Initial state.** Before grading, auto-scored points are already applied (MC 5 of 5).
+  The quiz submission and the assignment submission are both `pending_review`.
+- **Per-question write.** `PUT /api/v1/courses/:c/quizzes/:q/submissions/:quiz_submission_id`
+  with `{quiz_submissions:[{attempt, questions:{<question_id>:{score, comment}}}]}`
+  returns 200. The quiz total and the assignment score update immediately, with no
+  `posted_grade` sent.
+  - Grading only some manual questions leaves the submission `pending_review`.
+  - Grading all of them makes the quiz `complete` and the assignment `graded`.
+- **Scores and comments are set, not added.** An identical rewrite is harmless, and a
+  new value replaces the old score and comment.
+- **Comments.** The comment is stored per question in `submission_data[].more_comments`,
+  with line breaks preserved. It is **not** a submission comment. A separate
+  submission-level `text_comment` (without a grade) coexists and leaves the score
+  unchanged.
+- **Bounds are not enforced by Canvas.** A score above the question's points is accepted,
+  which produced 31 out of 30. The runtime must enforce `0 <= score <= question points`.
+- **The attempt must exist.** A non-existent `attempt` returns 400 `invalid attempt`.
+- **Posting.** Under automatic posting, a per-question write is visible at once
+  (`posted_at` set). Under manual posting with grades hidden, writes stay hidden
+  (`posted_at` null) until grades are posted.
+  - The policy is readable as the assignment's `post_manually`.
+  - GraphQL `setAssignmentPostPolicy`, `hideAssignmentGrades`, and
+    `postAssignmentGrades` change it. Canvas Expert should read the policy, not change
+    it.
+
 ## Next batch
 
-**Batch 2: score classic quiz writing.** Not briefed.
-- **Goal:** a Scoring Session scores a classic quiz's `essay_question` and
-  `file_upload_question` answers, and writes a **score and a comment per question**
-  through classic quiz grading, so the quiz total updates in Canvas.
-- **Today:** PowerGrader refuses classic quizzes (`api/powergrader/canvas_fetch.py`,
-  "Classic Quizzes are not supported").
-- **Before briefing, run a live probe** on an unpublished, restricted classic quiz with
-  the Test Student:
-  - read the answers from `GET .../submissions?include[]=submission_history`
-    `submission_data`, or `quiz_submissions/:id/questions`;
-  - write per-question `score` and `comment` with `PUT
-    /api/v1/courses/:c/quizzes/:q/submissions/:id` (`quiz_submissions:[{attempt,
-    questions:{<id>:{score, comment}}}]`);
-  - check posting-policy visibility and idempotent rewrites.
-- **Read first:** `docs/guides/scoring-sessions.md`,
-  `docs/reference/powergrader-scoring-map.md`, and
-  `docs/contracts/feedback-scoring-contract.md`.
-- **Carried decisions:** a score and a comment per question (teacher-confirmed
-  2026-09-29).
+**Batch 2: score classic quiz writing.** This is briefed in
+`docs/handoffs/classic-quiz-scoring.md` while that brief is current.
+- Carried decision: a score and a comment per question (teacher-confirmed 2026-09-29).
 
 ## New Quiz draft comments (probe run before 2026-09-29)
 

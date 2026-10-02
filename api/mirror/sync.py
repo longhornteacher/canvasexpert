@@ -148,8 +148,51 @@ def _fetch_submissions(course_id, canvas_get_all, *, submitted_since=None,
         params["submitted_since"] = submitted_since
     if graded_since:
         params["graded_since"] = graded_since
-    return canvas_get_all(
+    rows, error = canvas_get_all(
         f"/api/v1/courses/{course_id}/students/submissions", params, timeout=60)
+    if error or not with_comments:
+        return rows, error
+    # Course-filtered staff evidence is transient. Neither a comment marker
+    # nor a student-supplied author role proves authority to edit feedback.
+    try:
+        staff, staff_error = canvas_get_all(
+            f"/api/v1/courses/{course_id}/users",
+            {"enrollment_type[]": ["teacher", "ta"], "include[]": ["enrollments"],
+             "enrollment_state[]": ["active"], "per_page": 100}, timeout=60)
+    except Exception:
+        staff, staff_error = None, "unavailable"
+    roles = {}
+    if not staff_error and isinstance(staff, list):
+        for user in staff:
+            if not isinstance(user, dict) or not str(user.get("id") or "").isdigit():
+                continue
+            for enrollment in user.get("enrollments") or []:
+                if (not isinstance(enrollment, dict)
+                        or str(enrollment.get("course_id") or "") != str(course_id)
+                        or str(enrollment.get("user_id") or "") != str(user["id"])
+                        or enrollment.get("enrollment_state") != "active"):
+                    continue
+                role = {"TeacherEnrollment": "teacher", "TaEnrollment": "ta"}.get(enrollment.get("type"))
+                if role:
+                    roles[str(user["id"])] = role
+    import copy
+    from api.work_registry.providers.home_attention import _author_id
+
+    enriched = copy.deepcopy(rows)
+    for submission in enriched or []:
+        if not isinstance(submission, dict):
+            continue
+        for comment in submission.get("submission_comments") or []:
+            if not isinstance(comment, dict):
+                continue
+            author_id = _author_id(comment)
+            role = roles.get(author_id, "") if author_id != str(submission.get("user_id") or "") else ""
+            comment["author_role"] = role
+            comment.pop("author_type", None)
+            if isinstance(comment.get("author"), dict):
+                comment["author"].pop("role", None)
+                comment["author"].pop("type", None)
+    return enriched, None
 
 
 def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all,

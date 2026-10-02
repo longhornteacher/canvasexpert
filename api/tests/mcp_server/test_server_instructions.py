@@ -62,7 +62,10 @@ INSTRUCTION_BUDGET = 2200
 # (post_score or feedback_only, +244): a numeric draft score in feedback
 # with no gradebook score.
 # Raised to the measured 20,793 for the retained assignment-history read.
-LISTING_BUDGET = 20793
+# Raised to the measured 22,352 for the four feedback-only revision tools
+# (prepare_feedback_revision, get_feedback_revision_packet,
+# stage_feedback_revisions, apply_staged_feedback_revisions, +1,559).
+LISTING_BUDGET = 22352
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
@@ -259,7 +262,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 60
+    assert len(listed) == 64
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -363,9 +366,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 60
-    assert len(_synthetic_mcp["calls"]) == 60
-    assert len(_synthetic_mcp["gated"]) == 60
+    assert len(results) == 64
+    assert len(_synthetic_mcp["calls"]) == 64
+    assert len(_synthetic_mcp["gated"]) == 64
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

@@ -11,6 +11,85 @@ from docx import Document
 
 
 @pytest.fixture
+def feedback_revision_work(tmp_path, monkeypatch):
+    """Synthetic private feedback scope; real shared journal, fake Canvas only."""
+    from api.feedback_vault import Vault
+    from api.shared_work import SharedWorkStore
+    from api.powergrader import feedback_revision as fr
+    from api.mcp_server import tools
+    from api.mirror import store as mirror_store
+
+    vault = Vault(str(tmp_path / "vault.json"))
+    labels = [vault.get_or_assign(uid, real_name=name) for uid, name in (
+        ("900001", "Synthetic First"), ("900002", "Fictional Omega"))]
+    vault.save()
+    store = SharedWorkStore(root=str(tmp_path))
+    stamp = mirror_store.now_iso()
+    freshness = {"state": "current", "last_success_at": stamp,
+                 "requires_teacher_confirmation": False}
+    comments = {"state": "current", "last_success_at": stamp, "records": []}
+    assignment = {"id": "700010", "name": "Practice response", "description": "Explain.",
+                  "is_quiz": False, "quiz_kind": "", "is_quiz_lti_assignment": False,
+                  "points_possible": 100}
+    rows = [{"user_id": uid, "assignment_id": "700010", "workflow_state": "graded",
+             "score": score, "grade": str(score), "late": False, "missing": False,
+             "excused": False, "body": "A complete synthetic response.",
+             "user": {"name": name}, "submission_comments": [
+                 {"id": cid, "author_id": "900099", "author_role": "teacher",
+                  "comment": "Original long feedback.", "created_at": stamp}]} for uid, cid, score, name in (
+                     ("900001", "500001", 0, "Synthetic First"),
+                     ("900002", "500002", 85, "Fictional Omega"))]
+    calls = []
+    monkeypatch.setattr(fr, "SharedWorkStore", lambda: store)
+    monkeypatch.setattr(fr.assignment_refresh, "prepare_assignment_from_mirror",
+                        lambda *_a: (copy.deepcopy(rows), copy.deepcopy(assignment), {"freshness": freshness}))
+    monkeypatch.setattr(fr.read_service, "private_submission_comments", lambda *_a, **_kw: comments)
+    monkeypatch.setattr(tools, "_vault_factory", lambda: vault)
+    monkeypatch.setattr(tools, "_course_gate_check", lambda cid: None if cid == "111" else "unavailable")
+    monkeypatch.setattr(fr.canvas_client, "_canvas_send",
+                        lambda method, path, payload: (calls.append((method, path, copy.deepcopy(payload))) or {}, None))
+    monkeypatch.setattr(fr.canvas_client, "canvas_get", lambda *_a, **_kw: pytest.fail("No Canvas GET allowed"))
+
+    def prepare(**kwargs):
+        return tools.prepare_feedback_revision("111", "700010", **kwargs)
+
+    def revisions(packet, take=None):
+        return [{"pseudonym": r["pseudonym"], "comment_key": r["comment_key"],
+                 "feedback": "Submit a second typed draft that fixes the listed problems."}
+                for r in packet["revisions"][:take]]
+
+    return SimpleNamespace(store=store, vault=vault, labels=labels, rows=rows,
+                           comments=comments, assignment=assignment, freshness=freshness,
+                           calls=calls, prepare=prepare, revisions=revisions, tools=tools)
+
+
+@pytest.fixture
+def feedback_attachment_work(feedback_revision_work, tmp_path, monkeypatch):
+    from api.powergrader import feedback_revision as fr
+
+    w = feedback_revision_work
+    folder = tmp_path / "To Review" / "Attachments"
+    folder.mkdir(parents=True)
+    w.file = folder / "Practice Exemplars.docx"
+    w.file.write_bytes(b"synthetic unchanged exemplar bytes")
+    w.uploads = []
+    monkeypatch.setattr(fr.forge_files.runtime_paths, "workspace_root", lambda: str(tmp_path))
+    def send(method, path, payload):
+        w.calls.append((method, path, copy.deepcopy(payload)))
+        if method == "POST":
+            return {"upload_url": "https://signed-upload.invalid", "upload_params": {"key": "synthetic"}}, None
+        return {}, None
+    def multipart(url, *, data, files, timeout, allow_redirects):
+        assert allow_redirects is False
+        assert url == "https://signed-upload.invalid" and data == {"key": "synthetic"}
+        w.uploads.append((files["file"][0], files["file"][1].read(), files["file"][2]))
+        return SimpleNamespace(status_code=201, headers={}, json=lambda: {"id": 600000 + len(w.uploads)})
+    monkeypatch.setattr(fr.canvas_client, "_canvas_send", send)
+    monkeypatch.setattr(fr.assignment_whole.requests, "post", multipart)
+    return w
+
+
+@pytest.fixture
 def mirror_assignment_input(tmp_path, monkeypatch):
     """Synthetic normalized mirror rows for the assignment preparation boundary."""
     from api.powergrader import assignment_refresh
