@@ -231,6 +231,12 @@ def private_submission_comments(course_id, *, root=None, max_age_hours=None, now
     )
 
 
+def private_submission_history(course_id, assignment_id, *, root=None) -> dict:
+    """Read retained local evidence without consulting projection freshness."""
+    from . import submission_history
+    return submission_history.read_history(course_id, assignment_id, root=root)
+
+
 def _catalog_scope(course_id, scope: str, scope_key: str, *, catalog_reader=None,
                    max_age_hours=None, now=None) -> dict:
     if catalog_reader is None:

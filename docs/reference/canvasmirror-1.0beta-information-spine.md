@@ -156,7 +156,10 @@ These are the architectural decisions future briefs must inherit.
 
 Every mirrored Canvas fact can be deleted and rebuilt. A projection may preserve attempt
 history observed over time, but it never becomes a competing authority. Corrupt projection
-files are treated as absent or recovered from a validated previous snapshot.
+files are treated as absent or recovered from a validated previous snapshot. Separately,
+observed ordinary assignment attempts and captured originals are retained as private historical
+evidence under the workspace archive. That archive is not a current Canvas projection or
+authority and is not removed when projection membership is pruned.
 
 ### 5.2 CanvasMirror is not a universal HTTP proxy
 
@@ -378,9 +381,11 @@ paths should remain compatible unless a later contract migration has an immediat
 ### 7.3 Focused evidence remains a separate owner
 
 Binary attachments and New Quiz native evidence have different size, authorization,
-freshness, and renderer constraints from metadata. CanvasMirror coordinates their status
-and exposes their completeness; it does not turn the heartbeat into a course-wide download
-job.
+freshness, and renderer constraints from metadata. Ordinary assignment originals are
+captured opportunistically from existing submission reads with bounded requests and bytes;
+their local-only archive status is independent from projection freshness. CanvasMirror does
+not turn the heartbeat into a course-wide download job. New Quiz native evidence remains a
+separate owner.
 
 ### 7.4 Schema evolution is rebuild-first and last-good-safe
 
@@ -630,7 +635,8 @@ quizzes as routine metadata work.
   rubric definitions, gradebook configuration.
 - **Private student data:** roster, sections, groups/memberships, submissions, attempts,
   comments, grades, personalized due facts, New Quiz responses.
-- **Private evidence:** attachment bytes, media, native New Quiz evidence, generated reports.
+- **Private evidence:** retained ordinary assignment uploads, media, native New Quiz evidence,
+  generated reports.
 - **Irreplaceable private state:** pseudonym vault, teacher settings/aliases, receipts. These
   are not disposable mirror projections.
 

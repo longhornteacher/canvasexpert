@@ -920,7 +920,8 @@ def write_assignments(course_id, rows: list[dict], *, root=None,
 
 def merge_submissions(course_id, assignment_id, rows: list[dict], *,
                       root=None, attempted_at: str | None = None,
-                      state: str = "current", replace: bool = False) -> dict:
+                      state: str = "current", replace: bool = False,
+                      stream_get=None, canvas_origin="", capture_budget=None) -> dict:
     """Merge Canvas submission rows into one assignment's mirror file.
 
     ``replace=False`` (delta): upsert the incoming users, keep everyone else.
@@ -938,6 +939,18 @@ def merge_submissions(course_id, assignment_id, rows: list[dict], *,
                 lambda d: validate_submissions(d, course_id, assignment_id),
             )
             existing_entries = (existing or {}).get("submissions") or {}
+            from . import submission_history
+            # The mirror file is disposable. Seed it before any incoming row,
+            # including sparse deltas, can replace its observed fields.
+            if existing is not None:
+                submission_history.capture_cached_document(
+                    course_id, assignment_id, existing, root=root)
+            # Persist URL-free metadata before committing the mirror. Actual
+            # network streaming is retried below after both store locks exit.
+            submission_history.capture_rows(
+                course_id, assignment_id, rows or [], vault=vault, root=root,
+                budget=capture_budget,
+            )
             entries: dict[str, dict] = {} if replace else {
                 user_id: {"current": dict(entry["current"]),
                           "attempts": dict(entry["attempts"])}
@@ -950,7 +963,25 @@ def merge_submissions(course_id, assignment_id, rows: list[dict], *,
                 user_id, current, attempts = normalized
                 previous = entries.get(user_id) or existing_entries.get(user_id) or {}
                 merged_attempts = dict(previous.get("attempts") or {})
-                merged_attempts.update(attempts)
+                for attempt_key, incoming in attempts.items():
+                    prior = merged_attempts.get(attempt_key)
+                    if prior:
+                        merged = dict(prior)
+                        if incoming.get("body"):
+                            if not merged.get("body"):
+                                merged["body"] = incoming["body"]
+                            # Keep the first captured draft in the disposable
+                            # projection; conflicting observations live in the
+                            # durable history archive.
+                        if incoming.get("attachment_names"):
+                            merged["attachment_names"] = list(dict.fromkeys(
+                                list(merged.get("attachment_names") or [])
+                                + list(incoming["attachment_names"])))
+                        if incoming.get("submission_type"):
+                            merged["submission_type"] = incoming["submission_type"]
+                        merged_attempts[attempt_key] = merged
+                    else:
+                        merged_attempts[attempt_key] = incoming
                 # A row fetched without submission_comments (delta; or a full
                 # pass that omitted the include) must not erase comments a prior
                 # pass already stored — carry them forward when this row is bare.
@@ -966,8 +997,19 @@ def merge_submissions(course_id, assignment_id, rows: list[dict], *,
                 **_envelope(state, attempted_at),
                 "submissions": entries,
             }
-            return _write_document(submission_path(course_id, assignment_id, root),
-                                   validate_submissions(document, course_id, assignment_id))
+            written = _write_document(
+                submission_path(course_id, assignment_id, root),
+                validate_submissions(document, course_id, assignment_id))
+    if stream_get is not None:
+        # Keep Canvas I/O outside both the vault transaction and course lock.
+        # Metadata is already durable, so a failed download is independently
+        # visible and retryable without affecting the projection commit.
+        submission_history.capture_rows(
+            course_id, assignment_id, rows or [], vault=vault, root=root,
+            stream_get=stream_get, canvas_origin=canvas_origin,
+            budget=capture_budget,
+        )
+    return written
 
 
 def prune_submission_files(course_id, keep_assignment_ids, *, root=None) -> list[str]:
@@ -984,9 +1026,24 @@ def prune_submission_files(course_id, keep_assignment_ids, *, root=None) -> list
             if not name.endswith(".v1.json") or name in keep:
                 continue
             try:
+                assignment_id = name[: -len(".v1.json")]
+                # Archive the stored projection directly. The public reader
+                # rehydrates pseudonym keys into Canvas ids for local callers,
+                # but the durable history manifest must retain only the
+                # pseudonymous on-disk representation.
+                document = _read_document(
+                    submission_path(course_id, assignment_id, root),
+                    lambda d: validate_submissions(d, course_id, assignment_id),
+                )
+                if document is not None:
+                    from . import submission_history
+                    submission_history.capture_cached_document(
+                        course_id, assignment_id, document, root=root)
                 os.remove(workspace.extended_path(os.path.join(directory, name)))
-                removed.append(name[: -len(".v1.json")])
-            except OSError:
+                removed.append(assignment_id)
+            except Exception:
+                # The disposable copy is the only remaining evidence if the
+                # archive cannot be validated or written. Keep it in place.
                 continue
     return sorted(removed)
 

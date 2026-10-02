@@ -39,6 +39,15 @@ from api import course_catalog, operational_log
 from api.course_catalog import error_code
 
 from . import new_quizzes, store
+from . import submission_history
+from .submission_history import CaptureBudget
+
+
+def _merge_capture_totals(totals, course_id, assignment_id, *, root=None):
+    summary = submission_history.capture_summary(course_id, assignment_id, root=root)
+    for key, value in summary.items():
+        if key in totals:
+            totals[key] += int(value or 0)
 
 
 WATERMARK_OVERLAP_MINUTES = 10
@@ -144,7 +153,8 @@ def _fetch_submissions(course_id, canvas_get_all, *, submitted_since=None,
 
 
 def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all,
-                                root=None, now=None) -> dict:
+                                root=None, now=None, stream_get=None,
+                                canvas_origin="") -> dict:
     """Refresh one assignment without claiming course-delta coverage.
 
     This focused-current acquisition deliberately leaves course pass envelopes
@@ -166,15 +176,20 @@ def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all,
         rows = None
     if error:
         return {"ok": False, "error": error, "error_code": error_code(error)}
-    document = store.merge_submissions(course_id, assignment_id, rows or [],
-                                       root=root, attempted_at=started)
+    document = store.merge_submissions(
+        course_id, assignment_id, rows or [], root=root, attempted_at=started,
+        stream_get=stream_get, canvas_origin=canvas_origin,
+        capture_budget=CaptureBudget())
     return {"ok": True, "assignment_id": str(assignment_id),
             "submission_rows": len(rows or []),
-            "submissions": len(document["submissions"])}
+            "submissions": len(document["submissions"]),
+            "evidence_capture": submission_history.capture_summary(
+                course_id, assignment_id, root=root)}
 
 
 def refresh_submissions_course_delta(course_id, *, canvas_get_all, root=None,
-                                     now=None) -> dict:
+                                     now=None, stream_get=None,
+                                     canvas_origin="") -> dict:
     """Refresh the named ``submissions.course_delta`` scope only.
 
     This deliberately reuses the last successful course-delta window without
@@ -225,12 +240,18 @@ def refresh_submissions_course_delta(course_id, *, canvas_get_all, root=None,
         return _result(False, logical_requests=2, error_code=error_code(error))
 
     grouped = _group_by_assignment(list(submitted or []) + list(graded or []))
+    budget = CaptureBudget()
+    capture_totals = {"attempts": 0, "files": 0, "captured": 0,
+                      "pending": 0, "failed": 0}
     for assignment_id, rows in grouped.items():
-        store.merge_submissions(course_id, assignment_id, rows, root=root,
-                                attempted_at=started, replace=False)
+        store.merge_submissions(
+            course_id, assignment_id, rows, root=root, attempted_at=started,
+            replace=False, stream_get=stream_get, canvas_origin=canvas_origin,
+            capture_budget=budget)
+        _merge_capture_totals(capture_totals, course_id, assignment_id, root=root)
     return _result(True, logical_requests=2,
                    changed_rows=len(submitted or []) + len(graded or []),
-                   touched_assignments=grouped)
+                   touched_assignments=grouped, evidence_capture=capture_totals)
 
 
 def _group_by_assignment(rows) -> dict[str, list[dict]]:
@@ -268,7 +289,8 @@ def refresh_status(course_id, *, root=None) -> dict:
 
 def refresh(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
             now=None, operation_id=None, force=False, full=False,
-            with_comments=True, course_name=None) -> dict:
+            with_comments=True, course_name=None, stream_get=None,
+            canvas_origin="") -> dict:
     """Run one durable, coalesced read-only refresh.
 
     The per-course lock covers acquisition and projection commit.  A caller
@@ -297,6 +319,7 @@ def refresh(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
                     canvas_get_all_complete=canvas_get_all_complete, root=root,
                     now=now, bypass_new_quiz_cooldown=True,
                     course_name=course_name, with_comments=with_comments,
+                    stream_get=stream_get, canvas_origin=canvas_origin,
                 )
             else:
                 result = delta_pass(
@@ -304,6 +327,7 @@ def refresh(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
                     canvas_get_all_complete=canvas_get_all_complete, root=root,
                     now=now, bypass_new_quiz_cooldown=True,
                     course_name=course_name,
+                    stream_get=stream_get, canvas_origin=canvas_origin,
                 )
             lifecycle = store.finish_refresh(
                 course_id, operation_id=operation_id, ok=bool(result.get("ok")),
@@ -453,7 +477,8 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
               bypass_new_quiz_cooldown: bool = False,
               skip_new_quiz_metadata: bool = False,
               course_name: str | None = None,
-              with_comments: bool = True) -> dict:
+              with_comments: bool = True, stream_get=None,
+              canvas_origin="") -> dict:
     """Backfill / nightly reconcile: fetch everything first, then rewrite.
 
     ``bypass_new_quiz_cooldown`` plumbs the manual ``sync_now`` override down
@@ -514,10 +539,15 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
         course_id, assignments, root=root, attempted_at=started)
     store.write_roster(course_id, students, sections, root=root, attempted_at=started)
     grouped = _group_by_assignment(submissions)
+    budget = CaptureBudget()
+    capture_totals = {"attempts": 0, "files": 0, "captured": 0,
+                      "pending": 0, "failed": 0}
     for assignment_id in document["assignments"]:
-        store.merge_submissions(course_id, assignment_id,
-                                grouped.get(assignment_id, []), root=root,
-                                attempted_at=started, replace=True)
+        store.merge_submissions(
+            course_id, assignment_id, grouped.get(assignment_id, []), root=root,
+            attempted_at=started, replace=True, stream_get=stream_get,
+            canvas_origin=canvas_origin, capture_budget=budget)
+        _merge_capture_totals(capture_totals, course_id, assignment_id, root=root)
     if with_comments:
         store.record_submission_comments_state(
             course_id, ok=True, attempted_at=started, root=root)
@@ -538,13 +568,15 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
             "submission_rows": len(submissions or []),
             "pruned_assignments": diagnostics["orphans_pruned"],
             "assignment_changes": diagnostics,
+            "evidence_capture": capture_totals,
             "new_quizzes": new_quiz_result}
 
 
 def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, now=None,
                bypass_new_quiz_cooldown: bool = False,
                skip_new_quiz_metadata: bool = False,
-               course_name: str | None = None) -> dict:
+               course_name: str | None = None, stream_get=None,
+               canvas_origin="") -> dict:
     """Incremental pass. Falls back to a full pass when no watermark exists
     yet (first run, or a rebuilt mirror). ``bypass_new_quiz_cooldown`` — see
     ``full_pass``. ``course_name`` — see ``full_pass``; also forwarded to the
@@ -558,7 +590,8 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
                          canvas_get_all_complete=canvas_get_all_complete, root=root, now=now,
                          bypass_new_quiz_cooldown=bypass_new_quiz_cooldown,
                          skip_new_quiz_metadata=skip_new_quiz_metadata,
-                         course_name=course_name)
+                         course_name=course_name, stream_get=stream_get,
+                         canvas_origin=canvas_origin)
     started = now or store.now_iso()
 
     assignments, error, complete = _fetch_assignments(course_id, canvas_get_all_complete)
@@ -592,9 +625,15 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
     _document, diagnostics = _commit_assignment_index(
         course_id, assignments, root=root, attempted_at=started)
     grouped = _group_by_assignment(list(submitted or []) + list(graded or []))
+    budget = CaptureBudget()
+    capture_totals = {"attempts": 0, "files": 0, "captured": 0,
+                      "pending": 0, "failed": 0}
     for assignment_id, rows in grouped.items():
-        store.merge_submissions(course_id, assignment_id, rows, root=root,
-                                attempted_at=started, replace=False)
+        store.merge_submissions(
+            course_id, assignment_id, rows, root=root, attempted_at=started,
+            replace=False, stream_get=stream_get, canvas_origin=canvas_origin,
+            capture_budget=budget)
+        _merge_capture_totals(capture_totals, course_id, assignment_id, root=root)
     watermark = _overlapped(started)
     store.record_pass(course_id, "delta", ok=True, attempted_at=started,
                       watermarks={"submitted_since": watermark,
@@ -610,6 +649,7 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
             "changed_rows": len(submitted or []) + len(graded or []),
             "touched_assignments": sorted(grouped),
             "assignment_changes": diagnostics,
+            "evidence_capture": capture_totals,
             "new_quizzes": new_quiz_result}
 
 

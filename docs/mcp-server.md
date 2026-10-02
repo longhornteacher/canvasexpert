@@ -57,7 +57,9 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 68 (59 tools). Version 68 replaces structured feedback fields and the
+Tool schema version 69 (60 tools). Version 69 adds `get_submission_history`, a bounded
+read of retained local submission evidence that remains historical after mirror pruning.
+Version 68 replaces structured feedback fields and the
 `exemplars`/`disclosure` staging inputs with one teacher-authored `feedback` string per result.
 Canvas Expert preserves the string and adds `Draft score: X/Y` only in `feedback_only` mode.
 Version 67 adds optional `grade_mode` (`post_score` default, or
@@ -118,6 +120,7 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `apply_roster_student_change(course_id, preview, preview_digest, expected_settings_digest)` | Applies the unchanged preview of local roster settings | Yes, pseudonymized |
 | `clear_roster_student_field(course_id, pseudonym, field, expected_settings_digest)` | Direct digest-protected clear for supported local settings; nickname fields are rejected | Yes, pseudonymized |
 | `get_submissions(course_id, assignment_id, include_text=true, pseudonyms="", max_text_chars=2000)` | Mirror submissions including historical rows; current_enrollment marks same-mirror roster membership; optional pseudonym narrowing and bounded text | Yes, pseudonymized |
+| `get_submission_history(course_id, assignment_id, pseudonyms="", include_text=true, max_text_chars=12000, offset=0, limit=50)` | Paginated, scrubbed observations from the private retained archive; observed-only coverage, no freshness or enrollment claim; original files stay local | Yes, pseudonymized |
 | `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |
 | `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state; exact saved family links label each bridge and differentiated source with its partner IDs | Yes, pseudonymized |
 | `preview_grade_adjustment(course_id, assignment_id, adjustment)` | Mirror-backed, pseudonymized before/after review for a points-based existing-grade adjustment, including rule, explicit, and revert previews | Yes, pseudonymized |

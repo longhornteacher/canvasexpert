@@ -675,7 +675,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
         "Course discovery and catalog", "Shared work items", "Create and Forge",
         "Push verification and recovery", "Scoring Sessions", "Gradebook",
         "SIS Grade Bridges", "Learning Objectives",
-        "Writing Timeline", "Writing Record", "Students",
+            "Writing Timeline", "Writing Record", "Students",
     }
 
     assert result["ok"] is True
@@ -683,7 +683,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 59
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 60
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -1730,7 +1730,7 @@ def test_server_registers_the_expected_tool_set():
     tool_names = set(mcp._tool_manager._tools.keys())
     assert tool_names == {
         "list_courses", "list_sections", "list_groups", "get_course_assignments", "get_modules",
-            "get_roster", "get_submissions", "refresh_course_structure",
+            "get_roster", "get_submissions", "get_submission_history", "refresh_course_structure",
         "get_writing_history", "get_gradebook_snapshot", "refresh_mirror",
             "get_authoring_contract", "get_product_guide",
             "list_staged_content", "preview_content_push", "preview_differentiated_quiz_push", "apply_content_push",

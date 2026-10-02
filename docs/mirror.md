@@ -89,6 +89,12 @@ check protects each reviewed write from overwriting a newer Canvas change.
 Per-assignment submission files keep OneDrive syncs small and localize any
 cross-machine conflict to a single disposable file.
 
+Ordinary assignment attempt evidence has a separate durable home under the
+selected workspace's `_System/Archive/Submission History/<course>/<assignment>/`.
+Its URL-free manifest keeps pseudonymized observations and references immutable
+original-file blobs; it is private teacher evidence, not a current Canvas
+projection. Workspace reset does not include this archive.
+
 ## Sync passes (`api/mirror/sync.py`)
 
 - **full** — backfill and nightly reconcile are the *same code path*: fetch
@@ -172,8 +178,11 @@ email stays a removed, live-only-if-ever-added field; modules stay live.
 **Attempt history is append-only** within a living submission: students who
 resubmit accumulate `attempts` keyed by attempt number, which survive full-
 pass rewrites. This is the substrate for regrade queues, revision chains, and
-growth-over-time views. (Deleted submissions take their attempts with them —
-the mirror mirrors truth.) New Quiz response snapshots follow the same law:
+growth-over-time views. The disposable projection still prunes removed
+students and assignments, while observed ordinary assignment attempts and
+captured originals remain in the private retained-history archive for draft
+comparison. This archive reports observed history only; it does not establish
+current membership or freshness. New Quiz response snapshots follow the same law:
 attempts captured earlier but absent from a later report are carried forward,
 while `current`/`latest_attempt` always reflect the newest fetch alone.
 
@@ -310,6 +319,12 @@ safety scan — the response is a sync status, full stop. This keeps the AI's
 entire path to Canvas indirect: it can only ask Canvas Expert to sync, then
 read whatever Canvas Expert wrote to disk.
 
+`get_submission_history` reads the durable local archive independently of
+projection freshness and membership. It returns bounded, scrubbed observations
+with `coverage: observed_only`; it never refreshes Canvas or returns raw files.
+Approved text/DOCX originals may contribute scrubbed text; PDF and other
+formats remain local-only for teacher inspection in the private archive.
+
 Scoring Session continuation follows the same boundary. Once a queue item has
 been selected, preparation reads fresh roster, assignment, and submission
 projections only. Ordinary submission text enters the existing SAFE pipeline;
@@ -334,7 +349,10 @@ student-free quiz classification stops a true New Quiz with
   a missing or corrupt sidecar reads as `unavailable` without ever touching the
   last-good submission files. This slice is read-service-only: no Home/Work
   consumer, report fallback, or write-triggered invalidation is wired to it yet.
-- **Attachment downloads** (names only, in attempt records).
+- Arbitrary attachment handling, media derivatives, OCR, and PDF extraction.
+  Ordinary assignment originals are retained privately as evidence; only the
+  existing approved text/DOCX routing may contribute scrubbed text to the new
+  history read.
 - New Quiz item-level grading or feedback writes. Mirror snapshots are read-only,
   and Canvas Expert does not write New Quiz item scores or per-item feedback.
 - Multi-machine conflict smarts beyond disposability. (`vault.json` — not a

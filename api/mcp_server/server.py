@@ -409,6 +409,20 @@ def get_submissions(course_id: str, assignment_id: str,
 
 
 @mcp.tool(structured_output=False)
+def get_submission_history(course_id: str, assignment_id: str,
+                           pseudonyms: str = "", include_text: bool = True,
+                           max_text_chars: int = 12000,
+                           offset: int = 0, limit: int = 50) -> str:
+    """Read bounded retained assignment drafts and file evidence from local history.
+    History is observed-only and does not report current Canvas freshness or enrollment."""
+    return _compact(tools.get_submission_history(
+        course_id, assignment_id, pseudonyms=pseudonyms,
+        include_text=include_text, max_text_chars=max_text_chars,
+        offset=offset, limit=limit,
+    ))
+
+
+@mcp.tool(structured_output=False)
 def get_writing_history(pseudonym: str, since: str = "", until: str = "",
                         include_text: bool = False,
                         max_text_chars: int = 2000) -> str:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
 from api.feedback_vault import Vault
+from api.identity_vault_service import open_vault
 from api.mcp_server import server, tools
 from api.mirror import store as mirror_store
 from api.platform_services import workspace
@@ -90,6 +92,56 @@ def _set_previous_course(_set_active_courses, monkeypatch):
         )
 
     return set_previous_course
+
+
+@pytest.fixture
+def retained_history_env(monkeypatch, tmp_path):
+    """Isolated private history, identity vault, and synthetic attachment transport."""
+    course_id, assignment_id = "711", "82001"
+    origin = "https://canvas.example.edu"
+    root = str(tmp_path)
+    monkeypatch.setattr(workspace, "workspace_root", lambda: root)
+    vault = open_vault(root)
+    with vault.transaction():
+        vault.get_or_assign("991001", real_name="Alice Example")
+    monkeypatch.setattr(tools, "_open_vault", lambda: (vault, None))
+    monkeypatch.setattr(tools.config, "saved_courses",
+                        lambda: [{"id": course_id, "name": "Course", "active": False}])
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [])
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+            self.headers = {"Content-Length": str(len(payload))}
+            self.closed = False
+
+        def iter_content(self, chunk_size):
+            yield self.payload
+
+        def close(self):
+            self.closed = True
+
+    def capture(payloads=(), body="Alice's first draft"):
+        attachments = []
+        responses = {}
+        for file_id, filename, payload in payloads:
+            attachments.append({"id": file_id, "filename": filename,
+                                "url": f"{origin}/files/{file_id}?token=hidden",
+                                "size": len(payload), "content_type": "application/octet-stream"})
+            responses[str(file_id)] = Response(payload)
+        row = {"assignment_id": int(assignment_id), "user_id": 991001,
+               "attempt": 1, "submitted_at": "2026-09-01T10:00:00Z",
+               "workflow_state": "submitted", "body": body,
+               "submission_type": "online_text_entry", "attachments": attachments}
+        stream = lambda url: (responses[url.split("/files/")[1].split("?")[0]], None)
+        mirror_store.merge_submissions(
+            course_id, assignment_id, [row], root=root,
+            stream_get=stream if payloads else None, canvas_origin=origin,
+        )
+        return responses
+
+    return {"course_id": course_id, "assignment_id": assignment_id,
+            "origin": origin, "root": root, "vault": vault, "capture": capture}
 
 
 @pytest.fixture

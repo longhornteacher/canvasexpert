@@ -26,11 +26,13 @@ from api.platform_services.canvas_client import (
     canvas_get as _platform_canvas_get,
     canvas_get_all as _platform_canvas_get_all,
     canvas_get_all_complete as _platform_canvas_get_all_complete,
+    canvas_stream_get as _platform_canvas_stream_get,
     canvas_get_telemetry,
 )
 canvas_get = _platform_canvas_get
 canvas_get_all = _platform_canvas_get_all
 canvas_get_all_complete = _platform_canvas_get_all_complete
+canvas_stream_get = _platform_canvas_stream_get
 from .routes.courses import load_group_categories
 from .routes.names import _vault as _identity_vault
 
@@ -116,7 +118,9 @@ def _run_groups(course_id: str):
 
 def _run_submission_delta(course_id: str):
     with _telemetry("submissions.course_delta"):
-        return sync.refresh_submissions_course_delta(course_id, canvas_get_all=canvas_get_all)
+        return sync.refresh_submissions_course_delta(
+            course_id, canvas_get_all=canvas_get_all,
+            stream_get=canvas_stream_get, canvas_origin=config.get_canvas_base())
 
 
 def _run_new_quiz_metadata(course_id: str):
@@ -137,7 +141,10 @@ def _run_course_refresh(course_id: str):
         if context.get("priority") in {"background", "concluded"}:
             course = next((item for item in config.active_courses()
                            if str(item.get("id")) == str(course_id)), None)
-            return _run_heartbeat_course(course) if course else {"ok": False, "error_class": "course_unavailable"}
+            return (_run_heartbeat_course(
+                course, stream_get=canvas_stream_get,
+                canvas_origin=config.get_canvas_base()) if course else
+                {"ok": False, "error_class": "course_unavailable"})
         course = next((item for item in config.saved_courses()
                        if str(item.get("id")) == str(course_id)), None)
         if not course:
@@ -147,6 +154,7 @@ def _run_course_refresh(course_id: str):
             canvas_get_all=canvas_get_all,
             canvas_get_all_complete=canvas_get_all_complete,
             course_name=course.get("name"),
+            stream_get=canvas_stream_get, canvas_origin=config.get_canvas_base(),
             force=True,
         )
 
@@ -193,6 +201,7 @@ def _run_scoring_course_refresh(course_id: str):
             canvas_get_all=canvas_get_all,
             canvas_get_all_complete=canvas_get_all_complete,
             course_name=course.get("name"),
+            stream_get=canvas_stream_get, canvas_origin=config.get_canvas_base(),
             force=True, full=True, with_comments=False,
         )
 
@@ -214,6 +223,7 @@ def _run_scoring_discovery_refresh(course_id: str):
             canvas_get_all=canvas_get_all,
             canvas_get_all_complete=canvas_get_all_complete,
             course_name=course.get("name"),
+            stream_get=canvas_stream_get, canvas_origin=config.get_canvas_base(),
             force=False, full=True, with_comments=False,
         )
 
@@ -336,7 +346,8 @@ def _refresh_groups_on_maintenance(course_id: str, *, load_groups, now: str) -> 
 
 
 def _run_heartbeat_course(course: dict, *, canvas_get=None, canvas_get_all=None,
-                          canvas_get_all_complete=None, load_groups=None, now=None) -> dict:
+                          canvas_get_all_complete=None, load_groups=None, now=None,
+                          stream_get=None, canvas_origin="") -> dict:
     """One course's legacy cadence, called inside a background coordinator job."""
     canvas_get = canvas_get or globals()["canvas_get"]
     canvas_get_all = canvas_get_all or globals()["canvas_get_all"]
@@ -365,6 +376,8 @@ def _run_heartbeat_course(course: dict, *, canvas_get=None, canvas_get_all=None,
                 kwargs["canvas_get_all_complete"] = canvas_get_all_complete
             if pass_name in {"full", "delta"}:
                 kwargs["course_name"] = course.get("name")
+                kwargs["stream_get"] = stream_get
+                kwargs["canvas_origin"] = canvas_origin
             if concluded and pass_name == "full":
                 kwargs["skip_new_quiz_metadata"] = True
             result = _PASS_RUNNERS[pass_name](course_id, **kwargs)
@@ -428,6 +441,8 @@ def sync_now(course_id: str | None = None, *, canvas_get=None, canvas_get_all=No
         result = sync.delta_pass(cid, canvas_get_all=canvas_get_all,
                                  canvas_get_all_complete=canvas_get_all_complete, now=now,
                                  bypass_new_quiz_cooldown=True,
+                                 stream_get=canvas_stream_get,
+                                 canvas_origin=config.get_canvas_base(),
                                  course_name=course.get("name"))
         _emit_refresh_outcome(
             "delta", result, duration_ms=max(0, int(round((time.monotonic() - started) * 1000)))

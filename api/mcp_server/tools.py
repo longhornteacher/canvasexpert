@@ -239,7 +239,7 @@ def _freshness_attention(envelope: dict) -> dict | None:
 
 _STUDENT_RESULT_KEYS = {
     "pseudonym", "roster", "submissions", "students", "student",
-    "writing_history",
+    "writing_history", "attempts", "submission_history",
     "extra_time", "monitored", "classroom_profile",
 }
 
@@ -1430,8 +1430,9 @@ _TOOL_GROUPS = {
         "apply_learning_objective",
         "delete_learning_objective",
     ),
-    # Mirror submissions are the evidence exposed by the Writing Timeline job.
-    "Writing Timeline": ("get_submissions",),
+    # Current submissions remain freshness-gated; retained history is explicitly
+    # historical and remains available after current projection pruning.
+    "Writing Timeline": ("get_submissions", "get_submission_history"),
     "Writing Record": ("get_writing_history",),
     "Students": (
         "get_roster",
@@ -2006,6 +2007,152 @@ def get_submissions(course_id: str, assignment_id: str,
                    else tuple(c for c in _SUBMISSION_COLUMNS if c != "text"))
         result["submissions"] = _tabulate(result["submissions"], columns)
     return result
+
+
+def get_submission_history(course_id: str, assignment_id: str,
+                          pseudonyms: str = "", include_text: bool = True,
+                          max_text_chars: int = 12000,
+                          offset: int = 0, limit: int = 50) -> dict:
+    """Read bounded, retained assignment attempts from private local history.
+
+    This is historical observed evidence. It reads no Canvas data and makes no
+    claim about current membership or freshness.
+    """
+    identity_error = _saved_course_gate_check(course_id)
+    if identity_error:
+        return {"ok": False, "error": identity_error}
+    if (not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100
+            or not isinstance(offset, int) or isinstance(offset, bool) or offset < 0
+            or not isinstance(max_text_chars, int) or isinstance(max_text_chars, bool)
+            or not 1 <= max_text_chars <= 20000):
+        return {"ok": False, "error": "Invalid pagination or text bounds."}
+    vault, vault_err = _open_vault()
+    if vault_err:
+        return {"ok": False, "error": vault_err}
+    try:
+        manifest = read_service.private_submission_history(
+            str(course_id), str(assignment_id), root=workspace.workspace_root())
+    except Exception:
+        return {"ok": False, "error": "Retained submission history is unavailable or invalid."}
+
+    replacement_map = feedback_scrub.build_replacement_map(vault.entries(), set())
+    wanted = {value.strip().casefold() for value in str(pseudonyms or "").split(",")
+              if value.strip()}
+    selected = []
+    for attempt in manifest.get("attempts", {}).values():
+        person = str(attempt.get("pseudonym") or "")
+        if wanted and person.casefold() not in wanted:
+            continue
+        for observation in attempt.get("observations", []):
+            selected.append((person, int(attempt.get("attempt") or 0),
+                             str(attempt.get("submitted_at") or ""),
+                             str(observation.get("digest") or ""), attempt, observation))
+    selected.sort(key=lambda row: (row[0].casefold(), row[1], row[2], row[3]))
+    total = len(selected)
+    page = selected[offset:offset + limit]
+    next_offset = offset + len(page) if offset + len(page) < total else None
+    text_budget = 100000
+    attempts = []
+
+    def bounded_text(value):
+        nonlocal text_budget
+        safe = feedback_scrub.scrub_text(str(value or ""), replacement_map)
+        allowance = min(max_text_chars, text_budget)
+        truncated = len(safe) > allowance
+        result = safe[:allowance]
+        text_budget -= len(result)
+        return result, truncated
+
+    from api.nq_report import html_to_text
+    from api.powergrader import student_attachments
+    from api.mirror import submission_history as history_store
+    import io
+    import zipfile
+    file_budget = 200
+    omitted_file_count = 0
+    for person, number, submitted_at, digest, attempt, observation in page:
+        item = {
+            "pseudonym": person, "attempt": number,
+            "submitted_at": submitted_at,
+            "captured_at": str(observation.get("captured_at") or ""),
+            "observation_digest": digest,
+            "conflict": bool(observation.get("conflict") or attempt.get("conflict")),
+            "files": [],
+        }
+        if include_text:
+            item["text"], item["text_truncated"] = bounded_text(
+                html_to_text(observation.get("body") or ""))
+        observation_keys = set(observation.get("file_keys") or [])
+        related_files = [entry for entry in attempt.get("files", [])
+                         if entry.get("key") in observation_keys]
+        for file_entry in related_files:
+            if file_budget <= 0:
+                omitted_file_count += 1
+                continue
+            file_budget -= 1
+            file_index = 200 - file_budget
+            filename = str(file_entry.get("filename") or "")
+            extension = os.path.splitext(filename)[1].lower()
+            approved = extension in student_attachments.AI_TEXT_EXTS
+            file_info = {
+                "label": f"File {file_index}",
+                "type": "docx" if extension == ".docx" else ("text" if approved else "local_only"),
+                "status": str(file_entry.get("status") or "unavailable"),
+                "artifact_ref": str(file_entry.get("artifact_ref") or "") or None,
+            }
+            if include_text and approved and file_info["status"] == "captured":
+                if text_budget <= 0:
+                    file_info["status"] = "text_budget_exhausted"
+                else:
+                    path = history_store.file_path(
+                        course_id, assignment_id, file_info["artifact_ref"],
+                        root=workspace.workspace_root())
+                    try:
+                        if not path or os.path.getsize(workspace.extended_path(path)) > 5 * 1024 * 1024:
+                            file_info["status"] = "extraction_limit"
+                        else:
+                            with open(workspace.extended_path(path), "rb") as handle:
+                                data = handle.read(5 * 1024 * 1024 + 1)
+                            if len(data) > 5 * 1024 * 1024:
+                                file_info["status"] = "extraction_limit"
+                            elif extension == ".docx":
+                                with zipfile.ZipFile(io.BytesIO(data)) as zipped:
+                                    members = zipped.infolist()
+                                    if len(members) > 10000 or sum(x.file_size for x in members) > 100 * 1024 * 1024:
+                                        file_info["status"] = "extraction_limit"
+                                    else:
+                                        routed = student_attachments.route_bytes(
+                                            filename, data, max_ai_chars=100000)
+                                        if routed.get("extraction_status") != "extracted":
+                                            file_info["status"] = "extraction_failed"
+                                        else:
+                                            file_info["text"], file_info["text_truncated"] = bounded_text(
+                                                routed.get("text") or "")
+                            else:
+                                routed = student_attachments.route_bytes(
+                                    filename, data, max_ai_chars=100000)
+                                if routed.get("extraction_status") != "extracted":
+                                    file_info["status"] = "extraction_failed"
+                                else:
+                                    file_info["text"], file_info["text_truncated"] = bounded_text(
+                                        routed.get("text") or "")
+                    except Exception:
+                        file_info["status"] = "extraction_failed"
+            item["files"].append(file_info)
+        attempts.append(item)
+
+    payload = {
+        "source": "retained_history", "coverage": "observed_only",
+        "history_note": "Historical evidence only; current Canvas freshness and enrollment are unknown.",
+        "revision": int(manifest.get("revision") or 0),
+        "manifest_digest": hashlib.sha256(json.dumps(
+            manifest, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":")).encode("utf-8")).hexdigest(),
+        "total": total, "offset": offset, "limit": limit,
+        "next_offset": next_offset, "attempts": attempts,
+        "omitted_file_count": omitted_file_count,
+    }
+    return pseudonym.gate(payload, vault)
 
 
 # A student's writing history has no session lookback of its own to borrow, and

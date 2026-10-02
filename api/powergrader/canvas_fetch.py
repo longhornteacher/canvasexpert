@@ -15,7 +15,9 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from api.platform_services import config, workspace
-from api.platform_services.canvas_client import canvas_get, canvas_get_all, canvas_headers
+from api.platform_services.canvas_client import (
+    canvas_get, canvas_get_all, canvas_headers, canvas_stream_get,
+)
 from api.mirror import new_quizzes
 from api.mirror import queries as mirror_queries
 from api.mirror import sync as mirror_sync
@@ -51,7 +53,8 @@ def _mirror_session_submissions(course_id: str, assignment_id: str):
     """
     try:
         result = mirror_sync.sync_assignment_submissions(
-            course_id, assignment_id, canvas_get_all=canvas_get_all)
+            course_id, assignment_id, canvas_get_all=canvas_get_all,
+            stream_get=canvas_stream_get, canvas_origin=config.get_canvas_base())
     except Exception:
         return None, "sync_exception"
     if not result.get("ok"):
