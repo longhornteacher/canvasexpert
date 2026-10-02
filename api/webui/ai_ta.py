@@ -113,6 +113,11 @@ RETIRED_FILES = {
         # authored content always waits in the UI for the teacher to push it,
         # which the content push pair contradicts.
         "d6898fbb9e3ebdf9b171eccc8789f1f492c848cabd76f7f04902eccfadfd60c7",
+        # Before the Quiz feedback-reference troubleshooting wording; still said
+        # never to refresh an open session (a copy seeded from that release).
+        "fbb080b9c8804121f4400bda13321320f003b260a6531107faf9d8d833f9d5b4",
+        # Before refresh_scoring_session: said never to refresh an open session.
+        "a62638a1f17733812e2d46c3c2639c2b4a5368b82f8b39d575e8d0a17bdf3ebe",
     }),
 }
 

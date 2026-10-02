@@ -7,11 +7,13 @@ import math
 import os
 import re
 import uuid
+from datetime import datetime, timezone
 from api.nq_report import html_to_text
 from api.platform_services import config, workspace
 from api.powergrader import (
     assignment_refresh,
     assignmentforge,
+    context,
     media_recordings,
     scoring_artifacts,
     session_builder,
@@ -282,6 +284,34 @@ def _ready_payload(session: dict) -> dict:
     return result
 
 
+def _freshness_refusal(freshness: dict, use_existing_mirror: bool) -> dict | None:
+    """The one freshness gate shared by preparation and session refresh."""
+    if (str(freshness.get("projection_state", freshness.get("state")) or "").casefold() != "current"
+            or not str(freshness.get("last_success_at") or "").strip()):
+        return _typed_failure(
+            "mirror_projection_unavailable", "freshness", retryable=True,
+            user_action="Refresh the Current course mirror, then retry this exact assignment.",
+            error="The local CanvasMirror projection is unavailable or not current.",
+        )
+    if (freshness.get("requires_teacher_confirmation")
+            and not bool(use_existing_mirror)):
+        return _typed_failure(
+            "mirror_freshness_confirmation_required", "freshness", retryable=True,
+            user_action=(
+                "Ask whether relevant Canvas work changed since this snapshot. If not, "
+                "retry this exact call with use_existing_mirror=true; if yes or "
+                "unsure, wait for an explicit teacher request to refresh."
+            ),
+            error="The local CanvasMirror snapshot needs teacher freshness confirmation.",
+            freshness={
+                "last_success_at": str(freshness.get("last_success_at") or ""),
+                "age_minutes": int(freshness.get("age_minutes") or 0),
+                "requires_teacher_confirmation": True,
+            },
+        )
+    return None
+
+
 def prepare_scoring_session(
     course_id: str,
     assignment_id: str,
@@ -428,29 +458,9 @@ def prepare_scoring_session(
         )
 
     freshness = mirror_result.get("freshness") or {}
-    if (str(freshness.get("projection_state", freshness.get("state")) or "").casefold() != "current"
-            or not str(freshness.get("last_success_at") or "").strip()):
-        return _typed_failure(
-            "mirror_projection_unavailable", "freshness", retryable=True,
-            user_action="Refresh the Current course mirror, then retry this exact assignment.",
-            error="The local CanvasMirror projection is unavailable or not current.",
-        )
-    if (freshness.get("requires_teacher_confirmation")
-            and not bool(use_existing_mirror)):
-        return _typed_failure(
-            "mirror_freshness_confirmation_required", "freshness", retryable=True,
-            user_action=(
-                "Ask whether relevant Canvas work changed since this snapshot. If not, "
-                "retry this exact preparation with use_existing_mirror=true; if yes or "
-                "unsure, wait for an explicit teacher request to refresh."
-            ),
-            error="The local CanvasMirror snapshot needs teacher freshness confirmation.",
-            freshness={
-                "last_success_at": str(freshness.get("last_success_at") or ""),
-                "age_minutes": int(freshness.get("age_minutes") or 0),
-                "requires_teacher_confirmation": True,
-            },
-        )
+    freshness_refusal = _freshness_refusal(freshness, use_existing_mirror)
+    if freshness_refusal:
+        return freshness_refusal
 
     rubric_text_override = None
     complete_guidance = None
@@ -656,3 +666,285 @@ def _activate(session: dict, *, activate_session, save_session) -> list[dict]:
     if save_session is None:
         save_session = session_store.save_session
     return session_store.activate_scoring_session(session, save_session=save_session)
+
+
+_REFRESHABLE_STATUSES = session_store.ACTIONABLE_STATUSES
+_TERMINAL_STATUSES = frozenset({"completed", "completed_with_holds"})
+
+
+def _as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_time(value):
+    try:
+        stamp = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
+
+
+def _is_resubmission(row: dict, baseline) -> bool:
+    """True when a mirror row is a newer submission than the session's baseline.
+
+    The baseline is the ``submission_baseline`` stored on each session student
+    ({attempt, submitted_at}). A record that stored neither is an unknown
+    baseline and is never reported as resubmitted.
+    """
+    if not isinstance(baseline, dict):
+        return False
+    base_attempt, base_at = _as_int(baseline.get("attempt")), _as_time(baseline.get("submitted_at"))
+    if base_attempt is None and base_at is None:
+        return False
+    attempt, at = _as_int(row.get("attempt")), _as_time(row.get("submitted_at"))
+    if attempt is not None and base_attempt is not None and attempt != base_attempt:
+        return attempt > base_attempt
+    if at is not None and base_at is not None:
+        return at > base_at
+    return False
+
+
+def _first_new_offset(session: dict, bundle: dict, new_pseudonyms: set[str]) -> int | None:
+    """Bundle row offset of the first appended student's first scorable row."""
+    from api.powergrader import scoring_packet
+
+    if not new_pseudonyms:
+        return None
+    offset = 0
+    while True:
+        page = scoring_packet.build_packet(
+            session=session, safe_bundle=bundle, offset=offset, limit=500,
+            include_context=False,
+        )
+        for index, row in enumerate(page.get("students") or []):
+            if row.get("pseudonym") in new_pseudonyms:
+                return offset + index
+        if page.get("next_offset") is None:
+            return None
+        offset = int(page["next_offset"])
+
+
+def _pseudonyms_by_user_id() -> dict[str, str]:
+    return {str(entry.get("canvas_id")): str(entry.get("pseudonym") or "")
+            for entry in context.vault().entries() if entry.get("pseudonym")}
+
+
+def refresh_scoring_session(
+    scoring_session_id: str,
+    *,
+    use_existing_mirror: bool = False,
+    replace_resubmitted: bool = False,
+    load_session=None,
+    save_session=None,
+) -> dict:
+    """Bring late and resubmitted mirror work into one open Scoring Session.
+
+    Local mirror only: no Canvas call and no mirror refresh. The caller holds the
+    scope lock and then the session lock (the same order as staging). Rows
+    already staged or posted, ``push_idempotency``, ``push_log``, and history are
+    never rewritten; new students and replaced resubmissions are appended to a
+    new merged SAFE bundle file while the earlier bundle file stays on disk.
+    """
+    from api.powergrader import scoring_packet
+
+    load_session = load_session or session_store.load_session
+    save_session = save_session or session_store.save_session
+
+    def refuse(code, user_action, *, retryable=False, **extra):
+        return _typed_failure(code, "refresh", retryable=retryable,
+                              user_action=user_action, **extra)
+
+    session = load_session(str(scoring_session_id or ""))
+    if (not isinstance(session, dict)
+            or session.get("session_kind") != SCORING_SESSION_KIND
+            or str(session.get("session_id") or "") != str(scoring_session_id or "")):
+        return refuse("session_not_found",
+                      "Use a scoring_session_id from list_scoring_sessions().")
+    status = str(session.get("status") or "")
+    if status == session_store.SUPERSEDED_STATUS:
+        return refuse("session_superseded",
+                      "Use the current session listed by list_scoring_sessions().")
+    if status in _TERMINAL_STATUSES:
+        return refuse("session_completed",
+                      "This session is finished; call prepare_scoring_session for this "
+                      "exact assignment instead.")
+    if status not in _REFRESHABLE_STATUSES:
+        return refuse("session_not_refreshable",
+                      "This session has no open packet to refresh; list_scoring_sessions() "
+                      "shows the usable session.")
+    students = [s for s in session.get("students") or [] if isinstance(s, dict)]
+    if any(s.get("push_state") == "sent_unknown" for s in students):
+        return refuse("canvas_write_attention",
+                      "A previous Canvas write could not be confirmed. Review Canvas "
+                      "before refreshing this session.")
+    if not workspace.workspace_root():
+        return refuse("workspace_unavailable",
+                      "Open Canvas Expert on this computer, then retry.", retryable=True)
+
+    course_id = str(session.get("course_id") or "")
+    assignment_id = str(session.get("assignment_id") or "")
+    try:
+        submissions, assignment, mirror_result = assignment_refresh.prepare_assignment_from_mirror(
+            course_id, assignment_id)
+    except Exception:
+        submissions, assignment, mirror_result = None, None, {"code": "mirror_projection_unavailable"}
+    mirror_result = mirror_result if isinstance(mirror_result, dict) else {}
+    if mirror_result.get("error") or not isinstance(assignment, dict):
+        return refuse(str(mirror_result.get("code") or "mirror_projection_unavailable"),
+                      "Refresh the Current course mirror, then retry this exact call.",
+                      retryable=True)
+    freshness = mirror_result.get("freshness") or {}
+    freshness_refusal = _freshness_refusal(freshness, use_existing_mirror)
+    if freshness_refusal:
+        return freshness_refusal
+
+    old_bundle_path = _safe_bundle_path(session)
+    try:
+        with open(old_bundle_path, encoding="utf-8") as handle:
+            base_bundle = json.load(handle)
+    except (OSError, ValueError):
+        base_bundle = None
+    if not scoring_packet.validate_safe_bundle(base_bundle).get("ok"):
+        return refuse("packet_invalid", "The SAFE scoring packet is missing or invalid.",
+                      retryable=True)
+
+    eligible = session_store.eligible_submission_rows(submissions)
+    rows_by_uid = {str(row.get("user_id")): row for row in eligible if row.get("user_id")}
+    session_uids = {str(s.get("user_id")) for s in students if s.get("user_id") is not None}
+    added_rows = [row for row in eligible
+                  if row.get("user_id") and str(row["user_id"]) not in session_uids]
+    resubmitted, posted_resubmitted, replaced_uids = [], [], []
+    for student in students:
+        uid = str(student.get("user_id"))
+        row = rows_by_uid.get(uid)
+        if row is None or not _is_resubmission(row, student.get("submission_baseline")):
+            continue
+        if student.get("posted") or student.get("status") == "posted":
+            posted_resubmitted.append(uid)
+        elif replace_resubmitted:
+            replaced_uids.append(uid)
+        else:
+            resubmitted.append(uid)
+
+    mirror_fields = {
+        "mirror_revision": (mirror_result.get("mirror_revision") or mirror_result.get("revision")
+                            or mirror_result.get("snapshot_id")),
+        "mirror_snapshot_id": str(mirror_result.get("snapshot_id") or ""),
+        "submission_snapshot": session_store.eligible_submission_snapshot_digest(submissions),
+        "submission_snapshot_count": len(eligible),
+    }
+
+    def labels(uids, names):
+        return sorted(names.get(str(uid)) or "(unknown student)" for uid in uids)
+
+    try:
+        names = _pseudonyms_by_user_id()
+    except Exception:
+        return refuse("safe_refresh_failed", "Retry the refresh.", retryable=True)
+    report = {
+        "ok": True, "scoring_session_id": session["session_id"],
+        "resubmitted_not_replaced": labels(resubmitted, names),
+        "posted_resubmitted": labels(posted_resubmitted, names),
+    }
+
+    if not added_rows and not replaced_uids:
+        if any(session.get(key) != value for key, value in mirror_fields.items()):
+            session.update(mirror_fields)
+            save_session(session)
+        return {**report, "changed": False, "added": [], "replaced": [], "held_added": 0,
+                "first_new_offset": None,
+                "packet_digest": scoring_packet.packet_digest(
+                    session["session_id"], base_bundle, course_id=course_id,
+                    assignment_id=assignment_id)}
+
+    replaced = set(replaced_uids)
+    added_ids = {str(row["user_id"]) for row in added_rows}
+    delta_rows = [row for row in eligible
+                  if row.get("user_id") and str(row["user_id"]) in (replaced | added_ids)]
+    if writing_timeline.is_tracked_assignment(assignment):
+        student_attachments.attach_writing_timelines(delta_rows, roster_submissions=submissions)
+    history = list(session.get("scoring_refreshes") or [])
+    try:
+        ai_result = scoring_artifacts.build_scoring_artifacts(
+            submitted=delta_rows, assignment_name=str(session.get("assignment_name") or assignment_id),
+            assignment_description=str(session.get("assignment_description") or ""),
+            course_id=course_id, course_name=config.course_display_name(course_id),
+            assignment_id=assignment_id, session_id=session["session_id"],
+            protected=config.active_protected_names(),
+            base_bundle=base_bundle, drop_canvas_ids=replaced_uids,
+            file_label=f"refresh-{len(history) + 1}",
+        )
+    except Exception:
+        ai_result = {"ok": False}
+    if not isinstance(ai_result, dict) or not ai_result.get("ok"):
+        if isinstance(ai_result, dict) and ai_result.get("code") == "pseudonym_provisional":
+            return refuse("pseudonym_provisional",
+                          "Resolve the provisional pseudonym in the local roster, then retry.")
+        return refuse("safe_refresh_failed",
+                      "The SAFE scoring packet could not be refreshed. Retry this call.",
+                      retryable=True)
+    try:
+        names = _pseudonyms_by_user_id()
+    except Exception:
+        return refuse("safe_refresh_failed", "Retry the refresh.", retryable=True)
+
+    new_students = session_builder.build_students(
+        submitted=delta_rows, ai_by_uid={}, ai_item_by_uid={},
+        ai_failures=dict(ai_result.get("ai_failures") or {}),
+        monitored=config.get_monitored_students(),
+        extra_time_map=_extra_time_map(config.get_extra_time(course_id)),
+    )
+    fresh_by_uid = {str(s["user_id"]): s for s in new_students}
+    session["students"] = [
+        fresh_by_uid[str(s.get("user_id"))] if str(s.get("user_id")) in replaced else s
+        for s in session.get("students") or []
+    ] + [fresh_by_uid[str(row["user_id"])] for row in added_rows
+         if str(row["user_id"]) in fresh_by_uid]
+
+    artifacts = dict(session.get("privacy_artifacts") or {})
+    fresh_artifacts = dict(ai_result.get("privacy_artifacts") or {})
+    history.append({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "previous_safe_bundle": artifacts.get("safe_bundle"),
+                    "added": len(added_rows), "replaced": len(replaced_uids)})
+    for key in ("attachment_only_count", "excluded_count", "media_hold_count"):
+        artifacts[key] = int(artifacts.get(key) or 0) + int(fresh_artifacts.get(key) or 0)
+    artifacts.update({key: fresh_artifacts[key]
+                      for key in ("safe_folder", "safe_bundle", "safe_students")
+                      if key in fresh_artifacts})
+    session["privacy_artifacts"] = artifacts
+    session["scoring_refreshes"] = history
+    session.update(mirror_fields)
+    session.pop("staged_scoring_apply", None)
+    session["status"] = "ready"
+
+    ready = _ready_payload(session)
+    if not ready.get("ok"):
+        return ready
+    with open(_safe_bundle_path(session), encoding="utf-8") as handle:
+        merged = json.load(handle)
+    first_offset = _first_new_offset(
+        session, merged, set(ai_result.get("appended_pseudonyms") or []))
+    try:
+        save_session(session)
+    except Exception:
+        return refuse("session_store_unavailable",
+                      "The refreshed Scoring Session could not be saved. Retry this call.",
+                      retryable=True)
+    scorable = {
+        str(s.get("pseudonym")) for s in merged.get("students") or []
+        if any(str(r.get("response") or "").strip() or r.get("oral_reading")
+               for r in s.get("responses") or [])
+    }
+    return {
+        **report, "changed": True,
+        "added": labels(added_ids, names),
+        "replaced": labels(replaced_uids, names),
+        "held_added": sum(1 for uid in [*added_ids, *replaced_uids]
+                          if names.get(uid) not in scorable),
+        "first_new_offset": first_offset,
+        "packet_digest": scoring_packet.packet_digest(
+            session["session_id"], merged, course_id=course_id, assignment_id=assignment_id),
+    }

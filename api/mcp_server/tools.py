@@ -158,6 +158,13 @@ _NEXT_STEPS = {
         "If response_count is 0 and held is greater than zero, explain that held "
         "responses could not be scored from text."
     ),
+    "refresh_scoring_session": (
+        "If first_new_offset is set, read get_scoring_packet from that offset, score only "
+        "those rows, and stage them with stage_scoring_results using this packet_digest as "
+        "expected_packet_digest; rows already staged keep their results. If changed is "
+        "false, continue the existing packet. Report resubmitted_not_replaced and "
+        "posted_resubmitted to the teacher; replace_resubmitted=true replaces only unposted ones."
+    ),
     "preview_sis_grade_bridge": (
         "Summarize the aggregate review and get teacher confirmation, then call "
         "apply_sis_grade_bridge with batch_id, operation_id, and review_digest unchanged."
@@ -1402,6 +1409,7 @@ _TOOL_GROUPS = {
         "list_feedback_contracts",
         "discover_scoring_work",
         "prepare_scoring_session",
+        "refresh_scoring_session",
         "list_scoring_sessions",
         "get_scoring_packet",
         "stage_scoring_results",
@@ -2551,7 +2559,8 @@ def _open_scoring_session_refusal(course_id: str, assignment_id: str,
         "user_action": (
             "Use get_scoring_packet with the existing scoring_session_id, "
             "work locally on that snapshot, then stage once. Do not prepare "
-            "this assignment again."
+            "this assignment again; if the teacher says work arrived late or was "
+            "resubmitted, call refresh_scoring_session."
         ),
         "error": "A usable Scoring Session is already open for this assignment.",
     }
@@ -2614,6 +2623,56 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
     return result
 
 
+def refresh_scoring_session(scoring_session_id: str, use_existing_mirror: bool = False,
+                            replace_resubmitted: bool = False) -> dict:
+    """Bring late or resubmitted mirror work into one open Scoring Session.
+
+    Reads the local mirror only. Lock order matches staging: scope, then session."""
+    from api.powergrader import scoring_preparation, session_store
+
+    lease_error = _scoring_work_lease_refusal(scoring_session_id)
+    if lease_error:
+        return lease_error
+    session = _load_scoring_assignment_session(scoring_session_id)
+    if not session:
+        return {"ok": False, "code": "session_not_found",
+                "error": "The assignment-scoped Scoring Session was not found."}
+    course_id = str(session.get("course_id") or "")
+    assignment_id = str(session.get("assignment_id") or "")
+    gate_error = _course_gate_check(course_id)
+    if gate_error:
+        return {
+            "ok": False, "code": "invalid_scope", "stage": "validate",
+            "retryable": False,
+            "user_action": "Provide a Current course_id and exact assignment_id.",
+            "error": gate_error,
+        }
+    try:
+        with session_store.scope_lock(course_id, assignment_id):
+            current = _load_scoring_assignment_session(scoring_session_id)
+            if not current or not _is_current_scoring_session(current):
+                return _session_superseded(scoring_session_id)
+            with session_store.session_lock(scoring_session_id):
+                result = scoring_preparation.refresh_scoring_session(
+                    scoring_session_id, use_existing_mirror=bool(use_existing_mirror),
+                    replace_resubmitted=bool(replace_resubmitted))
+    except Exception:
+        return {
+            "ok": False, "code": "safe_refresh_failed", "stage": "refresh",
+            "retryable": True,
+            "user_action": "The Scoring Session could not be refreshed. Retry this call.",
+            "error": "The Scoring Session could not be refreshed safely.",
+        }
+    result = _normalize_scoring_preparation_result(result)
+    if not result.get("ok"):
+        return result
+    vault, vault_error = _open_vault()
+    if vault_error:
+        return {"ok": False, "code": "identity_unavailable",
+                "error": "The private identity vault is unavailable."}
+    return _with_next("refresh_scoring_session", pseudonym.gate(result, vault))
+
+
 def _load_scoring_assignment_session(scoring_session_id: str) -> dict | None:
     from api.powergrader import session_store
 
@@ -2659,8 +2718,17 @@ def _is_current_scoring_session(session: dict) -> bool:
         return False
 
 
+def _session_mirror_changed(session: dict) -> dict:
+    """The refusal for a mirror that moved on. It never changes the session."""
+    return {"ok": False, "code": "session_mirror_changed",
+            "scoring_session_id": str(session.get("session_id") or ""),
+            "error": "The CanvasMirror changed after this Scoring Session was prepared.",
+            "next": "Call refresh_scoring_session with this scoring_session_id when the "
+                    "teacher directs, then read the packet again."}
+
+
 def _session_mirror_check(session: dict) -> dict:
-    """Check the frozen mirror identity before exposing or applying a packet."""
+    """Check the frozen mirror identity before exposing a packet."""
     expected_revision = session.get("mirror_revision")
     if expected_revision in (None, ""):
         # Older private records did not bind a mirror revision. Keep them
@@ -2689,14 +2757,12 @@ def _session_mirror_check(session: dict) -> dict:
         return {"ok": False, "code": "mirror_revision_unusable",
                 "error": "The usable CanvasMirror revision is unavailable. Refresh this course and retry."}
     if str(revision) != str(expected_revision):
-        return {"ok": False, "code": "session_stale",
-                "error": "A newer CanvasMirror revision exists. Prepare a replacement Scoring Session before continuing."}
+        return _session_mirror_changed(session)
 
     expected_snapshot_id = str(session.get("mirror_snapshot_id") or "")
     current_snapshot_id = str(scope.get("snapshot_id") or "")
     if expected_snapshot_id and current_snapshot_id and expected_snapshot_id != current_snapshot_id:
-        return {"ok": False, "code": "session_stale",
-                "error": "A newer CanvasMirror snapshot exists. Prepare a replacement Scoring Session before continuing."}
+        return _session_mirror_changed(session)
 
     try:
         document = mirror_store.read_submissions(course_id, assignment_id, root=root)
@@ -2714,26 +2780,9 @@ def _session_mirror_check(session: dict) -> dict:
         session, mirror_revision=revision, submission_snapshot=snapshot,
     )
     if verdict.get("stale"):
-        return {"ok": False, "code": verdict.get("code") or "session_stale",
-                "error": "The current submission snapshot changed. Prepare a replacement Scoring Session before continuing."}
+        return _session_mirror_changed(session)
     return {"ok": True, "mirror_revision": revision,
             "snapshot_id": current_snapshot_id, "submission_snapshot": snapshot}
-
-
-def _ensure_session_usable(session: dict) -> dict:
-    """Persist stale-session invalidation while keeping the refusal identity-safe."""
-    from api.powergrader import session_store
-
-    verdict = _session_mirror_check(session)
-    if verdict.get("ok"):
-        return verdict
-    if verdict.get("code") in {"session_stale", "submission_identity_mismatch"}:
-        try:
-            session_store.mark_session_stale(session, code=verdict["code"])
-            session_store.save_session(session)
-        except Exception:
-            pass
-    return verdict
 
 
 def _feedback_revision_call(operation, *args, **kwargs):
@@ -2941,7 +2990,7 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
                 "error": "The assignment-scoped Scoring Session was not found."}
     if not _is_current_scoring_session(session):
         return _session_superseded(scoring_session_id)
-    freshness = _ensure_session_usable(session)
+    freshness = _session_mirror_check(session)
     if not freshness.get("ok"):
         return freshness
     if session.get("status") not in {"ready", "needs_teacher_input", "staged", "completed", "completed_with_holds"}:

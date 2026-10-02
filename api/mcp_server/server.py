@@ -34,10 +34,10 @@ _SERVER_INSTRUCTIONS = (
     "without an explicit teacher request. "
     "For broad grading, discover_scoring_work reads every Current course mirror. Report all "
     "assignment and attention rows; wait for teacher direction. Call prepare_scoring_session once per exact "
-    "assignment. If snapshot exceeds threshold, ask whether Canvas work changed; refresh only after an "
+    "assignment. If snapshot exceeds threshold, ask if Canvas changed; refresh only after an "
     "explicit teacher request or retry with use_existing_mirror=true. On "
-    "scoring_session_already_open, use that session; do not prepare or refresh the assignment "
-    "again; work locally from its immutable packet. For needs_scoring_norms, ask its question and retry "
+    "scoring_session_already_open, work locally in that session; never re-prepare it. "
+    "Late/resubmitted work: refresh_scoring_session if teacher asks. For needs_scoring_norms, ask its question and retry "
     "with bounded scoring guidance; never ask the teacher to choose a scoring transport or "
     "assignment type. An explicit score/post direction authorizes the selected discovery rows together "
     "without reconfirming each assignment, but never extends beyond those rows or another session. Read every SAFE "
@@ -630,6 +630,14 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
     return _compact(tools.prepare_scoring_session(
         course_id, assignment_id, scoring_guidance, use_existing_mirror,
         scoring_guidance_provenance, feedback_contract_id, late_policy))
+
+
+@mcp.tool(structured_output=False)
+def refresh_scoring_session(scoring_session_id: str, use_existing_mirror: bool = False,
+                            replace_resubmitted: bool = False) -> str:
+    """Add late or resubmitted mirror work to an open Scoring Session."""
+    return _compact(tools.refresh_scoring_session(
+        scoring_session_id, use_existing_mirror, replace_resubmitted))
 
 
 @mcp.tool(structured_output=False)

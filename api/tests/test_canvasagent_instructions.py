@@ -287,9 +287,9 @@ def test_mcp_server_instructions_cover_cross_course_scoring_discovery_and_held_w
     for phrase in (
         "discover_scoring_work",
         "every current course",
-        "complete assignment and attention set",
+        "report all assignment and attention rows",
         "wait for teacher direction",
-        "selected exact",
+        "selected discovery rows",
         "held work",
         "evidence gaps are not empty",
     ):

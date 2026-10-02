@@ -200,8 +200,8 @@ another full scoring refresh, preparation checks that exact scope. When a usable
 record exists (`ready` or staging `needs_teacher_input` with a valid SAFE packet), it
 returns the identity-safe `scoring_session_already_open` refusal with the existing
 `scoring_session_id`; it does not refresh, save, or supersede anything. The agent must continue
-from that immutable packet and must not call preparation or `refresh_mirror` again for the
-assignment. A failed preparation, a typed blocker, and the basis-stage `needs_scoring_norms`
+from that packet and must not call preparation or `refresh_mirror` again for the
+assignment; late or resubmitted work comes in through `refresh_scoring_session` on teacher direction. A failed preparation, a typed blocker, and the basis-stage `needs_scoring_norms`
 state neither save a session nor supersede one. A snapshot beyond the applicable
 local-time threshold is an advisory decision: the teacher may explicitly acknowledge
 it with `use_existing_mirror=true`.

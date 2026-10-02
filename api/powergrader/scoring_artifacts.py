@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 
@@ -29,12 +30,20 @@ def build_scoring_artifacts(
     course_id: str, course_name: str, assignment_id: str, session_id: str,
     source_text: str = "", source_files_json: str = "", source_uploads=None,
     protected: set[str] | None = None,
+    base_bundle: dict | None = None, drop_canvas_ids=(), file_label: str = "",
 ) -> dict:
     """Build and persist the SAFE source consumed by packet paging.
 
     The private session is the only private copy. This builder owns the vault
     transaction and all outbound scrub/safety gates, while returning only
     identity-free aggregate facts to its caller.
+
+    ``base_bundle`` is the refresh path: ``submitted`` holds only the new rows,
+    which pass the same pseudonymize/scrub/safety gates and are appended after
+    the base bundle's surviving students. Students named by ``drop_canvas_ids``
+    are removed from the base first (their replacement is appended). The whole
+    merged bundle is scanned again, and ``file_label`` gives the merged result
+    its own file so the earlier bundle file is never overwritten.
     """
     steps: list[dict] = []
     try:
@@ -96,9 +105,26 @@ def build_scoring_artifacts(
             if feedback_scrub.verify_clean(shared_blob, vault):
                 safe.pop("shared_context", None)
                 shared_excluded = True
+        appended = [str(student.get("pseudonym") or "") for student in clean_students]
+
+        if base_bundle is not None:
+            dropped = {str(entry.get("pseudonym") or "") for entry in vault.entries()
+                       if str(entry.get("canvas_id")) in {str(v) for v in drop_canvas_ids}}
+            merged = copy.deepcopy(base_bundle)
+            merged["students"] = [
+                student for student in merged.get("students") or []
+                if str(student.get("pseudonym") or "") not in dropped
+            ] + clean_students
+            safe = merged
+            shared_excluded = "shared_context" not in safe
+            receipt = feedback_safety.assert_scrubbed(safe, vault)
+            if not receipt["green"]:
+                _step(steps, "safety_gate", "Validated merged SAFE bundle", "error")
+                return {"ok": False, "privacy_steps": steps}
 
         stem = safe_filename(assignment_name or "assignment")
-        safe_path = os.path.join(safe_dir, f"{stem}__bundle.json")
+        label = f"-{safe_filename(file_label)}" if file_label else ""
+        safe_path = os.path.join(safe_dir, f"{stem}__bundle{label}.json")
         with open(workspace.extended_path(safe_path), "w", encoding="utf-8") as handle:
             json.dump(safe, handle, indent=2, ensure_ascii=False)
         _step(steps, "safe_bundle", "Saved SAFE scoring bundle", "ok")
@@ -131,6 +157,7 @@ def build_scoring_artifacts(
                 "shared_context_excluded": shared_excluded,
             },
             "ai_by_uid": {}, "ai_item_by_uid": {}, "ai_failures": failures,
+            "appended_pseudonyms": appended,
         }
     except PseudonymProvisionalError:
         return {"ok": False, "code": "pseudonym_provisional", "privacy_steps": steps}

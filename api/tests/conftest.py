@@ -330,3 +330,119 @@ def attempts_world(monkeypatch):
                                module=attempts_grant)
 
     return build
+
+
+@pytest.fixture
+def scoring_refresh_world(tmp_path, monkeypatch):
+    """One synthetic open Scoring Session over a fake local mirror.
+
+    The SAFE builder, vault, scrub, bundle files, stage and apply are real; only
+    the mirror read, the in-memory session store (a deep copy per save and load,
+    like a file), and the Canvas transport are faked. ``world.sent`` records
+    every Canvas write the apply lane makes.
+    """
+    import contextlib
+    import copy
+    import json as _json
+
+    from api.feedback_vault import Vault
+    from api.mcp_server import tools
+    from api.platform_services import config, workspace
+    from api.powergrader import (
+        assignment_refresh, scoring_apply, scoring_artifacts, scoring_preparation,
+        session_store,
+    )
+
+    vault = Vault(str(tmp_path / "vault.json"))
+    assignment = {"id": "a1", "name": "Essay", "description": "Write the essay.",
+                  "points_possible": 10, "is_quiz_lti_assignment": False,
+                  "quiz_kind": "", "rubric": []}
+    world = SimpleNamespace(
+        revision=1, rows=[], sessions={}, sent=[], vault=vault, tmp_path=tmp_path,
+        freshness={"course_id": "c1", "state": "current",
+                   "last_success_at": "2026-09-21T12:00:00Z", "age_minutes": 0,
+                   "requires_teacher_confirmation": False},
+    )
+
+    def snapshot_id():
+        return f"c1:{world.revision}"
+
+    def add(user_id, name, body="A synthetic response.", **overrides):
+        row = {"user_id": user_id, "id": f"sub-{user_id}", "workflow_state": "submitted",
+               "submission_type": "online_text_entry", "body": body, "attempt": 1,
+               "submitted_at": "2026-09-18T10:00:00Z", "score": None, "late": False,
+               "user": {"name": name, "sortable_name": name}, "attachments": [],
+               "assignment": {"id": "a1", "name": "Essay", "description": "Write the essay.",
+                              "points_possible": 10}}
+        row.update(overrides)
+        world.rows.append(row)
+        world.revision += 1
+        return row
+
+    def resubmit(user_id, body="A synthetic revised response.", attempt=2,
+                 submitted_at="2026-09-19T10:00:00Z"):
+        row = next(r for r in world.rows if r["user_id"] == user_id)
+        row.update(body=body, attempt=attempt, submitted_at=submitted_at)
+        world.revision += 1
+
+    def session(session_id=None):
+        key = session_id or next(iter(world.sessions))
+        return copy.deepcopy(world.sessions[key])
+
+    def bundle(record=None):
+        record = record or session()
+        with open(record["privacy_artifacts"]["safe_bundle"], encoding="utf-8") as handle:
+            return _json.load(handle)
+
+    def pseudonym(user_id):
+        return vault.get_or_assign(user_id)
+
+    def prepare():
+        result = scoring_preparation.prepare_scoring_session("c1", "a1")
+        assert result["status"] == "ready", result
+        return result["scoring_session_id"]
+
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
+    monkeypatch.setattr(config, "course_display_name", lambda _id: "Course")
+    monkeypatch.setattr(config, "get_monitored_students", lambda: {})
+    monkeypatch.setattr(config, "get_extra_time", lambda _id: [])
+    monkeypatch.setattr(config, "active_protected_names", lambda: set())
+    monkeypatch.setattr(config, "active_courses", lambda: [{"id": "c1", "name": "Course"}])
+    monkeypatch.setattr(
+        assignment_refresh, "prepare_assignment_from_mirror",
+        lambda _course, _assignment: (
+            copy.deepcopy(world.rows), dict(assignment),
+            {"status": "mirror", "manifest_path": None, "mirror_revision": world.revision,
+             "snapshot_id": snapshot_id(), "freshness": dict(world.freshness)}))
+    monkeypatch.setattr(scoring_artifacts.privacy, "feedback_artifact_dirs",
+                        lambda **_kwargs: (str(tmp_path / "SAFE"), str(tmp_path / "PRIVATE")))
+    monkeypatch.setattr(scoring_artifacts.context, "vault", lambda: vault)
+    monkeypatch.setattr(tools, "_vault_factory", lambda: vault)
+    monkeypatch.setattr(session_store, "save_session",
+                        lambda value: world.sessions.__setitem__(
+                            value["session_id"], copy.deepcopy(value)))
+    monkeypatch.setattr(session_store, "load_session",
+                        lambda sid: copy.deepcopy(world.sessions.get(sid)))
+    monkeypatch.setattr(session_store, "list_session_summaries",
+                        lambda: [session_store._summary(value) for value in world.sessions.values()])
+    monkeypatch.setattr(session_store, "session_lock", lambda _sid: contextlib.nullcontext())
+    monkeypatch.setattr(session_store, "scope_lock", lambda _c, _a: contextlib.nullcontext())
+    monkeypatch.setattr(session_store, "assert_work_item_writable", lambda _sid: None)
+    monkeypatch.setattr(
+        tools.read_service, "private_submissions",
+        lambda *_a, **_kw: {"state": "current", "mirror_revision": world.revision,
+                            "snapshot_id": snapshot_id()})
+    monkeypatch.setattr(
+        tools.mirror_store, "read_submissions",
+        lambda *_a, **_kw: {"submissions": {r["user_id"]: {"current": r} for r in world.rows}})
+    monkeypatch.setattr(
+        scoring_apply, "default_transports",
+        lambda: (lambda method, path, payload, timeout=30:
+                 (world.sent.append((method, path, copy.deepcopy(payload))) or ({"id": 1}, None))))
+    monkeypatch.setattr(scoring_apply, "default_read_transport",
+                        lambda: (lambda path, params: ([], None)))
+
+    world.add, world.resubmit, world.session = add, resubmit, session
+    world.bundle, world.pseudonym, world.prepare = bundle, pseudonym, prepare
+    world.tools = tools
+    return world

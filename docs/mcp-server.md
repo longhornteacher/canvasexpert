@@ -57,7 +57,11 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 71 (64 tools). Version 71 adds the `late_policy` parameter
+Tool schema version 72 (65 tools). Version 72 adds `refresh_scoring_session`, which
+brings late-arriving and resubmitted local-mirror work into an open Scoring Session
+without a Canvas call; `get_scoring_packet` now refuses a changed mirror with
+`session_mirror_changed` instead of superseding the session. See
+`docs/guides/scoring-sessions.md`. Version 71 adds the `late_policy` parameter
 (`ask | waive | apply`) to `prepare_scoring_session`; see `docs/guides/scoring-sessions.md`
 for the late decision per row and the late-row read-back after apply (none in `feedback_only`
 mode).
@@ -156,6 +160,7 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `resume_operation(operation_id)` | Continues one existing, teacher-approved operation from its last recorded step through the same executor retry path; refuses an operation that already applied, was abandoned, or is held by another attempt | No |
 | `abandon_operation(operation_id)` | Marks one existing, teacher-approved operation abandoned with no Canvas call; blocks later `resume_operation`/apply and returns a `repair_plan` of what was already created from recorded steps | No |
 | `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="", late_policy="ask")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input; page zero includes the selected teacher feedback guidance and scoring basis; `late_policy` is `ask | waive | apply` (a refused value is `invalid_late_policy`) and, when passed to an already-open session, is saved on it and reported back | No |
+| `refresh_scoring_session(scoring_session_id, use_existing_mirror=false, replace_resubmitted=false)` | Append late-arriving and (optionally) replace resubmitted unposted work in an open session from the local mirror only; staged and posted rows are preserved; returns pseudonyms, `packet_digest`, and `first_new_offset` | Yes, pseudonymized |
 | `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
 | `list_work_items()` | Shared work-item holders, sync progress, and orphan counts without private session contents | No |
 | `get_work_item(work_id)` | One shared work item's holder and sync status | No |
@@ -324,8 +329,9 @@ older than the applicable local-time threshold (60 minutes during Monday-Friday
 `mirror_freshness_confirmation_required`; the agent asks whether relevant Canvas
 work changed and either waits for an explicit refresh request or retries with
 `use_existing_mirror=true`. At exactly the threshold it does not prompt. Once a usable session id exists,
-continue locally from its immutable packet and do not prepare or refresh that
-assignment again. A repeated call returns `scoring_session_already_open`.
+continue locally from its packet and do not prepare that assignment again. A
+repeated call returns `scoring_session_already_open`. Late or resubmitted work
+arrives through `refresh_scoring_session` on teacher direction.
 
 Scoring preparation preserves the Canvas assignment's finite, nonnegative
 `points_possible`, including zero, and returns `assignment_points_unavailable` when that

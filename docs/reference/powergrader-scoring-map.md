@@ -33,6 +33,16 @@ write authorization. Canvas Live is the only review/edit surface.
   by `(scope_generation, created, session_id)` at the call boundary. Existing
   records without a generation use `(created, session_id)` as the fallback
   regardless of status, with no migration or deletion.
+- `scoring_preparation.refresh_scoring_session` (MCP `refresh_scoring_session`, lock
+  order scope, then session) merges late-arriving and resubmitted local-mirror rows
+  into an open session. Added students and replaced unposted resubmitters are built
+  through `scoring_artifacts.build_scoring_artifacts(base_bundle=...)` and appended
+  to a new merged SAFE bundle file (earlier bundle files stay; `scoring_refreshes`
+  records the history). A resubmission is detected against each student's stored
+  `submission_baseline` (`attempt`, `submitted_at`); an unknown baseline is never
+  reported. Staged and posted rows, `push_idempotency`, and `push_log` are preserved;
+  the frozen stage is cleared. `get_scoring_packet` refuses a changed mirror with
+  `session_mirror_changed` and never persists `superseded`.
 - `scoring_discovery.py` owns the read-only cross-course digest. It reads configured
   Current-course local mirror snapshots with bounded concurrency, projects aggregate
   assignment counts plus freshness, and joins at most one current actionable session

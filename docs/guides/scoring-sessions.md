@@ -48,8 +48,11 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
 
 2. A successful preparation returns one `scoring_session_id`. Once prepared, its
    private SAFE packet is authoritative. A heartbeat or later mirror refresh
-   cannot supersede, revalidate, or interrupt that packet. A repeated prepare
-   returns `scoring_session_already_open` and the existing session id.
+   never supersedes or rewrites it: `get_scoring_packet` refuses with
+   `session_mirror_changed` and leaves the session as it was, and
+   `refresh_scoring_session` is the one way to bring newer mirror work into it.
+   A repeated prepare returns `scoring_session_already_open` and the existing
+   session id.
 
 3. Read page zero with `get_scoring_packet`, including its teacher feedback
    contract and scoring basis, then follow `next_offset` through every page. Report held or otherwise
@@ -110,6 +113,30 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
 9. Continue through other rows only when they were part of the teacher-selected
    set. A newly discovered assignment requires new teacher direction.
 
+## Late arrivals and resubmissions
+
+When a student submits after the session was prepared, the teacher can say so and
+the agent calls `refresh_scoring_session(scoring_session_id,
+use_existing_mirror=false, replace_resubmitted=false)`. It reads the local mirror
+only (no Canvas call, no mirror refresh) and applies the same freshness gate and
+`use_existing_mirror` acknowledgement as preparation. It refuses, changing nothing,
+for a superseded or finished (`completed`/`completed_with_holds`) session (prepare
+instead) or when any row is `canvas_write_attention`.
+
+- A newly eligible student is appended as new SAFE rows at the end of the packet,
+  through the same pseudonym, scrub, safety-scan, and hold path as preparation.
+- A student who resubmitted since the session's stored baseline is reported in
+  `resubmitted_not_replaced` and left untouched; with `replace_resubmitted=true`
+  an unposted resubmitter is replaced (staged score, feedback, and review fields
+  cleared, new work appended). A posted resubmitter is only reported in
+  `posted_resubmitted`; posted rows are never touched.
+- Everything already staged or posted is preserved. The old stage is cleared, so
+  read the packet from `first_new_offset`, stage only the new rows with the new
+  `packet_digest` as `expected_packet_digest`, summarize, and apply as usual:
+  apply posts every staged, unposted row and never re-sends a posted one.
+- With nothing new, the result is `changed: false` and the session only records
+  the current mirror, so reads resume.
+
 ## Feedback-only reopening
 
 Already graded ordinary assignments can be reopened for **feedback only** with
@@ -162,7 +189,9 @@ send intents, outcomes, and earlier runs remain in private append-only work hist
 | `needs_scoring_norms` | No rubric or guidance is available | Ask for bounded guidance and retry the same preparation |
 | `mirror_freshness_confirmation_required` | The valid local snapshot exceeds the applicable America/Chicago 60-minute school-hours or 600-minute outside-hours threshold | Ask whether relevant Canvas work changed; refresh only after an explicit request, or retry with `use_existing_mirror=true` |
 | `mirror_projection_unavailable` | A required projection is missing, corrupt, or not current | Refresh the Current course mirror, then retry the exact call |
-| `scoring_session_already_open` | A usable assignment session already exists | Continue from its packet; do not prepare or refresh it again |
+| `scoring_session_already_open` | A usable assignment session already exists | Continue from its packet; do not prepare it again. If work arrived late or was resubmitted, `refresh_scoring_session` on teacher direction |
+| `session_mirror_changed` | The mirror moved on after the session was prepared; the session is unchanged | Call `refresh_scoring_session(scoring_session_id)` on teacher direction, then read the packet again |
+| `session_completed` | `refresh_scoring_session` was asked on a finished session | Call `prepare_scoring_session` for the exact assignment instead |
 | `session_superseded` | A non-current session id was supplied | Use the current session listed by `list_scoring_sessions()` |
 | `needs_teacher_input` | A bounded scoring risk needs a decision | The packet remains readable; ask only the returned pseudonym-only questions, then stage unchanged results. Use `reset_scoring_review` to reopen the local packet review without changing it |
 | `stage_changed` | The frozen stage or private plan no longer matches (including a changed `late_policy`) | Stage the exact intended result set again |

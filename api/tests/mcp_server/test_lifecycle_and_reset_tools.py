@@ -44,9 +44,11 @@ def test_workspace_reset_requires_unchanged_preview_and_returns_receipt(monkeypa
     assert calls == [False, False, True]
 
 
-def test_scoring_packet_invalidates_session_when_mirror_revision_changes(
+def test_scoring_packet_refuses_but_never_supersedes_when_mirror_revision_changes(
     monkeypatch, tmp_path,
 ):
+    """LAW: a mirror change refuses the packet read and names the refresh; the
+    session itself is never changed by it."""
     session = {
         "session_id": "session-1", "session_kind": "scoring_assignment",
         "course_id": "course-1", "assignment_id": "assignment-1",
@@ -68,8 +70,10 @@ def test_scoring_packet_invalidates_session_when_mirror_revision_changes(
 
     result = tools.get_scoring_packet("session-1")
 
-    assert result["code"] == "session_stale"
-    assert session["status"] == "superseded"
+    assert result["code"] == "session_mirror_changed"
+    assert "refresh_scoring_session" in result["next"]
+    assert result["scoring_session_id"] == "session-1"
+    assert session["status"] == "ready"
 
 
 def test_scoring_packet_reports_missing_bundle_before_packet_read(monkeypatch, tmp_path):

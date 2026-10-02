@@ -683,7 +683,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 64
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 65
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -1761,7 +1761,8 @@ def test_server_registers_the_expected_tool_set():
             "apply_learning_objective", "delete_learning_objective",
             "get_roster_student_settings", "preview_roster_student_change",
                     "apply_roster_student_change", "clear_roster_student_field",
-                    "list_feedback_contracts", "prepare_scoring_session", "list_scoring_sessions", "get_scoring_packet",
+                    "list_feedback_contracts", "prepare_scoring_session", "refresh_scoring_session",
+                    "list_scoring_sessions", "get_scoring_packet",
                 "stage_scoring_results", "apply_staged_scoring_results",
         "reset_scoring_review",
         "prepare_feedback_revision", "get_feedback_revision_packet",

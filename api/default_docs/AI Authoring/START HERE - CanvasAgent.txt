@@ -144,8 +144,8 @@ Call prepare_scoring_session(course_id, assignment_id) once. It reads only curre
 local mirror projections. If it returns mirror_freshness_confirmation_required, ask
 whether relevant Canvas work changed; refresh only after an explicit teacher request,
 or retry with use_existing_mirror=true when the teacher says no. If it returns
-scoring_session_already_open, use the existing session and do not prepare or refresh
-that assignment again. Once ready, work locally from the immutable packet. If it
+scoring_session_already_open, use that session; for late or resubmitted work,
+refresh_scoring_session keeps staged rows. Work locally from its packet. If it
 returns needs_scoring_norms, ask the teacher for bounded scoring guidance, then retry
  the same exact preparation. Assignment content is authoritative; a Canvas rubric is
 used only when assignment content is empty, and teacher-authored directives layer on top.

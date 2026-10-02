@@ -108,16 +108,6 @@ def session_staleness(session: dict, *, mirror_revision=None,
     return {"stale": False}
 
 
-def mark_session_stale(session: dict, *, code="session_stale", replacement_session_id="") -> dict:
-    """Record stale state without deleting the private packet/history."""
-    session["status"] = SUPERSEDED_STATUS
-    session["stale_code"] = str(code)
-    session["stale_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    if replacement_session_id:
-        session["superseded_by_session_id"] = str(replacement_session_id)
-    return session
-
-
 def result_idempotency_key(session: dict, pseudonym: str, item_id: str,
                            caller_key: str = "") -> str:
     return _stable_digest({"session": session.get("session_id"),
