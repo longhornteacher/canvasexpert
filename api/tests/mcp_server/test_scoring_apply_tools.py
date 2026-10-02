@@ -282,6 +282,8 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
     monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
         lambda method, path, payload, timeout=30: (sent.append((method, path, payload)) or ({"id": 1}, None))
     ))
+    monkeypatch.setattr(scoring_apply, "default_read_transport",
+                        lambda: (lambda path, params: ([], None)))
 
     result_with_grading = _result(6)
     result_with_grading[0]["late_days"] = 1
@@ -449,3 +451,199 @@ def test_a_students_earlier_stamp_and_question_survive_staging_only_b_again(
                      for _method, path, payload in sent}
     assert posted_grades[REAL_ID_A] == "10"   # insincere: posts unchanged
     assert posted_grades[REAL_ID_B] == "9"    # mark(9, 10, 30, False) == 9
+
+
+# ── Late decision, read-back, and self-explaining errors ────────────────────
+
+
+def _late_policy_course(monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
+                        reader=None):
+    """A policy-course session with one late row; returns (session, bundle, sent, reads)."""
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    session["students"][0].update({
+        "cached_due_date": "2026-09-25T23:59:00-05:00",
+        "canvas_late": True,
+        "seconds_late": 100000,
+        "submission_baseline": {"attempt": 1, "submitted_at": "2026-09-28T08:00:00-05:00"},
+    })
+    from api.platform_services import config
+    from api.powergrader import scoring_apply
+    grading_policy_files.policy(floor_percent=30, missing_percent=20,
+                                sweep_after_school_days=15)
+    monkeypatch.setattr(config, "get_extra_time", lambda course_id: [])
+    sent, reads = [], []
+    monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
+        lambda method, path, payload, timeout=30: (sent.append((method, path, payload)) or ({"id": 1}, None))
+    ))
+
+    def read(path, params):
+        reads.append((path, params))
+        return reader(path, params) if reader else ([], None)
+
+    monkeypatch.setattr(scoring_apply, "default_read_transport", lambda: read)
+    return session, bundle, sent, reads
+
+
+def _late_results(score=6):
+    results = _result(score)
+    results[0]["late_days"] = 1
+    return results
+
+
+def test_waive_late_stage_shows_the_post_answer_decision_and_sends_the_waived_bytes(
+    monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
+):
+    """EXAMPLE: the question carries the generic legend and per-row late block;
+    answering waive_late shows waived in the staged summary and posts status none."""
+    _session, bundle, sent, _reads = _late_policy_course(
+        monkeypatch, tmp_path, _set_active_courses, grading_policy_files)
+    digest = _digest(bundle)
+
+    first = tools.stage_scoring_results("session-1", _late_results(), digest)
+    assert first["status"] == "needs_teacher_input"
+    question = first["questions"][0]
+    assert question["answer_with"] == ["post_late_days", "waive_late", "stop"]
+    assert "school days after the due date" in question["legend"]
+    assert first["rows"] == [{"pseudonym": PSEUDONYM,
+                              "late": {"decision": "applied", "late_days": 1}}]
+
+    staged = tools.stage_scoring_results(
+        "session-1", _late_results(), digest, 
+        review_digest=first["review_digest"], answers={"late_days": "waive_late"})
+    assert staged["status"] == "staged"
+    assert staged["rows"] == [{"pseudonym": PSEUDONYM, "late": {"decision": "waived"}}]
+
+    applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+    assert applied["counts"]["finalized"] == 1
+    submission = sent[0][2]["submission"]
+    assert submission["late_policy_status"] == "none"
+    assert "seconds_late_override" not in submission
+    assert "Canvas applies the late penalty" not in sent[0][2]["comment"]["text_comment"]
+
+
+def test_apply_reports_a_waived_row_canvas_still_penalized(
+    monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
+):
+    """EXAMPLE: points_deducted 2 on a waived row -> late_not_honored, the code,
+    a user_action, and the row's own late facts; the write stays recorded."""
+    _session, bundle, _sent, reads = _late_policy_course(
+        monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
+        reader=lambda _p, _q: ([{"user_id": int(REAL_ID), "score": 4, "entered_score": 6,
+                                 "points_deducted": 2, "late_policy_status": "none"}], None))
+    digest = _digest(bundle)
+    first = tools.stage_scoring_results("session-1", _late_results(), digest)
+    staged = tools.stage_scoring_results(
+        "session-1", _late_results(), digest, 
+        review_digest=first["review_digest"], answers={"late_days": "waive_late"})
+
+    applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+
+    assert len(reads) == 1
+    assert applied["ok"] is True
+    assert applied["code"] == "late_readback_mismatch"
+    assert "Review" in applied["user_action"]
+    assert applied["counts"]["late_not_honored"] == 1 and applied["counts"]["finalized"] == 0
+    row = applied["results"][0]
+    assert row["status"] == "late_not_honored"
+    assert row["late"] == {"decision": "waived", "late_policy_status": "none",
+                           "points_deducted": 2, "score": 4}
+    assert applied["posted_rows"] == [PSEUDONYM]
+    assert REAL_ID not in _blob(applied) and REAL_NAME not in _blob(applied)
+
+
+def test_apply_with_a_failed_read_warns_and_keeps_the_rows_finalized(
+    monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
+):
+    _session, bundle, _sent, _reads = _late_policy_course(
+        monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
+        reader=lambda _p, _q: (None, "HTTP 500: boom"))
+    digest = _digest(bundle)
+    first = tools.stage_scoring_results("session-1", _late_results(), digest)
+    staged = tools.stage_scoring_results(
+        "session-1", _late_results(), digest, 
+        review_digest=first["review_digest"], answers={"late_days": "post_late_days"})
+
+    applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+
+    assert applied["ok"] is True
+    assert applied["counts"]["finalized"] == 1 and applied["counts"]["late_not_honored"] == 0
+    assert applied["warnings"] == ["late_readback_unavailable"]
+    assert applied["results"][0]["late"] == {
+        "decision": "applied", "late_days": 1, "readback": "unavailable"}
+
+
+def test_changing_late_policy_after_a_frozen_stage_refuses_stage_changed(
+    monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
+):
+    """LAW: a frozen stage cannot apply under a different late policy."""
+    session, bundle, sent, _reads = _late_policy_course(
+        monkeypatch, tmp_path, _set_active_courses, grading_policy_files)
+    digest = _digest(bundle)
+    first = tools.stage_scoring_results("session-1", _late_results(), digest)
+    staged = tools.stage_scoring_results(
+        "session-1", _late_results(), digest, 
+        review_digest=first["review_digest"], answers={"late_days": "post_late_days"})
+    assert staged["status"] == "staged"
+
+    session["late_policy"] = "waive"
+    refused = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+
+    assert refused["ok"] is False and refused["code"] == "stage_changed"
+    assert sent == []
+
+
+def test_invalid_results_names_unknown_and_missing_pseudonyms_and_fields(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """CONTRACT: an unknown pseudonym is explained, never a blank ``fields``."""
+    _session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    results = _result(8)
+    results[0]["pseudonym"] = "Mewtwo"
+
+    refused = tools.stage_scoring_results("session-1", results, _digest(bundle))
+
+    assert refused["ok"] is False and refused["code"] == "invalid_results"
+    validation = refused["validation"]
+    assert validation["fields"] == ["pseudonym"]
+    # A string that is nobody's pseudonym is counted, never echoed.
+    assert validation["unknown_pseudonyms"] == []
+    assert validation["unrecognized_count"] == 1
+    assert validation["missing_pseudonyms"] == [PSEUDONYM]
+    assert "Mewtwo" not in _blob(refused)
+
+
+def test_invalid_results_echoes_only_unknown_pseudonyms_that_resolve_in_the_vault(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """CONTRACT: another student's real pseudonym is echoed so the agent can see
+    the mix-up; sorted, with the missing packet pseudonym alongside."""
+    _session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    vault = tools._vault_factory()
+    vault.get_or_assign("900777", real_name="Zed Zeta")
+    vault.set_pseudonym("900777", "Eevee")
+    vault.save()
+    results = _result(8)
+    results[0]["pseudonym"] = "Eevee"
+
+    refused = tools.stage_scoring_results("session-1", results, _digest(bundle))
+
+    validation = refused["validation"]
+    assert validation["unknown_pseudonyms"] == ["Eevee"]
+    assert validation["missing_pseudonyms"] == [PSEUDONYM]
+    assert validation["unrecognized_count"] == 0
+    assert "Zed" not in _blob(refused)
+
+
+def test_a_real_name_supplied_as_a_pseudonym_is_never_echoed(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """LAW: unknown pseudonyms are agent-supplied strings; one that is not a
+    vault pseudonym (here a real name) is never echoed back."""
+    _session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    results = _result(8)
+    results[0]["pseudonym"] = REAL_NAME
+
+    refused = tools.stage_scoring_results("session-1", results, _digest(bundle))
+
+    assert refused["ok"] is False
+    assert REAL_NAME not in _blob(refused)

@@ -63,9 +63,16 @@ def rep_from_dict(document: dict) -> AssignmentContext:
 
 
 def submission_to_dict(submission: Submission, *, canvas_id: str) -> dict:
+    document = _submission_document(submission, canvas_id)
+    if submission.attempt is not None:
+        document["attempt"] = int(submission.attempt)
+    return document
+
+
+def _submission_document(submission: Submission, canvas_id: str) -> dict:
     return {"schema": DOCUMENT_VERSION, "submission_id": submission.submission_id, "rep_id": submission.rep_id, "canvas_id": str(canvas_id), "submitted_at": submission.submitted_at.isoformat(), "raw_text": submission.raw_text, "student_word_count": submission.student_word_count, "segments": [segment_to_dict(segment) for segment in submission.segments], "flags": [flag_to_dict(flag) for flag in submission.flags], "scrub_findings": [finding_to_dict(finding) for finding in submission.scrub_findings]}
 
 
 def submission_from_dict(document: dict, *, pseudonym_id: str) -> Submission:
     _require(document, "submission", "submission_id", "rep_id", "submitted_at")
-    return Submission(submission_id=document["submission_id"], rep_id=document["rep_id"], pseudonym_id=pseudonym_id, submitted_at=datetime.fromisoformat(document["submitted_at"]), raw_text=document.get("raw_text", ""), segments=[segment_from_dict(segment) for segment in document.get("segments", [])], student_word_count=int(document.get("student_word_count", 0)), flags=[flag_from_dict(flag) for flag in document.get("flags", [])], scrub_findings=[finding_from_dict(finding) for finding in document.get("scrub_findings", [])])
+    return Submission(submission_id=document["submission_id"], rep_id=document["rep_id"], pseudonym_id=pseudonym_id, submitted_at=datetime.fromisoformat(document["submitted_at"]), raw_text=document.get("raw_text", ""), segments=[segment_from_dict(segment) for segment in document.get("segments", [])], student_word_count=int(document.get("student_word_count", 0)), flags=[flag_from_dict(flag) for flag in document.get("flags", [])], scrub_findings=[finding_from_dict(finding) for finding in document.get("scrub_findings", [])], attempt=None if document.get("attempt") is None else int(document["attempt"]))

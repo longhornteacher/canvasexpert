@@ -269,7 +269,10 @@ than the raw rubric score, and a Scoring Session sends `late_policy_status` and
 the posted value stays the raw score, exactly as before. `feedback_only` does not calculate or send a gradebook mark or late-policy fields, regardless of course policy.
 
 A Canvas HTTP success means the write was accepted; CE records that compact receipt and moves
-on. A non-HTTP transport error is `write_transport_unknown`: it performs no later verification
+on. The only read after a send is for late-decision rows (`waived` or `applied`): one batched,
+read-only submissions read that reports whether Canvas honored the late status, never retried
+and never used to correct a row (`docs/contracts/grading-policy-contract.md` section 5). A
+non-HTTP transport error is `write_transport_unknown`: it performs no later verification
 and no automatic retry, and it is never reported as `canvas_write_attention`. An explicit
 Canvas HTTP rejection is a failed write. Neither outcome may trigger a second submission
 comment write. A successful transport response finalizes the exact local idempotency slot, so

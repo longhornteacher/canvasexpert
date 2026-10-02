@@ -84,6 +84,11 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
    The selected mode is stored on the assignment session and shown in review
    responses and `list_scoring_sessions`; omit `grade_mode` on a review retry to
    keep the stored selection. Changing modes changes the review and stage digest.
+   A `late_days` question (when the session `late_policy` is `ask`) offers
+   `post_late_days`, `waive_late` (waive every listed row), and `stop`; per-row mixing
+   is a resubmission with `late_days: 0` on the rows to waive. Pass `late_policy`
+   (`ask | waive | apply`) to `prepare_scoring_session` to settle it up front. Stage
+   responses show each late row's decision as `late: {decision, late_days?}`.
    After staging succeeds, summarize the aggregate and wait for a direct,
    contemporaneous teacher request to post that exact staged work.
 
@@ -91,8 +96,12 @@ as `mirror_projection_unavailable`; refresh the course mirror and retry.
    idempotency_key="")` only after that direct request. The tool accepts no
    replacement result rows, review answers, or plan. It rechecks the private
    packet and frozen plan, then uses the existing narrow score/comment write lane
-   once. It performs no post-write Canvas read, mirror refresh, comparison, or
-   automatic retry.
+   once. It performs no mirror refresh, grade comparison, or automatic retry. Its
+   only read is one batched, read-only check of the rows whose late decision was
+   `waived` or `applied`; a row Canvas did not honor is reported `late_not_honored`
+   (`late_readback_mismatch`) and a failed read is the warning
+   `late_readback_unavailable`. Nothing is retried or corrected: tell the teacher to
+   review those rows in Canvas.
 
 8. A Canvas HTTP success means the write was accepted. A
    `write_transport_unknown` result means the write may or may not have landed:
@@ -156,7 +165,10 @@ send intents, outcomes, and earlier runs remain in private append-only work hist
 | `scoring_session_already_open` | A usable assignment session already exists | Continue from its packet; do not prepare or refresh it again |
 | `session_superseded` | A non-current session id was supplied | Use the current session listed by `list_scoring_sessions()` |
 | `needs_teacher_input` | A bounded scoring risk needs a decision | The packet remains readable; ask only the returned pseudonym-only questions, then stage unchanged results. Use `reset_scoring_review` to reopen the local packet review without changing it |
-| `stage_changed` | The frozen stage or private plan no longer matches | Stage the exact intended result set again |
+| `stage_changed` | The frozen stage or private plan no longer matches (including a changed `late_policy`) | Stage the exact intended result set again |
+| `invalid_late_policy` | `late_policy` was not `ask`, `waive`, or `apply` | Retry with one of the three values; on an already-open session the supplied value is saved on it |
+| `late_readback_mismatch` / `late_not_honored` | After apply, Canvas stored a late status or deduction that differs from the decision sent | The write stays posted; tell the teacher to review those rows in Canvas. Nothing is retried or corrected |
+| `late_readback_unavailable` | The post-apply late check could not read Canvas | A warning only; the rows stay finalized and the teacher may check them in Canvas |
 | `canvas_write_attention` | A previous Canvas write is ambiguous | Review Canvas; do not blind-retry |
 | `write_transport_unknown` | The send returned no HTTP response | Let the teacher review Canvas; CE does not re-read or retry |
 | `new_quiz_writing_requires_assignment` | A New Quiz contains writing | Grade it in Canvas and author future writing separately |

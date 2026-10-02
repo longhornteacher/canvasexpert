@@ -165,7 +165,10 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(method, path, payload) [checkpointed Hub page create, restriction, assignment, publication, or compensation]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments", "catalog.pages"],
+      "scopes": [
+        "catalog.assignments",
+        "catalog.pages"
+      ],
       "reconciliation": "invalidate",
       "reason": "Creates, secures, and compensates restricted Hub tier pages through distinct checkpointed steps, for both the AssignmentForge Hub and the classic QuizForge Hub; the operation ledger invalidates assignment and page catalog scopes after the complete Hub operation succeeds."
     },
@@ -176,7 +179,9 @@
       "call_index": 1,
       "call_form": "canvas_client._canvas_send(method, path, payload) [checkpointed classic quiz create, question create, settings save, publish, or bounded rollback delete]",
       "classification": "canvas_mutation",
-      "scopes": ["catalog.assignments"],
+      "scopes": [
+        "catalog.assignments"
+      ],
       "reconciliation": "invalidate",
       "reason": "Every classic quiz write goes through this one write-ahead-marked helper: create the unpublished quiz, add each question, save settings (which computes points), publish, and delete only a quiz this same run created after a definitive question rejection. The central operation-ledger post-apply hook invalidates the assignment, module, and (for a Hub) page catalog scopes after the confirmed operation succeeds."
     },
@@ -208,7 +213,7 @@
     },
     {
       "path": "api/operation_ledger/adapters/assignment_whole.py",
-      "symbol": "upload_course_file",
+      "symbol": "upload_initialized_file",
       "detector": "attr:post",
       "call_index": 1,
       "call_form": "requests.post(upload_url, data=upload_params, files={...})",
@@ -217,7 +222,7 @@
         "none"
       ],
       "reconciliation": "n/a",
-      "reason": "Second leg of the Canvas two-step file upload; the target is a Canvas-issued storage URL, not the core REST API. No JSON scope to reconcile."
+      "reason": "Second leg of the Canvas two-step file upload, shared by course-file uploads and feedback-revision submission-comment attachments; the target is a Canvas-issued storage URL, not the core REST API, and the request carries no Canvas credentials. No JSON scope to reconcile."
     },
     {
       "path": "api/operation_ledger/adapters/quick_assignment.py",
@@ -388,7 +393,46 @@
         "private.submission_comments"
       ],
       "reconciliation": "targeted",
-      "reason": "The unified MCP Scoring Session submit path calls scoring_apply.apply_plan, which reaches this narrow grade writer. It sends the reviewed posted_grade (the raw score, or the effort-credit mark in a grading-policy course) and one plain-text comment once, then records the transport outcome; in a grading-policy course it also sends the teacher-confirmed late_policy_status/seconds_late_override for a late row. It performs no read-back and interprets no gradebook or late-policy adjustment beyond that; Canvas applies the rest itself."
+      "reason": "The unified MCP Scoring Session submit path calls scoring_apply.apply_plan, which reaches this narrow grade writer. It sends the reviewed posted_grade (the raw score, or the effort-credit mark in a grading-policy course) and one plain-text comment once, then records the transport outcome; for a late row it also sends the late decision (late_policy_status and, when applied, seconds_late_override; a waived row sends status none with no override). It performs no read-back and interprets nothing itself; the apply layer afterwards makes one read-only check of the late-decision rows only (never retried or corrected), and Canvas applies the rest itself."
+    },
+    {
+      "path": "api/powergrader/feedback_revision.py",
+      "symbol": "_apply_attachments",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(\"POST\", <submission_comments_files_path>, upload_init) [attachment upload init]",
+      "classification": "canvas_upload",
+      "scopes": [
+        "private.submission_comments"
+      ],
+      "reconciliation": "none",
+      "reason": "Upload init for one shared feedback attachment on one student's submission, sent only after the frozen stage matches and a durable intent receipt is saved. A transport-unknown outcome sets attention and is never resent. The module triggers no mirror refresh; the teacher refreshes comments explicitly when needed."
+    },
+    {
+      "path": "api/powergrader/feedback_revision.py",
+      "symbol": "_apply_attachments",
+      "detector": "attr:_canvas_send",
+      "call_index": 2,
+      "call_form": "canvas_client._canvas_send(\"PUT\", <submission_path>, {\"comment\": {text_comment, file_ids}}) [attachment comment]",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "private.submission_comments"
+      ],
+      "reconciliation": "none",
+      "reason": "Posts the attachment label comment referencing the uploaded file id, only after the upload step is accepted. Receipt-guarded: an unknown outcome sets attention and is never resent. Scores are not touched; no mirror refresh is triggered."
+    },
+    {
+      "path": "api/powergrader/feedback_revision.py",
+      "symbol": "apply",
+      "detector": "attr:_canvas_send",
+      "call_index": 1,
+      "call_form": "canvas_client._canvas_send(\"PUT\", row[\"path\"], {\"comment\": row[\"feedback\"]}) [revised feedback comment]",
+      "classification": "canvas_mutation",
+      "scopes": [
+        "private.submission_comments"
+      ],
+      "reconciliation": "none",
+      "reason": "Posts one revised plain-text feedback comment per row from the frozen, digest-checked stage. A durable intent receipt precedes each send and an unknown outcome sets attention without resend. Scores stay fixed; no mirror refresh is triggered."
     },
     {
       "path": "api/powergrader/new_quiz_fetch.py",

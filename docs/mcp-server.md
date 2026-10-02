@@ -57,7 +57,11 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 70 (64 tools). Version 70 adds `prepare_feedback_revision`,
+Tool schema version 71 (64 tools). Version 71 adds the `late_policy` parameter
+(`ask | waive | apply`) to `prepare_scoring_session`; see `docs/guides/scoring-sessions.md`
+for the late decision per row and the late-row read-back after apply (none in `feedback_only`
+mode).
+Version 70 adds `prepare_feedback_revision`,
 `get_feedback_revision_packet`, `stage_feedback_revisions`, and
 `apply_staged_feedback_revisions` for revising selected existing staff comments
 on graded ordinary assignments while preserving scores. `stage_feedback_revisions`
@@ -151,7 +155,7 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `verify_live(course_id, kind, id="", title="")` | The one Live Canvas read an agent makes after a push: confirms one `assignment`/`page`/`quiz` by exact id or exact title. One Canvas call, or two only when `module_ids` isn't already on the object; writes nothing | No |
 | `resume_operation(operation_id)` | Continues one existing, teacher-approved operation from its last recorded step through the same executor retry path; refuses an operation that already applied, was abandoned, or is held by another attempt | No |
 | `abandon_operation(operation_id)` | Marks one existing, teacher-approved operation abandoned with no Canvas call; blocks later `resume_operation`/apply and returns a `repair_plan` of what was already created from recorded steps | No |
-| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input; page zero includes the selected teacher feedback guidance and scoring basis | No |
+| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="", late_policy="ask")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold require explicit acknowledgement; missing norms return bounded teacher input; page zero includes the selected teacher feedback guidance and scoring basis; `late_policy` is `ask | waive | apply` (a refused value is `invalid_late_policy`) and, when passed to an already-open session, is saved on it and reported back | No |
 | `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
 | `list_work_items()` | Shared work-item holders, sync progress, and orphan counts without private session contents | No |
 | `get_work_item(work_id)` | One shared work item's holder and sync status | No |

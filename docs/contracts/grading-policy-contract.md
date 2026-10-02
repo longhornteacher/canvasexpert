@@ -107,8 +107,13 @@ and no-school dates never add.
 - **Insincere attempts.** Every row proposed insincere becomes a teacher question. An
   unconfirmed row is treated as sincere.
 - **Late days.** One question listing each row Canvas marks late, with Canvas's day count and
-  a suggested count. The teacher accepts the suggestions or gives a number per row. The review
-  never says why a suggestion differs from Canvas's count.
+  a suggested count, asked when the session's `late_policy` is `ask` (the default). Its
+  options are `post_late_days`, `waive_late`, and `stop`; per-row mixing is a resubmission
+  with `late_days: 0` on the rows to waive. A one-line `legend` states that `canvas_days` is
+  Canvas's calendar-day count and `late_days` is school days after the due date (weekends and
+  Holidays.csv dates excluded, less any grace days), posted unless waived. The review states
+  only this generic rule and never a per-row reason for a difference from Canvas's count,
+  because grace days come from accommodations.
 
 `session_actions._payload` is the one place the mark and late fields are computed, so the
 projected payload in the plan digest is exactly what is sent:
@@ -122,9 +127,27 @@ projected payload in the plan digest is exactly what is sent:
 - Newly authored Scoring Session feedback is sent unchanged with no automatic gradebook or
   late-policy footer; numeric score-only rows send no comment. Frozen legacy stages retain
   their established payload behavior. Effort-credit and late-policy payload math is unchanged.
+- Waived (`waive_late` answer, or session `late_policy = "waive"`, in a course with or without
+  a policy): `submission.late_policy_status = "none"` and no `seconds_late_override`;
+  `posted_grade` is unchanged. The session `late_policy` is `ask | waive | apply`: `waive`
+  asks no question and waives every late row; `apply` in a policy course asks no question and
+  posts each row's confirmed or suggested count (in a no-policy course it equals `ask`, which
+  sends no late field). The `waive_late` answer is frozen in the stage; a changed
+  `late_policy` changes the plan digest, so a frozen stage refuses `stage_changed` at apply.
+  In `feedback_only` grade mode no submission object is sent, so there is no late decision:
+  no question, no per-row `late` block, no read-back, and `late_policy` is ignored.
+- Each late candidate row's decision is `waived`, `applied` (policy course), or `canvas` (no
+  late field; Canvas's own policy). Stage responses show it per row as
+  `late: {decision, late_days?}`.
 
-Unchanged: one write per student, no readback, no verification GET, no reading of Canvas's
-deduction. The session student record gains `cached_due_date`, `canvas_late`, and
+Unchanged: one write per student, no pre-write read, no verification of any row other than the
+late-decision rows. After the writes, one batched read-only submissions read covers only the
+posted rows whose decision is `waived` or `applied` (score, entered_score, points_deducted,
+late_policy_status). A row whose stored status differs from the status sent, or a row sent
+`"none"` with `points_deducted` above 0, is reported `late_not_honored`
+(`late_readback_mismatch`); a failed read is the warning `late_readback_unavailable`. The
+read is never retried and never corrects a row, and a confirmed write stays recorded as
+posted. The session student record gains `cached_due_date`, `canvas_late`, and
 `seconds_late` for every submission, not only New Quiz rows.
 
 Known Canvas behavior: a student resubmission resets the status and override to nil; the

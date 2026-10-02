@@ -2,9 +2,10 @@
 
 The ordinary Assignment write is deliberately narrow: send the reviewed raw
 score and plain-text comment to the Canvas Submissions endpoint once, then
-record the transport outcome. Canvas Expert does not read the resulting grade
+record the transport outcome. This module does not read the resulting grade
 back, compare it, or interpret any gradebook or late-policy adjustment Canvas
-applies. A Canvas HTTP success means the write was accepted; a connection loss
+applies (the apply layer's one late-decision check lives in scoring_apply).
+A Canvas HTTP success means the write was accepted; a connection loss
 is transport-unknown and is never automatically retried or re-read.
 
 See docs/contracts/feedback-scoring-contract.md (Session consumption and write
@@ -74,7 +75,45 @@ def _strip_draft_banner(feedback: str) -> str:
     return _DRAFT_BANNER_RE.sub("", feedback, count=1).strip()
 
 
-def _payload(student: dict, *, grade_mode: str = "post_score") -> dict:
+def late_decision(student: dict, *, waive: bool = False,
+                  grade_mode: str = "post_score") -> dict | None:
+    """The one late decision a candidate row posts with, or ``None`` when not late.
+
+    ``waived`` sends status ``none`` and no override, with or without a Grading
+    Policy. ``applied`` (policy course only) posts the confirmed or suggested
+    ``late_days``. ``canvas`` sends no late fields and leaves Canvas's own policy
+    in charge. ``feedback_only`` sends no submission object, so there is no late
+    decision at all. See docs/contracts/grading-policy-contract.md section 5.
+    """
+    if grade_mode == "feedback_only" or not student.get("canvas_late"):
+        return None
+    if waive:
+        return {"decision": "waived"}
+    grading = student.get("grading")
+    if grading:
+        days = grading.get("late_days")
+        if days is None:
+            days = grading.get("suggested_late_days")
+        if days is not None:
+            return {"decision": "applied", "late_days": days}
+    return {"decision": "canvas"}
+
+
+def late_waived(session: dict, student: dict, waive_user_ids=(),
+                grade_mode: str = "post_score") -> bool:
+    """Whether the session's late policy or a ``waive_late`` answer waives this row.
+
+    Never in ``feedback_only`` mode: no late fields are sent, so the session's
+    ``late_policy`` is ignored there.
+    """
+    if grade_mode == "feedback_only":
+        return False
+    return (str((session or {}).get("late_policy") or "ask") == "waive"
+            or str(student.get("user_id")) in {str(uid) for uid in waive_user_ids})
+
+
+def _payload(student: dict, *, grade_mode: str = "post_score",
+             waive_late: bool = False) -> dict:
     # Single grading surface: PowerGrader is the only writer of an AI-feedback
     # submission comment (``comment[text_comment]``). Gradebook may adjust
     # ``posted_grade`` (curve/late/extension) but never writes feedback here.
@@ -94,6 +133,7 @@ def _payload(student: dict, *, grade_mode: str = "post_score") -> dict:
 
     # Feedback-only scoring keeps the numeric draft in the rendered comment,
     # but must never send a grade or policy field to Canvas.
+    decision = None
     if grade_mode == "feedback_only":
         posted_grade = None
         days = None
@@ -102,16 +142,14 @@ def _payload(student: dict, *, grade_mode: str = "post_score") -> dict:
     # docs/contracts/grading-policy-contract.md section 5). Without a
     # ``grading`` stamp this function is byte-identical to today.
     else:
-        days = None
+        decision = late_decision(student, waive=waive_late)
+        days = (decision.get("late_days")
+                if decision and decision["decision"] == "applied" else None)
         if grading:
             points_possible = grading.get("points_possible")
             posted_grade = grading_policy.mark(
                 score, points_possible, grading.get("floor_percent"), bool(grading.get("insincere")),
             )
-            if student.get("canvas_late"):
-                days = grading.get("late_days")
-                if days is None:
-                    days = grading.get("suggested_late_days")
             if (not student.get("_teacher_authored_feedback")
                     and posted_grade is not None and score is not None
                     and float(posted_grade) != float(score)):
@@ -126,7 +164,9 @@ def _payload(student: dict, *, grade_mode: str = "post_score") -> dict:
     payload: dict = {}
     if posted_grade is not None:
         payload["submission"] = {"posted_grade": str(posted_grade)}
-        if grading and student.get("canvas_late") and days is not None:
+        if decision and decision["decision"] == "waived":
+            payload["submission"]["late_policy_status"] = "none"
+        elif days is not None:
             if days > 0:
                 payload["submission"]["late_policy_status"] = "late"
                 payload["submission"]["seconds_late_override"] = days * 86400
@@ -201,10 +241,13 @@ def push_grades(
     canvas_send,
     idempotency_key: str = "",
     grade_mode: str = "post_score",
+    waive_late_user_ids=(),
 ) -> tuple[dict, int]:
     """Send the reviewed raw score and comment once, then record the outcome.
 
-    No Canvas read happens before or after the send. A Canvas HTTP success
+    No Canvas read happens here, before or after the send (the apply layer makes
+    its own late-row check). ``waive_late_user_ids`` are rows a ``waive_late``
+    answer waived; the session's ``late_policy`` can waive every late row. A Canvas HTTP success
     finalizes the exact local idempotency slot; a non-HTTP transport error is
     ``write_transport_unknown`` and is never re-verified or automatically
     repeated; an explicit Canvas HTTP rejection is a failed write. Neither
@@ -225,13 +268,15 @@ def push_grades(
     pushed = 0
     for user_id in requested:
         student = students.get(user_id)
-        if not student or not _payload(student, grade_mode=grade_mode):
+        waive = bool(student) and late_waived(
+            session, student, waive_late_user_ids, grade_mode)
+        if not student or not _payload(student, grade_mode=grade_mode, waive_late=waive):
             return {"ok": False, "code": "payload_changed",
                     "error": "The reviewed grade or feedback changed. Review again."}, 409
         if student.get("status") != "approved" or student.get("posted"):
             return {"ok": False, "code": "payload_changed",
                     "error": "The reviewed grade or feedback changed. Review again."}, 409
-        payload = _payload(student, grade_mode=grade_mode)
+        payload = _payload(student, grade_mode=grade_mode, waive_late=waive)
         payload_digest = _digest(payload)
         target_digest = _digest({"user_id": user_id, "payload": payload})
         idem_slot = f"{request_key}:{user_id}" if request_key else user_id
@@ -271,10 +316,15 @@ def push_grades(
         student["status"] = "posted"
         idempotency[idem_slot] = target_digest
         pushed += 1
-        results.append({
+        result = {
             "user_id": user_id, "status": "pushed", "code": "pushed",
             "request_digest": payload_digest, "target_digest": target_digest,
-        })
+        }
+        decision = late_decision(student, waive=waive, grade_mode=grade_mode)
+        if decision:
+            result["late"] = {**decision, "sent_status": (
+                payload.get("submission") or {}).get("late_policy_status")}
+        results.append(result)
 
     if results:
         session.setdefault("push_log", []).append({

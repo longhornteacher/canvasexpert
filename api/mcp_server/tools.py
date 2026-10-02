@@ -2507,7 +2507,11 @@ def _normalize_scoring_preparation_result(result) -> dict:
     return result
 
 
-def _open_scoring_session_refusal(course_id: str, assignment_id: str) -> dict | None:
+_LATE_POLICIES = ("ask", "waive", "apply")
+
+
+def _open_scoring_session_refusal(course_id: str, assignment_id: str,
+                                  late_policy: str = "") -> dict | None:
     """Refuse duplicate preparation when a usable assignment packet is open.
 
     A missing, invalid, or stale packet is recoverable through the existing
@@ -2525,12 +2529,25 @@ def _open_scoring_session_refusal(course_id: str, assignment_id: str) -> dict | 
         return None
 
     session_id = str(session.get("session_id") or "")
+    current_policy = str(session.get("late_policy") or "ask")
+    # "" means not supplied: only an explicit value changes the saved one.
+    if late_policy and late_policy != current_policy:
+        # A local preference, not packet content: save it on the open session.
+        # It changes the plan digest, so a frozen stage fails stage_changed at
+        # apply and the agent restages.
+        with session_store.session_lock(session_id):
+            fresh = session_store.load_session(session_id)
+            if isinstance(fresh, dict):
+                fresh["late_policy"] = late_policy
+                session_store.save_session(fresh)
+                current_policy = late_policy
     return {
         "ok": False,
         "code": "scoring_session_already_open",
         "stage": "prepare",
         "retryable": False,
         "scoring_session_id": session_id,
+        "late_policy": current_policy,
         "user_action": (
             "Use get_scoring_packet with the existing scoring_session_id, "
             "work locally on that snapshot, then stage once. Do not prepare "
@@ -2544,7 +2561,8 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
                             scoring_guidance: str = "",
                             use_existing_mirror: bool = False,
                             scoring_guidance_provenance: str = "",
-                            feedback_contract_id: str = "") -> dict:
+                            feedback_contract_id: str = "",
+                            late_policy: str = "") -> dict:
     """Prepare one exact assignment from the local CanvasMirror.
 
     See ScoringSession/SCORING_SESSIONS.md (§2) in your workspace root for the
@@ -2562,15 +2580,25 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
                 "user_action": "Provide a Current course_id and exact assignment_id.",
                 "error": gate_error,
             }
+    policy = str(late_policy or "").strip().casefold()
+    if policy and policy not in _LATE_POLICIES:
+        return {
+            "ok": False, "code": "invalid_late_policy", "stage": "validate",
+            "retryable": False,
+            "user_action": "Use late_policy " + ", ".join(_LATE_POLICIES) + ".",
+            "error": "late_policy must be one of: " + ", ".join(_LATE_POLICIES) + ".",
+        }
     try:
         with session_store.scope_lock(course_key, assignment_key):
-            existing = _open_scoring_session_refusal(course_key, assignment_key)
+            existing = _open_scoring_session_refusal(course_key, assignment_key, policy)
     except Exception:
         return _safe_scoring_preparation_failure()
     if existing:
         return existing
     try:
         prepare_kwargs = {"use_existing_mirror": use_existing_mirror}
+        if policy and policy != "ask":
+            prepare_kwargs["late_policy"] = policy
         if str(scoring_guidance_provenance or "").strip():
             prepare_kwargs["scoring_guidance_provenance"] = scoring_guidance_provenance
         if str(feedback_contract_id or "").strip():
@@ -3047,6 +3075,49 @@ def stage_scoring_results(scoring_session_id: str, results: list,
             grade_mode=grade_mode)
 
 
+def _result_validation(verdict: dict, results, safe_bundle: dict, vault) -> dict:
+    """Counts, failing fields, and which pseudonyms are unknown or missing.
+
+    ``unknown_pseudonyms`` are results whose pseudonym is not in this packet.
+    Only values that resolve in the vault (another student's real pseudonym) are
+    echoed; any other agent-supplied string is counted in ``unrecognized_count``
+    and never echoed, because the output gate only soft-flags a name inside free
+    text and would not stop it. Lists are capped, and nothing here is written to
+    the operational log.
+    """
+    rows = results.get("results") if isinstance(results, dict) else results
+    supplied = {r["pseudonym"] for r in rows or []
+                if isinstance(r, dict) and isinstance(r.get("pseudonym"), str) and r["pseudonym"]}
+    packet = {s["pseudonym"] for s in (safe_bundle or {}).get("students") or []
+              if isinstance(s, dict) and isinstance(s.get("pseudonym"), str) and s["pseudonym"]}
+
+    def capped(values) -> list:
+        return [value[:64] for value in sorted(values)[:50]]
+
+    unknown = supplied - packet
+    known = {value for value in unknown if vault.reverse(value) is not None}
+    return {"errors": len(verdict.get("errors") or []),
+            "warnings": len(verdict.get("warnings") or []),
+            "fields": verdict.get("fields") or [],
+            "unknown_pseudonyms": capped(known),
+            "unrecognized_count": len(unknown - known),
+            "missing_pseudonyms": capped(packet - supplied)}
+
+
+def _late_rows(session: dict, plan: dict, names: dict, answers=None, only=None) -> list:
+    """Pseudonym-keyed late decisions for the stage response, post-answer."""
+    from api.powergrader import scoring_apply
+
+    keep = None if only is None else {str(uid) for uid in only}
+    return [
+        {"pseudonym": names.get(uid) or "(unknown student)", "late": decision}
+        for uid, decision in sorted(
+            scoring_apply.late_decisions(session, plan, answers).items(),
+            key=lambda item: names.get(item[0]) or "")
+        if keep is None or uid in keep
+    ]
+
+
 def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                                   expected_packet_digest: str,
                                   review_digest: str = "",
@@ -3103,11 +3174,10 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
         return {"ok": False, "code": "identity_unavailable", "error": "The private identity vault is unavailable."}
     verdict = fp.validate_results(results, safe_bundle, vault)
     if not verdict.get("ok"):
-        return {"ok": False, "code": "invalid_results",
-                "error": "Results must match the supplied pseudonyms and item ids and contain valid feedback.",
-                "validation": {"errors": len(verdict.get("errors") or []),
-                               "warnings": len(verdict.get("warnings") or []),
-                               "fields": verdict.get("fields") or []}}
+        return pseudonym.gate({
+            "ok": False, "code": "invalid_results",
+            "error": "Results must match the supplied pseudonyms and item ids and contain valid feedback.",
+            "validation": _result_validation(verdict, results, safe_bundle, vault)}, vault)
 
     rendered = fp.render_results(
         results, bundle=safe_bundle, grade_mode=grade_mode,
@@ -3115,11 +3185,17 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
     try:
         rows = fp.reidentify(rendered, vault)
     except Exception:
-        return {"ok": False, "code": "invalid_results", "error": "Results could not be safely matched to this session."}
+        return pseudonym.gate({
+            "ok": False, "code": "invalid_results",
+            "error": "Results could not be safely matched to this session.",
+            "validation": _result_validation(verdict, results, safe_bundle, vault)}, vault)
     for index, row in enumerate(rows):
         row["pseudonym"] = str((rendered[index] or {}).get("pseudonym") or "")
     if any(not row.get("resolved") for row in rows):
-        return {"ok": False, "code": "invalid_results", "error": "Every result must match a supplied pseudonym."}
+        return pseudonym.gate({
+            "ok": False, "code": "invalid_results",
+            "error": "Every result must match a supplied pseudonym.",
+            "validation": _result_validation(verdict, results, safe_bundle, vault)}, vault)
 
     names = {}
     every_pseudonym = []
@@ -3261,6 +3337,9 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                     "grade_mode": grade_mode,
                     "counts": {"ready": len(plan["candidate_ids"]),
                                "held": held_count}}
+                late_rows = _late_rows(candidate, plan, names, answers)
+                if late_rows:
+                    response["rows"] = late_rows
                 with session_store.scope_lock(session.get("course_id"),
                                               session.get("assignment_id")):
                     if not _is_current_scoring_session(
@@ -3343,6 +3422,9 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                 "grade_mode": grade_mode,
                 "counts": {"ready": len(selected_ids), "held": len(held_user_ids)},
             }
+            late_rows = _late_rows(candidate, plan, names, answers, only=selected_ids)
+            if late_rows:
+                response["rows"] = late_rows
             return _with_next("stage_scoring_results", pseudonym.gate(response, vault))
 
     return {
@@ -3585,22 +3667,35 @@ def reset_scoring_review(scoring_session_id: str) -> dict:
 def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()) -> dict:
     """Project ordinary assignment writes to aggregate, pseudonym-only outcomes.
 
-    Only transport facts cross this boundary: no Canvas-returned score, grade,
-    gradebook total, deduction, policy status, comment text, or Canvas response.
+    Only transport facts cross this boundary, plus the late-decision read-back:
+    for rows whose decision was waived or applied, that row's Canvas-returned
+    late_policy_status, points_deducted and score. No other Canvas-returned
+    grade, gradebook total, comment text, or Canvas response crosses.
     """
     counts = {"finalized": 0, "already_applied": 0, "held": 0, "failed": 0,
-              "transport_unknown": 0}
+              "transport_unknown": 0, "late_not_honored": 0}
     outcomes = []
+    unavailable = False
     for item in payload.get("results") or []:
         status = str(item.get("status") or "failed")
         public_status = "finalized" if status == "pushed" else status
+        late = item.get("late") if isinstance(item.get("late"), dict) else None
+        if public_status == "finalized" and late and late.get("late_honored") is False:
+            public_status = "late_not_honored"
         if public_status not in counts:
             public_status = "failed"
         counts[public_status] += 1
-        outcomes.append({"pseudonym": names.get(str(item.get("user_id"))) or "(unknown student)",
-                         "status": public_status,
-                         **({"code": str(item.get("code") or "failed")}
-                            if public_status in {"failed", "transport_unknown"} else {})})
+        outcome = {"pseudonym": names.get(str(item.get("user_id"))) or "(unknown student)",
+                   "status": public_status,
+                   **({"code": str(item.get("code") or "failed")}
+                      if public_status in {"failed", "transport_unknown"} else {})}
+        if late and public_status in {"finalized", "late_not_honored"}:
+            shown = {key: late[key] for key in ("decision", "late_days", "late_policy_status",
+                                                "points_deducted", "score", "readback")
+                     if key in late}
+            unavailable = unavailable or late.get("readback") == "unavailable"
+            outcome["late"] = shown
+        outcomes.append(outcome)
     held_ids = {str(uid) for uid in held_user_ids}
     counts["held"] = len(held_ids)
     outcomes.extend({"pseudonym": names.get(uid) or "(unknown student)", "status": "held"}
@@ -3616,6 +3711,13 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
     if payload.get("code") == "partial_post_remaining":
         result["code"] = "partial_post_remaining"
         result["recovery"] = "Retry only the remaining rows after resolving any attention rows."
+    warnings = []
+    if unavailable:
+        warnings.append("late_readback_unavailable")
+    if counts["late_not_honored"]:
+        warnings.append("late_readback_mismatch")
+    if warnings:
+        result["warnings"] = warnings
     if not result["ok"]:
         if counts["transport_unknown"]:
             # The write may have landed. Name only the safe outcome and the
@@ -3626,6 +3728,10 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
         else:
             result["code"] = str(payload.get("code") or "write_failed")
             result["error"] = "One or more results could not be finalized. Review Canvas before retrying."
+    if counts["late_not_honored"]:
+        result.setdefault("code", "late_readback_mismatch")
+        result["user_action"] = ("Review the late_not_honored rows in Canvas: the stored late "
+                                 "status or deduction does not match what was posted.")
     return pseudonym.gate(result, vault)
 
 
@@ -3652,6 +3758,8 @@ def _scoring_apply_safe(plan: dict, names: dict) -> dict:
                  "late_days": row.get("late_days")}
                 for row in question["rows"]
             ]
+        if "legend" in question:
+            safe["legend"] = question["legend"]
         return safe
 
     return {

@@ -92,7 +92,17 @@ def _submission_row(
             for flag in submission.flags
         ],
     }
-    if include_text:
+    if submission.attempt is not None:
+        row["attempt"] = submission.attempt
+    # Never a silently blank row: say whether the text is here, left out on
+    # request, or absent from the stored row.
+    if not include_text:
+        row["text_status"] = "omitted"
+    elif not submission.raw_text.strip():
+        row["text_status"] = "unavailable"
+        row["text_reason"] = "no_typed_text"
+    else:
+        row["text_status"] = "included"
         row["raw_text"] = _truncate(submission.raw_text, max_text_chars)
     return row
 

@@ -120,3 +120,21 @@ def test_score_must_be_a_number_or_null():
     result = feedback_results.validate_results([_result(score=True)])
     assert result["ok"] is False
     assert "score" in result["fields"]
+
+
+def test_unknown_pseudonym_and_item_errors_always_name_their_field():
+    """CONTRACT: every hard error from the vault and bundle cross-checks adds to
+    ``fields``, so an invalid_results response is never left with a blank list."""
+    class Vault:
+        def reverse(self, pseudonym):
+            return {"canvas_id": "1"} if pseudonym == "Ada" else None
+
+    bundle = {"students": [{"pseudonym": "Ada", "responses": [{"item_id": "101", "possible": 4}]}]}
+    stranger = dict(ADA, pseudonym="Nobody")
+    wrong_item = dict(ADA, item_id="999")
+
+    unknown = feedback_results.validate_results([stranger], bundle, Vault())
+    off_bundle_item = feedback_results.validate_results([wrong_item], bundle, Vault())
+
+    assert unknown["ok"] is False and unknown["fields"] == ["pseudonym"]
+    assert off_bundle_item["ok"] is False and off_bundle_item["fields"] == ["item_id"]

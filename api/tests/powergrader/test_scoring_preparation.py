@@ -156,3 +156,43 @@ def test_preparation_keeps_canonical_submission_digest(monkeypatch, tmp_path):
 
 def test_old_session_staleness_law_is_no_longer_used_for_packet_flow():
     assert not hasattr(session_store, "session_staleness") or callable(session_store.session_staleness)
+
+
+def test_invalid_guidance_provenance_is_refused_before_it_can_be_persisted(monkeypatch, tmp_path):
+    """LAW: a bad provenance is never saved, so later bare retries cannot replay it."""
+    _saved, _prepare = _wire(monkeypatch, tmp_path)
+
+    refused = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", "Be kind.", scoring_guidance_provenance="bogus",
+        save_session=lambda session: None)
+
+    assert refused["code"] == "invalid_scoring_guidance_provenance"
+    assert all(value in refused["user_action"] for value in scoring_preparation.GUIDANCE_PROVENANCES)
+    assert session_store.load_preparation_state("c1", "a1") == {}
+
+
+def test_provenance_without_guidance_or_contract_is_ignored(monkeypatch, tmp_path):
+    """CONTRACT: provenance describes guidance; with none supplied it is ignored,
+    even when invalid, and preparation proceeds as default."""
+    saved, _prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(
+        rubric=[{"description": "Reasoning", "points": 10, "ratings": []}]))
+
+    result = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", "", scoring_guidance_provenance="bogus",
+        save_session=lambda session: saved.setdefault(session["session_id"], session))
+
+    assert result["status"] == "ready"
+    assert session_store.load_preparation_state("c1", "a1") == {}
+
+
+@pytest.mark.parametrize("policy, expected", [(None, "ask"), ("waive", "waive"), ("apply", "apply")])
+def test_the_late_policy_is_stored_on_the_private_session(monkeypatch, tmp_path, policy, expected):
+    saved, _prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(
+        rubric=[{"description": "Reasoning", "points": 10, "ratings": []}]))
+    kwargs = {} if policy is None else {"late_policy": policy}
+
+    result = scoring_preparation.prepare_scoring_session(
+        "c1", "a1", "Guidance", save_session=lambda session: saved.setdefault(
+            session["session_id"], session), **kwargs)
+
+    assert saved[result["scoring_session_id"]]["late_policy"] == expected

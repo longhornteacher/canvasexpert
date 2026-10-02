@@ -18,7 +18,7 @@ def _explode_live(*_args, **_kwargs):
 def test_live_mcp_schema_matches_versioned_contract():
     from api.mcp_server import server
 
-    assert contract.TOOL_SCHEMA_VERSION == 70
+    assert contract.TOOL_SCHEMA_VERSION == 71
     expected = contract.load_contract()
     live = contract.live_contract(server.mcp)
     assert live == expected

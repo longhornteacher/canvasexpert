@@ -83,8 +83,10 @@ write authorization. Canvas Live is the only review/edit surface.
   earlier session JSON, SAFE bundles, and receipts stay as teacher history, and no
   supersession metadata, private path, or Canvas id crosses MCP.
 - Ordinary assignments retain the plan digest, per-student idempotency, and a minimized
-  transport receipt. There is no grade-state preflight, no post-write read-back, and no
-  grade-result comparison: a Canvas HTTP success is the whole postcondition. A non-HTTP
+  transport receipt. There is no grade-state preflight and no grade-result comparison: a
+  Canvas HTTP success is the postcondition, except that late-decision rows (`waived` or
+  `applied` only) get one batched, read-only submissions check after the writes, never
+  retried or corrected. A non-HTTP
   transport error is `write_transport_unknown` with no read-back and no automatic retry,
   and it is never reported as `canvas_write_attention`; explicit Canvas HTTP rejection
   remains failed. Canvas Expert does not

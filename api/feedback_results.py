@@ -255,10 +255,12 @@ def validate_results(results, bundle: dict = None, vault: Vault = None,
             errors.append(f"{where}: duplicate result for {key}")
         seen.add(key)
         if vault is not None and ps and vault.reverse(ps) is None:
-            errors.append(f"{where}: pseudonym '{ps}' is not in the vault")
+            _error(where, "pseudonym", f"pseudonym '{ps}' is not in the vault")
         if bundle:
             if key not in expected:
-                errors.append(f"{where}: {key} was not in the bundle the LLM scored")
+                known = {p for p, _item in expected}
+                _error(where, "pseudonym" if ps not in known else "item_id",
+                       f"{key} was not in the bundle the LLM scored")
             else:
                 pmax = possible.get(key)
                 if isinstance(sc, (int, float)) and isinstance(pmax, (int, float)) \

@@ -2,10 +2,13 @@
 
 The ordinary Assignment write is one send: the reviewed raw score and
 plain-text comment go to the Canvas Submissions endpoint, and Canvas applies
-every gradebook and late-policy adjustment from there. This module therefore
-performs no Canvas read at all -- no existing-score lookup, no frozen baseline,
-no drift check, and no post-write verification. Canvas Live is the review
-surface; the teacher may edit the result there.
+every gradebook and late-policy adjustment from there. This module performs no
+Canvas read before the send -- no existing-score lookup, no frozen baseline, no
+drift check. After the send it makes exactly one read-only check, and only for
+rows whose late decision was ``waived`` or ``applied``: a single batched
+submissions read to confirm Canvas honored that decision. It is never retried
+and never corrects a row. Canvas Live is the review surface; the teacher may
+edit the result there.
 
 What still guards the write: the packet digest, the exact assignment scope, the
 session's currentness, result-shape and range validation, the outbound privacy
@@ -55,13 +58,27 @@ QUESTION_OPTIONS: dict[str, tuple[str, ...]] = {
     "pseudonym_in_feedback": ("skip_those", "post_anyway"),
     "held_not_scored": ("proceed", "stop"),
     "insincere_attempt": ("confirm_insincere", "stop"),
-    "late_days": ("post_late_days", "stop"),
+    "late_days": ("post_late_days", "waive_late", "stop"),
 }
 
 # Answers that drop the question's affected rows from the write. Everything
 # else posts them. "stop" is separate: it abandons the whole apply.
 _SKIP_ANSWERS = {"skip_those"}
 _STOP_ANSWERS = {"stop"}
+# Answers that waive the late penalty for every row the question lists.
+_WAIVE_ANSWERS = {"waive_late"}
+
+_LATE_LEGEND = (
+    "canvas_days is Canvas's calendar-day count; late_days is school days after "
+    "the due date (weekends and Holidays.csv dates excluded, less any grace days) "
+    "and is the value posted unless waived."
+)
+_LATE_DETAIL = (
+    "Decide how late work posts. post_late_days posts each row's late_days as "
+    "listed; waive_late posts every listed row with the late penalty waived; "
+    "stop abandons this apply. To mix per row, resubmit results with late_days: 0 "
+    "on the rows to waive and answer post_late_days."
+)
 
 # held_not_scored names students who would receive nothing. They are not in
 # the candidate set to begin with, so its answers gate the run rather than
@@ -78,7 +95,8 @@ def _staged(student: dict) -> bool:
         (student.get("ai_feedback") or "").strip())
 
 
-def _projected_payload(student: dict, *, grade_mode: str = "post_score") -> dict:
+def _projected_payload(student: dict, session: dict | None = None, *,
+                       grade_mode: str = "post_score") -> dict:
     """What ``_payload`` will build once the staged values are approved.
 
     Mirrors the approval copy in ``approve_rows`` so the plan digest covers the
@@ -89,7 +107,10 @@ def _projected_payload(student: dict, *, grade_mode: str = "post_score") -> dict
         projected["teacher_score"] = student.get("ai_score")
     if not (student.get("teacher_feedback") or "").strip():
         projected["teacher_feedback"] = student.get("ai_feedback") or ""
-    return session_actions._payload(projected, grade_mode=grade_mode)
+    return session_actions._payload(
+        projected, grade_mode=grade_mode,
+        waive_late=session_actions.late_waived(
+            session or {}, student, grade_mode=grade_mode))
 
 
 def default_transports():
@@ -105,6 +126,23 @@ def default_transports():
     return _canvas_send
 
 
+def default_read_transport():
+    """The read-only counterpart of ``default_transports`` for the late-row check.
+
+    Returns ``read(path, params) -> (rows, error)``; a list that could not be
+    proven complete is an error, so a partial page never looks like a result.
+    """
+    from api.platform_services.canvas_client import canvas_get_all_complete
+
+    def read(path, params):
+        rows, error, complete = canvas_get_all_complete(path, params=params)
+        if error or not complete:
+            return None, error or "pagination_incomplete"
+        return rows, None
+
+    return read
+
+
 def _question(kind: str, detail: str, user_ids: list[str], **extra) -> dict:
     question = {
         "id": kind,
@@ -115,6 +153,40 @@ def _question(kind: str, detail: str, user_ids: list[str], **extra) -> dict:
     }
     question.update(extra)
     return question
+
+
+def waived_user_ids(plan: dict, answers: dict | None) -> list[str]:
+    """Rows a ``waive_late`` answer waives: every row listed in that question."""
+    answers = {str(k): str(v) for k, v in (answers or {}).items()}
+    waived: set[str] = set()
+    for question in plan.get("questions") or []:
+        if answers.get(question["id"]) in _WAIVE_ANSWERS:
+            waived.update(question["user_ids"])
+    return sorted(waived)
+
+
+def late_decisions(session: dict, plan: dict, answers: dict | None = None) -> dict:
+    """``{user_id: {decision, late_days?}}`` for each late candidate row.
+
+    Reflects the post-answer decision once ``answers`` carries a ``waive_late``
+    answer; before any answer a policy-course row shows what ``post_late_days``
+    would post.
+    """
+    grade_mode = str(plan.get("grade_mode") or "post_score")
+    if grade_mode == "feedback_only":
+        return {}
+    waived = set(waived_user_ids(plan, answers))
+    wanted = set(plan.get("candidate_ids") or [])
+    out = {}
+    for student in session.get("students", []):
+        uid = str(student.get("user_id"))
+        if uid not in wanted:
+            continue
+        decision = session_actions.late_decision(
+            student, waive=session_actions.late_waived(session, student, waived))
+        if decision:
+            out[uid] = decision
+    return out
 
 
 def build_plan(session: dict, *, pseudonyms=()) -> dict:
@@ -143,7 +215,7 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
 
     for student in candidates:
         user_id = str(student["user_id"])
-        payload = _projected_payload(student, grade_mode=grade_mode)
+        payload = _projected_payload(student, session, grade_mode=grade_mode)
 
         score = student.get("ai_score") if student.get("teacher_score") is None \
             else student.get("teacher_score")
@@ -170,8 +242,12 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
     insincere = ([str(s["user_id"]) for s in candidates
                   if (s.get("grading") or {}).get("insincere")]
                  if grade_mode == "post_score" else [])
+    # The session's late_policy settles the question up front: waive and apply
+    # never ask. Only ask puts the late_days question to the teacher. Feedback-only
+    # sends no late fields, so it has no late decision and ignores late_policy.
     late_candidates = ([s for s in candidates
-                        if s.get("grading") and s.get("canvas_late")]
+                        if s.get("grading") and s.get("canvas_late")
+                        and str(session.get("late_policy") or "ask") == "ask"]
                        if grade_mode == "post_score" else [])
 
     questions = []
@@ -203,8 +279,9 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
     if late_candidates:
         questions.append(_question(
             "late_days",
-            "Confirm how many days late each of these submissions counts for grading.",
+            _LATE_DETAIL,
             [str(s["user_id"]) for s in late_candidates],
+            legend=_LATE_LEGEND,
             rows=[
                 {
                     "user_id": str(s["user_id"]),
@@ -226,12 +303,14 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
             "in_session": len(students),
             "already_posted": sum(1 for s in students if s.get("posted")),
         },
-        "digest": _plan_digest(candidate_ids, candidates, questions, grade_mode=grade_mode),
+        "digest": _plan_digest(candidate_ids, candidates, questions, session,
+                               grade_mode=grade_mode),
         "grade_mode": grade_mode,
     }
 
 
-def _plan_digest(candidate_ids, candidates, questions, *, grade_mode: str = "post_score") -> str:
+def _plan_digest(candidate_ids, candidates, questions, session=None, *,
+                 grade_mode: str = "post_score") -> str:
     """Covers the rows, the exact bytes to be pushed, and what was asked.
 
     A staged score edited between preview and apply, a question that appears or
@@ -240,7 +319,7 @@ def _plan_digest(candidate_ids, candidates, questions, *, grade_mode: str = "pos
     """
     identity = {
         "user_ids": candidate_ids,
-        "payloads": {str(s["user_id"]): _projected_payload(s, grade_mode=grade_mode)
+        "payloads": {str(s["user_id"]): _projected_payload(s, session, grade_mode=grade_mode)
                      for s in candidates},
         "questions": [{"kind": q["kind"], "user_ids": q["user_ids"]} for q in questions],
     }
@@ -263,13 +342,13 @@ def resolve_answers(plan: dict, answers: dict | None) -> dict:
                           + ", ".join(unanswered))}
 
     invalid = [
-        f"{q['id']}={answers[q['id']]}"
+        f"{q['id']}={answers[q['id']]}: offered {', '.join(QUESTION_OPTIONS[q['kind']])}"
         for q in plan["questions"]
         if answers[q["id"]] not in QUESTION_OPTIONS[q["kind"]]
     ]
     if invalid:
         return {"ok": False, "code": "invalid_answer",
-                "error": "Not an offered option: " + ", ".join(sorted(invalid))}
+                "error": "Not an offered option: " + "; ".join(sorted(invalid))}
 
     skipped: set[str] = set()
     for question in plan["questions"]:
@@ -284,7 +363,8 @@ def resolve_answers(plan: dict, answers: dict | None) -> dict:
     if not selected:
         return {"ok": False, "code": "nothing_to_post",
                 "error": "Every staged row was skipped by an answer. Nothing to post."}
-    return {"ok": True, "user_ids": selected, "skipped": sorted(skipped)}
+    waived = [uid for uid in waived_user_ids(plan, answers) if uid in set(selected)]
+    return {"ok": True, "user_ids": selected, "skipped": sorted(skipped), "waived": waived}
 
 
 def approve_rows(session: dict, user_ids) -> None:
@@ -306,15 +386,66 @@ def approve_rows(session: dict, user_ids) -> None:
         student["status"] = "approved"
 
 
+def _check_late_rows(session_id: str, pushed: dict, load_session, canvas_read) -> None:
+    """Read back only the pushed rows whose late decision Canvas should honor.
+
+    One batched, read-only submissions read for the ``waived``/``applied`` rows
+    that sent a late status. It annotates each row's ``late`` block in place:
+    ``late_honored`` is False when Canvas stored a different status or still
+    deducted points from a row sent ``"none"``; ``readback: "unavailable"`` when
+    the read failed. It never retries, corrects, or changes a recorded write.
+    """
+    rows = [r for r in pushed.get("results") or []
+            if r.get("status") == "pushed"
+            and (r.get("late") or {}).get("decision") in {"waived", "applied"}
+            and (r.get("late") or {}).get("sent_status")]
+    if not rows:
+        return
+    session = load_session(session_id) or {}
+    ids = [str(r["user_id"]) for r in rows]
+    try:
+        if canvas_read is None:
+            canvas_read = default_read_transport()
+        found, error = canvas_read(
+            f"/api/v1/courses/{session['course_id']}/assignments/{session['assignment_id']}/submissions",
+            {"student_ids[]": ids, "per_page": 100},
+        )
+    except Exception:
+        found, error = None, "read_failed"
+    if not error and isinstance(found, list):
+        by_user = {str(r.get("user_id")): r for r in found if isinstance(r, dict)}
+    else:
+        by_user = {}
+    for row in rows:
+        late = row["late"]
+        read = by_user.get(str(row["user_id"]))
+        if read is None:
+            late["readback"] = "unavailable"
+            continue
+        deducted = read.get("points_deducted")
+        try:
+            deducted_over_zero = deducted is not None and float(deducted) > 0
+        except (TypeError, ValueError):
+            deducted_over_zero = False
+        late.update({"late_policy_status": read.get("late_policy_status"),
+                     "points_deducted": deducted, "score": read.get("score")})
+        if (read.get("late_policy_status") != late["sent_status"]
+                or (late["sent_status"] == "none" and deducted_over_zero)):
+            late["late_honored"] = False
+
+
 def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
-               load_session, save_session, canvas_send=None,
+               load_session, save_session, canvas_send=None, canvas_read=None,
                pseudonyms=(), idempotency_key: str = "") -> tuple[dict, int]:
     """Approve and send exactly what a matching preview described.
 
     ``approve_rows`` runs before the send, so ``push_grades`` sees ordinary
-    approved rows. There is no freeze, no drift check, and no read-back: the
-    plan digest is the only thing standing between the preview the teacher read
-    and the bytes that go out.
+    approved rows. There is no freeze and no drift check: the plan digest and
+    the frozen answers are the only things standing between the preview the
+    teacher read and the bytes that go out. Rows a ``waive_late`` answer waived
+    go to ``push_grades`` by id, so ``_payload`` builds the waived bytes for
+    exactly those rows. After the send, ``_check_late_rows`` makes the one
+    read-only late-decision check.
     """
     if canvas_send is None:
         canvas_send = default_transports()
@@ -344,10 +475,12 @@ def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
         load_session=load_session, save_session=save_session,
         canvas_send=canvas_send, idempotency_key=idempotency_key,
         grade_mode=plan["grade_mode"],
+        waive_late_user_ids=resolved.get("waived") or (),
     )
     if pushed.get("ok"):
         pushed = dict(pushed)
         pushed["skipped"] = resolved["skipped"]
+    _check_late_rows(session_id, pushed, load_session, canvas_read)
     # Make retry state explicit even when Canvas accepted only part of the
     # batch.  The private session remains the source of truth for exact rows.
     current = load_session(session_id) or session

@@ -76,3 +76,81 @@ def test_packet_accepts_staged_status_but_rejects_historical_root(monkeypatch):
     monkeypatch.setattr(session_store, "load_session", lambda _sid: {
         "session_id": "root", "session_kind": "scoring_session"})
     assert tools.get_scoring_packet("root")["code"] == "session_not_found"
+
+
+def test_prepare_refuses_an_unknown_late_policy_naming_the_values(monkeypatch):
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "c1"}])
+    monkeypatch.setattr("api.powergrader.scoring_preparation.prepare_scoring_session",
+                        lambda *_args, **_kwargs: pytest.fail("preparation ran"))
+
+    result = tools.prepare_scoring_session("c1", "a1", late_policy="forgive")
+
+    assert result["code"] == "invalid_late_policy"
+    assert all(value in result["error"] for value in ("ask", "waive", "apply"))
+
+
+@pytest.mark.parametrize("policy", ["waive", "apply"])
+def test_prepare_hands_a_non_default_late_policy_to_preparation(monkeypatch, policy):
+    seen = {}
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "c1"}])
+
+    def prepare(*_args, **kwargs):
+        seen.update(kwargs)
+        return {"ok": True, "status": "ready", "scoring_session_id": "s1"}
+
+    monkeypatch.setattr("api.powergrader.scoring_preparation.prepare_scoring_session", prepare)
+
+    tools.prepare_scoring_session("c1", "a1", "Writing", late_policy=policy)
+
+    assert seen["late_policy"] == policy
+
+
+def test_already_open_session_takes_the_new_late_policy_and_reports_it(monkeypatch):
+    """CONTRACT: a differing late_policy is saved onto the open session, a local
+    preference rather than packet content, and the refusal reports the current one."""
+    saved = {}
+    session = {"session_id": "s1", "course_id": "c1", "assignment_id": "a1",
+               "session_kind": "scoring_assignment", "status": "staged", "late_policy": "ask"}
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "c1"}])
+    monkeypatch.setattr(session_store, "current_actionable_session", lambda *_args: session)
+    monkeypatch.setattr(session_store, "packet_health", lambda _session: {"ok": True})
+    monkeypatch.setattr(session_store, "load_session", lambda _sid: dict(session))
+    monkeypatch.setattr(session_store, "save_session", lambda value: saved.update(value))
+    monkeypatch.setattr(session_store, "session_lock",
+                        lambda _sid: __import__("contextlib").nullcontext())
+    monkeypatch.setattr("api.powergrader.scoring_preparation.prepare_scoring_session",
+                        lambda *_args, **_kwargs: pytest.fail("duplicate preparation ran"))
+
+    result = tools.prepare_scoring_session("c1", "a1", late_policy="waive")
+
+    assert result["code"] == "scoring_session_already_open"
+    assert result["late_policy"] == "waive"
+    assert saved["late_policy"] == "waive"
+    # Supplying the value the session already has changes nothing and saves nothing.
+    saved.clear()
+    session["late_policy"] = "waive"
+    assert tools.prepare_scoring_session("c1", "a1", late_policy="waive")["late_policy"] == "waive"
+    assert saved == {}
+
+
+def test_reprepare_without_late_policy_keeps_the_saved_one(monkeypatch):
+    """LAW: omitting late_policy never resets a saved waive/apply."""
+    saved = {}
+    session = {"session_id": "s1", "course_id": "c1", "assignment_id": "a1",
+               "session_kind": "scoring_assignment", "status": "staged", "late_policy": "waive"}
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "c1"}])
+    monkeypatch.setattr(session_store, "current_actionable_session", lambda *_args: session)
+    monkeypatch.setattr(session_store, "packet_health", lambda _session: {"ok": True})
+    monkeypatch.setattr(session_store, "load_session", lambda _sid: dict(session))
+    monkeypatch.setattr(session_store, "save_session", lambda value: saved.update(value))
+    monkeypatch.setattr(session_store, "session_lock",
+                        lambda _sid: __import__("contextlib").nullcontext())
+
+    result = tools.prepare_scoring_session("c1", "a1")
+
+    assert result["code"] == "scoring_session_already_open"
+    assert result["late_policy"] == "waive"
+    assert saved == {}
+    # Only an explicit value changes it, including an explicit ask.
+    assert tools.prepare_scoring_session("c1", "a1", late_policy="ask")["late_policy"] == "ask"
+    assert saved["late_policy"] == "ask"

@@ -281,3 +281,17 @@ def test_unsupported_grading_type_refuses_before_operation_creation(
         "error": "unsupported_grading_type",
         "blocking": True,
     }
+
+
+@pytest.mark.parametrize("adjustment, valid_values", [
+    ({"kind": "curve"}, ("rule", "explicit", "revert")),
+    ({"kind": "rule", "model": "squash"}, tuple(sorted(grade_adjustment._RULES))),
+])
+def test_invalid_kind_and_model_name_the_valid_values(adjustment, valid_values):
+    """CONTRACT: a rejected kind or rule model lists what it would accept."""
+    with pytest.raises(ValueError) as refused:
+        grade_adjustment._canonical_adjustment(adjustment)
+
+    message = str(refused.value)
+    assert message.startswith("invalid_adjustment")
+    assert all(value in message for value in valid_values)

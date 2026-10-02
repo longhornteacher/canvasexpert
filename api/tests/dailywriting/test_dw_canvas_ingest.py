@@ -1020,3 +1020,57 @@ def test_cli_ingest_canvas_surfaces_the_refusal_as_a_command_error(monkeypatch, 
     out = capsys.readouterr().out
     assert "error:" in out
     assert "catalog" in out
+
+
+# --- L6.5: a history row is never silently blank, and carries the attempt -----
+
+@pytest.mark.parametrize("include_text, raw_text, status, reason", [
+    (False, "Some typed words.", "omitted", None),
+    (False, "", "omitted", None),
+    (True, "Some typed words.", "included", None),
+    (True, "   ", "unavailable", "no_typed_text"),
+])
+def test_history_rows_always_say_what_happened_to_their_text(
+        include_text, raw_text, status, reason):
+    """CONTRACT: every submission row carries text_status (and text_reason when
+    the stored row has no text); raw_text appears only when included."""
+    from datetime import datetime
+    from api.dailywriting import projection
+    from api.dailywriting.core.models import Submission
+
+    submission = Submission(
+        submission_id="s1", rep_id="r1", pseudonym_id="Pikachu",
+        submitted_at=datetime(2026, 9, 14, 20, 0), raw_text=raw_text, segments=[],
+        student_word_count=3)
+
+    payload = projection.build_history_payload(
+        pseudonym_id="Pikachu", since=date(2026, 1, 1), until=date(2026, 12, 31),
+        submissions=[submission], reps={}, include_text=include_text, max_text_chars=0)
+
+    row = payload["submissions"][0]
+    assert row["text_status"] == status
+    assert row.get("text_reason") == reason
+    assert ("raw_text" in row) is (status == "included")
+    assert "attempt" not in row   # older rows carry none; no backfill
+
+
+def test_ingest_records_the_mirror_attempt_and_history_exposes_it(monkeypatch, tmp_path):
+    """EXAMPLE: a newly ingested row keeps the mirror's attempt number."""
+    _mount(monkeypatch, tmp_path)
+    root = str(tmp_path)
+    _write_catalog(root)
+    _write_mirror(root, extra_subs=[
+        {"assignment_id": ASSIGNMENT_ID, "user_id": 900001, "workflow_state": "submitted",
+         "submitted_at": "2026-09-14T20:00:00Z", "body": "<p>A typed paragraph.</p>",
+         "submission_type": "online_text_entry", "attempt": 2},
+    ])
+    repository, vault = _repository(tmp_path)
+    _bind_tools(monkeypatch, repository, vault)
+
+    list(canvas_ingest.ingest_canvas_assignment(COURSE_ID, ASSIGNMENT_ID,
+                                                repository=repository))
+
+    pseudonym = VaultResolver(vault).to_pseudonym("900001")
+    row = _history(pseudonym, include_text=True)["submissions"][0]
+    assert row["attempt"] == 2
+    assert row["text_status"] == "included"

@@ -16,6 +16,7 @@ from api.powergrader import session_store
 
 
 _RULES = {"flat_bump", "target_average", "proportional", "floor_cap"}
+_KINDS = ("rule", "explicit", "revert")
 
 
 def _current_course(course_id: str) -> bool:
@@ -61,8 +62,9 @@ def _canonical_adjustment(adjustment: dict) -> dict:
     if not isinstance(adjustment, dict):
         raise ValueError("invalid_adjustment: field 'adjustment' must be an object")
     kind = adjustment.get("kind")
-    if kind not in {"rule", "explicit", "revert"}:
-        raise ValueError("invalid_adjustment: field 'kind' is invalid")
+    if kind not in _KINDS:
+        raise ValueError("invalid_adjustment: field 'kind' is invalid; use one of: "
+                         + " | ".join(_KINDS))
     if kind == "revert":
         operation_id = str(adjustment.get("operation_id") or "").strip()
         if not operation_id:
@@ -81,7 +83,8 @@ def _canonical_adjustment(adjustment: dict) -> dict:
     model = (adjustment.get("model") or adjustment.get("rule")
              or adjustment.get("curve_type"))
     if model not in _RULES:
-        raise ValueError("invalid_adjustment: field 'model' is invalid")
+        raise ValueError("invalid_adjustment: field 'model' is invalid; use one of: "
+                         + " | ".join(sorted(_RULES)))
     settings = adjustment.get("settings")
     if settings is None:
         settings = {

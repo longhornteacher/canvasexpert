@@ -65,7 +65,8 @@ INSTRUCTION_BUDGET = 2200
 # Raised to the measured 22,352 for the four feedback-only revision tools
 # (prepare_feedback_revision, get_feedback_revision_packet,
 # stage_feedback_revisions, apply_staged_feedback_revisions, +1,559).
-LISTING_BUDGET = 22352
+# Raised to the measured 22,613 for prepare_scoring_session's late_policy (+261).
+LISTING_BUDGET = 22613
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {

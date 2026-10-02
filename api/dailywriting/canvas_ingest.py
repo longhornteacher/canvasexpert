@@ -90,6 +90,15 @@ def _no_token_error(count: int) -> str:
             "submissions never need it.")
 
 
+def _attempt(row: dict) -> int | None:
+    """The mirror's attempt number for this row, when it carries a usable one."""
+    try:
+        attempt = int(row.get("attempt"))
+    except (TypeError, ValueError):
+        return None
+    return attempt if attempt > 0 else None
+
+
 def _typed_text(row: dict) -> str:
     return html_to_text(row.get("body") or "").strip()
 
@@ -204,6 +213,7 @@ def ingest_canvas_assignment(
             text=text,
             context=context,
             vault=vault,
+            attempt=_attempt(row),
         )
         repository.append_submission(submission)
         processed += 1

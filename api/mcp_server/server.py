@@ -234,7 +234,8 @@ def apply_sis_grade_bridge(
 def preview_grade_adjustment(
     course_id: str, assignment_id: str, adjustment: dict
 ) -> str:
-    """Prepare a pseudonymized existing-grade adjustment for teacher review."""
+    """Prepare a pseudonymized existing-grade adjustment for teacher review.
+    adjustment: {kind:rule,model,settings} | {kind:explicit,entries} | {kind:revert,operation_id}."""
     return _compact(tools.preview_grade_adjustment(
         course_id, assignment_id, adjustment
     ))
@@ -621,11 +622,14 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
                             scoring_guidance: str = "",
                             use_existing_mirror: bool = False,
                             scoring_guidance_provenance: str = "",
-                            feedback_contract_id: str = "") -> str:
-    """Prepare one exact assignment for packet paging or return a typed blocker."""
+                            feedback_contract_id: str = "",
+                            late_policy: str = "") -> str:
+    """Prepare one exact assignment for packet paging or return a typed blocker.
+    scoring_guidance_provenance: teacher_authored|inherited|default|unknown.
+    late_policy: ask|waive|apply (omit to keep)."""
     return _compact(tools.prepare_scoring_session(
         course_id, assignment_id, scoring_guidance, use_existing_mirror,
-        scoring_guidance_provenance, feedback_contract_id))
+        scoring_guidance_provenance, feedback_contract_id, late_policy))
 
 
 @mcp.tool(structured_output=False)

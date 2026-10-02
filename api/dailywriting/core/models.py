@@ -78,3 +78,5 @@ class Submission:
     student_word_count: int
     flags: list[SegmentationFlag] = field(default_factory=list)
     scrub_findings: list[ScrubFinding] = field(default_factory=list)
+    # Mirror attempt number, recorded on rows ingested from Canvas; absent on older rows.
+    attempt: int | None = None

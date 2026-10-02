@@ -489,3 +489,273 @@ def test_accepted_exact_payload_is_not_sent_twice():
 
     assert len(sent) == first_count, "an accepted payload was sent twice"
     assert again["ok"] is True
+
+
+# ── Late decision per row ───────────────────────────────────────────────────
+
+
+def _late_session(*, policy_course=True, late_policy=None, late_days=(2, 0)):
+    """Two late candidate rows; ``late_days`` is each row's confirmed count."""
+    session = _session()
+    if late_policy:
+        session["late_policy"] = late_policy
+    for student, days in zip(session["students"], late_days):
+        student["canvas_late"] = True
+        if policy_course:
+            student["grading"] = {"floor_percent": 30, "points_possible": 10,
+                                  "insincere": False, "late_days": days,
+                                  "suggested_late_days": days, "canvas_late_days": 3}
+    return session
+
+
+def _late_fields(payload):
+    submission = payload.get("submission") or {}
+    return {key: submission[key] for key in ("late_policy_status", "seconds_late_override")
+            if key in submission}
+
+
+@pytest.mark.parametrize("policy_course, waive, late_days, expected", [
+    (True, True, 2, {"late_policy_status": "none"}),
+    (False, True, None, {"late_policy_status": "none"}),
+    (True, False, 2, {"late_policy_status": "late", "seconds_late_override": 172800}),
+    (True, False, 0, {"late_policy_status": "none"}),
+    (False, False, None, {}),
+])
+def test_late_decision_decides_the_late_fields_in_the_payload(
+        policy_course, waive, late_days, expected):
+    """LAW: ``_payload`` is the one place late fields are computed, and waived
+    sends status none with no override in any course; posted_grade stays the score."""
+    student = {"user_id": "9001", "teacher_score": 8, "canvas_late": True}
+    if policy_course:
+        student["grading"] = {"floor_percent": 30, "points_possible": 10,
+                              "insincere": False, "late_days": late_days}
+
+    payload = session_actions._payload(student, waive_late=waive)
+
+    assert _late_fields(payload) == expected
+    # Waiving never touches the mark: raw score, or the effort-credit mark (8/10 at a 30% floor).
+    assert payload["submission"]["posted_grade"] == ("9" if policy_course else "8")
+
+
+def test_a_row_that_is_not_late_has_no_late_decision():
+    assert session_actions.late_decision({"user_id": "9001"}, waive=True) is None
+
+
+def test_late_days_question_offers_waive_and_explains_itself():
+    """CONTRACT: three options, a generic legend, and the per-row mixing route."""
+    plan = scoring_apply.build_plan(_late_session())
+    question = next(q for q in plan["questions"] if q["kind"] == "late_days")
+
+    assert question["options"] == ["post_late_days", "waive_late", "stop"]
+    assert "weekends and Holidays.csv dates excluded" in question["legend"]
+    assert "late_days: 0" in question["detail"]
+    assert "waive_late" in question["detail"] and "post_late_days" in question["detail"]
+    # Generic text only: a per-row reason could disclose an accommodation.
+    assert all(set(row) == {"user_id", "canvas_days", "late_days"} for row in question["rows"])
+
+
+@pytest.mark.parametrize("kind", sorted(scoring_apply.QUESTION_OPTIONS))
+def test_invalid_answer_lists_the_offered_options(kind):
+    """CONTRACT: every question kind names its own options when an answer fails."""
+    plan = {"questions": [{"id": kind, "kind": kind, "user_ids": ["9001"]}],
+            "candidate_ids": ["9001"]}
+
+    resolved = scoring_apply.resolve_answers(plan, {kind: "not_an_option"})
+
+    assert resolved["code"] == "invalid_answer"
+    assert (f"{kind}=not_an_option: offered "
+            + ", ".join(scoring_apply.QUESTION_OPTIONS[kind])) in resolved["error"]
+
+
+def _apply(session, answers, **kwargs):
+    load, save, saved = _store(session)
+    sent = []
+
+    def canvas_send(method, path, payload, timeout=30):
+        sent.append((path.rsplit("/", 1)[-1], payload))
+        return ({"id": 1}, None)
+
+    plan = scoring_apply.build_plan(session)
+    result, _status = scoring_apply.apply_plan(
+        "session-1", expected_digest=plan["digest"], answers=answers,
+        load_session=load, save_session=save, canvas_send=canvas_send, **kwargs)
+    return result, dict(sent), plan
+
+
+def test_waive_late_answer_sends_the_waived_bytes_for_exactly_the_listed_rows():
+    """EXAMPLE: the answer waives every listed row; rows outside the question
+    keep their own payload."""
+    session = _late_session()
+    session["students"].append({"user_id": "9003", "ai_score": 7, "ai_feedback": "Fine."})
+
+    result, sent, plan = _apply(session, {"late_days": "waive_late"},
+                                canvas_read=lambda *_a: ([], None))
+
+    question = next(q for q in plan["questions"] if q["kind"] == "late_days")
+    assert question["user_ids"] == ["9001", "9002"]
+    assert _late_fields(sent["9001"]) == {"late_policy_status": "none"}
+    assert _late_fields(sent["9002"]) == {"late_policy_status": "none"}
+    assert _late_fields(sent["9003"]) == {}
+    assert result["ok"] is True
+
+
+def test_post_late_days_answer_keeps_the_applied_payload():
+    session = _late_session()
+
+    _result, sent, _plan = _apply(session, {"late_days": "post_late_days"},
+                                  canvas_read=lambda *_a: ([], None))
+
+    assert _late_fields(sent["9001"]) == {"late_policy_status": "late",
+                                          "seconds_late_override": 172800}
+    assert _late_fields(sent["9002"]) == {"late_policy_status": "none"}
+
+
+@pytest.mark.parametrize("policy_course, late_policy, asks, expected_9001", [
+    (True, "ask", True, {"late_policy_status": "late", "seconds_late_override": 172800}),
+    (True, "apply", False, {"late_policy_status": "late", "seconds_late_override": 172800}),
+    (True, "waive", False, {"late_policy_status": "none"}),
+    (False, "waive", False, {"late_policy_status": "none"}),
+    (False, "apply", False, {}),
+    (False, "ask", False, {}),
+])
+def test_session_late_policy_settles_the_question_and_the_payload(
+        policy_course, late_policy, asks, expected_9001):
+    """CONTRACT: the session default decides whether the question is asked and
+    which payload posts, across every policy x course combination."""
+    session = _late_session(policy_course=policy_course, late_policy=late_policy)
+
+    plan = scoring_apply.build_plan(session)
+    asked = any(q["kind"] == "late_days" for q in plan["questions"])
+    _result, sent, _plan = _apply(session, {"late_days": "post_late_days"} if asked else {},
+                                  canvas_read=lambda *_a: ([], None))
+
+    assert asked is asks
+    assert _late_fields(sent["9001"]) == expected_9001
+
+
+def test_changing_the_session_late_policy_changes_the_plan_digest():
+    """LAW: a frozen plan cannot survive a late-policy change (the staged apply
+    then refuses stage_changed and the agent restages)."""
+    before = scoring_apply.build_plan(_late_session(late_policy="waive"))["digest"]
+
+    assert scoring_apply.build_plan(_late_session(late_policy="apply"))["digest"] != before
+    assert scoring_apply.build_plan(_late_session(late_policy="ask"))["digest"] != before
+
+
+def test_late_decisions_reflect_the_post_answer_decision():
+    session = _late_session()
+    plan = scoring_apply.build_plan(session)
+
+    before = scoring_apply.late_decisions(session, plan)
+    after = scoring_apply.late_decisions(session, plan, {"late_days": "waive_late"})
+
+    assert before == {"9001": {"decision": "applied", "late_days": 2},
+                      "9002": {"decision": "applied", "late_days": 0}}
+    assert after == {"9001": {"decision": "waived"}, "9002": {"decision": "waived"}}
+
+
+# ── Late-row read-back (the one read after the write) ───────────────────────
+
+
+def _reader(rows=None, error=None, calls=None):
+    def read(path, params):
+        if calls is not None:
+            calls.append((path, params))
+        return (None, error) if error else (rows, None)
+    return read
+
+
+def test_waived_row_with_a_deduction_is_reported_not_honored_in_one_batched_read():
+    """EXAMPLE: one batched read; a waived row Canvas still penalized is flagged
+    and the recorded write is untouched."""
+    session = _late_session()
+    calls = []
+    rows = [{"user_id": 9001, "score": 6, "entered_score": 8, "points_deducted": 2,
+             "late_policy_status": "none"},
+            {"user_id": 9002, "score": 6, "entered_score": 6, "points_deducted": 0,
+             "late_policy_status": "none"}]
+
+    result, _sent, _plan = _apply(session, {"late_days": "waive_late"},
+                                  canvas_read=_reader(rows, calls=calls))
+
+    assert len(calls) == 1
+    path, params = calls[0]
+    assert path == "/api/v1/courses/course-1/assignments/assignment-1/submissions"
+    assert params["student_ids[]"] == ["9001", "9002"]
+    by_user = {r["user_id"]: r for r in result["results"]}
+    assert by_user["9001"]["late"]["late_honored"] is False
+    assert by_user["9001"]["late"]["points_deducted"] == 2
+    assert "late_honored" not in by_user["9002"]["late"]
+    assert all(s["posted"] for s in session["students"])
+
+
+def test_a_status_that_differs_from_the_one_sent_is_not_honored():
+    session = _late_session()
+    rows = [{"user_id": 9001, "score": 6, "points_deducted": 2, "late_policy_status": "none"},
+            {"user_id": 9002, "score": 6, "points_deducted": 0, "late_policy_status": "late"}]
+
+    result, _sent, _plan = _apply(session, {"late_days": "post_late_days"},
+                                  canvas_read=_reader(rows))
+
+    by_user = {r["user_id"]: r for r in result["results"]}
+    assert by_user["9001"]["late"]["late_honored"] is False   # sent late, read none
+    assert by_user["9002"]["late"]["late_honored"] is False   # sent none, read late
+
+
+def test_a_failed_read_marks_rows_unavailable_and_never_fails_the_write():
+    session = _late_session()
+
+    result, _sent, _plan = _apply(session, {"late_days": "waive_late"},
+                                  canvas_read=_reader(error="HTTP 500: boom"))
+
+    assert result["ok"] is True
+    assert all(r["late"]["readback"] == "unavailable" for r in result["results"])
+    assert all("late_honored" not in r["late"] for r in result["results"])
+    assert all(s["posted"] for s in session["students"])
+
+
+def test_a_raising_reader_is_an_unavailable_read_not_a_failed_write():
+    session = _late_session()
+
+    def read(path, params):
+        raise RuntimeError("network down")
+
+    result, _sent, _plan = _apply(session, {"late_days": "waive_late"}, canvas_read=read)
+
+    assert result["ok"] is True
+    assert all(r["late"]["readback"] == "unavailable" for r in result["results"])
+
+
+@pytest.mark.parametrize("session_factory", [
+    lambda: _session(),                                          # nothing late
+    lambda: _late_session(policy_course=False),                  # decision: canvas
+])
+def test_no_read_happens_when_no_row_has_a_waived_or_applied_decision(session_factory):
+    """LAW: rows that are not late, or whose decision is canvas, are never read."""
+    calls = []
+
+    result, _sent, _plan = _apply(session_factory(), {},
+                                  canvas_read=_reader([], calls=calls))
+
+    assert result["ok"] is True
+    assert calls == []
+
+
+@pytest.mark.parametrize("late_policy", ["ask", "waive", "apply"])
+def test_feedback_only_mode_has_no_late_decision(late_policy):
+    """LAW: feedback_only sends no submission object, so a late row gets no late
+    question, no per-row late block, no read-back, and ``late_policy`` is ignored."""
+    session = _late_session(late_policy=late_policy)
+    session["grade_mode"] = "feedback_only"
+    calls = []
+
+    result, sent, plan = _apply(session, {}, canvas_read=_reader([], calls=calls))
+
+    assert plan["grade_mode"] == "feedback_only"
+    assert not [q for q in plan["questions"] if q["kind"] == "late_days"]
+    assert scoring_apply.late_decisions(session, plan) == {}
+    assert result["ok"] is True
+    assert set(sent) == {"9001", "9002"}
+    assert all("submission" not in payload for payload in sent.values())
+    assert all("late" not in row for row in result["results"])
+    assert calls == []

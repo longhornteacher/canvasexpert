@@ -32,6 +32,9 @@ _GUIDANCE_DIRECTIVE_RE = re.compile(
 )
 
 
+GUIDANCE_PROVENANCES = frozenset({"teacher_authored", "inherited", "default", "unknown"})
+
+
 def _typed_failure(code: str, stage: str, *, retryable: bool, user_action: str,
                    error: str | None = None, **extra) -> dict:
     """Return the identity-safe preparation result shape."""
@@ -287,6 +290,7 @@ def prepare_scoring_session(
     use_existing_mirror: bool = False,
     scoring_guidance_provenance: str = "",
     feedback_contract_id: str = "",
+    late_policy: str = "ask",
     save_session=None,
     activate_session=None,
 ) -> dict:
@@ -321,6 +325,19 @@ def prepare_scoring_session(
     supplied_guidance = str(scoring_guidance or "").strip()
     supplied_provenance = str(scoring_guidance_provenance or "").strip().casefold()
     supplied_contract_id = str(feedback_contract_id or "").strip()
+    if not (supplied_guidance or supplied_contract_id):
+        # Provenance describes guidance; with none supplied it means nothing and
+        # must not be stored, replayed, or rejected.
+        supplied_provenance = ""
+    if supplied_provenance and supplied_provenance not in GUIDANCE_PROVENANCES:
+        # Reject before save_preparation_state persists it; a bad value saved
+        # here would be replayed by every later bare retry.
+        return _typed_failure(
+            "invalid_scoring_guidance_provenance", "basis", retryable=False,
+            user_action=("Use one of: " + ", ".join(sorted(GUIDANCE_PROVENANCES))
+                         + " as the guidance provenance."),
+            error="The scoring guidance provenance is invalid.",
+        )
     if supplied_guidance or supplied_contract_id:
         if not supplied_provenance:
             supplied_provenance = "teacher_authored" if supplied_guidance else ""
@@ -442,10 +459,11 @@ def prepare_scoring_session(
     provenance = str(scoring_guidance_provenance or "").strip().casefold()
     if guidance and not provenance:
         provenance = "teacher_authored"
-    if provenance and provenance not in {"teacher_authored", "inherited", "default", "unknown"}:
+    if provenance and provenance not in GUIDANCE_PROVENANCES:
         return _typed_failure(
             "invalid_scoring_guidance_provenance", "basis", retryable=False,
-            user_action="Use teacher_authored, inherited, default, or unknown guidance provenance.",
+            user_action=("Use one of: " + ", ".join(sorted(GUIDANCE_PROVENANCES))
+                         + " as the guidance provenance."),
             error="The scoring guidance provenance is invalid.",
             assignment_name=assignment_name,
         )
@@ -586,6 +604,7 @@ def prepare_scoring_session(
     ).hexdigest()
     session["scoring_basis"] = scoring_basis
     session["scoring_guidance_provenance"] = provenance or None
+    session["late_policy"] = str(late_policy or "ask")
     session["scoring_freshness"] = {
         "state": str(freshness.get("state") or "current"),
         "last_success_at": str(freshness.get("last_success_at") or ""),
