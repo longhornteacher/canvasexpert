@@ -11,6 +11,12 @@ from api.operation_ledger import models, operations, paths, receipts
 from api.operation_ledger.adapters import grade_adjustment as adapter_module
 from api.operation_ledger.adapters.grade_adjustment import GradeAdjustmentAdapter
 from api.platform_services import canvas_client, config
+from api.platform_services import workspace
+
+
+@pytest.fixture(autouse=True)
+def _score_ledger_workspace(tmp_path, monkeypatch):
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
 
 
 class FakeVault:

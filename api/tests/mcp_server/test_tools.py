@@ -683,7 +683,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 65
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 68
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -1605,7 +1605,8 @@ def test_refresh_mirror_accepts_previous_course(monkeypatch, _set_previous_cours
     assert result == {
         "ok": True,
         "status": "synced",
-        "message": "Mirror refreshed (roster, groups, assignments, and submissions status only). Re-read the refused tool now.",
+        "message": "Mirror refreshed (roster, groups, assignments, and submissions status only). Re-read the refused tool now. 0 scores changed outside CE.",
+        "canvas_external_count": 0,
     }
 
 
@@ -1668,6 +1669,26 @@ def test_refresh_mirror_reports_synced_on_success(monkeypatch, _set_active_cours
     result = tools.refresh_mirror("111")
     assert result["ok"] is True
     assert result["status"] == "synced"
+    assert result["canvas_external_count"] == 0
+    assert "0 scores changed outside CE" in result["message"]
+
+
+def test_refresh_mirror_sums_only_successful_scalar_external_counts(monkeypatch, _set_active_courses):
+    _set_active_courses(["111"])
+    monkeypatch.setattr(tools, "_enqueue_sync", lambda course_id, scopes=None: "plan-1")
+    monkeypatch.setattr(tools, "_wait_for_plan", lambda plan_id, **kwargs: {
+        "state": "succeeded",
+        "jobs": [
+            {"scope": "course.refresh", "state": "succeeded", "canvas_external_count": 2},
+            {"scope": "submissions.course_delta", "state": "succeeded", "canvas_external_count": 3},
+            {"scope": "course.feedback_refresh", "state": "failed", "canvas_external_count": 99},
+            {"scope": "roster", "state": "succeeded", "canvas_external_count": 8},
+            {"scope": "course.refresh", "state": "succeeded", "canvas_external_count": True},
+        ],
+    })
+    result = tools.refresh_mirror("111")
+    assert result["canvas_external_count"] == 5
+    assert "5 scores changed outside CE" in result["message"]
 
 
 def test_refresh_mirror_enqueues_roster_pass(monkeypatch, _set_active_courses):
@@ -1763,7 +1784,8 @@ def test_server_registers_the_expected_tool_set():
                     "apply_roster_student_change", "clear_roster_student_field",
                     "list_feedback_contracts", "prepare_scoring_session", "refresh_scoring_session",
                     "list_scoring_sessions", "get_scoring_packet",
-                "stage_scoring_results", "apply_staged_scoring_results",
+        "stage_scoring_results", "apply_staged_scoring_results",
+        "create_score_curve_rule", "deactivate_score_curve_rule", "get_score_ledger",
         "reset_scoring_review",
         "prepare_feedback_revision", "get_feedback_revision_packet",
         "stage_feedback_revisions", "apply_staged_feedback_revisions",

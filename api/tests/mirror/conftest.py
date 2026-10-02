@@ -3,6 +3,13 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def score_ledger_workspace(tmp_path, monkeypatch):
+    """Keep durable score evidence separate from each disposable mirror root."""
+    from api.platform_services import workspace
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path / "workspace"))
+
+
 @pytest.fixture
 def submission_history_support():
     class Response:

@@ -922,6 +922,7 @@ def test_targeted_submission_delta_returns_sanitized_summary_without_advancing_p
         "touched_assignments": ["700010"],
         "evidence_capture": {"attempts": 1, "files": 0, "captured": 0,
                              "pending": 0, "failed": 0},
+        "canvas_external_count": 0,
     }
     assert result["duration_ms"] >= 0
     assert [params for _path, params in calls] == [

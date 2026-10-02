@@ -342,7 +342,7 @@ def test_blind_capture_never_reaches_the_canvas_payload():
         blind_delta=4.0, blind_committed=True, blind_recorded_at="t", ai_revealed=True,
     )
     payload = session_actions._payload(student)
-    assert payload["submission"]["posted_grade"] == "7.0"
+    assert payload["submission"]["posted_grade"] == "7"
     assert payload["comment"]["text_comment"] == "Good work."
     serialized = repr(payload)
     for leak in ("blind_", "Private first pass", "4.0"):

@@ -439,8 +439,29 @@ def scoring_refresh_world(tmp_path, monkeypatch):
         scoring_apply, "default_transports",
         lambda: (lambda method, path, payload, timeout=30:
                  (world.sent.append((method, path, copy.deepcopy(payload))) or ({"id": 1}, None))))
-    monkeypatch.setattr(scoring_apply, "default_read_transport",
-                        lambda: (lambda path, params: ([], None)))
+    def read_after_apply():
+        """Return only the exact grades accepted by this synthetic transport."""
+        def read(_path, params):
+            requested = params.get("student_ids[]", [])
+            if isinstance(requested, str):
+                requested = [requested]
+            rows = []
+            for user_id in requested:
+                sent = next((payload for _method, path, payload in reversed(world.sent)
+                             if path.endswith(f"/submissions/{user_id}")
+                             or path.endswith(f"/submissions/{user_id}?")), None)
+                if sent is None:
+                    continue
+                grade = sent.get("submission", {}).get("posted_grade")
+                if grade is None:
+                    continue
+                rows.append({"user_id": str(user_id), "score": float(grade),
+                             "entered_score": float(grade), "points_deducted": None,
+                             "late_policy_status": None})
+            return rows, None
+        return read
+
+    monkeypatch.setattr(scoring_apply, "default_read_transport", read_after_apply)
 
     world.add, world.resubmit, world.session = add, resubmit, session
     world.bundle, world.pseudonym, world.prepare = bundle, pseudonym, prepare

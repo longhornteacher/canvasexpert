@@ -5,6 +5,7 @@ import copy
 import math
 
 from api import freshness_policy
+from api import score_curves, score_ledger
 from api.identity_vault_service import open_vault
 from api.mcp_server import pseudonym
 from api.operation_ledger import batches, executor, models, operations, receipts, registry
@@ -16,7 +17,7 @@ from api.powergrader import session_store
 
 
 _RULES = {"flat_bump", "target_average", "proportional", "floor_cap"}
-_KINDS = ("rule", "explicit", "revert")
+_KINDS = ("rule", "explicit", "revert", "revert_rule")
 
 
 def _current_course(course_id: str) -> bool:
@@ -70,6 +71,11 @@ def _canonical_adjustment(adjustment: dict) -> dict:
         if not operation_id:
             raise ValueError("invalid_adjustment: field 'operation_id' is required")
         return {"kind": "revert", "operation_id": operation_id}
+    if kind == "revert_rule":
+        rule_id = str(adjustment.get("rule_id") or "").strip()
+        if not rule_id:
+            raise ValueError("invalid_adjustment: field 'rule_id' is required")
+        return {"kind": "revert_rule", "rule_id": rule_id}
     if kind == "explicit":
         rows = adjustment.get("entries", adjustment.get("rows"))
         if not isinstance(rows, list):
@@ -80,6 +86,12 @@ def _canonical_adjustment(adjustment: dict) -> dict:
             "allow_above_points": bool(adjustment.get("allow_above_points", False)),
         }
 
+    if adjustment.get("rule_id"):
+        basis = adjustment.get("baseline_basis")
+        if basis not in {"raw", "entered"}:
+            raise ValueError("invalid_adjustment: baseline_basis must be raw or entered")
+        return {"kind": "rule", "rule_id": str(adjustment["rule_id"]),
+                "baseline_basis": basis}
     model = (adjustment.get("model") or adjustment.get("rule")
              or adjustment.get("curve_type"))
     if model not in _RULES:
@@ -227,10 +239,46 @@ def _prepare_entries(baseline: dict, adjustment: dict, vault) -> tuple[list[dict
     eligible = [row for row in baseline.get("entries") or [] if row.get("eligible")]
     kind = adjustment["kind"]
     proposed = {}
+    provenance_by_user = {}
     extra_skipped = {}
     excluded_ids = set()
 
-    if kind == "rule":
+    if kind == "rule" and adjustment.get("rule_id"):
+        course_id = str(baseline.get("course_id") or "")
+        rule_id = str(adjustment["rule_id"])
+        rule_events = score_ledger.list_rule_events(course_id)
+        rule = next((item for item in rule_events
+                     if item.get("rule_id") == rule_id and item.get("action") == "create"), None)
+        if not rule:
+            raise ValueError("invalid_adjustment: rule_id was not found")
+        formula = rule.get("formula") or {}
+        events = score_ledger.list_events(course_id, str(baseline.get("assignment_id") or ""))
+        for row in eligible:
+            uid = str(row["user_id"])
+            events = score_ledger.list_events(course_id, str(baseline.get("assignment_id") or ""))
+            current = row.get("before")
+            if adjustment["baseline_basis"] == "raw":
+                evidence = [event for event in events if str(event.get("student_id")) == uid
+                            and event.get("curve_rule_id") == rule_id
+                            and event.get("action") == "verified"
+                            and event.get("entered_score") is not None]
+                latest = max(evidence, key=lambda item: str(item.get("timestamp") or ""), default=None)
+                if (not latest or latest.get("raw_score") is None
+                        or str(latest.get("attempt") or "") != str(row.get("attempt") or "")
+                        or not _numbers_equal(latest.get("entered_score"), current)
+                        or not _numbers_equal(latest.get("canvas_score"), row.get("canvas_score"))):
+                    extra_skipped["raw_baseline_unlinked"] = extra_skipped.get("raw_baseline_unlinked", 0) + 1
+                    continue
+                base = float(latest["raw_score"])
+                provenance_by_user[uid] = {"baseline_raw": base, "baseline_rule_id": rule_id,
+                    "baseline_event_id": latest.get("event_id"), "attempt": latest.get("attempt")}
+            else:
+                base = float(current)
+                provenance_by_user[uid] = {"baseline_entered": base, "baseline_basis": "entered",
+                    "baseline_rule_id": rule_id, "attempt": row.get("attempt")}
+            scored = score_curves.apply_formula(base, baseline["assignment"]["points_possible"], formula)
+            proposed[uid] = (scored["entered_score"], False)
+    elif kind == "rule":
         eligible_ids = {str(row.get("user_id")) for row in eligible}
         for requested in adjustment.get("exclude_pseudonyms", []):
             user_id = pseudonym.resolve_pseudonym(vault, roster, requested)
@@ -285,6 +333,44 @@ def _prepare_entries(baseline: dict, adjustment: dict, vault) -> tuple[list[dict
             if after > points and not adjustment.get("allow_above_points"):
                 raise ValueError(f"invalid_adjustment: pseudonym '{requested}' exceeds points_possible")
             proposed[str(user_id)] = (_number(after), False)
+    elif kind == "revert_rule":
+        rule_id = adjustment["rule_id"]
+        events = score_ledger.list_events(str(baseline.get("course_id") or ""),
+                                          str(baseline.get("assignment_id") or ""))
+        successful = [event for event in events if event.get("action") == "verified"
+                      and event.get("curve_rule_id") == rule_id]
+        reverted = {str(event.get("origin_event_id")) for event in events
+                    if event.get("action") == "revert" and event.get("curve_rule_id") == rule_id}
+        latest_by_key = {}
+        for event in successful:
+            key = (str(event.get("student_id")), str(event.get("attempt") or ""), rule_id)
+            if str(event.get("event_id")) not in reverted:
+                prior = latest_by_key.get(key)
+                if prior is None or str(event.get("timestamp") or "") > str(prior.get("timestamp") or ""):
+                    latest_by_key[key] = event
+        by_user_current = {str(row.get("user_id")): row for row in baseline.get("entries") or []}
+        for (uid, attempt, _rid), event in latest_by_key.items():
+            row = by_user_current.get(uid)
+            if not row or not row.get("eligible"):
+                extra_skipped["student_unavailable"] = extra_skipped.get("student_unavailable", 0) + 1
+                continue
+            try:
+                newer = int(row.get("attempt")) > int(attempt)
+            except (TypeError, ValueError):
+                newer = str(row.get("attempt") or "") != attempt
+            if newer:
+                extra_skipped["newer_attempt"] = extra_skipped.get("newer_attempt", 0) + 1
+            elif event.get("raw_score") is None:
+                extra_skipped["raw_unknown"] = extra_skipped.get("raw_unknown", 0) + 1
+            elif (str(row.get("attempt") or "") != attempt
+                  or not _numbers_equal(row.get("before"), event.get("entered_score"))
+                  or not _numbers_equal(row.get("canvas_score"), event.get("canvas_score"))):
+                extra_skipped["changed_since_curve"] = extra_skipped.get("changed_since_curve", 0) + 1
+            else:
+                proposed[uid] = (_number(event.get("raw_score")), False)
+                provenance_by_user[uid] = {"baseline_raw": event.get("raw_score"),
+                    "baseline_rule_id": rule_id, "baseline_event_id": event.get("event_id"),
+                    "origin_event_id": event.get("event_id"), "attempt": event.get("attempt")}
     else:
         original_id = adjustment["operation_id"]
         original = _completed_operation(original_id)
@@ -317,6 +403,8 @@ def _prepare_entries(baseline: dict, adjustment: dict, vault) -> tuple[list[dict
             "after": _number(after),
             "changed": not _numbers_equal(before, after),
             "capped": bool(capped),
+            **({"attempt": by_user[user_id].get("attempt")} if by_user[user_id].get("attempt") is not None else {}),
+            **provenance_by_user.get(user_id, {}),
         })
     entries.sort(key=lambda row: row.get("pseudonym") or row["user_id"])
     return entries, extra_skipped, excluded_ids
@@ -467,6 +555,7 @@ def preview_grade_adjustment(course_id: str, assignment_id: str,
             steps=adapter.initial_steps(payload, baseline),
         )
         operation_id = models.new_operation_id()
+        payload["operation_id"] = operation_id
         operation = models.new_operation(
             operation_id=operation_id, kind=KIND,
             source_ref={"type": "grade_adjustment"},
@@ -501,6 +590,7 @@ def apply_grade_adjustment(operation_id: str, batch_id: str,
     if operation is None or operation.get("kind") != KIND:
         return {"ok": False, "error": "grade adjustment operation was not found"}
     if operation.get("status") == "applied":
+        _record_rule_reversion(operation)
         return _apply_projection(operation_key,
                                  {"ok": True, "status": "already_applied"}, operation)
     try:
@@ -509,7 +599,33 @@ def apply_grade_adjustment(operation_id: str, batch_id: str,
         return {"ok": False, "error": str(exc)}
     except Exception:
         return {"ok": False, "error": "grade adjustment apply could not complete"}
+    if result.get("state") == "applied":
+        _record_rule_reversion(operations.get_operation(operation_key) or operation)
     return _apply_projection(operation_key, result, operation)
+
+
+def _record_rule_reversion(operation: dict) -> None:
+    payload = operation.get("normalized_payload") or {}
+    adjustment = payload.get("adjustment") or {}
+    if adjustment.get("kind") != "revert_rule":
+        return
+    course_id = str(payload.get("course_id") or "")
+    assignment_id = str(payload.get("assignment_id") or "")
+    rule_id = str(adjustment.get("rule_id") or "")
+    try:
+        rule_events = score_ledger.list_rule_events(course_id)
+        rule = next((event for event in rule_events if event.get("rule_id") == rule_id
+                     and event.get("action") == "create"), None)
+        if not rule:
+            return
+        if rule.get("scope") == "course":
+            score_curves.exclude_assignment(course_id, rule_id, assignment_id)
+        elif score_curves.resolve_rule(course_id, assignment_id) is not None:
+            score_curves.deactivate_rule(course_id, rule_id)
+    except Exception:
+        # Reversion grade writes already have their immutable outcome; lifecycle
+        # journal failure is surfaced by the next rule resolution as a blocker.
+        return
 
 
 __all__ = ["KIND", "preview_grade_adjustment", "apply_grade_adjustment",

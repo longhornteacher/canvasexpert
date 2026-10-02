@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from functools import wraps
 
 from api import grading_policy
+from api import score_ledger
 from api.feedback_results import _format_number
 from api.powergrader import attribution
 from api.powergrader import blind_first
@@ -161,9 +162,19 @@ def _payload(student: dict, *, grade_mode: str = "post_score",
         else:
             posted_grade = score
 
+        frozen_curve = student.get("frozen_curve")
+        if posted_grade is not None and isinstance(frozen_curve, dict):
+            posted_grade = frozen_curve.get("entered_score")
+            raw_value = frozen_curve.get("raw_score")
+            entered_value = frozen_curve.get("entered_score")
+            line = (f"Raw {_format_number(raw_value)} -> Entered "
+                    f"{_format_number(entered_value)}.")
+            if line not in feedback:
+                feedback = f"{feedback}\n\n{line}" if feedback else line
+
     payload: dict = {}
     if posted_grade is not None:
-        payload["submission"] = {"posted_grade": str(posted_grade)}
+        payload["submission"] = {"posted_grade": _format_number(posted_grade)}
         if decision and decision["decision"] == "waived":
             payload["submission"]["late_policy_status"] = "none"
         elif days is not None:
@@ -261,6 +272,18 @@ def push_grades(
         return {"ok": False, "code": error, "error": "Select valid submissions to post."}, 200
 
     students = {str(student.get("user_id")): student for student in session.get("students", [])}
+    if any(
+        user_id in students
+        and ((students[user_id].get("teacher_score") is not None)
+             or (students[user_id].get("ai_score") is not None))
+        for user_id in requested
+    ):
+        try:
+            score_ledger.validate_scope(str(session.get("course_id") or ""),
+                                        str(session.get("assignment_id") or ""))
+        except Exception:
+            return {"ok": False, "code": "score_ledger_unavailable",
+                    "error": "Private score evidence is unavailable. Nothing was sent."}, 200
     idempotency = session.setdefault("push_idempotency", {})
     request_key = str(idempotency_key or "")
 
@@ -289,9 +312,36 @@ def push_grades(
             })
             continue
 
+        sent_score = (payload.get("submission") or {}).get("posted_grade")
+        raw_score = (student.get("teacher_score") if student.get("teacher_score") is not None
+                     else student.get("ai_score"))
+        evidence_key = f"scoring:{session_id}:{idem_slot}:{target_digest}"
+        if sent_score is not None:
+            baseline = student.get("submission_baseline") or {}
+            try:
+                score_ledger.append_event({
+                    "source": "ce_apply", "action": "intent",
+                    "course_id": session.get("course_id"),
+                    "assignment_id": session.get("assignment_id"),
+                    "student_id": user_id,
+                    "attempt": baseline.get("attempt") or student.get("current_attempt"),
+                    "submission_digest": baseline.get("submission_digest"),
+                    "raw_score": (student.get("frozen_curve") or {}).get("raw_score", raw_score),
+                    "entered_score": sent_score,
+                    "curve_rule_id": (student.get("frozen_curve") or {}).get("rule_id"),
+                    "feedback": (payload.get("comment") or {}).get("text_comment") or "",
+                    "session_id": session_id, "stage_id": (session.get("staged_scoring_apply") or {}).get("stage_digest"),
+                }, idempotency_key=evidence_key + ":intent")
+            except Exception:
+                return {"ok": False, "code": "score_ledger_unavailable",
+                        "error": "Private score evidence is unavailable. Nothing was sent."}, 200
+
         _response, send_error = canvas_send("PUT", _path(session, user_id), payload)
         if send_error:
             if _explicit_canvas_rejection(send_error):
+                if sent_score is not None:
+                    _append_score_outcome(evidence_key, "failed", session, student, sent_score,
+                                          raw_score, payload)
                 results.append({
                     "user_id": user_id, "status": "failed", "code": "canvas_rejected",
                     "request_digest": payload_digest, "target_digest": target_digest,
@@ -303,6 +353,9 @@ def push_grades(
             student["status"] = "attention"
             student["push_state"] = "sent_unknown"
             save_session(session)
+            if sent_score is not None:
+                _append_score_outcome(evidence_key, "unknown", session, student, sent_score,
+                                      raw_score, payload)
             results.append({
                 "user_id": user_id, "status": "transport_unknown",
                 "code": "write_transport_unknown",
@@ -315,11 +368,16 @@ def push_grades(
         student["posted"] = True
         student["status"] = "posted"
         idempotency[idem_slot] = target_digest
+        if sent_score is not None:
+            _append_score_outcome(evidence_key, "accepted", session, student, sent_score,
+                                  raw_score, payload)
         pushed += 1
         result = {
             "user_id": user_id, "status": "pushed", "code": "pushed",
             "request_digest": payload_digest, "target_digest": target_digest,
         }
+        if sent_score is not None:
+            result["entered_score"] = float(sent_score)
         decision = late_decision(student, waive=waive, grade_mode=grade_mode)
         if decision:
             result["late"] = {**decision, "sent_status": (
@@ -352,3 +410,26 @@ def push_grades(
     elif failed:
         outcome["code"] = "canvas_rejected"
     return outcome, 200
+
+
+def _append_score_outcome(key, action, session, student, entered, raw, payload):
+    baseline = student.get("submission_baseline") or {}
+    try:
+        score_ledger.append_event({
+            "source": "ce_apply", "action": action,
+            "course_id": session.get("course_id"), "assignment_id": session.get("assignment_id"),
+            "student_id": student.get("user_id"),
+            "attempt": baseline.get("attempt") or student.get("current_attempt"),
+            "submission_digest": baseline.get("submission_digest"),
+            "raw_score": (student.get("frozen_curve") or {}).get("raw_score", raw),
+            "entered_score": entered,
+            "curve_rule_id": (student.get("frozen_curve") or {}).get("rule_id"),
+            "feedback": (payload.get("comment") or {}).get("text_comment") or "",
+            "session_id": session.get("session_id"),
+            "stage_id": (session.get("staged_scoring_apply") or {}).get("stage_digest"),
+        }, idempotency_key=key + ":" + action)
+    except Exception:
+        # The accepted Canvas write remains accepted. The durable intent is
+        # still evidence, and a later reconciliation can disclose the gap.
+        return False
+    return True

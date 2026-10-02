@@ -316,6 +316,17 @@ def _store(session):
             saved)
 
 
+def _readback_for(sent, params):
+    rows = []
+    for uid in params.get("student_ids[]", []):
+        payload = next(item[-1] for item in sent if item[-2].endswith("/" + str(uid)))
+        entered = float(payload["submission"]["posted_grade"])
+        rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
+                     "points_deducted": None,
+                     "late_policy_status": payload["submission"].get("late_policy_status")})
+    return rows, None
+
+
 def test_apply_plan_pushes_the_previewed_rows():
     """EXAMPLE: preview, answer, apply -- one push per selected student."""
     session = _session()
@@ -329,7 +340,8 @@ def test_apply_plan_pushes_the_previewed_rows():
     plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers={},
-        load_session=load, save_session=save, canvas_send=canvas_send)
+        load_session=load, save_session=save, canvas_send=canvas_send,
+        canvas_read=lambda _path, params: _readback_for(sent, params))
 
     assert result["ok"] is True
     assert len(sent) == 2
@@ -377,17 +389,18 @@ def test_apply_plan_skips_what_the_answer_skipped():
     sent = []
 
     def canvas_send(method, path, payload, timeout=30):
-        sent.append(path)
+        sent.append((method, path, payload))
         return ({"id": 1}, None)
 
     plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"],
         answers={"score_above_possible": "skip_those"},
-        load_session=load, save_session=save, canvas_send=canvas_send)
+        load_session=load, save_session=save, canvas_send=canvas_send,
+        canvas_read=lambda _path, params: _readback_for(sent, params))
 
     assert result["ok"] is True
-    assert len(sent) == 1 and "9002" in sent[0]
+    assert len(sent) == 1 and "9002" in sent[0][1]
 
 
 def test_apply_plan_reports_exact_partial_post_recovery_rows():
@@ -413,27 +426,34 @@ def test_apply_plan_reports_exact_partial_post_recovery_rows():
     assert result["remaining_rows"] == ["9002"]
 
 
-# ── The narrow write: no read-back ──────────────────────────────────────────
+# ── Score read-back ────────────────────────────────────────────────────────
 
-def test_successful_send_performs_no_canvas_read():
-    """LAW: after a successful ordinary scoring PUT, CE performs no Canvas GET,
-    mirror refresh, final-grade comparison, or policy inspection."""
+def test_successful_numeric_send_gets_score_readback():
+    """LAW: every accepted numeric write gets bounded score verification."""
     session = _session()
     load, save, _saved = _store(session)
+    sent = []
 
     def canvas_send(method, path, payload, timeout=30):
+        sent.append((method, path, payload))
         return ({"id": 1}, None)
+
+    reads = []
+    def canvas_read(path, params):
+        reads.append((path, params))
+        return _readback_for(sent, params)
 
     plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers={},
-        load_session=load, save_session=save, canvas_send=canvas_send)
+        load_session=load, save_session=save, canvas_send=canvas_send,
+        canvas_read=canvas_read)
 
     assert result["ok"] is True
-    # The accepted-write receipt carries transport facts only.
+    assert len(reads) == 1
     receipt = session["push_log"][-1]["results"][0]
-    assert set(receipt) == {"user_id", "status", "code",
-                            "request_digest", "target_digest"}
+    assert receipt["entered_score"] == 8
+    assert result["results"][0]["late"]["verification"] == "verified"
     assert "postcondition_digest" not in receipt
 
 
@@ -575,6 +595,18 @@ def _apply(session, answers, **kwargs):
         sent.append((path.rsplit("/", 1)[-1], payload))
         return ({"id": 1}, None)
 
+    def canvas_read(_path, params):
+        rows = []
+        for uid in params.get("student_ids[]", []):
+            payload = dict(sent).get(str(uid), {})
+            entered = float((payload.get("submission") or {}).get("posted_grade"))
+            late_status = (payload.get("submission") or {}).get("late_policy_status")
+            rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
+                         "points_deducted": None, "late_policy_status": late_status})
+        return rows, None
+
+    kwargs.setdefault("canvas_read", canvas_read)
+
     plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers=answers,
@@ -588,8 +620,7 @@ def test_waive_late_answer_sends_the_waived_bytes_for_exactly_the_listed_rows():
     session = _late_session()
     session["students"].append({"user_id": "9003", "ai_score": 7, "ai_feedback": "Fine."})
 
-    result, sent, plan = _apply(session, {"late_days": "waive_late"},
-                                canvas_read=lambda *_a: ([], None))
+    result, sent, plan = _apply(session, {"late_days": "waive_late"})
 
     question = next(q for q in plan["questions"] if q["kind"] == "late_days")
     assert question["user_ids"] == ["9001", "9002"]
@@ -672,7 +703,7 @@ def test_waived_row_with_a_deduction_is_reported_not_honored_in_one_batched_read
     calls = []
     rows = [{"user_id": 9001, "score": 6, "entered_score": 8, "points_deducted": 2,
              "late_policy_status": "none"},
-            {"user_id": 9002, "score": 6, "entered_score": 6, "points_deducted": 0,
+            {"user_id": 9002, "score": 7, "entered_score": 7, "points_deducted": 0,
              "late_policy_status": "none"}]
 
     result, _sent, _plan = _apply(session, {"late_days": "waive_late"},
@@ -685,7 +716,7 @@ def test_waived_row_with_a_deduction_is_reported_not_honored_in_one_batched_read
     by_user = {r["user_id"]: r for r in result["results"]}
     assert by_user["9001"]["late"]["late_honored"] is False
     assert by_user["9001"]["late"]["points_deducted"] == 2
-    assert "late_honored" not in by_user["9002"]["late"]
+    assert by_user["9002"]["late"]["verification"] == "verified", by_user["9002"]
     assert all(s["posted"] for s in session["students"])
 
 
@@ -702,19 +733,20 @@ def test_a_status_that_differs_from_the_one_sent_is_not_honored():
     assert by_user["9002"]["late"]["late_honored"] is False   # sent none, read late
 
 
-def test_a_failed_read_marks_rows_unavailable_and_never_fails_the_write():
+def test_a_failed_read_marks_numeric_scores_unverified():
     session = _late_session()
 
     result, _sent, _plan = _apply(session, {"late_days": "waive_late"},
                                   canvas_read=_reader(error="HTTP 500: boom"))
 
-    assert result["ok"] is True
+    assert result["ok"] is False
+    assert result["code"] == "score_readback_unavailable"
     assert all(r["late"]["readback"] == "unavailable" for r in result["results"])
     assert all("late_honored" not in r["late"] for r in result["results"])
     assert all(s["posted"] for s in session["students"])
 
 
-def test_a_raising_reader_is_an_unavailable_read_not_a_failed_write():
+def test_a_raising_reader_is_an_unavailable_score_verification():
     session = _late_session()
 
     def read(path, params):
@@ -722,7 +754,8 @@ def test_a_raising_reader_is_an_unavailable_read_not_a_failed_write():
 
     result, _sent, _plan = _apply(session, {"late_days": "waive_late"}, canvas_read=read)
 
-    assert result["ok"] is True
+    assert result["ok"] is False
+    assert result["code"] == "score_readback_unavailable"
     assert all(r["late"]["readback"] == "unavailable" for r in result["results"])
 
 
@@ -730,15 +763,11 @@ def test_a_raising_reader_is_an_unavailable_read_not_a_failed_write():
     lambda: _session(),                                          # nothing late
     lambda: _late_session(policy_course=False),                  # decision: canvas
 ])
-def test_no_read_happens_when_no_row_has_a_waived_or_applied_decision(session_factory):
-    """LAW: rows that are not late, or whose decision is canvas, are never read."""
-    calls = []
-
-    result, _sent, _plan = _apply(session_factory(), {},
-                                  canvas_read=_reader([], calls=calls))
+def test_every_numeric_write_is_read_even_without_an_explicit_late_decision(session_factory):
+    """LAW: score verification covers ordinary and Canvas-owned late rows."""
+    result, _sent, _plan = _apply(session_factory(), {})
 
     assert result["ok"] is True
-    assert calls == []
 
 
 @pytest.mark.parametrize("late_policy", ["ask", "waive", "apply"])

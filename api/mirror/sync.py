@@ -209,6 +209,7 @@ def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all,
     if blocked:
         return blocked
     started = now or store.now_iso()
+    score_summary = {}
     try:
         rows, error = canvas_get_all(
             f"/api/v1/courses/{course_id}/assignments/{assignment_id}/submissions",
@@ -222,12 +223,13 @@ def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all,
     document = store.merge_submissions(
         course_id, assignment_id, rows or [], root=root, attempted_at=started,
         stream_get=stream_get, canvas_origin=canvas_origin,
-        capture_budget=CaptureBudget())
+        capture_budget=CaptureBudget(), score_summary=score_summary)
     return {"ok": True, "assignment_id": str(assignment_id),
             "submission_rows": len(rows or []),
             "submissions": len(document["submissions"]),
             "evidence_capture": submission_history.capture_summary(
-                course_id, assignment_id, root=root)}
+                course_id, assignment_id, root=root),
+            "canvas_external_count": int(score_summary.get("canvas_external_count") or 0)}
 
 
 def refresh_submissions_course_delta(course_id, *, canvas_get_all, root=None,
@@ -284,17 +286,21 @@ def refresh_submissions_course_delta(course_id, *, canvas_get_all, root=None,
 
     grouped = _group_by_assignment(list(submitted or []) + list(graded or []))
     budget = CaptureBudget()
+    external_count = 0
     capture_totals = {"attempts": 0, "files": 0, "captured": 0,
                       "pending": 0, "failed": 0}
     for assignment_id, rows in grouped.items():
+        score_summary = {}
         store.merge_submissions(
             course_id, assignment_id, rows, root=root, attempted_at=started,
             replace=False, stream_get=stream_get, canvas_origin=canvas_origin,
-            capture_budget=budget)
+            capture_budget=budget, score_summary=score_summary)
+        external_count += int(score_summary.get("canvas_external_count") or 0)
         _merge_capture_totals(capture_totals, course_id, assignment_id, root=root)
     return _result(True, logical_requests=2,
                    changed_rows=len(submitted or []) + len(graded or []),
-                   touched_assignments=grouped, evidence_capture=capture_totals)
+                   touched_assignments=grouped, evidence_capture=capture_totals,
+                   canvas_external_count=external_count)
 
 
 def _group_by_assignment(rows) -> dict[str, list[dict]]:
@@ -583,13 +589,17 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
     store.write_roster(course_id, students, sections, root=root, attempted_at=started)
     grouped = _group_by_assignment(submissions)
     budget = CaptureBudget()
+    external_count = 0
     capture_totals = {"attempts": 0, "files": 0, "captured": 0,
                       "pending": 0, "failed": 0}
     for assignment_id in document["assignments"]:
+        score_summary = {}
         store.merge_submissions(
             course_id, assignment_id, grouped.get(assignment_id, []), root=root,
             attempted_at=started, replace=True, stream_get=stream_get,
-            canvas_origin=canvas_origin, capture_budget=budget)
+            canvas_origin=canvas_origin, capture_budget=budget,
+            score_summary=score_summary)
+        external_count += int(score_summary.get("canvas_external_count") or 0)
         _merge_capture_totals(capture_totals, course_id, assignment_id, root=root)
     if with_comments:
         store.record_submission_comments_state(
@@ -612,6 +622,7 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
             "pruned_assignments": diagnostics["orphans_pruned"],
             "assignment_changes": diagnostics,
             "evidence_capture": capture_totals,
+            "canvas_external_count": external_count,
             "new_quizzes": new_quiz_result}
 
 
@@ -669,13 +680,16 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
         course_id, assignments, root=root, attempted_at=started)
     grouped = _group_by_assignment(list(submitted or []) + list(graded or []))
     budget = CaptureBudget()
+    external_count = 0
     capture_totals = {"attempts": 0, "files": 0, "captured": 0,
                       "pending": 0, "failed": 0}
     for assignment_id, rows in grouped.items():
+        score_summary = {}
         store.merge_submissions(
             course_id, assignment_id, rows, root=root, attempted_at=started,
             replace=False, stream_get=stream_get, canvas_origin=canvas_origin,
-            capture_budget=budget)
+            capture_budget=budget, score_summary=score_summary)
+        external_count += int(score_summary.get("canvas_external_count") or 0)
         _merge_capture_totals(capture_totals, course_id, assignment_id, root=root)
     watermark = _overlapped(started)
     store.record_pass(course_id, "delta", ok=True, attempted_at=started,
@@ -693,6 +707,7 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
             "touched_assignments": sorted(grouped),
             "assignment_changes": diagnostics,
             "evidence_capture": capture_totals,
+            "canvas_external_count": external_count,
             "new_quizzes": new_quiz_result}
 
 

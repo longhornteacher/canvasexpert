@@ -253,7 +253,8 @@ def test_mirror_refresh_required_blocks_only_a_keyless_late_row(monkeypatch):
     assert "blocking_error" not in non_late
     entry = next(row for row in non_late["entries"] if row["user_id"] == "student-1")
     assert entry == {"user_id": "student-1", "eligible": True, "skip_reason": None,
-                     "before": 7, "before_excused": False, "missing": False}
+                     "before": 7, "before_excused": False, "missing": False,
+                     "attempt": None, "canvas_score": 7}
 
     wire_submission_row({"assignment_id": "assignment-1", "user_id": "student-1",
                          "score": 7, "excused": False, "late": True})

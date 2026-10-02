@@ -581,6 +581,15 @@ def prepare_scoring_session(
         monitored=config.get_monitored_students(),
         extra_time_map=_extra_time_map(config.get_extra_time(course_id)),
     )
+    safe_bundle = None
+    try:
+        with open(privacy_artifacts["safe_bundle"], encoding="utf-8") as handle:
+            safe_bundle = json.load(handle)
+    except Exception:
+        pass
+    session_builder.freeze_score_provenance(
+        students, course_id, assignment_id, pseudonyms=_pseudonyms_by_user_id(),
+        safe_bundle=safe_bundle)
     session = session_builder.build_session(
         session_id=session_id, course_id=course_id, assignment_id=assignment_id,
         assignment_name=assignment_name, points_possible=points_possible, mode="packet",
@@ -858,7 +867,7 @@ def refresh_scoring_session(
                 "first_new_offset": None,
                 "packet_digest": scoring_packet.packet_digest(
                     session["session_id"], base_bundle, course_id=course_id,
-                    assignment_id=assignment_id)}
+                    assignment_id=assignment_id, baseline_provenance=session.get("students"))}
 
     replaced = set(replaced_uids)
     added_ids = {str(row["user_id"]) for row in added_rows}
@@ -897,6 +906,15 @@ def refresh_scoring_session(
         monitored=config.get_monitored_students(),
         extra_time_map=_extra_time_map(config.get_extra_time(course_id)),
     )
+    fresh_artifacts = dict(ai_result.get("privacy_artifacts") or {})
+    fresh_bundle = None
+    try:
+        with open(fresh_artifacts["safe_bundle"], encoding="utf-8") as handle:
+            fresh_bundle = json.load(handle)
+    except Exception:
+        pass
+    session_builder.freeze_score_provenance(new_students, course_id, assignment_id,
+                                             pseudonyms=names, safe_bundle=fresh_bundle)
     fresh_by_uid = {str(s["user_id"]): s for s in new_students}
     session["students"] = [
         fresh_by_uid[str(s.get("user_id"))] if str(s.get("user_id")) in replaced else s
@@ -905,7 +923,6 @@ def refresh_scoring_session(
          if str(row["user_id"]) in fresh_by_uid]
 
     artifacts = dict(session.get("privacy_artifacts") or {})
-    fresh_artifacts = dict(ai_result.get("privacy_artifacts") or {})
     history.append({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "previous_safe_bundle": artifacts.get("safe_bundle"),
                     "added": len(added_rows), "replaced": len(replaced_uids)})
@@ -946,5 +963,6 @@ def refresh_scoring_session(
                           if names.get(uid) not in scorable),
         "first_new_offset": first_offset,
         "packet_digest": scoring_packet.packet_digest(
-            session["session_id"], merged, course_id=course_id, assignment_id=assignment_id),
+            session["session_id"], merged, course_id=course_id, assignment_id=assignment_id,
+            baseline_provenance=session.get("students")),
     }

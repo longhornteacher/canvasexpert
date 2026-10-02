@@ -51,6 +51,7 @@ from api.webui import mirror_service
 from api.webui.deps import REPO_ROOT
 from api.webui import deps
 from api import feedback_safety, feedback_vault
+from api import score_curves, score_ledger
 from api.course_catalog import read_catalog
 from api import runtime_paths
 from api.mirror import queries as mirror_queries  # compatibility test seam
@@ -122,7 +123,10 @@ _SCORING_SESSION_COLUMNS = (
 )
 _PACKET_ITEM_COLUMNS = ("item_id", "prompt", "possible")
 _PACKET_STUDENT_COLUMNS = (
-    "pseudonym", "item_id", "text", "segment_index", "segment_count"
+    "pseudonym", "item_id", "text", "segment_index", "segment_count",
+    "baseline_raw", "baseline_entered", "baseline_basis", "baseline_rule_id",
+    "baseline_event_id", "baseline_attempt", "baseline_consistency",
+    "text_consistency",
 )
 _NEXT_STEPS = {
     "discover_scoring_work": (
@@ -1412,6 +1416,9 @@ _TOOL_GROUPS = {
         "refresh_scoring_session",
         "list_scoring_sessions",
         "get_scoring_packet",
+        "create_score_curve_rule",
+        "deactivate_score_curve_rule",
+        "get_score_ledger",
         "stage_scoring_results",
         "apply_staged_scoring_results",
         "reset_scoring_review",
@@ -2079,6 +2086,7 @@ def get_submission_history(course_id: str, assignment_id: str,
         return result, truncated
 
     from api.nq_report import html_to_text
+    from api.mirror.attempt_text import digest as attempt_text_digest
     from api.powergrader import student_attachments
     from api.mirror import submission_history as history_store
     import io
@@ -2095,8 +2103,25 @@ def get_submission_history(course_id: str, assignment_id: str,
             "captured_at": str(observation.get("captured_at") or ""),
             "observation_digest": digest,
             "conflict": bool(observation.get("conflict") or attempt.get("conflict")),
+            "text_provenance": str(observation.get("body_provenance") or "canvas_attempt"),
             "files": [],
         }
+        stored_files = {str(entry.get("key")): entry for entry in attempt.get("files", [])}
+        digest_files = [{key: stored_files[file_key].get(key)
+                         for key in ("key", "filename", "size", "content_type")}
+                        for file_key in observation.get("file_keys") or []
+                        if file_key in stored_files]
+        expected_digest = history_store._json_digest({
+            "body": observation.get("body") or "", "files": digest_files})
+        expected_text_digest = attempt_text_digest(observation.get("body") or "")
+        stored_text_digest = str(observation.get("text_digest") or "")
+        item["normalized_text_digest"] = stored_text_digest or None
+        item["evidence_consistency"] = (
+            "digest_mismatch" if expected_digest != digest else
+            "text_digest_mismatch" if stored_text_digest and stored_text_digest != expected_text_digest else
+            "text_digest_missing" if not stored_text_digest else
+            "conflicting" if item["conflict"] else
+            "missing_text" if not str(observation.get("body") or "").strip() else "consistent")
         body_text = html_to_text(observation.get("body") or "")
         if include_text:
             item["text"], item["text_truncated"] = bounded_text(body_text)
@@ -2343,6 +2368,112 @@ def get_gradebook_snapshot(course_id: str) -> dict:
     return result
 
 
+def create_score_curve_rule(course_id: str, formula: dict,
+                            assignment_id: str = "") -> dict:
+    """Create a local, immutable score curve rule; this makes no Canvas call."""
+    error = _course_gate_check(str(course_id))
+    if error:
+        return {"ok": False, "code": "course_unavailable", "error": error}
+    try:
+        rule = score_curves.create_rule(str(course_id), formula, str(assignment_id or ""),
+                                        root=workspace.workspace_root())
+    except score_curves.ScoreCurveError as exc:
+        return {"ok": False, "code": exc.code, "error": "The score curve rule could not be created."}
+    except Exception:
+        return {"ok": False, "code": "score_ledger_unavailable", "error": "Private score evidence is unavailable."}
+    return {"ok": True, "rule": {k: rule.get(k) for k in
+            ("rule_id", "scope", "assignment_id", "created_at", "formula", "preview")}}
+
+
+def deactivate_score_curve_rule(course_id: str, rule_id: str) -> dict:
+    """Deactivate a local curve rule without changing Canvas grades."""
+    error = _course_gate_check(str(course_id))
+    if error:
+        return {"ok": False, "code": "course_unavailable", "error": error}
+    try:
+        return score_curves.deactivate_rule(str(course_id), str(rule_id),
+                                            root=workspace.workspace_root())
+    except score_curves.ScoreCurveError as exc:
+        return {"ok": False, "code": exc.code, "error": "The score curve rule could not be deactivated."}
+    except Exception:
+        return {"ok": False, "code": "score_ledger_unavailable", "error": "Private score evidence is unavailable."}
+
+
+def get_score_ledger(course_id: str, assignment_id: str, pseudonyms: str = "",
+                     offset: int = 0, limit: int = 50) -> dict:
+    """Read bounded pseudonymized score events from the durable local archive."""
+    error = _saved_course_gate_check(str(course_id))
+    if error:
+        return {"ok": False, "error": error}
+    if (not isinstance(offset, int) or isinstance(offset, bool) or offset < 0
+            or not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100):
+        return {"ok": False, "code": "invalid_pagination", "error": "Invalid pagination bounds."}
+    vault, vault_error = _open_vault()
+    if vault_error:
+        return {"ok": False, "error": vault_error}
+    try:
+        events = score_ledger.list_events(str(course_id), str(assignment_id),
+                                          root=workspace.workspace_root())
+    except Exception:
+        return {"ok": False, "code": "score_ledger_unavailable",
+                "error": "Private score evidence is unavailable or invalid."}
+    wanted = {value.strip().casefold() for value in str(pseudonyms or "").split(",") if value.strip()}
+    rows = []
+    entries_by_id = {str(entry.get("canvas_id")): entry for entry in vault.entries()
+                     if entry.get("canvas_id") not in (None, "")}
+    assigned = False
+    for event in events:
+        student_id = str(event.get("student_id") or "")
+        identity = entries_by_id.get(student_id)
+        label = str((identity or {}).get("pseudonym") or "")
+        if student_id and not label:
+            try:
+                label = str(vault.get_or_assign(student_id) or "")
+                assigned = True
+            except Exception:
+                return {"ok": False, "code": "identity_unavailable", "error": "The private identity vault is unavailable."}
+        if wanted and label.casefold() not in wanted:
+            continue
+        if len(str(event.get("feedback") or "")) > 20000:
+            return {"ok": False, "code": "feedback_too_large", "error": "A complete feedback event exceeds the safe output bound."}
+        safe = {k: v for k, v in event.items()
+                if k not in {"student_id", "feedback", "logical_event_key",
+                             "integrity_sha256"}}
+        safe["pseudonym"] = label or None
+        rows.append((safe, event.get("feedback")))
+    if assigned:
+        try:
+            vault.save()
+        except Exception:
+            return {"ok": False, "code": "identity_unavailable", "error": "The private identity vault is unavailable."}
+    replacement_map = feedback_scrub.build_replacement_map(vault.entries(), set())
+    safe_rows = []
+    for safe, feedback in rows:
+        if feedback is not None:
+            safe["feedback"] = feedback_scrub.scrub_text(str(feedback), replacement_map)
+            safe["feedback_sha256"] = hashlib.sha256(safe["feedback"].encode("utf-8")).hexdigest()
+        safe_rows.append(safe)
+    safe_rows.sort(key=lambda row: (str(row.get("timestamp") or ""), str(row.get("event_id") or "")))
+    total = len(safe_rows)
+    page = []
+    page_chars = 0
+    for row in safe_rows[offset:offset + limit]:
+        row_chars = len(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+        if row_chars > 40000 and not page:
+            return {"ok": False, "code": "score_event_too_large",
+                    "error": "A complete score event exceeds the safe page bound."}
+        if page_chars + row_chars > 40000:
+            break
+        page.append(row)
+        page_chars += row_chars
+    payload = {"course_id": str(course_id), "assignment_id": str(assignment_id),
+               "events": page, "total": total, "offset": offset, "limit": limit,
+               "next_offset": offset + len(page) if offset + len(page) < total else None,
+               "coverage": "recorded_only",
+               "first_recorded_at": min((str(row.get("timestamp") or "") for row in safe_rows), default=None)}
+    return pseudonym.gate(payload, vault)
+
+
 def list_feedback_contracts() -> dict:
     """List teacher-authored scoring contracts without course/student data."""
     rows = []
@@ -2417,7 +2548,8 @@ def _refresh_identity(plan: dict) -> dict:
     if not isinstance(plan, dict):
         return {}
     jobs = plan.get("jobs") or []
-    job = jobs[0] if isinstance(jobs, list) and jobs and isinstance(jobs[0], dict) else {}
+    jobs = [job for job in jobs if isinstance(job, dict)] if isinstance(jobs, list) else []
+    job = jobs[0] if jobs else {}
     operation_id = plan.get("operation_id") or plan.get("plan_id")
     revision = job.get("mirror_revision", plan.get("mirror_revision"))
     snapshot_id = job.get("snapshot_id", plan.get("snapshot_id"))
@@ -2431,6 +2563,15 @@ def _refresh_identity(plan: dict) -> dict:
         identity["snapshot_id"] = str(snapshot_id)
     if error_code:
         identity["error_code"] = str(error_code)
+    external_scopes = {"course.refresh", "course.feedback_refresh",
+                       "course.scoring_refresh", "submissions.course_delta"}
+    relevant = [job for job in jobs if job.get("state") == "succeeded"
+                and job.get("scope") in external_scopes]
+    if plan.get("state") == "succeeded":
+        counts = [job.get("canvas_external_count", 0) for job in relevant]
+        identity["canvas_external_count"] = sum(
+            count for count in counts
+            if isinstance(count, int) and not isinstance(count, bool) and count >= 0)
     return identity
 
 
@@ -2459,6 +2600,7 @@ def refresh_mirror(course_id: str, include_comments: bool = False) -> dict:
                   "message": ("Mirror refreshed (roster, groups, assignments, submissions, and staff comment identities). Re-read the refused tool now."
                               if include_comments else "Mirror refreshed (roster, groups, assignments, and submissions status only). Re-read the refused tool now.")}
         result.update(identity)
+        result["message"] += f" {identity.get('canvas_external_count', 0)} scores changed outside CE."
         return result
     if state in ("queued", "running"):
         result = {"ok": True, "status": "syncing",
@@ -3088,6 +3230,32 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     except Exception as e:
         return {"ok": False, "error": f"Could not build packet: {e}"}
 
+    # Score provenance was frozen when this session baseline was prepared and
+    # is part of packet_digest; a later ledger outage cannot erase known mirror
+    # entered-score evidence or change the math basis mid-review.
+    by_pseudonym = {}
+    try:
+        vault_for_baseline = _vault_factory()
+        for student in session.get("students") or []:
+            uid = str(student.get("user_id") or "")
+            identity = vault_for_baseline.reverse(uid) or {} if uid else {}
+            pseudo = str(identity.get("pseudonym") or "")
+            if pseudo:
+                by_pseudonym[pseudo] = student
+    except Exception:
+        by_pseudonym = {}
+    for row in packet.get("students") or []:
+        student = by_pseudonym.get(str(row.get("pseudonym") or ""), {})
+        baseline = student.get("submission_baseline") or {}
+        row.update({"baseline_raw": baseline.get("raw_score"),
+            "baseline_entered": baseline.get("entered_score"),
+            "baseline_basis": baseline.get("basis"),
+            "baseline_rule_id": baseline.get("rule_id"),
+            "baseline_event_id": baseline.get("event_id"),
+            "baseline_attempt": baseline.get("attempt"),
+            "baseline_consistency": baseline.get("consistency") or "unknown",
+            "text_consistency": baseline.get("text_consistency") or "source_unknown"})
+
     # build_packet hands back dict rows so the scan can walk into the response
     # text. Tabulating first would bury every cell in a list, where the
     # scanner's key-based walk cannot reach it.
@@ -3195,6 +3363,21 @@ def _late_rows(session: dict, plan: dict, names: dict, answers=None, only=None) 
     ]
 
 
+def _scoring_curve_rows(session: dict, names: dict, selected_ids) -> list[dict]:
+    wanted = {str(uid) for uid in selected_ids}
+    rows = []
+    for student in session.get("students") or []:
+        uid = str(student.get("user_id") or "")
+        frozen = student.get("frozen_curve")
+        if uid not in wanted or not isinstance(frozen, dict):
+            continue
+        rows.append({"pseudonym": names.get(uid) or "(unknown student)",
+                     "raw": frozen.get("raw_score"), "effort_credit_input": frozen.get("input_score"),
+                     "entered": frozen.get("entered_score"), "rule_id": frozen.get("rule_id"),
+                     "formula": frozen.get("formula"), "rounding": frozen.get("rounding")})
+    return rows
+
+
 def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                                   expected_packet_digest: str,
                                   review_digest: str = "",
@@ -3242,6 +3425,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
     packet_digest = sp.packet_digest(
         scoring_session_id, safe_bundle,
         course_id=session.get("course_id"), assignment_id=session.get("assignment_id"),
+        baseline_provenance=session.get("students"),
     )
     if str(expected_packet_digest or "") != packet_digest:
         return {"ok": False, "code": "stale_packet", "error": "The scoring packet changed. Retrieve the current packet before submitting."}
@@ -3386,6 +3570,47 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
         for student in students_by_uid.values():
             student.pop("grading", None)
 
+    # Resolve and freeze the active local rule while staging. The rule math is
+    # private and participates in the payload digest; feedback-only rows never
+    # receive a score transformation.
+    if grade_mode == "post_score":
+        try:
+            rule = score_curves.resolve_rule(
+                str(candidate.get("course_id") or ""),
+                str(candidate.get("assignment_id") or ""),
+                root=workspace.workspace_root())
+        except Exception:
+            return {"ok": False, "code": "score_ledger_unavailable",
+                    "error": "Private score evidence is unavailable; no stage was saved."}
+        if rule:
+            for user_id, student in students_by_uid.items():
+                if user_id not in by_uid:
+                    continue
+                raw_score = student.get("teacher_score")
+                if raw_score is None:
+                    raw_score = student.get("ai_score")
+                if raw_score is None:
+                    continue
+                grading = student.get("grading") or {}
+                points_possible = grading.get("points_possible") or (candidate.get("assignment") or {}).get("points_possible")
+                try:
+                    effort_input = (grading_policy.mark(
+                        raw_score, points_possible, grading.get("floor_percent"), bool(grading.get("insincere")))
+                        if grading else raw_score)
+                    math_row = score_curves.apply_formula(effort_input, points_possible, rule.get("formula") or {})
+                except Exception:
+                    return {"ok": False, "code": "invalid_score_curve",
+                            "error": "The active score curve could not be applied safely."}
+                student["frozen_curve"] = {
+                    "rule_id": rule.get("rule_id"), "formula": rule.get("formula"),
+                    "raw_score": float(raw_score), "input_score": float(effort_input),
+                    "entered_score": math_row["entered_score"],
+                    "rounding": math_row["formula"].get("rounding"),
+                }
+        else:
+            for student in students_by_uid.values():
+                student.pop("frozen_curve", None)
+
     # Ordinary assignment risk planning. Its internal user ids are translated
     # before any question can cross MCP. Planning performs no Canvas read.
     if session.get("session_kind") == "scoring_assignment":
@@ -3458,6 +3683,10 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                         target["ai_feedback"] = staged.get("ai_feedback")
                         target["ai_item_results"] = staged.get("ai_item_results") or []
                         target["_teacher_authored_feedback"] = True
+                        if "frozen_curve" in staged:
+                            target["frozen_curve"] = staged["frozen_curve"]
+                        else:
+                            target.pop("frozen_curve", None)
                         if "grading" in staged:
                             target["grading"] = staged["grading"]
                         else:
@@ -3488,6 +3717,47 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                 }
                 current["grade_mode"] = grade_mode
                 current["status"] = "staged"
+                curve_rows = _scoring_curve_rows(candidate, names, selected_ids)
+                current["staged_curve_rows"] = curve_rows
+                try:
+                    staged_events = []
+                    for uid in selected_ids:
+                        student = current_by_uid.get(uid) or {}
+                        frozen = student.get("frozen_curve")
+                        raw_score = (student.get("teacher_score") if student.get("teacher_score") is not None
+                                     else student.get("ai_score"))
+                        if raw_score is None or grade_mode != "post_score":
+                            continue
+                        baseline = student.get("submission_baseline") or {}
+                        sent_payload = scoring_apply._projected_payload(
+                            student, current, grade_mode=grade_mode)
+                        entered = ((sent_payload.get("submission") or {}).get("posted_grade"))
+                        if entered is not None:
+                            try:
+                                entered = float(entered)
+                            except (TypeError, ValueError):
+                                entered = None
+                        staged_events.append(({
+                            "source": "ce_stage", "action": "staged",
+                            "course_id": current.get("course_id"), "assignment_id": current.get("assignment_id"),
+                            "student_id": uid, "attempt": baseline.get("attempt") or student.get("current_attempt"),
+                            "submission_digest": baseline.get("submission_digest"),
+                            "raw_score": (frozen or {}).get("raw_score", raw_score),
+                            "entered_score": (frozen or {}).get("entered_score", entered),
+                            "curve_rule_id": (frozen or {}).get("rule_id"),
+                            "feedback": (sent_payload.get("comment") or {}).get("text_comment") or "",
+                            "stage_id": stage_digest, "session_id": scoring_session_id,
+                        }, f"stage:{scoring_session_id}:{stage_digest}:{uid}"))
+                    for event, key in staged_events:
+                        score_ledger.append_event(event, idempotency_key=key)
+                    if staged_events:
+                        score_ledger.flush_exports(current.get("course_id"), current.get("assignment_id"))
+                except score_ledger.ScoreLedgerError as exc:
+                    return {"ok": False, "code": str(exc),
+                            "error": "Private score evidence could not be saved; the results were not staged."}
+                except Exception:
+                    return {"ok": False, "code": "score_ledger_unavailable",
+                            "error": "Private score evidence could not be saved; the results were not staged."}
                 session_store.save_session(current)
             held_user_ids = {str(st.get("user_id") or "") for st in session.get("students") or []
                              if str(st.get("user_id") or "") not in set(plan.get("candidate_ids") or [])}
@@ -3502,6 +3772,8 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
             late_rows = _late_rows(candidate, plan, names, answers, only=selected_ids)
             if late_rows:
                 response["rows"] = late_rows
+            if curve_rows:
+                response["score_rows"] = curve_rows
             return _with_next("stage_scoring_results", pseudonym.gate(response, vault))
 
     return {
@@ -3543,6 +3815,11 @@ def _apply_staged_scoring_results_locked(scoring_session_id: str,
                 "error": "The assignment-scoped Scoring Session was not found."}
     if not _is_current_scoring_session(session):
         return _session_superseded(scoring_session_id)
+    stage = session.get("staged_scoring_apply")
+    if (isinstance(stage, dict)
+            and str(stage.get("stage_digest") or "") == str(expected_stage_digest or "")
+            and isinstance(stage.get("last_result"), dict)):
+        return _with_next("apply_staged_scoring_results", copy.deepcopy(stage["last_result"]))
     if session.get("status") != "staged":
         return {"ok": False, "code": "stage_unavailable",
                 "error": "The exact scoring stage is unavailable. Stage the results again."}
@@ -3597,6 +3874,7 @@ def _apply_staged_scoring_results_locked(scoring_session_id: str,
     packet_digest = sp.packet_digest(
         scoring_session_id, safe_bundle,
         course_id=session.get("course_id"), assignment_id=session.get("assignment_id"),
+        baseline_provenance=session.get("students"),
     )
     if packet_digest != identity["expected_packet_digest"]:
         return {"ok": False, "code": "stale_packet",
@@ -3613,6 +3891,21 @@ def _apply_staged_scoring_results_locked(scoring_session_id: str,
         if label:
             names[str(entry.get("canvas_id"))] = label
             pseudonyms.append(label)
+    for student in session.get("students") or []:
+        frozen = student.get("frozen_curve")
+        if not frozen or str(student.get("user_id") or "") not in set(identity["selected_user_ids"]):
+            continue
+        try:
+            active = score_curves.resolve_rule(
+                str(session.get("course_id") or ""), str(session.get("assignment_id") or ""),
+                root=workspace.workspace_root())
+        except Exception:
+            return {"ok": False, "code": "score_ledger_unavailable",
+                    "error": "Private score evidence is unavailable."}
+        if (not active or str(active.get("rule_id")) != str(frozen.get("rule_id"))
+                or active.get("formula") != frozen.get("formula")):
+            return {"ok": False, "code": "stage_changed",
+                    "error": "The staged score curve changed. Stage the exact results again."}
     plan = scoring_apply.build_plan(session, pseudonyms=pseudonyms)
     if not plan.get("ok"):
         return {"ok": False, "code": str(plan.get("code") or "stage_invalid"),
@@ -3648,13 +3941,15 @@ def _apply_staged_scoring_results_locked(scoring_session_id: str,
     result = _record_scoring_session_result(
         scoring_session_id,
         _scoring_apply_result(payload, names, vault, held_user_ids=held_user_ids),
+        apply_digest=str(expected_stage_digest or ""),
     )
     return _with_next("apply_staged_scoring_results", result)
 
 
 def _record_scoring_session_result(scoring_session_id: str, result: dict,
                                    *, grade_mode: str | None = None,
-                                   draft_updates: dict | None = None) -> dict:
+                                   draft_updates: dict | None = None,
+                                   apply_digest: str = "") -> dict:
     """Persist terminal outcome on only the exact assignment session."""
     from api.powergrader import session_store
 
@@ -3682,6 +3977,10 @@ def _record_scoring_session_result(scoring_session_id: str, result: dict,
             session["last_failure"] = str(result.get("code") or "write_failed")
         session_store.save_session(session)
         grade_mode = str(session.get("grade_mode") or "post_score")
+        if apply_digest and isinstance(session.get("staged_scoring_apply"), dict):
+            session["staged_scoring_apply"]["last_apply_digest"] = apply_digest
+            session["staged_scoring_apply"]["last_result"] = copy.deepcopy(result)
+            session_store.save_session(session)
     return {**result, "scoring_session_id": scoring_session_id,
             "grade_mode": grade_mode}
 
@@ -3750,15 +4049,22 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
     grade, gradebook total, comment text, or Canvas response crosses.
     """
     counts = {"finalized": 0, "already_applied": 0, "held": 0, "failed": 0,
-              "transport_unknown": 0, "late_not_honored": 0}
+              "transport_unknown": 0, "late_not_honored": 0,
+              "score_mismatch": 0, "score_readback_unavailable": 0}
     outcomes = []
     unavailable = False
     for item in payload.get("results") or []:
         status = str(item.get("status") or "failed")
         public_status = "finalized" if status == "pushed" else status
         late = item.get("late") if isinstance(item.get("late"), dict) else None
-        if public_status == "finalized" and late and late.get("late_honored") is False:
-            public_status = "late_not_honored"
+        if public_status == "finalized" and late:
+            verification = late.get("verification")
+            if verification == "score_mismatch":
+                public_status = "score_mismatch"
+            elif verification == "score_readback_unavailable":
+                public_status = "score_readback_unavailable"
+            elif late.get("late_honored") is False:
+                public_status = "late_not_honored"
         if public_status not in counts:
             public_status = "failed"
         counts[public_status] += 1
@@ -3766,10 +4072,17 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
                    "status": public_status,
                    **({"code": str(item.get("code") or "failed")}
                       if public_status in {"failed", "transport_unknown"} else {})}
-        if late and public_status in {"finalized", "late_not_honored"}:
+        if late and public_status in {"finalized", "late_not_honored", "score_mismatch", "score_readback_unavailable"}:
             shown = {key: late[key] for key in ("decision", "late_days", "late_policy_status",
-                                                "points_deducted", "score", "readback")
+                                                "points_deducted", "score", "entered_score",
+                                                "canvas_score", "readback", "verification",
+                                                "raw_score", "curve_rule_id")
                      if key in late}
+            if shown.get("curve_rule_id"):
+                shown["disclosure"] = (
+                    f"staged {shown.get('raw_score')} -> Canvas {shown.get('canvas_score')} "
+                    f"(rule {shown['curve_rule_id']}; entered {shown.get('entered_score')})"
+                )
             unavailable = unavailable or late.get("readback") == "unavailable"
             outcome["late"] = shown
         outcomes.append(outcome)
@@ -3777,7 +4090,8 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
     counts["held"] = len(held_ids)
     outcomes.extend({"pseudonym": names.get(uid) or "(unknown student)", "status": "held"}
                     for uid in sorted(held_ids))
-    result = {"ok": bool(payload.get("ok")), "counts": counts, "results": outcomes}
+    verified_bad = counts["score_mismatch"] + counts["score_readback_unavailable"]
+    result = {"ok": bool(payload.get("ok")) and verified_bad == 0, "counts": counts, "results": outcomes}
     posted = [names.get(str(uid)) or "(unknown student)"
               for uid in payload.get("posted_rows") or []]
     remaining = [names.get(str(uid)) or "(unknown student)"
@@ -3803,7 +4117,9 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
             result["error"] = ("Canvas did not confirm the write. Review the assignment in "
                                "Canvas before retrying; Canvas Expert will not repeat it.")
         else:
-            result["code"] = str(payload.get("code") or "write_failed")
+            result["code"] = ("score_mismatch" if counts["score_mismatch"] else
+                               "score_readback_unavailable" if counts["score_readback_unavailable"] else
+                               str(payload.get("code") or "write_failed"))
             result["error"] = "One or more results could not be finalized. Review Canvas before retrying."
     if counts["late_not_honored"]:
         result.setdefault("code", "late_readback_mismatch")

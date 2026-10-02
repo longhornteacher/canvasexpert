@@ -424,6 +424,26 @@ def get_submission_history(course_id: str, assignment_id: str,
 
 
 @mcp.tool(structured_output=False)
+def create_score_curve_rule(course_id: str, formula: dict,
+                            assignment_id: str = "") -> str:
+    """Create an immutable local score curve rule; no Canvas grades change."""
+    return _compact(tools.create_score_curve_rule(course_id, formula, assignment_id))
+
+
+@mcp.tool(structured_output=False)
+def deactivate_score_curve_rule(course_id: str, rule_id: str) -> str:
+    """Deactivate a local score curve rule; no Canvas grades change."""
+    return _compact(tools.deactivate_score_curve_rule(course_id, rule_id))
+
+
+@mcp.tool(structured_output=False)
+def get_score_ledger(course_id: str, assignment_id: str,
+                     pseudonyms: str = "", offset: int = 0, limit: int = 50) -> str:
+    """Read bounded pseudonymized score evidence from the private local archive."""
+    return _compact(tools.get_score_ledger(course_id, assignment_id, pseudonyms, offset, limit))
+
+
+@mcp.tool(structured_output=False)
 def get_writing_history(pseudonym: str, since: str = "", until: str = "",
                         include_text: bool = False,
                         max_text_chars: int = 2000) -> str:

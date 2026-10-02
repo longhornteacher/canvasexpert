@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from api import feedback_scrub, storage_support
+from api.mirror.attempt_text import digest as attempt_text_digest
 from api.platform_services import workspace
 
 
@@ -269,9 +270,11 @@ def _blob_valid(root, course_id, assignment_id, file_entry):
 
 def _record_observation(manifest, pseudonym, attempt, submitted_at, body, files,
                         *, captured_at, root, course_id, assignment_id,
-                        stream_get=None, canvas_origin="", budget=None):
+                        stream_get=None, canvas_origin="", budget=None,
+                        body_provenance="canvas_attempt"):
     budget = budget or CaptureBudget()
     nonempty_body = body if isinstance(body, str) and body.strip() else ""
+    text_digest = attempt_text_digest(nonempty_body)
     if not nonempty_body and not files:
         return False
     attempt_key = f"{pseudonym}|{int(attempt)}|{submitted_at}"
@@ -327,7 +330,7 @@ def _record_observation(manifest, pseudonym, attempt, submitted_at, body, files,
     if any(item.get("digest") == digest for item in attempt_doc["observations"]):
         return status_snapshot != _json_digest(attempt_doc.get("files", []))
     conflict = bool(attempt_doc["observations"] and (
-        (nonempty_body and any(item.get("body") and item.get("body") != nonempty_body
+        (nonempty_body and any(item.get("text_digest") and item.get("text_digest") != text_digest
                                for item in attempt_doc["observations"]))
         or (file_entries and any(item.get("file_keys") and item.get("file_keys") !=
                                  [file["key"] for file in files]
@@ -336,6 +339,8 @@ def _record_observation(manifest, pseudonym, attempt, submitted_at, body, files,
     attempt_doc["conflict"] = bool(attempt_doc.get("conflict") or conflict)
     attempt_doc["observations"].append({
         "digest": digest, "captured_at": captured_at, "body": nonempty_body,
+        "text_digest": text_digest,
+        "body_provenance": body_provenance,
         "file_keys": [item["key"] for item in files], "conflict": conflict,
     })
     if nonempty_body and not attempt_doc.get("body"):
@@ -359,31 +364,60 @@ def capture_rows(course_id, assignment_id, rows, *, vault, root=None,
             continue
         pseudonym = vault.get_or_assign(str(row["user_id"]))
         entries = [row] + list(row.get("submission_history") or [])
-        for entry in entries:
+        # Canvas can return the same attempt twice, with a sparse historical
+        # entry and a richer top-level current entry. Keep one richer observed
+        # body and union file descriptors; contradictory nonempty bodies remain
+        # separate observations so _record_observation marks the conflict.
+        groups = {}
+        for position, entry in enumerate(entries):
             if not isinstance(entry, dict) or not entry.get("attempt") or not entry.get("submitted_at"):
                 continue
             try:
-                number = int(entry["attempt"])
+                attempt_number = int(entry["attempt"])
             except (TypeError, ValueError):
                 continue
-            if number < 1:
+            if attempt_number < 1:
                 continue
+            key = (attempt_number, str(entry["submitted_at"]))
+            groups.setdefault(key, []).append((position, entry))
+        normalized_entries = []
+        for key, values in groups.items():
+            nonempty = [(position, entry) for position, entry in values
+                        if isinstance(entry.get("body"), str) and entry["body"].strip()]
+            distinct = {attempt_text_digest(entry["body"]) for _position, entry in nonempty}
+            if len(distinct) == 1:
+                position, chosen = min(nonempty, key=lambda item: item[0]) if nonempty else values[0]
+                merged = dict(chosen)
+                merged["attachments"] = list({
+                    str((attachment or {}).get("id") or (attachment or {}).get("filename") or id(attachment)): attachment
+                    for _pos, entry in values for attachment in (entry.get("attachments") or [])
+                    if isinstance(attachment, dict)
+                }.values())
+                merged["_body_provenance"] = ("top_level_fallback" if position == 0
+                    and any(not (entry.get("body") or "").strip() for _pos, entry in values)
+                    else "canvas_attempt")
+                normalized_entries.append((key, merged))
+            else:
+                normalized_entries.extend((key, entry) for _position, entry in values)
+        for (number, submitted_at), entry in normalized_entries:
             body = entry.get("body")
             if isinstance(body, str):
                 body = feedback_scrub.scrub_text(body, replacement_map)
             else:
                 body = ""
             files = [d for d in (_file_descriptor(item) for item in (entry.get("attachments") or [])) if d]
-            prepared.append((pseudonym, number, str(entry["submitted_at"]), body, files))
+            prepared.append((pseudonym, number, str(submitted_at), body, files,
+                             str(entry.get("_body_provenance") or "canvas_attempt")))
 
     changed = False
     with storage_support.interprocess_lock(_manifest_lock(root, course_id, assignment_id)):
         manifest = _read(root, course_id, assignment_id)
-        for pseudonym, number, submitted_at, body, files in prepared:
+        for pseudonym, number, submitted_at, body, files, body_provenance in prepared:
             added = _record_observation(
                 manifest, pseudonym, number, submitted_at, body, files,
                 captured_at=_now(), root=root, course_id=course_id,
                 assignment_id=assignment_id, stream_get=None,
+                body_provenance=body_provenance,
             )
             changed = changed or added
         if changed:
@@ -393,7 +427,7 @@ def capture_rows(course_id, assignment_id, rows, *, vault, root=None,
     # Re-read and rebase each status update after a download so concurrent
     # captures cannot replace observations written while this stream ran.
     if stream_get is not None:
-        for pseudonym, number, submitted_at, _body, files in prepared:
+        for pseudonym, number, submitted_at, _body, files, _body_provenance in prepared:
             attempt_key = f"{pseudonym}|{number}|{submitted_at}"
             for descriptor in files:
                 with storage_support.interprocess_lock(_manifest_lock(root, course_id, assignment_id)):

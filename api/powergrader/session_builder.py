@@ -5,6 +5,7 @@ from datetime import datetime
 from api.powergrader.student_attachments import eligibility_decision
 from api.powergrader import media_recordings
 from api.powergrader import oral_reading
+from api.mirror.attempt_text import digest as attempt_text_digest
 
 
 def _attachment_metadata(attachment: dict) -> dict:
@@ -96,6 +97,9 @@ def build_students(
             "submission_baseline": {
                 "attempt": s.get("attempt"),
                 "submitted_at": s.get("submitted_at"),
+                "entered_score": s.get("entered_score"),
+                "canvas_score": s.get("score"),
+                "submission_digest": s.get("submission_digest") or attempt_text_digest(s.get("body")),
             },
             "status":        "pending",
             "ai_score":      ai.get("score"),
@@ -120,6 +124,109 @@ def build_students(
 
     students.sort(key=lambda x: x["real_name"].lower())
     return students
+
+
+def freeze_score_provenance(students: list[dict], course_id: str,
+                            assignment_id: str, *, pseudonyms=None,
+                            safe_bundle=None) -> None:
+    """Bind current raw-score links to this session's exact mirror baseline."""
+    for student in students:
+        baseline = student.get("submission_baseline")
+        if not isinstance(baseline, dict):
+            continue
+        entered = baseline.get("entered_score")
+        baseline.update({"raw_score": None,
+                         "basis": "entered" if entered is not None else None,
+                         "rule_id": None, "event_id": None,
+                         "consistency": "entered_only" if entered is not None else "unknown",
+                         "text_consistency": "source_unknown"})
+    if pseudonyms:
+        try:
+            from api.mirror import submission_history
+            from api.platform_services import workspace
+            manifest = submission_history.read_history(
+                str(course_id), str(assignment_id), root=workspace.workspace_root())
+            history_attempts = manifest.get("attempts") or {}
+            for student in students:
+                baseline = student.get("submission_baseline") or {}
+                uid = str(student.get("user_id") or "")
+                pseudonym = str(pseudonyms.get(uid) or "")
+                attempt = str(baseline.get("attempt") or "")
+                submitted_at = str(baseline.get("submitted_at") or "")
+                key = f"{pseudonym}|{attempt}|{submitted_at}"
+                doc = history_attempts.get(key)
+                observations = (doc or {}).get("observations") or []
+                expected = str(baseline.get("submission_digest") or "")
+                observed = {str(item.get("text_digest") or "") for item in observations}
+                if doc and doc.get("conflict"):
+                    baseline["text_consistency"] = "conflicting"
+                elif expected and expected in observed:
+                    baseline["text_consistency"] = "consistent"
+                elif observations:
+                    baseline["text_consistency"] = "digest_mismatch"
+                else:
+                    baseline["text_consistency"] = "missing_text"
+        except Exception:
+            pass
+    if isinstance(safe_bundle, dict):
+        from api.mirror.attempt_text import normalize as normalize_attempt_text
+        safe_by_pseudonym = {str(row.get("pseudonym") or ""): row
+                             for row in safe_bundle.get("students") or []
+                             if isinstance(row, dict)}
+        for student in students:
+            baseline = student.get("submission_baseline") or {}
+            uid = str(student.get("user_id") or "")
+            pseudonym = str((pseudonyms or {}).get(uid) or "")
+            source_body = normalize_attempt_text(student.get("body"))
+            responses = (safe_by_pseudonym.get(pseudonym) or {}).get("responses") or []
+            packet_text = "\n".join(str(row.get("response") or "") for row in responses
+                                      if isinstance(row, dict))
+            if not source_body or not packet_text:
+                baseline["packet_text_consistency"] = "source_unknown"
+            else:
+                baseline["packet_text_consistency"] = (
+                    "consistent" if source_body == normalize_attempt_text(packet_text)
+                    else "packet_source_mismatch")
+    try:
+        from api import score_ledger
+        events = score_ledger.list_events(str(course_id), str(assignment_id))
+    except Exception:
+        return
+    for student in students:
+        baseline = student.get("submission_baseline") or {}
+        uid = str(student.get("user_id") or "")
+        attempt = str(baseline.get("attempt") or "")
+        entered, canvas = baseline.get("entered_score"), baseline.get("canvas_score")
+        if not uid or not attempt or entered is None or canvas is None:
+            continue
+        links = [event for event in events
+                 if event.get("source") in {"ce_apply", "ce_curve", "ce_adjustment"}
+                 and event.get("action") == "verified"
+                 and event.get("curve_rule_id")
+                 and event.get("raw_score") is not None
+                 and str(event.get("student_id") or "") == uid
+                 and str(event.get("attempt") or "") == attempt
+                 and event.get("entered_score") is not None
+                 and abs(float(event["entered_score"]) - float(entered)) <= 1e-6
+                 and event.get("canvas_score") is not None
+                 and abs(float(event["canvas_score"]) - float(canvas)) <= 1e-6]
+        if not links:
+            continue
+        link = max(links, key=lambda event: str(event.get("timestamp") or ""))
+        invalidated = any(
+            event.get("source") == "canvas_external"
+            and event.get("action") == "external_change"
+            and str(event.get("student_id") or "") == uid
+            and str(event.get("attempt") or "") == attempt
+            and str(event.get("timestamp") or "") > str(link.get("timestamp") or "")
+            for event in events)
+        if invalidated:
+            baseline.update({"consistency": "external_change", "event_id": link.get("event_id"),
+                             "rule_id": link.get("curve_rule_id")})
+            continue
+        baseline.update({"raw_score": link.get("raw_score"), "basis": "raw",
+                         "rule_id": link.get("curve_rule_id"), "event_id": link.get("event_id"),
+                         "consistency": "current_linked"})
 
 
 def build_session(

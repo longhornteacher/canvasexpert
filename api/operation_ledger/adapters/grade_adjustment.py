@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import math
 
-from api import freshness_policy, operational_log
+from api import freshness_policy, operational_log, score_ledger
 from api.mirror import read_service
 from api.platform_services import canvas_client
 
@@ -141,7 +141,9 @@ def _mirror_baseline(payload: dict, target: dict) -> dict:
             entries.append({"user_id": user_id, "eligible": True,
                             "skip_reason": None, "before": _number(entered_score),
                             "before_excused": False,
-                            "missing": bool(row.get("missing"))})
+                            "missing": bool(row.get("missing")),
+                            "attempt": row.get("attempt"),
+                            "canvas_score": row.get("score")})
     for user_id, row in sorted(rows_by_user.items()):
         if user_id in current_ids:
             continue
@@ -335,6 +337,23 @@ class GradeAdjustmentAdapter:
                     entry, "score_changed_since_preview")
                 continue
 
+            evidence_key = f"adjust:{payload.get('operation_id') or claim.get('operation_id') or target.get('target_key')}:{user_id}:{step['step_key']}"
+            adjustment = payload.get("adjustment") or {}
+            rule_id = adjustment.get("rule_id")
+            source = "ce_adjustment"
+            common = {"source": source, "course_id": target["course_id"],
+                      "assignment_id": payload["assignment_id"], "student_id": user_id,
+                      "attempt": entry.get("attempt"), "raw_score": entry.get("baseline_raw"),
+                      "entered_score": entry.get("after"), "curve_rule_id": rule_id,
+                      "operation_id": payload.get("operation_id")}
+            try:
+                score_ledger.append_event({**common, "action": "intent"},
+                                          idempotency_key=evidence_key + ":intent")
+            except Exception:
+                step = self._mark_step(context, steps, step, "failed", "score_ledger_unavailable")
+                receipt_entries[user_id] = self._receipt_entry(entry, "score_ledger_unavailable")
+                return adapter_support.build_result("failed", steps=steps,
+                    error_code="score_ledger_unavailable", failed_items=list(receipt_entries.values()))
             request = {"submission": {"posted_grade": str(entry["after"])}}
             context.before_send(
                 step["step_key"],
@@ -344,6 +363,11 @@ class GradeAdjustmentAdapter:
             if error:
                 uncertain = adapter_support.is_uncertain(error)
                 code = "grade_write_uncertain" if uncertain else "grade_write_rejected"
+                try:
+                    score_ledger.append_event({**common, "action": "unknown" if uncertain else "failed"},
+                                              idempotency_key=evidence_key + (":unknown" if uncertain else ":failed"))
+                except Exception:
+                    pass
                 step_state = "sent_unknown" if uncertain else "failed"
                 self._mark_step(context, steps, step, step_state, code)
                 receipt_entries[user_id] = self._receipt_entry(entry, code)
@@ -353,8 +377,19 @@ class GradeAdjustmentAdapter:
                     failed_items=list(receipt_entries.values()),
                 )
 
+            evidence_failed = False
+            try:
+                score_ledger.append_event({**common, "action": "accepted"},
+                                          idempotency_key=evidence_key + ":accepted")
+            except Exception:
+                evidence_failed = True
             readback, read_error = canvas_client.canvas_get(path)
             if read_error:
+                try:
+                    score_ledger.append_event({**common, "action": "unknown"},
+                                              idempotency_key=evidence_key + ":unknown-readback")
+                except Exception:
+                    evidence_failed = True
                 code = "grade_write_uncertain"
                 self._mark_step(context, steps, step, "sent_unknown", code)
                 receipt_entries[user_id] = self._receipt_entry(entry, code)
@@ -364,6 +399,15 @@ class GradeAdjustmentAdapter:
                     failed_items=list(receipt_entries.values()),
                 )
             if not self._submission_matches(readback, entry.get("after"), False):
+                try:
+                    score_ledger.append_event({**common, "action": "unknown",
+                        "observed_entered_score": readback.get("entered_score"),
+                        "canvas_score": readback.get("score"),
+                        "points_deducted": readback.get("points_deducted"),
+                        "late_status": readback.get("late_policy_status")},
+                        idempotency_key=evidence_key + ":unknown-readback")
+                except Exception:
+                    evidence_failed = True
                 code = "grade_write_unverified"
                 self._mark_step(context, steps, step, "sent_unknown", code)
                 receipt_entries[user_id] = self._receipt_entry(entry, code)
@@ -371,11 +415,34 @@ class GradeAdjustmentAdapter:
                     "sent_unknown", steps=steps, error_code=code,
                     failed_items=list(receipt_entries.values()),
                 )
+            try:
+                score_ledger.append_event({**common, "action": "verified",
+                    "canvas_score": readback.get("score"),
+                    "observed_entered_score": readback.get("entered_score"),
+                    "points_deducted": readback.get("points_deducted"),
+                    "late_status": readback.get("late_policy_status")},
+                    idempotency_key=evidence_key + ":verified")
+                if adjustment.get("kind") == "revert_rule":
+                    score_ledger.append_event({**common, "source": "ce_curve", "action": "revert",
+                        "origin_event_id": entry.get("origin_event_id")},
+                        idempotency_key=evidence_key + ":revert")
+            except Exception:
+                evidence_failed = True
+            if evidence_failed:
+                code = "score_ledger_unavailable"
+                self._mark_step(context, steps, step, "sent_unknown", code)
+                receipt_entries[user_id] = self._receipt_entry(entry, code)
+                return adapter_support.build_result("sent_unknown", steps=steps,
+                    error_code=code, failed_items=list(receipt_entries.values()))
             self._mark_step(context, steps, step, "applied")
             receipt_entries[user_id] = self._receipt_entry(entry, "done")
             writes += 1
 
         if writes:
+            try:
+                score_ledger.flush_exports(target["course_id"], payload["assignment_id"])
+            except Exception:
+                pass
             try:
                 from api.webui import mirror_service
                 mirror_service.notify_course_changed(target["course_id"])

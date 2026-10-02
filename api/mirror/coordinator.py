@@ -47,6 +47,7 @@ class _Job:
     queue_wait_ms: int = 0
     mirror_revision: int = 0
     snapshot_id: str = ""
+    canvas_external_count: int = 0
 
 
 @dataclass
@@ -216,6 +217,10 @@ class MirrorCoordinator:
         if job.mirror_revision or job.snapshot_id:
             view.update({"mirror_revision": job.mirror_revision,
                          "snapshot_id": job.snapshot_id})
+        if (job.state == "succeeded" and job.scope in {
+                "course.refresh", "course.feedback_refresh", "course.scoring_refresh",
+                "submissions.course_delta"}):
+            view["canvas_external_count"] = job.canvas_external_count
         return view
 
     def _refresh_plan_locked(self, plan: _Plan) -> None:
@@ -255,6 +260,9 @@ class MirrorCoordinator:
                     if isinstance(outcome, dict):
                         job.mirror_revision = int(outcome.get("mirror_revision") or 0)
                         job.snapshot_id = str(outcome.get("snapshot_id") or "")
+                        count = outcome.get("canvas_external_count")
+                        job.canvas_external_count = (count if isinstance(count, int) and not isinstance(count, bool)
+                                                     and count >= 0 else 0)
             except Exception as error:
                 with self._lock:
                     job.state = "failed"

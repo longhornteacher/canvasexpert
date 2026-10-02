@@ -28,7 +28,7 @@ import copy
 import math
 from datetime import datetime, timezone
 
-from api import grading_policy, operational_log
+from api import grading_policy, operational_log, score_ledger
 from api.freshness_policy import LOCAL_TIMEZONE
 from api.mirror import read_service
 from api.platform_services import canvas_client, config
@@ -434,6 +434,8 @@ class MissingFillAdapter:
         is_undo = payload.get("mode") == "undo"
         any_failed = False
         writes = 0
+        ledger_validated = set()
+        ledger_scopes = set()
 
         for step in steps:
             if step.get("state") == "applied":
@@ -487,12 +489,38 @@ class MissingFillAdapter:
             posted_grade = "" if is_undo else str(entry["missing_value"])
             request = {"submission": {"posted_grade": posted_grade,
                                       "late_policy_status": "missing"}}
+            ledger_assignment = str(entry.get("assignment_id") or payload.get("assignment_id") or "")
+            if ledger_assignment not in ledger_validated:
+                try:
+                    score_ledger.validate_scope(str(target["course_id"]), ledger_assignment)
+                except Exception:
+                    self._mark_step(context, steps, step, "failed", "score_ledger_unavailable")
+                    receipt_entries[key] = self._receipt_entry(entry, "score_ledger_unavailable")
+                    return adapter_support.build_result("failed", steps=steps,
+                        error_code="score_ledger_unavailable", failed_items=list(receipt_entries.values()))
+                ledger_validated.add(ledger_assignment)
+            evidence_key = f"missing:{target.get('idempotency_key')}:{ledger_assignment}:{key}:{'undo' if is_undo else 'fill'}"
+            evidence = {"source": "ce_adjustment", "course_id": target["course_id"],
+                "assignment_id": ledger_assignment, "student_id": entry.get("user_id"),
+                "action": "intent", "entered_score": None if is_undo else entry.get("missing_value"),
+                "late_status": "missing", "operation_id": target.get("idempotency_key")}
+            try:
+                score_ledger.append_event(evidence, idempotency_key=evidence_key + ":intent")
+            except Exception:
+                self._mark_step(context, steps, step, "failed", "score_ledger_unavailable")
+                return adapter_support.build_result("failed", steps=steps,
+                    error_code="score_ledger_unavailable", failed_items=list(receipt_entries.values()))
             context.before_send(
                 step["step_key"],
                 models.sha256_dict({"method": "PUT", "path": path, "payload": request}),
             )
             _response, error = canvas_client._canvas_send("PUT", path, request)
             if error:
+                try:
+                    score_ledger.append_event({**evidence, "action": "unknown" if adapter_support.is_uncertain(error) else "failed"},
+                        idempotency_key=evidence_key + (":unknown" if adapter_support.is_uncertain(error) else ":failed"))
+                except Exception:
+                    pass
                 if adapter_support.is_uncertain(error):
                     code = "missing_fill_uncertain"
                     self._mark_step(context, steps, step, "sent_unknown", code)
@@ -511,8 +539,19 @@ class MissingFillAdapter:
                 any_failed = True
                 continue
 
+            try:
+                score_ledger.append_event({**evidence, "action": "accepted"},
+                    idempotency_key=evidence_key + ":accepted")
+            except Exception:
+                pass
+
             readback, read_error = canvas_client.canvas_get(path)
             if read_error:
+                try:
+                    score_ledger.append_event({**evidence, "action": "unknown"},
+                        idempotency_key=evidence_key + ":unknown-readback")
+                except Exception:
+                    pass
                 code = "missing_fill_uncertain"
                 self._mark_step(context, steps, step, "sent_unknown", code)
                 receipt_entries[key] = self._receipt_entry(entry, code)
@@ -534,11 +573,23 @@ class MissingFillAdapter:
                     "sent_unknown", steps=steps, error_code=code,
                     failed_items=list(receipt_entries.values()),
                 )
+            score_ledger.append_event({**evidence, "action": "verified",
+                "canvas_score": readback.get("score"),
+                "observed_entered_score": readback.get("entered_score"),
+                "points_deducted": readback.get("points_deducted"),
+                "late_status": readback.get("late_policy_status")},
+                idempotency_key=evidence_key + ":verified")
+            ledger_scopes.add(ledger_assignment)
             self._mark_step(context, steps, step, "applied")
             receipt_entries[key] = self._receipt_entry(entry, "done")
             writes += 1
 
         if writes:
+            for assignment_scope in ledger_scopes:
+                try:
+                    score_ledger.flush_exports(target["course_id"], assignment_scope)
+                except Exception:
+                    pass
             try:
                 from api.webui import mirror_service
                 mirror_service.notify_course_changed(target["course_id"])

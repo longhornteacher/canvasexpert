@@ -251,7 +251,8 @@ def test_refresh_appends_a_late_student_and_preserves_every_existing_record(
     assert new_bundle["students"][2]["pseudonym"] == result["added"][0]
     assert scoring_packet.validate_safe_bundle(new_bundle)["ok"] is True
     assert result["packet_digest"] == scoring_packet.packet_digest(
-        sid, new_bundle, course_id="c1", assignment_id="a1")
+        sid, new_bundle, course_id="c1", assignment_id="a1",
+        baseline_provenance=after.get("students"))
     blob = json.dumps(new_bundle)
     assert "900003" not in blob and "Late Learner" not in blob
     assert after["privacy_artifacts"]["safe_bundle"] != before["privacy_artifacts"]["safe_bundle"]
@@ -347,7 +348,11 @@ def test_refresh_replaces_only_unposted_resubmissions_and_only_when_asked(scorin
     fresh = next(s for s in after["students"] if s["user_id"] == "900001")
     assert fresh["ai_score"] is None and not fresh["ai_feedback"]
     assert fresh["teacher_score"] is None and fresh["status"] == "pending" and "grading" not in fresh
-    assert fresh["submission_baseline"] == {"attempt": 2, "submitted_at": "2026-09-19T10:00:00Z"}
+    baseline = fresh["submission_baseline"]
+    assert baseline["attempt"] == 2 and baseline["submitted_at"] == "2026-09-19T10:00:00Z"
+    assert baseline["entered_score"] is None and baseline["canvas_score"] is None
+    assert baseline["raw_score"] is None and baseline["consistency"] == "unknown"
+    assert len(baseline["submission_digest"]) == 64
     assert next(s for s in after["students"] if s["user_id"] == "900002") == next(
         s for s in before["students"] if s["user_id"] == "900002")
     rows = world.bundle(after)["students"]

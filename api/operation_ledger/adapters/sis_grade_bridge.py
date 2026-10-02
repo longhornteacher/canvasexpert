@@ -14,7 +14,7 @@ import copy
 import math
 from typing import Any
 
-from api import course_catalog, operational_log
+from api import course_catalog, operational_log, score_ledger
 from api.mirror import read_service
 from api.platform_services import canvas_client, config
 
@@ -552,6 +552,12 @@ class SisGradeBridgeAdapter:
             adapter_support.replace_step(steps, step)
 
         grade_writes = 0
+        if grade_entries:
+            try:
+                score_ledger.validate_scope(str(course_id), bridge_id)
+            except Exception:
+                return adapter_support.build_result("blocked", steps=steps,
+                    error_code="score_ledger_unavailable", returned_object_id=bridge_id)
         for index, entry in enumerate(grade_entries):
             step_key = f"copy_grade:{index}"
             step = adapter_support.find_step(steps, step_key)
@@ -562,23 +568,68 @@ class SisGradeBridgeAdapter:
                 f"/api/v1/courses/{course_id}/assignments/{bridge_id}/"
                 f"submissions/{entry['user_id']}"
             )
+            evidence_key = f"sis-bridge:{target.get('idempotency_key')}:{bridge_id}:{entry['user_id']}:{step_key}"
+            evidence = {"source": "ce_adjustment", "action": "intent",
+                "course_id": course_id, "assignment_id": bridge_id,
+                "student_id": entry.get("user_id"),
+                "entered_score": request["submission"].get("posted_grade"),
+                "operation_id": target.get("idempotency_key")}
+            try:
+                score_ledger.append_event(evidence, idempotency_key=evidence_key + ":intent")
+            except Exception:
+                return adapter_support.build_result("blocked", steps=steps,
+                    error_code="score_ledger_unavailable", returned_object_id=bridge_id)
             context.before_send(step_key, _request_digest("PUT", path, request))
             _response, error = canvas_client._canvas_send("PUT", path, request)
             if error:
+                try:
+                    uncertain = adapter_support.is_uncertain(error)
+                    score_ledger.append_event({**evidence, "action": "unknown" if uncertain else "failed"},
+                        idempotency_key=evidence_key + (":unknown" if uncertain else ":failed"))
+                except Exception:
+                    pass
                 return self._stop_after_error(
                     context, steps, step, error,
                     uncertain_code="grade_write_uncertain",
                     rejection_code="grade_write_rejected",
                     returned_object_id=bridge_id,
                 )
+            evidence_failed = False
+            try:
+                score_ledger.append_event({**evidence, "action": "accepted"},
+                    idempotency_key=evidence_key + ":accepted")
+            except Exception:
+                evidence_failed = True
             submission, read_error = canvas_client.canvas_get(path)
             if read_error or not _grade_matches(submission or {}, entry):
+                try:
+                    score_ledger.append_event({**evidence, "action": "unknown",
+                        "canvas_score": (submission or {}).get("score"),
+                        "observed_entered_score": (submission or {}).get("entered_score"),
+                        "points_deducted": (submission or {}).get("points_deducted"),
+                        "late_status": (submission or {}).get("late_policy_status")},
+                        idempotency_key=evidence_key + ":unknown-readback")
+                except Exception:
+                    evidence_failed = True
                 return self._stop_after_error(
                     context, steps, step, read_error or "grade postcondition mismatch",
                     uncertain_code="grade_write_unverified",
                     force_uncertain=True,
                     returned_object_id=bridge_id,
                 )
+            try:
+                score_ledger.append_event({**evidence, "action": "verified",
+                    "observed_entered_score": submission.get("entered_score"),
+                    "canvas_score": submission.get("score"),
+                    "points_deducted": submission.get("points_deducted"),
+                    "late_status": submission.get("late_policy_status")},
+                    idempotency_key=evidence_key + ":verified")
+            except Exception:
+                evidence_failed = True
+            if evidence_failed:
+                self._mark_step(context, steps, step, "sent_unknown", "score_ledger_unavailable")
+                return adapter_support.build_result("sent_unknown", steps=steps,
+                    error_code="score_ledger_unavailable", returned_object_id=bridge_id)
             step["state"] = "applied"
             step["error_code"] = None
             step = context.checkpoint_step(step)
@@ -586,6 +637,10 @@ class SisGradeBridgeAdapter:
             grade_writes += 1
 
         if grade_writes:
+            try:
+                score_ledger.flush_exports(course_id, bridge_id)
+            except Exception:
+                pass
             try:
                 from api.webui import mirror_service
                 mirror_service.notify_course_changed(course_id)

@@ -28,6 +28,64 @@ from api import feedback_vault
 from api.mcp_server import tools
 from api.powergrader import scoring_packet, session_builder, session_store
 
+
+def test_score_provenance_is_frozen_and_newer_external_evidence_invalidates_raw(monkeypatch):
+    from api import score_ledger
+
+    student = {"user_id": "student-1", "submission_baseline": {
+        "attempt": 1, "entered_score": 67, "canvas_score": 67,
+        "submitted_at": "2026-09-01T12:00:00Z", "submission_digest": "digest-1",
+    }}
+    verified = {"source": "ce_apply", "action": "verified", "student_id": "student-1",
+        "attempt": 1, "raw_score": 53, "entered_score": 67, "canvas_score": 67,
+        "curve_rule_id": "rule-1", "event_id": "e1", "timestamp": "2026-09-01T13:00:00Z"}
+    monkeypatch.setattr(score_ledger, "list_events", lambda *a, **k: [verified])
+    session_builder.freeze_score_provenance([student], "course-1", "assignment-1")
+    assert student["submission_baseline"]["raw_score"] == 53
+    assert student["submission_baseline"]["basis"] == "raw"
+
+    external = {"source": "canvas_external", "action": "external_change",
+        "student_id": "student-1", "attempt": 1, "event_id": "e2",
+        "timestamp": "2026-09-01T14:00:00Z"}
+    monkeypatch.setattr(score_ledger, "list_events", lambda *a, **k: [verified, external])
+    session_builder.freeze_score_provenance([student], "course-1", "assignment-1")
+    assert student["submission_baseline"]["raw_score"] is None
+    assert student["submission_baseline"]["entered_score"] == 67
+    assert student["submission_baseline"]["consistency"] == "external_change"
+
+
+def test_score_ledger_outage_keeps_entered_baseline(monkeypatch):
+    from api import score_ledger
+
+    student = {"user_id": "student-1", "submission_baseline": {
+        "attempt": 1, "entered_score": 67, "canvas_score": 67}}
+    monkeypatch.setattr(score_ledger, "list_events", lambda *a, **k: (_ for _ in ()).throw(
+        score_ledger.ScoreLedgerError("score_ledger_unavailable")))
+    session_builder.freeze_score_provenance([student], "course-1", "assignment-1")
+    assert student["submission_baseline"]["raw_score"] is None
+    assert student["submission_baseline"]["entered_score"] == 67
+    assert student["submission_baseline"]["basis"] == "entered"
+
+
+def test_packet_baseline_records_normalized_history_consistency(monkeypatch):
+    from api import score_ledger
+    from api.mirror import submission_history
+    from api.mirror.attempt_text import digest
+
+    body = "<p>Good work</p><p>https://example.invalid/signed</p>"
+    student = {"user_id": "student-1", "submission_baseline": {
+        "attempt": 1, "submitted_at": "2026-09-01T12:00:00Z",
+        "submission_digest": digest("Good work"),
+    }}
+    monkeypatch.setattr(score_ledger, "list_events", lambda *a, **k: [])
+    monkeypatch.setattr(submission_history, "read_history", lambda *a, **k: {
+        "attempts": {"Pika|1|2026-09-01T12:00:00Z": {"conflict": False,
+            "observations": [{"text_digest": digest(body)}]}}
+    })
+    session_builder.freeze_score_provenance([student], "course-1", "assignment-1",
+                                             pseudonyms={"student-1": "Pika"})
+    assert student["submission_baseline"]["text_consistency"] == "consistent"
+
 _ORDINALS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven"]
 
 
@@ -405,7 +463,8 @@ def test_packet_digest_is_shared_by_both_sides():
     packet = scoring_packet.build_packet(session=session, safe_bundle=bundle, include_context=False)
 
     assert packet["packet_digest"] == scoring_packet.packet_digest(
-        "s1", bundle, course_id="c1", assignment_id="a1")
+        "s1", bundle, course_id="c1", assignment_id="a1",
+        baseline_provenance=session.get("students"))
     assert packet["packet_digest"] != scoring_packet.packet_digest(
         "other-session", bundle, course_id="c1", assignment_id="a1")
     assert packet["packet_digest"] != scoring_packet.packet_digest(
@@ -552,7 +611,9 @@ def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):
     assert result["included_context"] is True
     # Tabulated on the way out, after the gate has walked the dict rows.
     assert list(result["students"]["columns"]) == [
-        "pseudonym", "item_id", "text", "segment_index", "segment_count"
+        "pseudonym", "item_id", "text", "segment_index", "segment_count",
+        "baseline_raw", "baseline_entered", "baseline_basis", "baseline_rule_id",
+        "baseline_event_id", "baseline_attempt", "baseline_consistency", "text_consistency",
     ]
     assert list(result["items"]["columns"]) == ["item_id", "prompt", "possible"]
     assert len(result["students"]["rows"]) == 6
@@ -774,7 +835,7 @@ def test_get_scoring_packet_keeps_contract_and_basis_when_context_is_compacted(m
     assert result["contract"]
     assert result["rubric"] == {"label": "Test Rubric", "included": True}
     assert result["shared_context_compaction"]["code"] == "shared_context_compacted"
-    assert result["students"]["columns"][-2:] == ["segment_index", "segment_count"]
+    assert result["students"]["columns"][3:5] == ["segment_index", "segment_count"]
 
 
 def test_combined_large_description_materials_and_response_stay_reconstructible(monkeypatch):

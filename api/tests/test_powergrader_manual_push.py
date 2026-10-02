@@ -17,6 +17,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from api.powergrader import session_actions
 
 
+@pytest.fixture(autouse=True)
+def _isolated_score_ledger_workspace(tmp_path, monkeypatch):
+    from api.platform_services import workspace
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
+
+
 def _session():
     return {
         "session_id": "session-1",
@@ -123,10 +129,11 @@ def test_successful_send_performs_no_canvas_read():
 
     assert result["ok"] is True
     assert len(calls) == 2
-    # The accepted-write receipt carries transport facts only.
+    # The accepted-write receipt retains the exact score sent for provenance.
     receipt = session["push_log"][-1]["results"][0]
     assert set(receipt) == {"user_id", "status", "code",
-                            "request_digest", "target_digest"}
+                            "request_digest", "target_digest", "entered_score"}
+    assert receipt["entered_score"] == 4.0
 
 
 def test_transport_error_is_unknown_without_idempotency_or_repeat():

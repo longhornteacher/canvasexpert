@@ -83,7 +83,7 @@ def _canonical_digest(value: dict) -> str:
 
 
 def packet_digest(scoring_session_id, safe_bundle: dict, *,
-                  course_id="", assignment_id="") -> str:
+                  course_id="", assignment_id="", baseline_provenance=None) -> str:
     """Identity of one assignment-scoped scoring session's SAFE bundle.
 
     ``stage_scoring_results`` recomputes this and refuses to stage scores once
@@ -93,6 +93,12 @@ def packet_digest(scoring_session_id, safe_bundle: dict, *,
     """
     return _canonical_digest({
         "bundle": safe_bundle,
+        "baseline_provenance": [
+            {"user_id": str(student.get("user_id") or ""),
+             "submission_baseline": student.get("submission_baseline") or {}}
+            for student in (baseline_provenance or [])
+            if isinstance(student, dict)
+        ],
         "scoring_session_id": str(scoring_session_id or ""),
         "course_id": str(course_id or ""),
         "assignment_id": str(assignment_id or ""),
@@ -374,6 +380,7 @@ def build_packet(
     digest = packet_digest(
         session.get("session_id"), safe_bundle,
         course_id=session.get("course_id"), assignment_id=session.get("assignment_id"),
+        baseline_provenance=session.get("students"),
     )
     items = sorted(items_by_id.values(), key=lambda i: i["item_id"])
     bundle_student_count = len(bundle_pseudonyms)

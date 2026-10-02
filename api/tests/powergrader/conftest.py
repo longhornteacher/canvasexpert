@@ -318,3 +318,10 @@ def _tracked_docx_submission(_timeline_docx):
         }
 
     return tracked_docx_submission
+
+@pytest.fixture(autouse=True)
+def _score_evidence_workspace(tmp_path, monkeypatch):
+    """Numeric write examples get an isolated private evidence archive."""
+    from api.platform_services import workspace
+
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))

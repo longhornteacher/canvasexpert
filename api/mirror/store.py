@@ -789,6 +789,9 @@ def normalize_submission(row: dict, vault=None) -> tuple[str, dict, dict] | None
         "graded_at": row.get("graded_at"),
         "score": row.get("score"),
         "entered_score": row.get("entered_score"),
+        "points_deducted": row.get("points_deducted"),
+        "late_policy_status": row.get("late_policy_status"),
+        "late_days": row.get("late_days"),
         "grade": row.get("grade"),
         "late": bool(row.get("late")),
         "missing": bool(row.get("missing")),
@@ -811,6 +814,8 @@ def normalize_submission(row: dict, vault=None) -> tuple[str, dict, dict] | None
             if isinstance(entry, dict)
         ],
     }
+    from .attempt_text import digest as attempt_text_digest
+    current["submission_digest"] = attempt_text_digest(current.get("body"))
     attempts: dict[str, dict] = {}
     # The row itself first, then history — a history entry for the same
     # attempt is richer (attachments, exact body) and must win.
@@ -922,7 +927,8 @@ def write_assignments(course_id, rows: list[dict], *, root=None,
 def merge_submissions(course_id, assignment_id, rows: list[dict], *,
                       root=None, attempted_at: str | None = None,
                       state: str = "current", replace: bool = False,
-                      stream_get=None, canvas_origin="", capture_budget=None) -> dict:
+                      stream_get=None, canvas_origin="", capture_budget=None,
+                      score_summary: dict | None = None) -> dict:
     """Merge Canvas submission rows into one assignment's mirror file.
 
     ``replace=False`` (delta): upsert the incoming users, keep everyone else.
@@ -957,11 +963,127 @@ def merge_submissions(course_id, assignment_id, rows: list[dict], *,
                           "attempts": dict(entry["attempts"])}
                 for user_id, entry in existing_entries.items()
             }
+            from api import score_ledger
+            ledger_root = workspace.workspace_root()
+            ledger_events = score_ledger.list_events(str(course_id), str(assignment_id), root=ledger_root)
+            latest_observation = {}
+            for event in ledger_events:
+                is_mirror_observation = (event.get("source") in {"mirror_observed", "canvas_external"}
+                    and event.get("action") in {"observed", "linked_ce_evidence", "external_change"})
+                is_verified_ce_observation = (event.get("source") in {"ce_apply", "ce_curve", "ce_adjustment"}
+                    and event.get("action") == "verified" and event.get("canvas_score") is not None)
+                if not (is_mirror_observation or is_verified_ce_observation):
+                    continue
+                key = (str(event.get("student_id") or ""), str(event.get("attempt") or ""))
+                if key not in latest_observation or str(event.get("timestamp") or "") >= str(latest_observation[key].get("timestamp") or ""):
+                    latest_observation[key] = event
+            evidence_changed = False
+            external_count = 0
             for row in rows or []:
                 normalized = normalize_submission(row, vault)
                 if normalized is None:
                     continue
                 user_id, current, attempts = normalized
+                attempt_value = current.get("attempt")
+                attempt_key = str(attempt_value or "")
+                raw_student_id = str(row.get("user_id") or "")
+                prior = latest_observation.get((raw_student_id, attempt_key))
+                score_fact = (current.get("score"), current.get("entered_score"),
+                    current.get("points_deducted"), current.get("late_policy_status"),
+                    current.get("late_days"), current.get("submission_digest"))
+                def same(left, right):
+                    return tuple(left or ()) == tuple(right or ())
+                prior_fact = ((prior.get("canvas_score"), prior.get("entered_score"),
+                    prior.get("points_deducted"), prior.get("late_status"), prior.get("late_days"),
+                    prior.get("submission_digest")) if prior else None)
+                if prior and same(prior_fact, score_fact) and prior.get("source") in {"mirror_observed", "canvas_external"}:
+                    # Replay of an unchanged refresh is not a new event.
+                    pass
+                else:
+                    ce_candidates = [event for event in ledger_events
+                        if event.get("source") in {"ce_apply", "ce_curve", "ce_adjustment"}
+                        and event.get("action") in {"accepted", "verified", "unknown"}
+                        and str(event.get("student_id") or "") == raw_student_id
+                        and str(event.get("attempt") or "") == attempt_key
+                        and event.get("entered_score") is not None]
+                    ce_candidates.sort(key=lambda item: str(item.get("timestamp") or ""))
+                    consumed = {str(event.get("origin_event_id")) for event in ledger_events
+                                if event.get("source") in {"mirror_observed", "canvas_external"}
+                                and event.get("origin_event_id")}
+                    newer_verified = [event for event in ce_candidates
+                        if event.get("action") == "verified" and event.get("canvas_score") is not None
+                        and str(event.get("timestamp") or "") > str(attempted_at)]
+                    stale_conflict = next((event for event in reversed(newer_verified)
+                        if score_fact[1] is None
+                        or abs(float(event.get("canvas_score")) - float(score_fact[0] or 0)) > 1e-6
+                        or (event.get("entered_score") is not None and
+                            abs(float(event["entered_score"]) - float(score_fact[1])) > 1e-6)), None)
+                    if stale_conflict:
+                        score_ledger.append_event({
+                            "source": "mirror_observed", "action": "stale_snapshot",
+                            "course_id": str(course_id), "assignment_id": str(assignment_id),
+                            "student_id": raw_student_id, "attempt": attempt_value,
+                            "entered_score": score_fact[1], "canvas_score": score_fact[0],
+                            "submission_digest": current.get("submission_digest"),
+                            "observation_at": str(attempted_at),
+                            "origin_event_id": stale_conflict.get("event_id"),
+                            "actor": "unknown",
+                        }, idempotency_key=f"mirror-stale:{user_id}:{attempt_key}:{attempted_at}:{score_fact}",
+                           root=ledger_root)
+                        previous = entries.get(user_id) or existing_entries.get(user_id) or {}
+                        merged_attempts = dict(previous.get("attempts") or {})
+                        for attempt_num, incoming in attempts.items():
+                            merged_attempts.setdefault(attempt_num, incoming)
+                        entries[user_id] = {"current": dict(previous.get("current") or current),
+                                            "attempts": merged_attempts}
+                        ledger_events = score_ledger.list_events(str(course_id), str(assignment_id), root=ledger_root)
+                        evidence_changed = True
+                        continue
+                    eligible_ce = [event for event in ce_candidates
+                        if str(event.get("event_id") or "") not in consumed
+                        and (not prior or str(event.get("timestamp") or "") >
+                             str(prior.get("timestamp") or ""))]
+                    matching_ce = (prior if prior and prior.get("source") in {"ce_apply", "ce_curve", "ce_adjustment"}
+                        and prior.get("action") == "verified" and score_fact[1] is not None
+                        and abs(float(prior.get("entered_score")) - float(score_fact[1])) <= 1e-6
+                        and abs(float(prior.get("canvas_score")) - float(score_fact[0] or 0)) <= 1e-6
+                        else next((event for event in reversed(eligible_ce)
+                        if score_fact[1] is not None
+                        and abs(float(event["entered_score"]) - float(score_fact[1])) <= 1e-6), None))
+                    latest_ce = eligible_ce[-1] if eligible_ce else None
+                    changed = (bool(prior and not same(prior_fact, score_fact))
+                        or bool(not prior and latest_ce and score_fact[1] is not None
+                                and abs(float(latest_ce["entered_score"]) - float(score_fact[1])) > 1e-6))
+                    source = "canvas_external" if changed and matching_ce is None else "mirror_observed"
+                    action = "external_change" if source == "canvas_external" else (
+                        "linked_ce_evidence" if matching_ce else "observed")
+                    new_event = score_ledger.append_event({
+                        "source": source, "action": action,
+                        "course_id": str(course_id), "assignment_id": str(assignment_id),
+                        "student_id": str(row.get("user_id") or ""), "attempt": attempt_value,
+                        "submission_digest": current.get("submission_digest"),
+                        "entered_score": score_fact[1], "canvas_score": score_fact[0],
+                        "old_entered_score": prior.get("entered_score") if prior else None,
+                        "new_entered_score": score_fact[1],
+                        "old_canvas_score": prior.get("canvas_score") if prior else None,
+                        "new_canvas_score": score_fact[0], "actor": "unknown",
+                        "points_deducted": score_fact[2], "late_status": score_fact[3],
+                        "late_days": score_fact[4],
+                        "old_points_deducted": prior.get("points_deducted") if prior else None,
+                        "new_points_deducted": score_fact[2],
+                        "old_late_status": prior.get("late_status") if prior else None,
+                        "new_late_status": score_fact[3],
+                        "old_late_days": prior.get("late_days") if prior else None,
+                        "new_late_days": score_fact[4],
+                        "observation_at": str(attempted_at),
+                        "origin_event_id": matching_ce.get("event_id") if matching_ce else None,
+                    }, idempotency_key=(f"mirror-score:{user_id}:{attempt_key}:"
+                                        f"{prior.get('event_id') if prior else 'initial'}:{score_fact}"), root=ledger_root)
+                    latest_observation[(raw_student_id, attempt_key)] = new_event
+                    ledger_events.append(new_event)
+                    evidence_changed = True
+                    if source == "canvas_external":
+                        external_count += 1
                 previous = entries.get(user_id) or existing_entries.get(user_id) or {}
                 merged_attempts = dict(previous.get("attempts") or {})
                 for attempt_key, incoming in attempts.items():
@@ -991,6 +1113,11 @@ def merge_submissions(course_id, assignment_id, rows: list[dict], *,
                     if previous_current.get("submission_comments"):
                         current["submission_comments"] = previous_current["submission_comments"]
                 entries[user_id] = {"current": current, "attempts": merged_attempts}
+            # Deduplicated retries still reconcile the export snapshot after a
+            # prior event publication whose export flush may have failed.
+            score_ledger.flush_exports(str(course_id), str(assignment_id), root=ledger_root)
+            if score_summary is not None:
+                score_summary["canvas_external_count"] = external_count
             document = {
                 "schema_version": MIRROR_VERSION,
                 "course_id": str(course_id),

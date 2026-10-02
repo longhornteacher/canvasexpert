@@ -7,12 +7,19 @@ import pytest
 
 from api.feedback_vault import Vault
 from api.mcp_server import tools
-from api.powergrader import scoring_packet
+from api.powergrader import scoring_packet, session_store
 
 
 REAL_ID = "900123"
 REAL_NAME = "Ada Lovelace"
 PSEUDONYM = "Pikachu"
+
+
+@pytest.fixture(autouse=True)
+def _score_evidence_workspace(tmp_path, monkeypatch):
+    from api.platform_services import workspace
+
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
 
 
 def _wire(monkeypatch, tmp_path, _set_active_courses):
@@ -54,8 +61,10 @@ def _result(score=8):
 
 
 def _digest(bundle):
+    session = session_store.load_session("session-1") or {}
     return scoring_packet.packet_digest("session-1", bundle,
-        course_id="course-1", assignment_id="assignment-1")
+        course_id="course-1", assignment_id="assignment-1",
+        baseline_provenance=session.get("students"))
 
 
 def _stage_then_apply(session_id, results, packet_digest, *, review_digest="", answers=None,
@@ -90,6 +99,106 @@ def test_stage_is_local_and_apply_is_the_only_canvas_lane(monkeypatch, tmp_path,
     assert writes == [True]
     assert result["counts"]["finalized"] == 1
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
+
+
+def test_curve_stage_apply_ledger_and_ledger_driven_revert(monkeypatch, tmp_path, _set_active_courses):
+    """EXAMPLE: one frozen 53→67 post is verified, recorded, replay-safe and revertible."""
+    session, bundle, sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    from api import score_curves, score_ledger, grade_adjustment
+    from api.operation_ledger.adapters import grade_adjustment as adjustment_adapter
+    from api.platform_services import canvas_client, config
+    from api.powergrader import scoring_apply
+
+    session["assignment"]["points_possible"] = 100
+    bundle["students"][0]["responses"][0]["possible"] = 100
+    (tmp_path / "safe-bundle.json").write_text(json.dumps(bundle), encoding="utf-8")
+    session["students"][0]["submission_baseline"] = {
+        "attempt": 1, "submitted_at": "2026-01-01T00:00:00Z",
+        "entered_score": None, "canvas_score": None,
+    }
+    rule = score_curves.create_rule("course-1", {"model": "gap_close", "fraction": .30},
+                                    "assignment-1", root=tmp_path)
+    writes, reads = [], []
+    def send(method, path, payload):
+        writes.append((path, payload))
+        return {"ok": True}, None
+    def read(path, params):
+        reads.append((path, params))
+        return ([{"user_id": int(REAL_ID), "entered_score": 67, "score": 67,
+                  "points_deducted": None, "late_policy_status": None}], None)
+    monkeypatch.setattr(scoring_apply, "default_transports", lambda: send)
+    monkeypatch.setattr(scoring_apply, "default_read_transport", lambda: read)
+    staged = tools.stage_scoring_results("session-1", _result(53), _digest(bundle))
+    assert staged.get("status") == "staged", staged
+    assert staged["score_rows"][0]["raw"] == 53
+    assert staged["score_rows"][0]["entered"] == 67
+    assert staged["score_rows"][0]["rule_id"] == rule["rule_id"]
+    applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+    assert applied["ok"] is True and applied["counts"]["finalized"] == 1
+    result_row = applied["results"][0]
+    assert result_row["late"]["raw_score"] == 53
+    assert result_row["late"]["entered_score"] == 67
+    assert result_row["late"]["canvas_score"] == 67
+    assert result_row["late"]["curve_rule_id"] == rule["rule_id"]
+    assert len(writes) == len(reads) == 1
+    assert writes[0][1]["submission"]["posted_grade"] == "67"
+    comment = writes[0][1]["comment"]["text_comment"]
+    assert "Raw 53 -> Entered 67." in comment
+
+    replay = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+    assert replay["counts"] == applied["counts"]
+    assert replay["results"] == applied["results"]
+    assert len(writes) == len(reads) == 1
+    ledger = tools.get_score_ledger("course-1", "assignment-1")
+    assert ledger.get("coverage") == "recorded_only" and ledger.get("first_recorded_at"), ledger
+    staged_event = next(event for event in ledger["events"] if event["source"] == "ce_stage")
+    sent_event = next(event for event in ledger["events"]
+                      if event["source"] == "ce_apply" and event["action"] == "verified")
+    assert staged_event["feedback"] == sent_event["feedback"] == comment
+    assert sent_event["raw_score"] == 53 and sent_event["entered_score"] == 67
+    assert sent_event["feedback_sha256"]
+
+    # Feed the same exact current baseline into the existing reviewed adjustment lane.
+    class FakeVault:
+        def transaction(self):
+            from contextlib import nullcontext
+            return nullcontext(self)
+        def get_or_assign(self, value): return PSEUDONYM
+    monkeypatch.setattr(config, "active_courses", lambda: [{"id": "course-1", "name": "Synthetic"}])
+    monkeypatch.setattr(grade_adjustment, "_vault", FakeVault)
+    live = {"assignment": {"id": "assignment-1", "grading_type": "points",
+                            "points_possible": 100, "name": "Essay"},
+            "score": 67, "entered_score": 67, "attempt": 1, "excused": False}
+    def mirror_baseline(payload, target):
+        return {"course_id": "course-1", "assignment_id": "assignment-1",
+            "assignment": dict(live["assignment"]),
+            "entries": [{"user_id": REAL_ID, "eligible": True, "before": live["entered_score"],
+                "canvas_score": live["score"], "attempt": live["attempt"],
+                "before_excused": False, "missing": False}],
+            "roster": [{"id": REAL_ID}], "synced_at": "2026-01-01T00:00:00Z",
+            "freshness": {"state": "current", "within_policy": True}}
+    monkeypatch.setattr(adjustment_adapter, "_mirror_baseline", mirror_baseline)
+    def canvas_get(path):
+        if path.endswith("/assignments/assignment-1"):
+            return dict(live["assignment"]), None
+        return dict(live), None
+    def canvas_put(method, path, payload):
+        live["entered_score"] = float(payload["submission"]["posted_grade"])
+        live["score"] = live["entered_score"]
+        return dict(live), None
+    monkeypatch.setattr(canvas_client, "canvas_get", canvas_get)
+    monkeypatch.setattr(canvas_client, "_canvas_send", canvas_put)
+    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed", lambda _course: None)
+    preview = grade_adjustment.preview_grade_adjustment("course-1", "assignment-1",
+        {"kind": "revert_rule", "rule_id": rule["rule_id"]})
+    assert preview["ok"] is True
+    assert preview["preview"]["changed"] == [{"pseudonym": PSEUDONYM, "before": 67, "after": 53}]
+    reverted = grade_adjustment.apply_grade_adjustment(preview["operation_id"],
+        preview["batch_id"], preview["review_digest"])
+    assert reverted["ok"] is True
+    assert live["entered_score"] == 53
+    assert any(event["source"] == "ce_curve" and event["action"] == "revert"
+               for event in score_ledger.list_events("course-1", "assignment-1", root=tmp_path))
 
 
 def test_questions_block_stage_then_matching_digest_allows_apply(monkeypatch, tmp_path, _set_active_courses):
@@ -172,6 +281,16 @@ def _fake_plan_and_canvas(monkeypatch, writes):
         lambda method, path, payload, timeout=30: (
             writes.append((method, path, payload)) or ({"id": 1}, None))
     ))
+    def read(path, params):
+        rows = []
+        for uid in params["student_ids[]"]:
+            payload = next(item[2] for item in writes if item[1].endswith("/" + str(uid)))
+            entered = float(payload["submission"]["posted_grade"])
+            rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
+                         "points_deducted": None,
+                         "late_policy_status": payload["submission"].get("late_policy_status")})
+        return rows, None
+    monkeypatch.setattr(scoring_apply, "default_read_transport", lambda: read)
 
 
 def test_authored_feedback_reaches_canvas_unchanged_and_score_only_omits_comment(
@@ -199,12 +318,16 @@ def test_authored_feedback_reaches_canvas_unchanged_and_score_only_omits_comment
     )
     score_writes = []
     _fake_plan_and_canvas(monkeypatch, score_writes)
+    from api.powergrader import scoring_apply
+    original_build_plan = scoring_apply.build_plan
+    monkeypatch.setattr(scoring_apply, "build_plan", lambda *args, **kwargs: {
+        **original_build_plan(*args, **kwargs), "digest": "score-only-review"})
     score_only = _result(6)
     score_only[0]["feedback"] = ""
     score_stage = tools.stage_scoring_results(
         "session-1", score_only, _digest(score_bundle),
     )
-    assert score_stage["status"] == "staged"
+    assert score_stage.get("status") == "staged", score_stage
     score_apply = tools.apply_staged_scoring_results("session-1", score_stage["stage_digest"])
     assert score_apply["counts"]["finalized"] == 1
     assert "comment" not in score_writes[0][2]
@@ -282,8 +405,26 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
     monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
         lambda method, path, payload, timeout=30: (sent.append((method, path, payload)) or ({"id": 1}, None))
     ))
-    monkeypatch.setattr(scoring_apply, "default_read_transport",
-                        lambda: (lambda path, params: ([], None)))
+    def read(path, params):
+        rows = []
+        for uid in params["student_ids[]"]:
+            payload = next(item[2] for item in sent if item[1].endswith("/" + str(uid)))
+            entered = float(payload["submission"]["posted_grade"])
+            rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
+                         "points_deducted": None,
+                         "late_policy_status": payload["submission"].get("late_policy_status")})
+        return rows, None
+    monkeypatch.setattr(scoring_apply, "default_read_transport", lambda: read)
+    def neutral_read(path, params):
+        rows = []
+        for uid in params["student_ids[]"]:
+            payload = next(item[2] for item in sent if item[1].endswith("/" + str(uid)))
+            entered = float(payload["submission"]["posted_grade"])
+            rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
+                         "points_deducted": None,
+                         "late_policy_status": payload["submission"].get("late_policy_status")})
+        return rows, None
+    monkeypatch.setattr(scoring_apply, "default_read_transport", lambda: neutral_read)
 
     result_with_grading = _result(6)
     result_with_grading[0]["late_days"] = 1
@@ -406,6 +547,16 @@ def test_a_students_earlier_stamp_and_question_survive_staging_only_b_again(
     monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
         lambda method, path, payload, timeout=30: (sent.append((method, path, payload)) or ({"id": 1}, None))
     ))
+    def read(path, params):
+        rows = []
+        for uid in params["student_ids[]"]:
+            payload = next(item[2] for item in sent if item[1].endswith("/" + str(uid)))
+            entered = float(payload["submission"]["posted_grade"])
+            rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
+                         "points_deducted": None,
+                         "late_policy_status": payload["submission"].get("late_policy_status")})
+        return rows, None
+    monkeypatch.setattr(scoring_apply, "default_read_transport", lambda: read)
 
     digest = _digest(bundle)
     both_results = [_result_for(PSEUDONYM_A, 10, insincere=True), _result_for(PSEUDONYM_B, 10)]
@@ -478,7 +629,16 @@ def _late_policy_course(monkeypatch, tmp_path, _set_active_courses, grading_poli
 
     def read(path, params):
         reads.append((path, params))
-        return reader(path, params) if reader else ([], None)
+        if reader:
+            return reader(path, params)
+        rows = []
+        for uid in params["student_ids[]"]:
+            payload = next(item[2] for item in sent if item[1].endswith("/" + str(uid)))
+            entered = float(payload["submission"]["posted_grade"])
+            rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
+                         "points_deducted": None,
+                         "late_policy_status": payload["submission"].get("late_policy_status")})
+        return rows, None
 
     monkeypatch.setattr(scoring_apply, "default_read_transport", lambda: read)
     return session, bundle, sent, reads
@@ -539,19 +699,19 @@ def test_apply_reports_a_waived_row_canvas_still_penalized(
     applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
 
     assert len(reads) == 1
-    assert applied["ok"] is True
-    assert applied["code"] == "late_readback_mismatch"
-    assert "Review" in applied["user_action"]
-    assert applied["counts"]["late_not_honored"] == 1 and applied["counts"]["finalized"] == 0
+    assert applied["ok"] is False
+    assert applied["code"] == "score_mismatch"
+    assert applied["counts"]["score_mismatch"] == 1 and applied["counts"]["finalized"] == 0
     row = applied["results"][0]
-    assert row["status"] == "late_not_honored"
-    assert row["late"] == {"decision": "waived", "late_policy_status": "none",
-                           "points_deducted": 2, "score": 4}
+    assert row["status"] == "score_mismatch"
+    assert row["late"]["decision"] == "waived"
+    assert row["late"]["verification"] == "score_mismatch"
+    assert row["late"]["points_deducted"] == 2
     assert applied["posted_rows"] == [PSEUDONYM]
     assert REAL_ID not in _blob(applied) and REAL_NAME not in _blob(applied)
 
 
-def test_apply_with_a_failed_read_warns_and_keeps_the_rows_finalized(
+def test_apply_with_a_failed_read_reports_score_verification_unavailable(
     monkeypatch, tmp_path, _set_active_courses, grading_policy_files,
 ):
     _session, bundle, _sent, _reads = _late_policy_course(
@@ -565,11 +725,10 @@ def test_apply_with_a_failed_read_warns_and_keeps_the_rows_finalized(
 
     applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
 
-    assert applied["ok"] is True
-    assert applied["counts"]["finalized"] == 1 and applied["counts"]["late_not_honored"] == 0
-    assert applied["warnings"] == ["late_readback_unavailable"]
-    assert applied["results"][0]["late"] == {
-        "decision": "applied", "late_days": 1, "readback": "unavailable"}
+    assert applied["ok"] is False
+    assert applied["counts"]["score_readback_unavailable"] == 1
+    assert applied["code"] == "score_readback_unavailable"
+    assert applied["results"][0]["late"]["readback"] == "unavailable"
 
 
 def test_changing_late_policy_after_a_frozen_stage_refuses_stage_changed(

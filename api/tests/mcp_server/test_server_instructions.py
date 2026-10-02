@@ -67,7 +67,9 @@ INSTRUCTION_BUDGET = 2200
 # stage_feedback_revisions, apply_staged_feedback_revisions, +1,559).
 # Raised to the measured 22,613 for prepare_scoring_session's late_policy (+261).
 # Raised to the measured 22,962 for refresh_scoring_session (+349).
-LISTING_BUDGET = 22962
+# Raised by 986 measured characters for the three durable score-rule/ledger
+# tools added in schema v73; the descriptions and result summaries remain short.
+LISTING_BUDGET = 23948
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
@@ -266,7 +268,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 65
+    assert len(listed) == 68
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -370,9 +372,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 65
-    assert len(_synthetic_mcp["calls"]) == 65
-    assert len(_synthetic_mcp["gated"]) == 65
+    assert len(results) == 68
+    assert len(_synthetic_mcp["calls"]) == 68
+    assert len(_synthetic_mcp["gated"]) == 68
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

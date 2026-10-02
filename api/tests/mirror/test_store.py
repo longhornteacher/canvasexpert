@@ -371,6 +371,82 @@ def test_unsubmitted_rows_are_stored_without_attempts(tmp_path):
     assert entry["attempts"] == {}
 
 
+def test_score_observations_use_workspace_archive_skip_replay_and_detect_clear(tmp_path, monkeypatch):
+    from api import score_ledger
+    from api.platform_services import workspace
+    ledger_root = tmp_path / "separate-workspace"
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(ledger_root))
+    initial = _submission_row(score=None, entered_score=None)
+    summary = {}
+    store.merge_submissions(COURSE, "700010", [initial], root=str(tmp_path / "mirror"),
+                            score_summary=summary)
+    events = score_ledger.list_events(COURSE, "700010", root=ledger_root)
+    assert len(events) == 1 and events[0]["source"] == "mirror_observed"
+    assert summary["canvas_external_count"] == 0
+    store.merge_submissions(COURSE, "700010", [initial], root=str(tmp_path / "mirror"),
+                            score_summary=summary)
+    assert len(score_ledger.list_events(COURSE, "700010", root=ledger_root)) == 1
+
+    graded = _submission_row(score=8, entered_score=8)
+    store.merge_submissions(COURSE, "700010", [graded], root=str(tmp_path / "mirror"),
+                            score_summary=summary)
+    assert summary["canvas_external_count"] == 1
+    cleared = _submission_row(score=None, entered_score=None)
+    store.merge_submissions(COURSE, "700010", [cleared], root=str(tmp_path / "mirror"),
+                            score_summary=summary)
+    assert summary["canvas_external_count"] == 1
+    events = score_ledger.list_events(COURSE, "700010", root=ledger_root)
+    clear = next(event for event in events if event.get("source") == "canvas_external"
+                 and event.get("new_entered_score") is None)
+    assert clear["action"] == "external_change"
+
+
+def test_verified_ce_then_external_edit_before_first_mirror_observation(tmp_path, monkeypatch):
+    from api import score_ledger
+    from api.platform_services import workspace
+    ledger_root = tmp_path / "archive"
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(ledger_root))
+    score_ledger.append_event({
+        "source": "ce_apply", "action": "verified", "course_id": COURSE,
+        "assignment_id": "700010", "student_id": "900001", "attempt": 1,
+        "raw_score": 53, "entered_score": 67, "canvas_score": 67,
+        "curve_rule_id": "rule-1", "timestamp": "2026-10-02T12:00:00Z",
+    }, idempotency_key="ce-verified", root=ledger_root)
+    summary = {}
+    store.merge_submissions(COURSE, "700010", [_submission_row(score=70, entered_score=70)],
+                            root=str(tmp_path / "mirror"),
+                            attempted_at="2026-10-02T12:01:00Z", score_summary=summary)
+    events = score_ledger.list_events(COURSE, "700010", root=ledger_root)
+    assert summary["canvas_external_count"] == 1
+    assert events[-1]["source"] == "canvas_external"
+    assert events[-1]["old_canvas_score"] == 67
+    assert events[-1]["new_canvas_score"] == 70
+    assert events[-1]["origin_event_id"] is None
+
+
+def test_stale_mirror_snapshot_after_newer_verified_ce_is_non_authoritative(tmp_path, monkeypatch):
+    from api import score_ledger
+    from api.platform_services import workspace
+    ledger_root = tmp_path / "archive"
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(ledger_root))
+    verified = score_ledger.append_event({
+        "source": "ce_apply", "action": "verified", "course_id": COURSE,
+        "assignment_id": "700010", "student_id": "900001", "attempt": 1,
+        "raw_score": 53, "entered_score": 67, "canvas_score": 67,
+        "curve_rule_id": "rule-1",
+    }, idempotency_key="ce-verified", root=ledger_root)
+    summary = {}
+    store.merge_submissions(COURSE, "700010", [_submission_row(score=44, entered_score=44)],
+                            root=str(tmp_path / "mirror"),
+                            attempted_at="2000-01-01T12:00:00Z", score_summary=summary)
+    events = score_ledger.list_events(COURSE, "700010", root=ledger_root)
+    stale = events[-1]
+    assert stale["source"] == "mirror_observed" and stale["action"] == "stale_snapshot"
+    assert stale["origin_event_id"] == verified["event_id"]
+    assert summary["canvas_external_count"] == 0
+    assert not any(event["source"] == "canvas_external" for event in events)
+
+
 def test_prune_submission_files(tmp_path):
     store.merge_submissions(COURSE, "700010", [_submission_row()], root=str(tmp_path))
     store.merge_submissions(COURSE, "700020", [_submission_row(assignment_id=700020)],

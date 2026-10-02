@@ -15,6 +15,12 @@ from api.operation_ledger.adapters.sis_grade_bridge import (
 from api.platform_services import canvas_client, config
 
 
+@pytest.fixture(autouse=True)
+def _score_ledger_workspace(tmp_path, monkeypatch):
+    from api.platform_services import workspace
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path / "workspace"))
+
+
 class FakeCanvas:
     def __init__(self):
         self.assignments = {

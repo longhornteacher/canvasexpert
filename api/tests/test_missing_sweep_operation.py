@@ -18,6 +18,12 @@ from api.platform_services import canvas_client, config
 _SYNCED_AT = "2026-09-26T20:00:00Z"
 
 
+@pytest.fixture(autouse=True)
+def _score_ledger_workspace(tmp_path, monkeypatch):
+    from api.platform_services import workspace
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path / "workspace"))
+
+
 class _FixedClock(datetime):
     """Pins ``freshness_policy``'s wall clock to exactly ``_SYNCED_AT`` so the
     mirror-freshness gate never depends on the real time a test happens to run."""

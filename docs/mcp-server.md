@@ -57,7 +57,10 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 72 (65 tools). Version 72 adds `refresh_scoring_session`, which
+Tool schema version 73 (68 tools). Version 73 adds private durable score records,
+immutable local `gap_close` curve rules, ledger-based revert, and read-back verification
+for numeric score writes; use `get_score_ledger` for bounded recorded-only history.
+Version 72 adds `refresh_scoring_session`, which
 brings late-arriving and resubmitted local-mirror work into an open Scoring Session
 without a Canvas call; `get_scoring_packet` now refuses a changed mirror with
 `session_mirror_changed` instead of superseding the session. See
@@ -142,16 +145,16 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `apply_roster_student_change(course_id, preview, preview_digest, expected_settings_digest)` | Applies the unchanged preview of local roster settings | Yes, pseudonymized |
 | `clear_roster_student_field(course_id, pseudonym, field, expected_settings_digest)` | Direct digest-protected clear for supported local settings; nickname fields are rejected | Yes, pseudonymized |
 | `get_submissions(course_id, assignment_id, include_text=true, pseudonyms="", max_text_chars=2000)` | Mirror submissions including historical rows; current_enrollment marks same-mirror roster membership; optional pseudonym narrowing and bounded text | Yes, pseudonymized |
-| `get_submission_history(course_id, assignment_id, pseudonyms="", include_text=true, max_text_chars=12000, offset=0, limit=50)` | Paginated, scrubbed observations from the private retained archive; observed-only coverage, no freshness or enrollment claim; original files stay local | Yes, pseudonymized |
+| `get_submission_history(course_id, assignment_id, pseudonyms="", include_text=true, max_text_chars=12000, offset=0, limit=50)` | Paginated, scrubbed observations from the private retained archive; URL-free text provenance and consistency/conflict flags; observed-only coverage, no freshness or enrollment claim; original files stay local | Yes, pseudonymized |
 | `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |
 | `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state; exact saved family links label each bridge and differentiated source with its partner IDs | Yes, pseudonymized |
-| `preview_grade_adjustment(course_id, assignment_id, adjustment)` | Mirror-backed, pseudonymized before/after review for a points-based existing-grade adjustment, including rule, explicit, and revert previews | Yes, pseudonymized |
-| `apply_grade_adjustment(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grade-adjustment operation with live per-student score checks, readback, and a receipt | Yes, pseudonymized |
+| `preview_grade_adjustment(course_id, assignment_id, adjustment)` | Mirror-backed, pseudonymized before/after review for a points-based adjustment, including rule-based raw/entered baselines and ledger-linked `revert_rule` previews | Yes, pseudonymized |
+| `apply_grade_adjustment(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grade adjustment with live per-student checks, score readback, durable outcome evidence, and a receipt | Yes, pseudonymized |
 | `preview_attempts_grant(course_id, assignment_id, grant)` | Pseudonymized review of extra attempts and/or a reopened window for an exact pseudonym list or the whole class on a regular online, Classic Quiz, or New Quiz assignment; classified from one live read with base dates, each student's live before value is frozen, and `attention` names `window_locked`, `new_quiz_unverified`, and `grades_unchanged`. Never infers students from scores | Yes, pseudonymized |
 | `apply_attempts_grant(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grant through the Operation Ledger, one checkpointed write per step and a live re-read before each (an extension is set to before + N only while the live value is still the frozen before); returns each pseudonym as granted, skipped, or failed with its before value. Apply only on the teacher's direct instruction | Yes, pseudonymized |
 | `preview_missing_sweep(course_id, revert_operation_id="")` | Mirror-prefiltered, live-per-assignment-checked, pseudonymized review of every eligible missing row past the policy's window (plus grace); pass `revert_operation_id` for an undo preview of a completed sweep | Yes, pseudonymized |
 | `apply_missing_sweep(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed sweep or undo with a live per-row check before each write, readback verification, and a receipt; one rejected row is skipped and the rest continue | Yes, pseudonymized |
-| `refresh_mirror(course_id, include_comments=false)` | Sync a saved course's mirror after a stale refusal, report status, then retry the read | No, returns a sync status, never course data |
+| `refresh_mirror(course_id, include_comments=false)` | Sync a saved course's mirror after a stale refusal, report status and the successful pass's aggregate `canvas_external_count` (including zero), then retry the read | No, returns a sync status, never course data |
 | `list_feedback_contracts()` | List teacher-authored judgment and feedback-shape contracts available in the private workspace; returns ids, summaries, and projected sizes only | No |
 | `discover_scoring_work()` | Read every Current course locally and return student-free assignment, freshness, and attention tables; no refresh, preparation, or Canvas write | No |
 | `preview_workspace_reset()` | Dry-runs the explicitly authorized local cleanup and reports classified paths, counts, and refusals | No |
@@ -166,9 +169,12 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `get_work_item(work_id)` | One shared work item's holder and sync status | No |
 | `handoff_work_item(work_id)` | Release this device's lease so another device can resume after sync | No |
 | `take_over_work_item(work_id, confirm_stale=false)` | Acquire a released item after sync, or explicitly confirm takeover after a stale lease | No |
-| `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract and untrusted response text; `next` explains row/person counts and paging | Yes, pseudonymized |
-| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, grade_mode="post_score")` | Validate one authored `feedback` string and numeric or null score per result, retain optional `insincere`/`late_days` grading flags, and freeze locally; numeric score-only work may have empty feedback; returns pseudonym-only questions when teacher input is needed and never calls Canvas | Yes, pseudonymized |
-| `apply_staged_scoring_results(scoring_session_id, expected_stage_digest, idempotency_key="")` | Post only the unchanged private stage after a direct teacher instruction; preserves narrow transport and idempotency safeguards | Yes, pseudonymized |
+| `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract, untrusted response text, and frozen baseline raw/entered provenance and attempt-text consistency | Yes, pseudonymized |
+| `create_score_curve_rule(course_id, formula, assignment_id="")` | Create an immutable local `gap_close` curve rule with a deterministic preview; course rules can be excluded per assignment without deactivating the course rule | No |
+| `deactivate_score_curve_rule(course_id, rule_id)` | Append a lifecycle event deactivating a local score curve rule; no Canvas grades change | No |
+| `get_score_ledger(course_id, assignment_id, pseudonyms="", offset=0, limit=50)` | Read paginated, pseudonymized recorded-only score events with complete scrubbed feedback and opaque device provenance; at most 100 events and 40,000 serialized characters per page | Yes, pseudonymized |
+| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, grade_mode="post_score")` | Validate one authored `feedback` string and numeric or null score per result, retain optional `insincere`/`late_days` flags, freeze active rule math and raw/entered values locally, and generate the disclosed `Raw X -> Entered Y` comment; never calls Canvas | Yes, pseudonymized |
+| `apply_staged_scoring_results(scoring_session_id, expected_stage_digest, idempotency_key="")` | Post only the unchanged private stage after a direct teacher instruction; performs bounded score readback, preserves unknown/mismatch outcomes, and returns the stored result without I/O on repeat | Yes, pseudonymized |
 | `prepare_feedback_revision(course_id, assignment_id, use_existing_mirror=false)` | Reopen a graded ordinary assignment for feedback-only revision from the local mirror; scores are preserved and never sent | No |
 | `get_feedback_revision_packet(work_id, offset=0, limit=10)` | Complete scrubbed responses, existing staff feedback, and opaque comment keys; scores are context only | Yes, pseudonymized |
 | `stage_feedback_revisions(work_id, expected_packet_digest, revisions, attachment_file=null)` | Freeze `{pseudonym, comment_key, feedback}` rows and an optional exact staged attachment filename; never calls Canvas | Yes, pseudonymized |

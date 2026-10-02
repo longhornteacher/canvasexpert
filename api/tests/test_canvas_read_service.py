@@ -7,6 +7,12 @@ import pytest
 from api.mirror import read_service, store
 
 
+@pytest.fixture(autouse=True)
+def _isolated_score_ledger_workspace(tmp_path, monkeypatch):
+    from api.platform_services import workspace
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
+
+
 COURSE = "course-1"
 STAMP = "2026-07-18T12:00:00Z"
 

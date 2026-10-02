@@ -142,7 +142,7 @@ def test_staging_only_the_new_row_then_applying_posts_it_with_the_staged_rows_on
 
     sent_to = sorted(path.rstrip("/").split("/")[-1] for _method, path, _payload in world.sent)
     assert sent_to == ["900002", "900003"]
-    assert applied["counts"]["finalized"] == 2
+    assert applied["counts"]["finalized"] == 2, applied
     finalized = sorted(row["pseudonym"] for row in applied["results"] if row["status"] == "finalized")
     assert finalized == sorted([second, world.pseudonym("900003")]) and first not in finalized
     assert "900003" not in json.dumps(applied)

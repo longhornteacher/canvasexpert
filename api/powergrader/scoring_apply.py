@@ -27,6 +27,8 @@ it, which never lets a ``user_id`` cross the boundary.
 from __future__ import annotations
 
 import json
+import math
+from api import score_ledger
 
 from . import session_actions
 from decimal import Decimal, InvalidOperation
@@ -323,6 +325,10 @@ def _plan_digest(candidate_ids, candidates, questions, session=None, *,
                      for s in candidates},
         "questions": [{"kind": q["kind"], "user_ids": q["user_ids"]} for q in questions],
     }
+    curve_rules = {str(s["user_id"]): s.get("frozen_curve")
+                   for s in candidates if s.get("frozen_curve")}
+    if curve_rules:
+        identity["curve_rules"] = curve_rules
     # Missing/default post_score deliberately retains the established digest
     # shape so actionable pilot stages remain valid. The non-default mode is
     # explicit because it changes the outbound payload and approval questions.
@@ -387,51 +393,135 @@ def approve_rows(session: dict, user_ids) -> None:
 
 
 def _check_late_rows(session_id: str, pushed: dict, load_session, canvas_read) -> None:
-    """Read back only the pushed rows whose late decision Canvas should honor.
+    """Verify every accepted numeric score with one bounded, read-only pass."""
+    def finite_number(value):
+        if isinstance(value, bool) or value is None:
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
 
-    One batched, read-only submissions read for the ``waived``/``applied`` rows
-    that sent a late status. It annotates each row's ``late`` block in place:
-    ``late_honored`` is False when Canvas stored a different status or still
-    deducted points from a row sent ``"none"``; ``readback: "unavailable"`` when
-    the read failed. It never retries, corrects, or changes a recorded write.
-    """
-    rows = [r for r in pushed.get("results") or []
-            if r.get("status") == "pushed"
-            and (r.get("late") or {}).get("decision") in {"waived", "applied"}
-            and (r.get("late") or {}).get("sent_status")]
+    rows = [r for r in pushed.get("results") or [] if r.get("status") == "pushed"]
     if not rows:
         return
     session = load_session(session_id) or {}
-    ids = [str(r["user_id"]) for r in rows]
+    try:
+        prior_events = score_ledger.list_events(str(session.get("course_id") or ""),
+                                                str(session.get("assignment_id") or ""))
+    except Exception:
+        prior_events = []
+    rows = [r for r in rows if finite_number(r.get("entered_score")) is not None]
+    numeric_rows = [r for r in rows if r.get("user_id") is not None]
+    by_user = {}
+    read_ok = True
     try:
         if canvas_read is None:
             canvas_read = default_read_transport()
-        found, error = canvas_read(
-            f"/api/v1/courses/{session['course_id']}/assignments/{session['assignment_id']}/submissions",
-            {"student_ids[]": ids, "per_page": 100},
-        )
+        for start in range(0, len(numeric_rows), 100):
+            chunk = numeric_rows[start:start + 100]
+            found, error = canvas_read(
+                f"/api/v1/courses/{session['course_id']}/assignments/{session['assignment_id']}/submissions",
+                {"student_ids[]": [str(r["user_id"]) for r in chunk], "per_page": 100},
+            )
+            if error or not isinstance(found, list):
+                read_ok = False
+                break
+            by_user.update({str(r.get("user_id")): r for r in found if isinstance(r, dict)})
     except Exception:
-        found, error = None, "read_failed"
-    if not error and isinstance(found, list):
-        by_user = {str(r.get("user_id")): r for r in found if isinstance(r, dict)}
-    else:
-        by_user = {}
+        read_ok = False
+
     for row in rows:
-        late = row["late"]
-        read = by_user.get(str(row["user_id"]))
+        late = row.setdefault("late", {"decision": "canvas", "sent_status": None})
+        read = by_user.get(str(row["user_id"])) if read_ok else None
         if read is None:
-            late["readback"] = "unavailable"
+            late.update({"readback": "unavailable", "verification": "score_readback_unavailable"})
             continue
-        deducted = read.get("points_deducted")
+        entered = finite_number(read.get("entered_score"))
+        canvas_score = finite_number(read.get("score"))
+        deducted = finite_number(read.get("points_deducted"))
+        status = str(read.get("late_policy_status") or "")
+        sent = finite_number(row.get("entered_score"))
+        if sent is None:
+            sent = finite_number(row.get("score_sent"))
+        if sent is None:
+            # The submission payload is retained only as private push evidence.
+            sent = finite_number(row.get("sent_score"))
+        # Session_actions records the exact entered grade on the pushed row.
+        if sent is None:
+            sent = finite_number(row.get("posted_grade"))
+        late.update({"readback": "available", "entered_score": entered,
+                     "canvas_score": canvas_score, "points_deducted": deducted,
+                     "late_policy_status": status})
+        curve = next((item.get("frozen_curve") or {} for item in session.get("students") or []
+                      if str(item.get("user_id")) == str(row.get("user_id"))), {})
+        if curve.get("rule_id"):
+            late.update({"raw_score": curve.get("raw_score"),
+                         "curve_rule_id": curve.get("rule_id")})
+        valid_statuses = {"late", "missing", "none", "extended"}
+        match = (sent is not None and entered is not None and canvas_score is not None
+                 and abs(entered - sent) <= 1e-6)
+        decision = str(late.get("decision") or "canvas")
+        sent_status = late.get("sent_status")
+        if match and status and status not in valid_statuses:
+            match = False
+        if match and sent_status is not None and status != str(sent_status):
+            match = False
+        if match and deducted is None:
+            match = abs(canvas_score - entered) <= 1e-6
+        elif match:
+            match = abs(canvas_score - (entered - deducted)) <= 1e-6
+            if deducted > 1e-6 and status not in valid_statuses - {"none", "extended"}:
+                match = False
+        if not match:
+            late.update({"late_honored": False, "verification": "score_mismatch"})
+        else:
+            late.update({"late_honored": True, "verification": "verified"})
         try:
-            deducted_over_zero = deducted is not None and float(deducted) > 0
-        except (TypeError, ValueError):
-            deducted_over_zero = False
-        late.update({"late_policy_status": read.get("late_policy_status"),
-                     "points_deducted": deducted, "score": read.get("score")})
-        if (read.get("late_policy_status") != late["sent_status"]
-                or (late["sent_status"] == "none" and deducted_over_zero)):
-            late["late_honored"] = False
+            student = next((item for item in session.get("students") or []
+                            if str(item.get("user_id")) == str(row.get("user_id"))), {})
+            baseline = student.get("submission_baseline") or {}
+            action = "verified" if match else "failed"
+            sent_event = next((event for event in reversed(prior_events)
+                if event.get("source") == "ce_apply" and event.get("action") in {"accepted", "intent"}
+                and str(event.get("student_id") or "") == str(row.get("user_id") or "")
+                and str(event.get("session_id") or "") == str(session_id)
+                and str(event.get("stage_id") or "") == str((session.get("staged_scoring_apply") or {}).get("stage_digest") or "")
+                and event.get("curve_rule_id") == (student.get("frozen_curve") or {}).get("rule_id")), None)
+            score_ledger.append_event({
+                "source": "ce_apply", "action": action,
+                "course_id": session.get("course_id"), "assignment_id": session.get("assignment_id"),
+                "student_id": row.get("user_id"),
+                "attempt": baseline.get("attempt") or student.get("current_attempt"),
+                "submission_digest": baseline.get("submission_digest"),
+                "raw_score": (student.get("frozen_curve") or {}).get("raw_score"),
+                "entered_score": entered, "canvas_score": canvas_score,
+                "points_deducted": deducted, "late_status": status,
+                "late_days": read.get("late_days"),
+                "feedback": (sent_event or {}).get("feedback"),
+                "curve_rule_id": (student.get("frozen_curve") or {}).get("rule_id"),
+                "session_id": session_id, "stage_id": (session.get("staged_scoring_apply") or {}).get("stage_digest"),
+            }, idempotency_key=f"verify:{session_id}:{row.get('target_digest') or row.get('request_digest') or row.get('user_id')}:{action}")
+        except Exception:
+            # Verification is still reflected in the in-memory result. The
+            # accepted write is never retried to repair the private export.
+            pass
+    verification_codes = [str((row.get("late") or {}).get("verification") or "") for row in rows]
+    try:
+        score_ledger.flush_exports(str(session.get("course_id") or ""),
+                                   str(session.get("assignment_id") or ""))
+    except Exception:
+        # The accepted Canvas writes and their canonical event files remain
+        # intact; export failure is surfaced as durable-history unavailability
+        # by the ledger reader and never causes a resend.
+        pass
+    if "score_mismatch" in verification_codes:
+        pushed["ok"] = False
+        pushed["code"] = "score_mismatch"
+    elif "score_readback_unavailable" in verification_codes:
+        pushed["ok"] = False
+        pushed["code"] = "score_readback_unavailable"
 
 
 def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
