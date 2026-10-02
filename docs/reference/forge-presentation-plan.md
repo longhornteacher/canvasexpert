@@ -19,9 +19,6 @@ four batches, each with acceptance criteria, seams, a gate, and stop conditions.
   operation receipts, scoring sessions, Canvas objects) is live. Stop reading obsolete keys
   and leave their stored values in place, never deleting them. Reads of historical records
   must not crash on retired values such as an `"Extend"` tier.
-- **Worktree hygiene.** At plan time, `api/mirror/store.py`, `api/tests/mirror/test_store.py`
-  (modified) and `stubbed-workspace/` (untracked) are unrelated work in progress. Preserve
-  them.
 
 ## 1. Repository truth at plan time (commit `dc6f2d8`, branch `dev`)
 
