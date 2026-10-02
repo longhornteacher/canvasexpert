@@ -210,7 +210,7 @@ def test_mirror_doc_bound_tools_match_the_live_registry():
     path = Path(__file__).resolve().parents[2] / "docs" / "mirror.md"
     doc = path.read_text(encoding="utf-8")
     section = doc.split("## MCP reads and the refresh tool", 1)[1].split("## v1 non-goals", 1)[0]
-    expected = {"get_roster", "get_submissions", "get_gradebook_snapshot"}
+    expected = {"get_roster", "get_submissions", "get_gradebook_snapshot", "get_submission_history"}
     named = set(re.findall(r"\b(?:get|list|preview|apply|save|delete|clear|archive|stage|refresh)_[a-z0-9_]+", section))
     assert expected <= named
     assert named - {"refresh_mirror"} == expected

@@ -89,3 +89,58 @@ def test_file_extraction_failure_is_visible_without_empty_success(tmp_path, monk
     result = tools.get_submission_history(COURSE, ASSIGNMENT)
     assert result["attempts"][0]["files"][0]["status"] == "extraction_failed"
     assert "text" not in result["attempts"][0]["files"][0]
+
+
+def _capture_many(env, user_ids, body):
+    from api.mirror import store as mirror_store
+    rows = [{"assignment_id": int(env["assignment_id"]), "user_id": uid, "attempt": 1,
+             "submitted_at": "2026-09-01T10:00:00Z", "workflow_state": "submitted",
+             "body": body, "submission_type": "online_text_entry", "attachments": []}
+            for uid in user_ids]
+    mirror_store.merge_submissions(env["course_id"], env["assignment_id"], rows,
+                                   root=env["root"], canvas_origin=env["origin"])
+
+
+def test_budget_ends_the_page_and_never_blanks_an_attempt(retained_history_env):
+    """Law: the aggregate text budget ends a page between attempts; every attempt
+    is returned exactly once, with its full max_text_chars-bounded text."""
+    env = retained_history_env
+    COURSE, ASSIGNMENT = env["course_id"], env["assignment_id"]
+    user_ids = list(range(992001, 992013))
+    _capture_many(env, user_ids, "<p>" + ("word " * 5000) + "</p>")  # ~25k > 20k cap
+
+    seen, offset, pages = [], 0, 0
+    while offset is not None:
+        result = tools.get_submission_history(COURSE, ASSIGNMENT, max_text_chars=20000,
+                                              offset=offset, limit=100)
+        assert result["ok"] is True, result
+        assert result["attempts"], "a page always holds at least one attempt"
+        if result["next_offset"] is not None:
+            assert result["page_end_reason"] == "text_budget"
+            assert result["next_offset"] == offset + len(result["attempts"])
+        for item in result["attempts"]:
+            assert item["text_status"] in {"included", "truncated", "no_body"}
+            assert item["text_status"] == "truncated"
+            assert len(item["text"]) == 20000
+            seen.append((item["pseudonym"], item["observation_digest"]))
+        offset, pages = result["next_offset"], pages + 1
+    assert pages > 1
+    assert len(seen) == len(set(seen)) == len(user_ids)
+
+
+def test_empty_body_with_text_file_reports_no_body_and_files_note(retained_history_env):
+    env = retained_history_env
+    env["capture"]([("505", "essay.txt", b"typed in a file")], body="")
+    result = tools.get_submission_history(env["course_id"], env["assignment_id"])
+    item = result["attempts"][0]
+    assert item["text_status"] == "no_body" and item["text"] == ""
+    assert "files" in item["text_note"]
+    assert item["files"][0]["text"] == "typed in a file"
+
+
+def test_include_text_false_marks_omitted_without_text(retained_history_env):
+    env = retained_history_env
+    env["capture"]()
+    item = tools.get_submission_history(
+        env["course_id"], env["assignment_id"], include_text=False)["attempts"][0]
+    assert item["text_status"] == "omitted" and "text" not in item

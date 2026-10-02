@@ -36,8 +36,12 @@ projection freshness.
 no Canvas calls. It returns deterministically ordered, paginated observations
 with a manifest revision/digest and `coverage: observed_only`. It does not
 claim current freshness or enrollment. Bounds are `limit` 1–100,
-`max_text_chars` 1–20,000, offset at least zero, and 100,000 aggregate returned
-text characters. Text is scrubbed again with the complete identity vault and
+`max_text_chars` 1–20,000, and offset at least zero. A page carries at most
+100,000 aggregate text characters: when the next attempt's text would not fit,
+the page ends before it (`page_end_reason: "text_budget"`, `next_offset` points
+at that attempt) rather than blanking it. With `include_text`, each attempt
+states `text_status` (`included`, `truncated`, or `no_body` with a `text_note`);
+without it, `omitted`. Text is scrubbed again with the complete identity vault and
 passes the normal outbound safety gate.
 
 Only existing `AI_TEXT_EXTS` formats may contribute extracted text. Extraction

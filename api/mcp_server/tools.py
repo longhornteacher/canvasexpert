@@ -2065,14 +2065,17 @@ def get_submission_history(course_id: str, assignment_id: str,
     next_offset = offset + len(page) if offset + len(page) < total else None
     text_budget = 100000
     attempts = []
+    page_end_reason = ""
+    item_chars = 0
 
     def bounded_text(value):
-        nonlocal text_budget
+        # Each piece is bounded by max_text_chars only. The aggregate budget
+        # ends the page between attempts; it never blanks an attempt's text.
+        nonlocal item_chars
         safe = feedback_scrub.scrub_text(str(value or ""), replacement_map)
-        allowance = min(max_text_chars, text_budget)
-        truncated = len(safe) > allowance
-        result = safe[:allowance]
-        text_budget -= len(result)
+        truncated = len(safe) > max_text_chars
+        result = safe[:max_text_chars]
+        item_chars += len(result)
         return result, truncated
 
     from api.nq_report import html_to_text
@@ -2083,6 +2086,9 @@ def get_submission_history(course_id: str, assignment_id: str,
     file_budget = 200
     omitted_file_count = 0
     for person, number, submitted_at, digest, attempt, observation in page:
+        item_chars = 0
+        file_budget_before = file_budget
+        omitted_before = omitted_file_count
         item = {
             "pseudonym": person, "attempt": number,
             "submitted_at": submitted_at,
@@ -2091,9 +2097,14 @@ def get_submission_history(course_id: str, assignment_id: str,
             "conflict": bool(observation.get("conflict") or attempt.get("conflict")),
             "files": [],
         }
+        body_text = html_to_text(observation.get("body") or "")
         if include_text:
-            item["text"], item["text_truncated"] = bounded_text(
-                html_to_text(observation.get("body") or ""))
+            item["text"], item["text_truncated"] = bounded_text(body_text)
+            item["text_status"] = ("no_body" if not body_text.strip()
+                                   else "truncated" if item["text_truncated"]
+                                   else "included")
+        else:
+            item["text_status"] = "omitted"
         observation_keys = set(observation.get("file_keys") or [])
         related_files = [entry for entry in attempt.get("files", [])
                          if entry.get("key") in observation_keys]
@@ -2113,7 +2124,9 @@ def get_submission_history(course_id: str, assignment_id: str,
                 "artifact_ref": str(file_entry.get("artifact_ref") or "") or None,
             }
             if include_text and approved and file_info["status"] == "captured":
-                if text_budget <= 0:
+                if not attempts and text_budget - item_chars <= 0:
+                    # Only a page's first attempt can overrun the aggregate;
+                    # later attempts that do not fit end the page instead.
                     file_info["status"] = "text_budget_exhausted"
                 else:
                     path = history_store.file_path(
@@ -2151,7 +2164,20 @@ def get_submission_history(course_id: str, assignment_id: str,
                     except Exception:
                         file_info["status"] = "extraction_failed"
             item["files"].append(file_info)
+        if item_chars > text_budget and attempts:
+            file_budget = file_budget_before
+            omitted_file_count = omitted_before
+            page_end_reason = "text_budget"
+            break
+        text_budget -= item_chars
+        if item.get("text_status") == "no_body":
+            item["text_note"] = (
+                "No typed body; text may be in files."
+                if any("text" in entry for entry in item["files"])
+                else "No typed text was observed for this observation.")
         attempts.append(item)
+    if page_end_reason:
+        next_offset = offset + len(attempts)
 
     payload = {
         "source": "retained_history", "coverage": "observed_only",
@@ -2164,6 +2190,8 @@ def get_submission_history(course_id: str, assignment_id: str,
         "next_offset": next_offset, "attempts": attempts,
         "omitted_file_count": omitted_file_count,
     }
+    if page_end_reason:
+        payload["page_end_reason"] = page_end_reason
     return pseudonym.gate(payload, vault)
 
 
