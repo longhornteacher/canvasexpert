@@ -57,9 +57,6 @@ def test_settings_transactions_preserve_interleaved_nested_updates(tmp_path, mon
 
     machine_path = tmp_path / "machine.json"
     monkeypatch.setattr(_io, "CONFIG_PATH", str(machine_path))
-    # Neutralize the legacy in-folder path so a real machine-local config.json
-    # on the dev box can never migrate itself into this test's tmp_path.
-    monkeypatch.setattr(_io, "LEGACY_CONFIG_PATH", str(tmp_path / "no-legacy-config.json"))
     current_root = {"value": None}
     monkeypatch.setattr(
         workspace, "workspace_root", lambda: current_root["value"]

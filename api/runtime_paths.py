@@ -7,7 +7,6 @@ workspace switch does not require a Python restart.
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -47,24 +46,6 @@ def process_lock_path() -> Path:
 def runtime_instance_path() -> Path:
     """Local rendezvous metadata for a process that already owns ce.lock."""
     return local_app_dir() / "runtime.json"
-
-
-def migrate_legacy_file(legacy_path, new_path) -> None:
-    """One-time copy of a legacy in-app-folder file to its new machine-local
-    home, the first time the new path is read and found missing.
-
-    The legacy file is left in place on purpose: an older copy of the app on
-    the same machine may still depend on it, and the self-update preserve
-    list keeps it alive across updates anyway, so deleting it here would add
-    risk for no benefit. Safe to call on every read -- once the new path
-    exists this is a single ``exists()`` check and returns immediately.
-    """
-    legacy_path = str(legacy_path)
-    new_path = str(new_path)
-    if os.path.exists(new_path) or not os.path.exists(legacy_path):
-        return
-    os.makedirs(os.path.dirname(new_path), exist_ok=True)
-    shutil.copy2(legacy_path, new_path)
 
 
 def _workspace_module():

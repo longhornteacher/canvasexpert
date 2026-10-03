@@ -235,11 +235,8 @@ def _private_store_roots():
     if workspace_root:
         roots.append(Path(workspace_root).resolve())
         vault = workspace_owner.identity_vault_dir(workspace_root)
-        legacy_vault = workspace_owner.legacy_identity_vault_dir(workspace_root)
         if vault:
             roots.append(Path(vault).resolve())
-        if legacy_vault:
-            roots.append(Path(legacy_vault).resolve())
     return roots
 
 

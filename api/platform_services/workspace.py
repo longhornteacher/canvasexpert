@@ -26,12 +26,6 @@ from engine.utils.text_utils import safe_filename_component
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR = os.path.dirname(MODULE_DIR)
 REPO_ROOT = os.path.dirname(API_DIR)
-# Pre-0.75 machine-local config lived inside the app folder, which a
-# self-update mirrors wholesale -- see runtime_paths.migrate_legacy_file().
-# Kept in step with config/_io.py's own CONFIG_PATH/LEGACY_CONFIG_PATH pair:
-# both resolve to the same physical file, computed independently because the
-# two modules already read machine config independently (see config/_io.py).
-LEGACY_CONFIG_PATH = os.path.join(MODULE_DIR, "config.json")
 CONFIG_PATH = str(runtime_paths.local_app_dir() / "config.json")
 DEFAULT_DOCS_DIR = os.path.join(API_DIR, "default_docs")
 WORKSPACE_NAME = "CanvasExpert"
@@ -73,8 +67,7 @@ FOR_AI_NAME = "For AI"
 
 SYSTEM_NAME = "_System"
 SHARED_NAME = "_Shared"
-SYSTEM_SUBFOLDERS = ("Identity Vault", "PowerGrader", "Audits", "Archive",
-                     "Canvas Catalog", "Canvas Mirror")
+SYSTEM_SUBFOLDERS = ("PowerGrader", "Audits", "Archive")
 CANVAS_CATALOG_NAME = "Canvas Catalog"
 CANVAS_MIRROR_NAME = "Canvas Mirror"
 
@@ -231,7 +224,6 @@ def needs_compact_layout(base_dir: str, *deepest_child: str, budget: int = TEACH
 
 
 def _machine_config():
-    runtime_paths.migrate_legacy_file(LEGACY_CONFIG_PATH, CONFIG_PATH)
     if not os.path.exists(CONFIG_PATH):
         return {}
     try:
@@ -471,9 +463,16 @@ def shared_work_root(root=None):
     return os.path.join(base, "work") if base else None
 
 
-def legacy_identity_vault_dir(root=None):
-    """Pre-split Identity Vault location used only by the one-time importer."""
-    return system_folder("Identity Vault", root)
+def retired_settings_path(root=None):
+    """Retired workspace settings location watched only by the storage guard."""
+    base = _root_or_workspace(root)
+    return os.path.join(base, "settings.json") if base else None
+
+
+def retired_identity_vault_path(root=None):
+    """Retired vault file watched only by the storage guard."""
+    base = system_folder("Identity Vault", root)
+    return os.path.join(base, "vault.json") if base else None
 
 
 def powergrader_root(root=None):
@@ -500,7 +499,6 @@ def archive_dir(root=None):
 
 def canvas_catalog_root():
     """Return this machine's disposable Canvas Catalog cache root."""
-    _retire_legacy_canvas_caches()
     return str(runtime_paths.local_cache_dir() / CANVAS_CATALOG_NAME)
 
 
@@ -528,76 +526,7 @@ def learning_objectives_path(root=None):
 
 def canvas_mirror_root():
     """Return this machine's disposable CanvasMirror cache root."""
-    _retire_legacy_canvas_caches()
     return str(runtime_paths.local_cache_dir() / CANVAS_MIRROR_NAME)
-
-
-_legacy_cache_retirement_checked: set[str] = set()
-
-
-def _retire_legacy_canvas_caches() -> None:
-    """Mark synced cache trees as retired without reading or deleting them."""
-    root = workspace_root()
-    if not root:
-        return
-    identity = hashlib.sha256(os.path.abspath(root).casefold().encode("utf-8")).hexdigest()[:16]
-    if identity in _legacy_cache_retirement_checked:
-        return
-    old_roots = [system_folder(CANVAS_CATALOG_NAME, root),
-                 system_folder(CANVAS_MIRROR_NAME, root)]
-    for old_root in old_roots:
-        if not old_root or not os.path.isdir(extended_path(old_root)):
-            continue
-        # The nine teacher-retained OneDrive conflict copies stay in place as
-        # evidence. Record only a count; never read their contents or log paths.
-        conflict_count = 0
-        try:
-            for directory, _, names in os.walk(extended_path(old_root)):
-                for name in names:
-                    stem, extension = os.path.splitext(name)
-                    split_at = stem.find("-")
-                    while extension and split_at >= 0:
-                        canonical = os.path.join(directory, stem[:split_at] + extension)
-                        if os.path.isfile(extended_path(canonical)):
-                            conflict_count += 1
-                            break
-                        split_at = stem.find("-", split_at + 1)
-        except OSError:
-            conflict_count = 0
-        marker = os.path.join(old_root, "README-MIGRATED.txt")
-        if not os.path.exists(extended_path(marker)):
-            message = (
-                "Canvas Expert no longer reads this OneDrive-synced cache.\n"
-                "Caches now live per machine under %LOCALAPPDATA%\\CanvasExpert\\cache.\n"
-                "This old cache is retained read-only for 30 days from migration.\n"
-                "Do not delete conflict copies; they are preserved as recovery evidence.\n"
-            )
-            fd, temporary_name = tempfile.mkstemp(
-                prefix="README-MIGRATED.tmp.", dir=extended_path(old_root)
-            )
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-                    handle.write(message)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                try:
-                    os.link(extended_path(temporary_name), extended_path(marker))
-                except FileExistsError:
-                    pass
-                except OSError:
-                    from api import operational_log
-                    operational_log.emit("workspace.cache_migration_marker", "failed",
-                                         scope="legacy_cache")
-            finally:
-                try:
-                    os.remove(extended_path(temporary_name))
-                except FileNotFoundError:
-                    pass
-        if conflict_count:
-            from api import operational_log
-            operational_log.emit("workspace.legacy_cache_conflict", "ok",
-                                 scope="legacy_cache", count=conflict_count)
-    _legacy_cache_retirement_checked.add(identity)
 
 
 def course_mirror_dir(course_id):
@@ -855,7 +784,7 @@ def _seed_workspace_readme(root):
             "To Review/ holds pending assistant drafts. Forge drafts wait for Canvas review and push.\n\n"
             "Printables/ is for PDF/DOCX output to print or photocopy.\n"
             "Canvas Uploads/ holds QTI/.imscc import packages.\n\n"
-            "_System/ contains the identity vault, PowerGrader state, and audit files; it is PRIVATE.\n"
+            "_System/ contains PowerGrader state, audits, and archives; it is PRIVATE.\n"
         )
     return path
 
@@ -896,46 +825,6 @@ def ensure_workspace():
 
     _seed_workspace_readme(root)
     return root
-
-
-def migrate_legacy_panels_folder(root=None):
-    """One-time cleanup of the old Library/Panels folder.
-
-    Library/Panels was named for the classroom display, which is gone. It also
-    held the canonical Learning Objectives document, which is not, so that
-    document moves to Library/Learning Objectives and the rest of the folder
-    is deleted. Nothing else in there outlived the display.
-
-    The one thing this will not delete is an objectives document it could not
-    move. If a document already exists at the destination (two machines
-    syncing, or a half-finished earlier run) the old folder is left alone
-    rather than taking an authored document down with it. Idempotent: once the
-    folder is gone this is a permanent no-op.
-    """
-    base = _root_or_workspace(root)
-    if not base:
-        return
-    legacy_dir = os.path.join(base, LIBRARY_NAME, "Panels")
-    if not os.path.isdir(legacy_dir):
-        return
-
-    document = "Learning Objectives.json"
-    source = os.path.join(legacy_dir, document)
-    target_dir = os.path.join(base, LIBRARY_NAME, LEARNING_OBJECTIVES_SUBFOLDER)
-    target = os.path.join(target_dir, document)
-    if os.path.isfile(source):
-        if os.path.exists(target):
-            return
-        try:
-            os.makedirs(target_dir, exist_ok=True)
-            shutil.move(source, target)
-        except OSError:
-            return
-
-    try:
-        shutil.rmtree(legacy_dir)
-    except OSError:
-        return
 
 
 def path_within_workspace(path: str, root=None) -> bool:

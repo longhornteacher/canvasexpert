@@ -21,9 +21,6 @@ TOKEN_KEY = "canvas_token"
 # An empty base is the signal that onboarding is not yet complete.
 CANVAS_BASE_DEFAULT   = ""
 DOWNLOAD_ROOT_DEFAULT = os.path.join(os.path.expanduser("~"), "Desktop", "Canvas Downloads")
-# Pre-0.75 machine-local config lived inside the app folder, which a
-# self-update mirrors wholesale -- see runtime_paths.migrate_legacy_file().
-LEGACY_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.json")
 CONFIG_PATH = str(runtime_paths.local_app_dir() / "config.json")
 SYNCED_KEYS = ("saved_courses", "extra_time",
                "tier_tags", "tier_colors",
@@ -39,7 +36,6 @@ SYNCED_KEYS = ("saved_courses", "extra_time",
 
 
 def _machine_load():
-    runtime_paths.migrate_legacy_file(LEGACY_CONFIG_PATH, CONFIG_PATH)
     if not os.path.exists(CONFIG_PATH):
         return {"canvas_base": CANVAS_BASE_DEFAULT, "saved_courses": []}
     with open(CONFIG_PATH, encoding="utf-8") as f:
@@ -53,37 +49,18 @@ def _machine_save(state):
         atomic_write_json(Path(CONFIG_PATH), state)
 
 
-def _workspace_settings_path() -> str | None:
-    root = workspace.workspace_root()
-    if not root:
-        return None
-    return os.path.join(root, "settings.json")
-
-
-def _workspace_load():
-    path = _workspace_settings_path()
-    if not path or not os.path.exists(path):
-        return {}
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        # OSError [Errno 22] on Windows = OneDrive cloud-only file not yet downloaded
-        return {}
-
-
-def _workspace_save(state):
-    raise RuntimeError("workspace_settings_are_append_only")
+def _retired_settings_path() -> str | None:
+    return workspace.retired_settings_path()
 
 
 def _synced_state():
     machine = _machine_load()
-    path = _workspace_settings_path()
+    path = _retired_settings_path()
     if not path:
         machine.setdefault("saved_courses", [])
         return machine
     fallback = {k: machine[k] for k in SYNCED_KEYS if k in machine}
-    store = SharedKVStore("settings", root=workspace.workspace_root(), legacy_path=path)
+    store = SharedKVStore("settings", root=workspace.workspace_root(), retired_path=path)
     ws = store.read(fallback)
     # Once the immutable snapshot exists, synced values have exactly one source:
     # the shared journal. Remove old local duplicates so a later device-local
@@ -118,14 +95,14 @@ def _modify_machine(mutator) -> dict:
 
 def _modify_workspace(mutator) -> dict | None:
     """Compatibility wrapper that now records changes as journal events."""
-    if not _workspace_settings_path():
+    if not _retired_settings_path():
         return None
     return _modify_synced(mutator)
 
 
 def _modify_synced(mutator) -> dict:
     """Reload the latest merged synced state and save it under its owner lock."""
-    path = _workspace_settings_path()
+    path = _retired_settings_path()
     if not path:
         return _modify_machine(mutator)
 
@@ -133,7 +110,7 @@ def _modify_synced(mutator) -> dict:
     with interprocess_lock(machine_lock):
         machine = _machine_load()
         fallback = {k: machine[k] for k in SYNCED_KEYS if k in machine}
-        store = SharedKVStore("settings", root=workspace.workspace_root(), legacy_path=path)
+        store = SharedKVStore("settings", root=workspace.workspace_root(), retired_path=path)
         ws = store.read(fallback)
         merged = dict(machine)
         for key in SYNCED_KEYS:

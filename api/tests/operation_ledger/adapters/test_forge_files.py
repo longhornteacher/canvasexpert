@@ -50,8 +50,6 @@ def test_stage_attachment_private_roots_and_reparse_points_are_never_read(tmp_pa
     monkeypatch.setattr(forge_files.config_io, "CONFIG_PATH", str(config_path))
     monkeypatch.setattr(workspace, "identity_vault_dir",
                         lambda root=None: str(Path(root) / "_System" / "Identity Vault"))
-    monkeypatch.setattr(workspace, "legacy_identity_vault_dir",
-                        lambda root=None: str(Path(root) / "_System" / "Identity Vault"))
     private_file = workspace_root / "Student Work" / "private.pdf"
     private_file.parent.mkdir(parents=True)
     private_file.write_bytes(b"private")

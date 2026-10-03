@@ -7,31 +7,30 @@ from api import feedback_vault, local_runtime, pseudonym_secret
 from api.feedback_artifacts import pseudonymize_submissions
 from api.shared_vault import PseudonymProvisionalError, SharedVault
 from api.shared_storage import compare_and_remove, quarantine_conflict
+from api import identity_vault_service
+from api.platform_services import workspace
 
 
-def _write_legacy_vault(root: Path, entries: dict) -> Path:
-    legacy_dir = root / "_System" / "Identity Vault"
-    legacy_dir.mkdir(parents=True, exist_ok=True)
-    path = legacy_dir / "vault.json"
+def _write_seed(root: Path, entries: dict, **extra) -> Path:
+    path = root / "_Shared" / "vault" / "seed.v1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
-        "schema_version": feedback_vault.SCHEMA_VERSION,
-        "by_canvas_id": entries,
-        "extra_top_level": "preserved-in-migration-source",
+        "version": 1, "created_at": "2026-01-01T00:00:00Z",
+        "created_by": "SYNTHETIC", "entries": entries, **extra,
     }), encoding="utf-8")
     return path
 
 
-def _shared_vault(root: Path, legacy_path=None, *, secret=b"s" * 32) -> SharedVault:
+def _shared_vault(root: Path, *, secret=b"s" * 32) -> SharedVault:
     return SharedVault(
         root / "_Shared" / "vault",
-        legacy_vault_path=legacy_path,
         workspace_root=root,
         secret_provider=lambda: secret,
     )
 
 
-def test_seed_import_preserves_existing_vault_fields_and_retires_source(tmp_path, monkeypatch):
-    legacy = _write_legacy_vault(tmp_path, {
+def test_existing_seed_loads_unchanged(tmp_path, monkeypatch):
+    entries = {
         "synthetic-id-1": {
             "pseudonym": feedback_vault._REGISTRY_WORDS[0],
             "real_name": "Synthetic Student",
@@ -40,18 +39,30 @@ def test_seed_import_preserves_existing_vault_fields_and_retires_source(tmp_path
             "first_seen": "2026-01-01T00:00:00Z",
             "extra_entry_field": {"kept": True},
         },
-    })
+    }
+    original = {"preserved_metadata": "keep", "version": 1,
+                "created_at": "2026-01-01T00:00:00Z", "created_by": "SYNTHETIC",
+                "entries": entries}
+    seed_path = _write_seed(tmp_path, entries, preserved_metadata="keep")
+    original_bytes = seed_path.read_bytes()
     monkeypatch.setattr(pseudonym_secret, "ensure_primary_secret", lambda: b"s" * 32)
 
-    vault = _shared_vault(tmp_path, legacy)
+    vault = _shared_vault(tmp_path)
 
-    seed = json.loads((tmp_path / "_Shared" / "vault" / "seed.v1.json").read_text(encoding="utf-8"))
+    seed = json.loads(seed_path.read_text(encoding="utf-8"))
+    assert seed == original
     assert seed["entries"]["synthetic-id-1"]["extra_entry_field"] == {"kept": True}
     assert seed["entries"]["synthetic-id-1"]["real_name"] == "Synthetic Student"
-    assert seed["source_metadata"]["extra_top_level"] == "preserved-in-migration-source"
     assert vault.entries()[0]["pseudonym"] == feedback_vault._REGISTRY_WORDS[0]
-    assert not legacy.exists()
-    assert list(legacy.parent.glob("vault.json.migrated-*"))
+    assert seed_path.read_bytes() == original_bytes
+
+
+def test_unconfigured_workspace_refuses_vault(monkeypatch):
+    monkeypatch.setattr(workspace, "workspace_root", lambda: None)
+
+    with pytest.raises(identity_vault_service.IdentityVaultUnavailable,
+                       match="workspace_not_configured"):
+        identity_vault_service.open_vault()
 
 
 def test_assignment_is_deterministic_after_journal_sync(tmp_path, monkeypatch):
@@ -69,12 +80,13 @@ def test_assignment_is_deterministic_after_journal_sync(tmp_path, monkeypatch):
 
 def test_cross_machine_assignment_collision_is_provisional_and_refused(tmp_path, monkeypatch):
     first_word = feedback_vault._REGISTRY_WORDS[0]
-    legacy = _write_legacy_vault(tmp_path, {
+    entries = {
         "synthetic-id-1": {"pseudonym": "", "real_name": "Synthetic One", "sis_id": "", "nicknames": [], "first_seen": ""},
         "synthetic-id-2": {"pseudonym": "", "real_name": "Synthetic Two", "sis_id": "", "nicknames": [], "first_seen": ""},
-    })
+    }
+    _write_seed(tmp_path, entries)
     monkeypatch.setattr(pseudonym_secret, "ensure_primary_secret", lambda: b"s" * 32)
-    _shared_vault(tmp_path, legacy)
+    _shared_vault(tmp_path)
     vault_dir = tmp_path / "_Shared" / "vault"
     journal_a = vault_dir / "journal.MACHINE-A.jsonl"
     journal_b = vault_dir / "journal.MACHINE-B.jsonl"
@@ -153,13 +165,14 @@ def test_recorded_pseudonym_outside_the_registry_stays_permanent(tmp_path, monke
     student never receives that word."""
     retired = "Zzretiredword"
     assert feedback_vault._canonical_registry_word(retired) is None
-    legacy = _write_legacy_vault(tmp_path, {
+    entries = {
         "synthetic-id-1": {"pseudonym": retired, "real_name": "Synthetic One",
                            "first_seen": "2026-01-01T00:00:00Z"},
-    })
+    }
+    _write_seed(tmp_path, entries)
     monkeypatch.setattr(pseudonym_secret, "ensure_primary_secret", lambda: b"s" * 32)
 
-    vault = _shared_vault(tmp_path, legacy)
+    vault = _shared_vault(tmp_path)
 
     assert vault.get_or_assign("synthetic-id-1") == retired
     assert vault.get_or_assign("synthetic-id-2") != retired

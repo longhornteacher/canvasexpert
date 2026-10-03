@@ -1,8 +1,6 @@
 """Production Identity Vault factory for the M365 shared privacy boundary."""
 from __future__ import annotations
 
-import os
-
 from api.platform_services import workspace
 from api.shared_vault import SharedVault
 
@@ -21,6 +19,5 @@ def open_vault(root=None) -> SharedVault:
     directory = workspace.identity_vault_dir(root)
     if not directory:
         raise IdentityVaultUnavailable("workspace_not_configured")
-    legacy_dir = workspace.legacy_identity_vault_dir(root)
-    legacy_path = os.path.join(legacy_dir, "vault.json") if legacy_dir else None
-    return SharedVault(directory, legacy_vault_path=legacy_path, workspace_root=root)
+    retired_path = workspace.retired_identity_vault_path(root)
+    return SharedVault(directory, retired_vault_path=retired_path, workspace_root=root)

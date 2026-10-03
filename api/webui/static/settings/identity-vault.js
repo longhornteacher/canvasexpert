@@ -33,9 +33,7 @@
       .then(function (response) { return response.json(); })
       .then(function (data) {
         if (!data.ok) {
-          setStatus(data.error === "identity_seed_mismatch"
-            ? "This device's legacy vault differs from the shared seed. Stop using student tools and resolve the migration mismatch."
-            : "Identity Vault status is unavailable. Review Local workspace & privacy.", true);
+          setStatus("Identity Vault status is unavailable. Review Local workspace & privacy.", true);
           return;
         }
         var message = data.configured

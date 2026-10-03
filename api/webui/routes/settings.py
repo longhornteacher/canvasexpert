@@ -18,7 +18,6 @@ from fastapi import APIRouter, Form
 from fastapi.responses import JSONResponse
 
 from api import pseudonym_secret
-from api.identity_ledger import SeedMismatchError
 from api.identity_vault_service import open_vault
 from api.platform_services import config
 from api.shared_storage import SharedStoreConflictError
@@ -38,12 +37,6 @@ def identity_vault_status():
             "configured": secret is not None,
             "fingerprint": pseudonym_secret.fingerprint(secret),
             "conflicts": len(vault.conflicts()),
-        })
-    except SeedMismatchError as error:
-        return JSONResponse({
-            "ok": False, "error": "identity_seed_mismatch",
-            "local_fingerprint": error.local_fingerprint,
-            "shared_fingerprint": error.shared_fingerprint,
         })
     except SharedStoreConflictError:
         return JSONResponse({"ok": False, "error": "shared_workspace_conflict"})

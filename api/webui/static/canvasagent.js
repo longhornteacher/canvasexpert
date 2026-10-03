@@ -172,7 +172,7 @@
     var workspace = health && health.workspace;
     var registry = health && health.pseudonym_registry;
     var conflicts = currentConflicts.length || (mirror && Array.isArray(mirror.vault_conflict) ? mirror.vault_conflict.length : 0);
-    if (currentSafetyBlocked) return { state: "unavailable", label: "Legacy storage reappeared", detail: "Shared writes are paused because a retired private file returned. Do not use student data until Local workspace & privacy is reviewed." };
+    if (currentSafetyBlocked) return { state: "unavailable", label: "Retired storage file found", detail: "Student-data reads and shared writes are blocked because a file exists at a retired vault or settings location. The file is never opened, whether or not a migrated copy exists. Review Local workspace & privacy." };
     if (conflicts) return { state: "unavailable", label: "Shared-store conflict", detail: conflicts + " conflict " + (conflicts === 1 ? "copy locks its store" : "copies lock their stores") + ". Compare or quarantine each copy below before relying on shared data." };
     if (state === "ready" && workspace && workspace.configured && workspace.writable && registry && registry.configured && !registry.low_runway) {
       return { state: "ready", label: "Ready", detail: "Workspace is writable and local privacy protections are available." };

@@ -22,7 +22,7 @@ class SharedStoreConflictError(RuntimeError):
 
 
 class LegacyStorageReappearedError(RuntimeError):
-    """A retired legacy file returned after the shared migration completed."""
+    """A file exists at a retired storage path and access must stop."""
 
     def __init__(self):
         super().__init__("legacy_storage_reappeared")
@@ -38,38 +38,25 @@ def _extended(path: Path) -> str:
 
 
 def legacy_storage_reappeared(path) -> bool:
-    """Detect a retired legacy file returning, without opening its contents."""
+    """Refuse any file at a retired storage path without opening its contents."""
     if not path:
         return False
     legacy = Path(path)
     extended_legacy = _extended(legacy)
     if not os.path.lexists(extended_legacy):
         return False
-    try:
-        names = os.listdir(_extended(legacy.parent))
-    except OSError as exc:
-        # Once the old file exists, inability to inspect migration markers
-        # cannot be treated as permission to consume or overwrite it.
-        raise LegacyStorageReappearedError() from exc
-    marker_prefix = legacy.name + ".migrated-"
-    if any(name.startswith(marker_prefix) for name in names):
-        raise LegacyStorageReappearedError()
-    return False
+    raise LegacyStorageReappearedError()
 
 
 def reappeared_legacy_storage(root=None) -> list[str]:
     """Return safe labels for retired files that have reappeared."""
     result = []
-    workspace_root = root if root is not None else workspace.workspace_root()
-    if not workspace_root:
-        return result
-    settings_path = Path(workspace_root) / "settings.json"
+    settings_path = workspace.retired_settings_path(root)
     try:
         legacy_storage_reappeared(settings_path)
     except LegacyStorageReappearedError:
         result.append("settings")
-    vault_dir = workspace.legacy_identity_vault_dir(root)
-    vault_path = Path(vault_dir) / "vault.json" if vault_dir else None
+    vault_path = workspace.retired_identity_vault_path(root)
     try:
         legacy_storage_reappeared(vault_path)
     except LegacyStorageReappearedError:

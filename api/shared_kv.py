@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -80,45 +79,17 @@ def unflatten(values: dict[str, object]) -> dict:
     return result
 
 
-def _contains_fixture(value) -> bool:
-    if isinstance(value, str):
-        return value == "Practice - Red/Gold"
-    if isinstance(value, dict):
-        return any(_contains_fixture(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_contains_fixture(item) for item in value)
-    return False
-
-
-def drop_test_course(document: dict) -> dict:
-    """Remove the one documented pre-launch key-42 practice fixture."""
-    result = copy.deepcopy(document)
-    if _contains_fixture(result.get("42")):
-        result.pop("42", None)
-    for key in ("sis_grade_bridges", "extra_time", "roster_student_settings",
-                "roster_score_matrices", "roster_relationships", "roster_baselines"):
-        mapping = result.get(key)
-        if isinstance(mapping, dict) and _contains_fixture(mapping.get("42")):
-            mapping.pop("42", None)
-    if isinstance(result.get("saved_courses"), list):
-        result["saved_courses"] = [course for course in result["saved_courses"]
-                                   if not (isinstance(course, dict)
-                                           and str(course.get("id")) == "42"
-                                           and _contains_fixture(course))]
-    return result
-
-
 class SharedKVStore:
     """One shared snapshot plus append-only journals, merged by last event."""
 
-    def __init__(self, name: str, *, root=None, legacy_path=None):
+    def __init__(self, name: str, *, root=None, retired_path=None):
         self.name = str(name)
         self.workspace_root = root
         shared = workspace.shared_root(root)
         if not shared:
             raise SharedKVError("workspace_not_configured")
         self.root = Path(shared) / "kv" / self.name
-        self.legacy_path = Path(legacy_path) if legacy_path else None
+        self.retired_path = Path(retired_path) if retired_path else None
 
     def _snapshots(self) -> list[tuple[Path, dict]]:
         rows = []
@@ -136,35 +107,15 @@ class SharedKVStore:
             rows.append((path, document))
         return sorted(rows, key=lambda row: (str(row[1].get("snapshot_at") or ""), row[0].name))
 
-    def _legacy_values(self, fallback: dict | None = None) -> dict:
-        legacy_storage_reappeared(self.legacy_path)
-        if self.legacy_path and self.legacy_path.is_file():
-            try:
-                with open(workspace.extended_path(str(self.legacy_path)), encoding="utf-8") as handle:
-                    document = json.load(handle)
-            except (OSError, json.JSONDecodeError) as exc:
-                raise SharedKVError("legacy_settings_unreadable") from exc
-            if not isinstance(document, dict):
-                raise SharedKVError("legacy_settings_invalid")
-            return drop_test_course(document)
-        return copy.deepcopy(fallback or {})
-
     def ensure_initial_snapshot(self, fallback: dict | None = None) -> None:
-        """Import legacy settings once using an immutable, no-replace publish."""
-        legacy_storage_reappeared(self.legacy_path)
+        """Publish current settings once using an immutable, no-replace snapshot."""
+        legacy_storage_reappeared(self.retired_path)
         snapshots = self._snapshots()
         if snapshots:
-            if self.legacy_path and self.legacy_path.is_file():
-                legacy_values = flatten(self._legacy_values())
-                initial_values = snapshots[0][1]["values"]
-                if any(initial_values.get(key) != value for key, value in legacy_values.items()):
-                    raise SharedKVError("legacy_settings_mismatch")
-                self._retire_legacy()
             return
-        document = self._legacy_values(fallback)
+        document = copy.deepcopy(fallback or {})
         snapshots = self._snapshots()
         if snapshots:
-            self._retire_legacy()
             return
         snapshot_at = _now()
         snapshot = {
@@ -179,23 +130,11 @@ class SharedKVStore:
         if not created:
             # A concurrent first run owns the immutable initial snapshot.
             self._snapshots()
-        else:
-            self._retire_legacy()
-
-    def _retire_legacy(self) -> None:
-        legacy_storage_reappeared(self.legacy_path)
-        if not self.legacy_path or not self.legacy_path.is_file():
-            return
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
-        migrated = self.legacy_path.with_name(f"{self.legacy_path.name}.migrated-{stamp}")
-        if not migrated.exists():
-            os.replace(workspace.extended_path(str(self.legacy_path)),
-                       workspace.extended_path(str(migrated)))
 
     def read_values(self, fallback: dict | None = None) -> dict[str, object]:
         # Conflict discovery is whole-tree, even though only this store's
         # writes are blocked by a sibling copy.
-        legacy_storage_reappeared(self.legacy_path)
+        legacy_storage_reappeared(self.retired_path)
         scan_conflicts(self.workspace_root)
         self.ensure_initial_snapshot(fallback)
         snapshots = self._snapshots()
@@ -234,7 +173,7 @@ class SharedKVStore:
         return unflatten(self.read_values(fallback))
 
     def append_changes(self, before: dict, after: dict) -> None:
-        legacy_storage_reappeared(self.legacy_path)
+        legacy_storage_reappeared(self.retired_path)
         old_values = flatten(before)
         new_values = flatten(after)
         changed = []

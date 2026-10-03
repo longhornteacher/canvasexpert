@@ -886,13 +886,8 @@ def _open_vault():
     except _VaultUnavailable as error:
         return None, str(error)
     except Exception as error:
-        from api.identity_ledger import SeedMismatchError
         from api.shared_storage import SharedStoreConflictError
         from api.shared_vault import PseudonymSecretRequired
-        if isinstance(error, SeedMismatchError):
-            return None, ("identity_seed_mismatch: local fingerprint "
-                          f"{error.local_fingerprint}, shared fingerprint "
-                          f"{error.shared_fingerprint}; resolve this device in Settings")
         if isinstance(error, SharedStoreConflictError):
             return None, _VAULT_CONFLICT_ERROR
         if isinstance(error, PseudonymSecretRequired):

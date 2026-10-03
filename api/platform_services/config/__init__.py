@@ -1,9 +1,7 @@
 """QuizForge-API configuration.
 
-Canvas base URL and the token remain machine-local. Synced user content moves to
-the OneDrive workspace when it exists. One-time migration copies the synced keys
-into workspace/settings.json and leaves the old machine keys in place as dead
-data so the two-PC last-writer-wins sync model stays simple.
+Canvas base URL, token, and device runtime settings stay machine-local. Synced
+settings live in the workspace's append-only `_Shared/kv/settings` store.
 
 This package re-exports all public configuration functions. Consumers import it
 as `from .. import config` and call `config.get_token()`, etc. — no import-path

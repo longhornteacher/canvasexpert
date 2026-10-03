@@ -5,7 +5,6 @@ import copy
 import hashlib
 import hmac
 import json
-import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,11 +48,11 @@ def _recorded_pseudonym(value: object) -> str | None:
 class SharedVault(feedback_vault.Vault):
     """API-compatible vault facade whose shared writes are append-only."""
 
-    def __init__(self, directory, *, legacy_vault_path=None, workspace_root=None,
+    def __init__(self, directory, *, retired_vault_path=None, workspace_root=None,
                  secret_provider=None):
         self.directory = Path(directory)
         self.workspace_root = workspace_root
-        self.legacy_vault_path = legacy_vault_path
+        self.retired_vault_path = retired_vault_path
         self.secret_provider = secret_provider or pseudonym_secret.get_secret
         self._provisional_ids: set[str] = set()
         self._assignment_events: list[dict] = []
@@ -64,16 +63,8 @@ class SharedVault(feedback_vault.Vault):
         super().__init__(str(self.directory / "vault.json"))
 
     def _ensure_seed(self) -> dict:
-        if self.legacy_vault_path is None and self.workspace_root is None:
-            production_dir = workspace.identity_vault_dir()
-            if production_dir and Path(production_dir).resolve() == self.directory.resolve():
-                legacy_dir = workspace.legacy_identity_vault_dir()
-                self.legacy_vault_path = os.path.join(legacy_dir, "vault.json") if legacy_dir else None
-        return identity_ledger.ensure_seed(
-            self.directory,
-            self.legacy_vault_path,
-            root=self.workspace_root,
-        )
+        legacy_storage_reappeared(self.retired_vault_path)
+        return identity_ledger.ensure_seed(self.directory, root=self.workspace_root)
 
     def _load(self):
         # Every shared-store read checks the whole tree so the console can
@@ -229,12 +220,12 @@ class SharedVault(feedback_vault.Vault):
         return self.directory / f"journal.{local_runtime.machine_id()}.jsonl"
 
     def _append(self, event: dict) -> None:
-        legacy_storage_reappeared(self.legacy_vault_path)
+        legacy_storage_reappeared(self.retired_vault_path)
         event = {"v": 1, "ts": self._timestamp(), "machine": local_runtime.machine_id(), **event}
         append_jsonl(self._journal_path(), event, root=self.workspace_root)
 
     def _save_changes(self) -> None:
-        legacy_storage_reappeared(self.legacy_vault_path)
+        legacy_storage_reappeared(self.retired_vault_path)
         current_ids = set(self._by_id)
         all_ids = current_ids | set(self._baseline_by_id)
         for canvas_id in sorted(all_ids):

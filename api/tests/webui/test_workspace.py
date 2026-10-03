@@ -39,10 +39,6 @@ def test_ensure_workspace_creates_and_seeds_authoring_library(tmp_path, monkeypa
     monkeypatch.delenv("OneDriveCommercial", raising=False)
     monkeypatch.setattr(workspace, "API_DIR", str(source_api))
     monkeypatch.setattr(workspace, "CONFIG_PATH", str(tmp_path / "config.json"))
-    # Neutralize the legacy in-folder path too, so a real machine-local
-    # config.json on the dev box (this app's own real config) can never
-    # migrate itself into this test's isolated tmp_path.
-    monkeypatch.setattr(workspace, "LEGACY_CONFIG_PATH", str(tmp_path / "no-legacy-config.json"))
     monkeypatch.setattr(workspace, "DEFAULT_DOCS_DIR", str(source_api / "default_docs"))
 
     seeded = root / "Library" / "AI Authoring" / "Author a Quiz (QuizForge).txt"
@@ -59,6 +55,8 @@ def test_ensure_workspace_creates_and_seeds_authoring_library(tmp_path, monkeypa
     assert not (root / "Library" / "Rubrics").exists()
     for folder in ["Printables", "Canvas Uploads", "To Review", "Student Work", "For AI", "_System"]:
         assert (root / folder).is_dir()
+    for retired in ("Identity Vault", "Canvas Catalog", "Canvas Mirror"):
+        assert not (root / "_System" / retired).exists()
 
     assert seeded.read_text(encoding="utf-8") == "user edited version"
     assert (root / "Library" / "AI Authoring" / "Author a Page (PageForge).txt").read_text(encoding="utf-8") == "new default"
@@ -73,9 +71,6 @@ def test_config_split_writes_workspace_settings_when_available(tmp_path, monkeyp
     workspace_root = tmp_path / "OneDrive" / "CanvasExpert"
     workspace_root.mkdir(parents=True)
     monkeypatch.setattr(config_io, "CONFIG_PATH", str(machine_config))
-    # Neutralize the legacy in-folder path so a real machine-local config.json
-    # on the dev box can never migrate itself into this test's tmp_path.
-    monkeypatch.setattr(config_io, "LEGACY_CONFIG_PATH", str(tmp_path / "no-legacy-config.json"))
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(workspace_root))
 
     _write_json(machine_config, {"canvas_base": config.CANVAS_BASE_DEFAULT, "saved_courses": []})
@@ -94,9 +89,6 @@ def test_config_split_writes_workspace_settings_when_available(tmp_path, monkeyp
 def test_config_split_stays_machine_local_without_workspace(tmp_path, monkeypatch):
     machine_config = tmp_path / "config.json"
     monkeypatch.setattr(config_io, "CONFIG_PATH", str(machine_config))
-    # Neutralize the legacy in-folder path so a real machine-local config.json
-    # on the dev box can never migrate itself into this test's tmp_path.
-    monkeypatch.setattr(config_io, "LEGACY_CONFIG_PATH", str(tmp_path / "no-legacy-config.json"))
     monkeypatch.setattr(workspace, "workspace_root", lambda: None)
 
     _write_json(machine_config, {"canvas_base": config.CANVAS_BASE_DEFAULT, "saved_courses": []})
@@ -108,42 +100,9 @@ def test_config_split_stays_machine_local_without_workspace(tmp_path, monkeypatc
     assert not (tmp_path / "OneDrive").exists()
 
 
-def test_config_migrates_from_legacy_in_folder_location_once(tmp_path, monkeypatch):
-    """D1: a fresh profile with no machine-local config.json but a legacy
-    in-folder config.json reads the legacy values once, writes the new
-    location, and leaves the legacy file in place (never deleted -- an older
-    copy of the app on the same machine may still depend on it)."""
-    legacy = tmp_path / "legacy" / "config.json"
-    legacy.parent.mkdir(parents=True)
-    _write_json(legacy, {"canvas_base": "https://legacy.example.test", "saved_courses": []})
-    new_path = tmp_path / "new" / "config.json"
-    assert not new_path.exists()
-
-    monkeypatch.setattr(config_io, "LEGACY_CONFIG_PATH", str(legacy))
-    monkeypatch.setattr(config_io, "CONFIG_PATH", str(new_path))
-    monkeypatch.setattr(workspace, "workspace_root", lambda: None)
-
-    assert config.get_canvas_base() == "https://legacy.example.test"
-    assert new_path.exists()
-    assert legacy.exists()
-
-    migrated = json.loads(new_path.read_text(encoding="utf-8"))
-    assert migrated["canvas_base"] == "https://legacy.example.test"
-
-    # Second read is a no-op migration (new path already exists) and does not
-    # touch the legacy file again.
-    legacy_mtime = legacy.stat().st_mtime
-    config.set_canvas_base("https://updated.example.test")
-    assert legacy.stat().st_mtime == legacy_mtime
-    assert json.loads(legacy.read_text(encoding="utf-8"))["canvas_base"] == "https://legacy.example.test"
-
-
 def test_adding_a_saved_previous_course_makes_it_current(tmp_path, monkeypatch):
     machine_config = tmp_path / "config.json"
     monkeypatch.setattr(config_io, "CONFIG_PATH", str(machine_config))
-    # Neutralize the legacy in-folder path so a real machine-local config.json
-    # on the dev box can never migrate itself into this test's tmp_path.
-    monkeypatch.setattr(config_io, "LEGACY_CONFIG_PATH", str(tmp_path / "no-legacy-config.json"))
     monkeypatch.setattr(workspace, "workspace_root", lambda: None)
     _write_json(machine_config, {
         "saved_courses": [{
@@ -164,9 +123,6 @@ def test_workspace_migration_is_idempotent(tmp_path, monkeypatch):
     workspace_root = tmp_path / "OneDrive" / "CanvasExpert"
     workspace_root.mkdir(parents=True)
     monkeypatch.setattr(config_io, "CONFIG_PATH", str(machine_config))
-    # Neutralize the legacy in-folder path so a real machine-local config.json
-    # on the dev box can never migrate itself into this test's tmp_path.
-    monkeypatch.setattr(config_io, "LEGACY_CONFIG_PATH", str(tmp_path / "no-legacy-config.json"))
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(workspace_root))
 
     _write_json(
@@ -202,26 +158,6 @@ def test_workspace_migration_is_idempotent(tmp_path, monkeypatch):
     assert second[0]["id"] == "1"
     assert workspace_state["saved_courses"][0]["id"] == "1"
     assert workspace_state["extra_time"]["1"][0]["name"] == "Ada"
-
-
-def test_legacy_canvas_caches_are_marked_but_preserved(tmp_path, monkeypatch):
-    root = tmp_path / "workspace"
-    old_cache = root / "_System" / "Canvas Catalog"
-    old_cache.mkdir(parents=True)
-    canonical = old_cache / "catalog.v3.json"
-    conflict = old_cache / "catalog-LAPTOP-TEST.json"
-    canonical.write_text("canonical cache", encoding="utf-8")
-    conflict.write_text("retained conflict evidence", encoding="utf-8")
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
-    monkeypatch.setattr(workspace.runtime_paths, "local_cache_dir", lambda: tmp_path / "local-cache")
-    workspace._legacy_cache_retirement_checked.clear()
-
-    local_root = workspace.canvas_catalog_root()
-
-    assert local_root == str(tmp_path / "local-cache" / "Canvas Catalog")
-    assert "no longer reads" in (old_cache / "README-MIGRATED.txt").read_text(encoding="utf-8")
-    assert canonical.read_text(encoding="utf-8") == "canonical cache"
-    assert conflict.read_text(encoding="utf-8") == "retained conflict evidence"
 
 
 @pytest.mark.parametrize("cache_kind", ["catalog", "mirror"])
@@ -314,7 +250,7 @@ def test_extended_path_is_noop_off_windows(monkeypatch):
     assert workspace.extended_path("") == ""
 
 
-def test_ensure_workspace_does_not_touch_a_stray_legacy_folder(tmp_path, monkeypatch):
+def test_ensure_workspace_does_not_create_retired_system_folders(tmp_path, monkeypatch):
     """ensure_workspace() only ever creates the v2 tree; it never reads, renames,
     or deletes an unrelated pre-existing folder (clean break, no migration)."""
     root = tmp_path / "CanvasExpert"
@@ -328,8 +264,9 @@ def test_ensure_workspace_does_not_touch_a_stray_legacy_folder(tmp_path, monkeyp
     assert marker.read_text(encoding="utf-8") == "untouched"
     assert (root / "Student Work" / "Submissions").is_dir()
     assert (root / "For AI").is_dir()
-    assert (root / "_System" / "Identity Vault").is_dir()
-    assert not (root / "_System" / "Identity Vault" / "vault.json").exists()
+    assert not (root / "_System" / "Identity Vault").exists()
+    assert not (root / "_System" / "Canvas Catalog").exists()
+    assert not (root / "_System" / "Canvas Mirror").exists()
 
 
 def test_assignment_evidence_manifest_is_atomic_identity_checked_and_conflict_fail_closed(tmp_path, monkeypatch):
@@ -469,68 +406,6 @@ def test_needs_compact_layout_joins_every_child_component(tmp_path):
     deep = workspace.needs_compact_layout(base, "a" * 100, "b" * 100, "c" * 100)
     assert shallow is False
     assert deep is True
-
-def _panels_root(tmp_path):
-    root = tmp_path / "CanvasExpert"
-    (root / "Library" / "Panels").mkdir(parents=True)
-    return root
-
-
-def test_migrate_panels_moves_the_objectives_document(tmp_path, monkeypatch):
-    """The document a teacher authored survives the folder rename."""
-    root = _panels_root(tmp_path)
-    (root / "Library" / "Panels" / "Learning Objectives.json").write_text(
-        '{"version": 2, "revision": 7, "objectives": {}}')
-    (root / "Library" / "Panels" / "Themes").mkdir()
-    (root / "Library" / "Panels" / "Themes" / "bobcats.json").write_text("{}")
-
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
-    workspace.migrate_legacy_panels_folder()
-
-    moved = root / "Library" / "Learning Objectives" / "Learning Objectives.json"
-    assert moved.read_text() == '{"version": 2, "revision": 7, "objectives": {}}'
-    # Everything else went with the display, and nothing was archived.
-    assert not (root / "Library" / "Panels").exists()
-    assert not (root / "_System").exists()
-
-
-def test_migrate_panels_deletes_a_folder_with_no_document(tmp_path, monkeypatch):
-    root = _panels_root(tmp_path)
-    (root / "Library" / "Panels" / "Themes").mkdir()
-    (root / "Library" / "Panels" / "Themes" / "bobcats.json").write_text("{}")
-
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
-    workspace.migrate_legacy_panels_folder()
-
-    assert not (root / "Library" / "Panels").exists()
-
-
-def test_migrate_panels_will_not_delete_an_objectives_document_it_cannot_move(tmp_path, monkeypatch):
-    """Two machines syncing, or a half-finished earlier run: the canonical copy
-    at the destination wins, and the old folder is left rather than deleting an
-    authored document."""
-    root = _panels_root(tmp_path)
-    (root / "Library" / "Panels" / "Learning Objectives.json").write_text("old")
-    (root / "Library" / "Learning Objectives").mkdir(parents=True)
-    (root / "Library" / "Learning Objectives" / "Learning Objectives.json").write_text("current")
-
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
-    workspace.migrate_legacy_panels_folder()
-
-    assert (root / "Library" / "Learning Objectives" / "Learning Objectives.json").read_text() == "current"
-    assert (root / "Library" / "Panels" / "Learning Objectives.json").read_text() == "old"
-
-
-def test_migrate_panels_is_a_no_op_without_the_old_folder(tmp_path, monkeypatch):
-    root = tmp_path / "CanvasExpert"
-    (root / "Library").mkdir(parents=True)
-
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
-    workspace.migrate_legacy_panels_folder()
-
-    assert not (root / "Library" / "Panels").exists()
-    assert not (root / "_System").exists()
-
 
 # ── Reserve-branch path segments ────────────────────────────────────────────
 

@@ -16,26 +16,13 @@ def test_nested_key_flattening_round_trips_dotted_and_escaped_names():
     assert unflatten(flatten(value)) == value
 
 
-def test_settings_migration_drops_key_42_fixture_and_retires_file(tmp_path):
-    legacy = tmp_path / "settings.json"
-    legacy.write_text(json.dumps({
-        "saved_courses": [
-            {"id": "42", "name": "Practice - Red/Gold", "nickname": "Practice - Red/Gold"},
-            {"id": "synthetic-course", "name": "Synthetic Course", "nickname": "Synthetic"},
-        ],
-        "sis_grade_bridges": {
-            "42": {"family": "Practice - Red/Gold"},
-            "synthetic-course": {"family": "Synthetic Family"},
-        },
-    }), encoding="utf-8")
-    store = SharedKVStore("settings", root=tmp_path, legacy_path=legacy)
+def test_fresh_snapshot_uses_current_settings_fallback(tmp_path):
+    store = SharedKVStore("settings", root=tmp_path)
+    current = {"saved_courses": [{"id": "synthetic-course", "nickname": "Synthetic"}]}
 
-    migrated = store.read()
+    store.ensure_initial_snapshot(current)
 
-    assert [course["id"] for course in migrated["saved_courses"]] == ["synthetic-course"]
-    assert "42" not in migrated["sis_grade_bridges"]
-    assert not legacy.exists()
-    assert list(tmp_path.glob("settings.json.migrated-*"))
+    assert store.read() == current
 
 
 def test_shared_journal_merges_nested_keys_and_tombstones(tmp_path):

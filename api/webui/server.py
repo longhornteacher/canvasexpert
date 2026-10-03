@@ -8,9 +8,8 @@ covers all of the teacher's courses. The teacher picks which course to target
 from a live dropdown (or from their saved bookmarks) on the dashboard — no
 more separate "profiles" for each class.
 
-QuizForge planning and validation may delegate to existing CLI scripts as
-subprocesses with credentials injected via environment variables. Live
-differentiated delivery uses the reviewed Operation Ledger path. See runner.py.
+QuizForge plans are built locally and live delivery uses the reviewed
+Operation Ledger path.
 """
 import os
 import threading
@@ -27,7 +26,7 @@ from api.mirror import coordinator as _mirror_coordinator
 from api.operation_ledger import recovery as _operation_ledger_recovery
 
 from api.platform_services import config
-from . import af, ai_ta, pf, runner
+from . import af, ai_ta, pf
 from api.platform_services import workspace
 from api import runtime_paths
 from api.platform_services.canvas_client import canvas_headers, canvas_get, canvas_get_all, _canvas_send
@@ -79,10 +78,6 @@ async def _lifespan(app):
         workspace.ensure_workspace()
     except Exception as e:
         print(f"Workspace setup note: {e}")
-    try:
-        workspace.migrate_legacy_panels_folder()
-    except Exception as e:
-        print(f"Legacy Panels folder migration note: {e}")
     try:
         # Pin the resolved workspace path so the headless MCP server (launched by
         # Claude Desktop / ChatGPT without the OneDrive env var) resolves the same
