@@ -6,10 +6,10 @@ from collections import Counter
 
 from api import feedback_scrub
 from api import roster_context
+from api import roster_service
 from api.identity_vault_service import open_vault
 from api.platform_services import config
 from api.platform_services import workspace
-from api.webui.routes.roster_helpers import _compute_warnings, _enrollment_section_ids
 
 from . import WorkCourseReads, check_deadline, finding, text
 
@@ -79,7 +79,7 @@ def scan_course(course_id: str, *, now, reads: WorkCourseReads) -> list[dict]:
     # the baseline; only the teacher's explicit Acknowledge action does.
     current_ids = {str(user.get("id")) for user in users
                     if isinstance(user, dict) and user.get("id") is not None}
-    current_sections = _enrollment_section_ids(users)
+    current_sections = roster_service.enrollment_section_ids(users)
     try:
         baseline = config.get_roster_baseline(course_id)
     except Exception:
@@ -102,7 +102,7 @@ def scan_course(course_id: str, *, now, reads: WorkCourseReads) -> list[dict]:
             "id": user_id,
             "extra_time": extra_time.get(user_id, {"enabled": False, "days": 0}),
         }
-        warnings = _compute_warnings(
+        warnings = roster_service.compute_warnings(
             student,
             vault_by_id,
             protected,

@@ -6,13 +6,14 @@ No external scheduler (locked-down district machines), no cloud, ever.
 import json
 import threading
 import time as _time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Form
 from fastapi.responses import JSONResponse
 
 from api.platform_services import config
 from api import operational_log
+from api import routine_runtime
 from api.webui import readiness
 from .routines_builtin import (
     _run_routine_download, _run_routine_curve,
@@ -27,63 +28,16 @@ router = APIRouter(prefix="/api", tags=["routines"])
 # Routine definitions
 # --------------------------------------------------------------------------
 
-_ROUTINE_DEFS = {
-    "download": {
-        "label": "Auto-download new student work",
-        "writes": False,
-        "default": {"enabled": False, "every_hours": 24,
-                    "params": {"window_days": 14}},
-    },
-    "curve": {
-        "label": "Auto-curve low assignment averages",
-        "writes": True,
-        "default": {"enabled": False, "every_hours": 168,
-                    "params": {"floor": 80, "mode": "flag", "window_days": 30}},
-    },
-    "student_reports": {
-        "label": "Refresh monitored-student reports",
-        "writes": False,
-        "default": {"enabled": False, "every_hours": 168,
-                    "params": {}},
-    },
-    "sis_bridge_sync": {
-        "label": "Differentiated bridge grade sync",
-        "writes": True,
-        "default": {"enabled": False, "every_hours": 24, "params": {}},
-    },
-}
-
 _ROUTINES_LOCK = threading.Lock()
-
-
-def _routine_state(rid):
-    saved = config.get_routine_states().get(rid, {})
-    base = json.loads(json.dumps(_ROUTINE_DEFS[rid]["default"]))
-    base["params"].update(saved.get("params", {}))
-    for k in ("enabled", "every_hours", "last_run", "last_summary"):
-        if k in saved:
-            base[k] = saved[k]
-    return base
-
-
-def _routine_due(state):
-    if not state.get("last_run"):
-        return True
-    try:
-        last = datetime.fromisoformat(state["last_run"])
-        hours = state.get("every_hours", 24)
-        return datetime.now() >= last + timedelta(hours=hours)
-    except (ValueError, TypeError):
-        return True
 
 
 def _routine(rid, label, writes=False, default=None):
     def deco(fn):
-        if rid in _ROUTINE_DEFS:
+        if rid in routine_runtime.ROUTINE_DEFS:
             print(f"[routines] custom '{rid}' collides with a built-in — skipped")
             return fn
-        _ROUTINE_DEFS[rid] = {"label": label, "writes": bool(writes),
-                              "default": default or {"enabled": False, "every_hours": 24, "params": {}}, "custom": True}
+        routine_runtime.ROUTINE_DEFS[rid] = {"label": label, "writes": bool(writes),
+                                             "default": default or {"enabled": False, "every_hours": 24, "params": {}}, "custom": True}
         _ROUTINE_RUNNERS[rid] = fn
         return fn
     return deco
@@ -99,7 +53,7 @@ _ROUTINE_RUNNERS = {
 from .routines_custom import load_custom_routines as _load_custom_routines_
 
 def _load_custom_routines():
-    _load_custom_routines_(_routine, _ROUTINE_DEFS, _ROUTINE_RUNNERS)
+    _load_custom_routines_(_routine, routine_runtime.ROUTINE_DEFS, _ROUTINE_RUNNERS)
 
 
 # --------------------------------------------------------------------------
@@ -109,19 +63,19 @@ def _load_custom_routines():
 @router.get("/routines")
 def api_routines():
     out = []
-    for rid, meta in _ROUTINE_DEFS.items():
-        st = _routine_state(rid)
+    for rid, meta in routine_runtime.ROUTINE_DEFS.items():
+        st = routine_runtime.routine_state(rid)
         out.append({"id": rid, "label": meta["label"], "writes": meta["writes"],
                     "custom": meta.get("custom", False), "enabled": st["enabled"],
                     "every_hours": st["every_hours"], "params": st["params"],
                     "last_run": st.get("last_run"), "last_summary": st.get("last_summary"),
-                    "due": _routine_due(st)})
+                    "due": routine_runtime.routine_due(st)})
     return JSONResponse({"ok": True, "routines": out})
 
 
 @router.post("/routines/save")
 def api_routines_save(routine_id: str = Form(...), patch: str = Form(...)):
-    if routine_id not in _ROUTINE_DEFS:
+    if routine_id not in routine_runtime.ROUTINE_DEFS:
         return JSONResponse({"ok": False, "error": "unknown routine"})
     try:
         p = json.loads(patch)
@@ -139,11 +93,11 @@ def api_routines_run(ids: str = Form(""), force: bool = Form(False)):
         return JSONResponse({"ok": False, "error": "a routine run is already in progress"})
     try:
         report = {"ok": True, "ran": [], "skipped": []}
-        for rid, meta in _ROUTINE_DEFS.items():
+        for rid, meta in routine_runtime.ROUTINE_DEFS.items():
             if id_list is not None and rid not in id_list:
                 continue
-            state = _routine_state(rid)
-            if not force and (not state["enabled"] or not _routine_due(state)):
+            state = routine_runtime.routine_state(rid)
+            if not force and (not state["enabled"] or not routine_runtime.routine_due(state)):
                 report["skipped"].append({"id": rid, "label": meta["label"],
                                           "reason": "disabled" if not state["enabled"] else "not due"})
                 continue
@@ -182,11 +136,11 @@ def _routines_heartbeat():
 def _run_routines_bg():
     # Custom routines get the same three triggers as built-ins (Run now /
     # catch-up on launch / every 30 min here) -- see api/webui/README.md.
-    # No parallel path: both kinds pass through the same _ROUTINE_DEFS /
+    # No parallel path: both kinds pass through the same ROUTINE_DEFS /
     # _ROUTINE_RUNNERS registries.
-    for rid, meta in _ROUTINE_DEFS.items():
-        state = _routine_state(rid)
-        if state["enabled"] and _routine_due(state):
+    for rid, meta in routine_runtime.ROUTINE_DEFS.items():
+        state = routine_runtime.routine_state(rid)
+        if state["enabled"] and routine_runtime.routine_due(state):
             try:
                 res = _ROUTINE_RUNNERS[rid](state["params"])
                 config.set_routine_state(rid, {"last_run": datetime.now().isoformat(timespec="seconds"),

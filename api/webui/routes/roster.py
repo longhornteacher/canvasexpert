@@ -23,12 +23,7 @@ from api.platform_services.canvas_client import canvas_get_all
 from .names import _vault
 from . import roster_changes
 from . import roster_updates
-from .roster_helpers import (
-    _as_int,
-    _compute_warnings,
-    _enrollment_section_ids,
-    _value_name,
-)
+from .roster_helpers import _as_int, _value_name
 
 router = APIRouter(prefix="/api/roster", tags=["roster"])
 
@@ -92,7 +87,7 @@ def roster_get(course_id: str = Query("")):
         _upsert_roster(vault, users)
         vault_entries_list = vault.entries()
 
-    enrollment_secs = _enrollment_section_ids(users)
+    enrollment_secs = roster_service.enrollment_section_ids(users)
 
     # Extra time
     extra_time_list = config.get_extra_time(course_id)
@@ -204,7 +199,7 @@ def roster_get(course_id: str = Query("")):
             "roster_change": roster_change,
             "warnings": [],
         }
-        row["warnings"] = _compute_warnings(
+        row["warnings"] = roster_service.compute_warnings(
             row, vault_by_id, protected_names, collisions,
             roster_change=roster_change)
         if profile_invalid:
@@ -349,9 +344,9 @@ def roster_changes_acknowledge(course_id: str = Form(...)):
     if err:
         return JSONResponse({"ok": False, "error": err})
     current_ids = {str(u["id"]) for u in (users or []) if u.get("id") is not None}
-    sections = _enrollment_section_ids(users)
+    sections = roster_service.enrollment_section_ids(users)
     # Every current id needs an entry, even an empty one for a student with
-    # no section -- _enrollment_section_ids omits those, and an id missing
+    # no section -- enrollment_section_ids omits those, and an id missing
     # from the baseline entirely would look newly added on the next diff.
     current_sections = {uid: sections.get(uid, []) for uid in current_ids}
     baseline = roster_context.build_roster_baseline(
@@ -369,7 +364,7 @@ def roster_changes_migrate_section(course_id: str = Form(...), user_id: str = Fo
     if err:
         return JSONResponse({"ok": False, "error": err})
     current_ids = {str(u["id"]) for u in (users or []) if u.get("id") is not None}
-    current_sections = _enrollment_section_ids(users)
+    current_sections = roster_service.enrollment_section_ids(users)
     diff = roster_context.diff_roster_baseline(
         config.get_roster_baseline(course_id), current_ids, current_sections)
     result, error = roster_changes.migrate_student_section(

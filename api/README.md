@@ -111,21 +111,18 @@ lives in `api/webui/config.json` (gitignored).
 
 ## Workspace & multi-PC
 
-When OneDrive is available, teacher-authored content lives in
-`OneDrive\CanvasExpert\` with `Assignments\`, `Library\AI Authoring\`,
-`Library\Quizzes\`, `Library\Pages\`, `Printables\`,
-`Canvas Uploads\`, and synced `settings.json`. Human-facing student work is
-canonical under `Student Work\Submissions\<Course>\Assignments\<Assignment>\`;
-pseudonymized artifacts live under `For AI\`, derived output under
-`Student Work\Reports\`, and vault/session state under `_System\`.
-`Student Work\` and `_System\` are
-PRIVATE; review every pseudonymized packet before sharing because it is not
-guaranteed anonymous.
+The configured workspace holds teacher-authored content and shared work. The
+vault, shared settings, and resumable work use append-only journals under
+`_Shared/`; Canvas Expert blocks shared-store access when sync conflicts appear.
+A file at a retired vault or settings location also blocks vault and settings
+access until the file is reviewed. Each computer keeps its CanvasMirror and
+Course Catalog cache and runtime settings under `%LOCALAPPDATA%\CanvasExpert`.
+Canvas base and download root are machine-local, and the Canvas token stays in
+Credential Manager. `Student Work/` and shared vault/session data are private;
+pseudonymized artifacts are not anonymous and need review before sharing.
 
-Machine-local state stays machine-local: `canvas_base`, `download_root`, and the
-Canvas token in Credential Manager. Synced state is last-writer-wins through
-OneDrive; conflict copies like `settings-<PC>.json` are ignored by the app. If
-OneDrive is absent, the app falls back to the local folders exactly as before.
+See the [multi-computer guide](../docs/guides/more-than-one-computer.md) for
+workspace setup, privacy checks, sync conflicts, and per-computer refreshes.
 
 Read-aloud media evidence uses an optional local `faster-whisper` `small.en` model.
 The application never downloads model weights during a Scoring Session; if the

@@ -2,6 +2,7 @@
 
 import json
 
+from api import routine_runtime
 from api.platform_services import config
 from api.webui.routes import routines, routines_builtin
 
@@ -60,7 +61,7 @@ def test_builtin_bridge_sync_runs_each_registered_family_with_safe_counts(monkey
 
 
 def test_builtin_bridge_sync_registration_is_default_off_write_routine():
-    definition = routines._ROUTINE_DEFS["sis_bridge_sync"]
+    definition = routine_runtime.ROUTINE_DEFS["sis_bridge_sync"]
 
     assert definition == {
         "label": "Differentiated bridge grade sync",

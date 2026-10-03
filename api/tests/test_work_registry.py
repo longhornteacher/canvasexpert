@@ -1,3 +1,4 @@
+import ast
 import json
 import threading
 from datetime import datetime, timedelta, timezone
@@ -84,6 +85,31 @@ def test_generic_description_falls_back_to_empty_for_an_unknown_kind():
     """An unmapped kind must fall back to "" (the rail then renders
     nothing), never to the raw slug itself."""
     assert generic_description("some.future.kind") == ""
+
+
+def test_work_registry_modules_do_not_import_the_control_console():
+    """The runtime registry remains usable without importing the FastAPI package."""
+    source_root = Path(__file__).parents[1] / "work_registry"
+    for source_path in source_root.rglob("*.py"):
+        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module == "api":
+                    imported = [f"api.{alias.name}" for alias in node.names]
+                elif node.level and (
+                    module.split(".", 1)[0] == "webui"
+                    or any(alias.name == "webui" for alias in node.names)
+                ):
+                    imported = ["api.webui"]
+                else:
+                    imported = [module]
+            else:
+                continue
+            assert all(name != "api.webui" and not name.startswith("api.webui.")
+                       for name in imported), source_path
 
 
 def test_fingerprints_are_stable_and_material_changes_digest():

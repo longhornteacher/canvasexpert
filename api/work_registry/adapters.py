@@ -106,15 +106,15 @@ def _receipt_jobs() -> list[dict]:
 
 def _routine_jobs() -> list[dict]:
     try:
-        from api.webui.routes import routines
-        definitions = routines._ROUTINE_DEFS
+        from api import routine_runtime
+        definitions = routine_runtime.ROUTINE_DEFS
     except Exception:
         return []
     output = []
     for routine_id in sorted(definitions):
         try:
-            state = routines._routine_state(routine_id)
-            due = routines._routine_due(state)
+            state = routine_runtime.routine_state(routine_id)
+            due = routine_runtime.routine_due(state)
         except Exception:
             continue
         if not state.get("enabled") or not due:
