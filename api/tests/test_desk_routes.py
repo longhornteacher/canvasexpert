@@ -1,11 +1,16 @@
 """Focused rendering contracts for the CanvasAgent root health console."""
 
 from pathlib import Path
+import builtins
 
 from fastapi.testclient import TestClient
+import pytest
 
 from api.webui import server
 from api.webui.routes import connections as connection_routes, pages
+from api.platform_services import workspace
+from api.shared_storage import LegacyStorageReappearedError
+from api.platform_services.config import courses
 
 
 def _ready_context():
@@ -80,12 +85,73 @@ def test_canvasagent_root_is_available_before_canvas_setup_and_connections_is_re
     assert client.get("/connections").status_code == 404
 
 
+def test_retired_settings_file_returns_safe_status_without_opening_it(tmp_path, monkeypatch):
+    retired = tmp_path / "settings.json"
+    retired.write_text("synthetic retired sentinel", encoding="utf-8")
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
+
+    real_builtin_open = builtins.open
+    real_path_open = Path.open
+    opened = []
+
+    def _is_retired(path):
+        try:
+            return Path(path).resolve() == retired.resolve()
+        except TypeError:
+            return False
+
+    def guarded_builtin_open(path, *args, **kwargs):
+        if _is_retired(path):
+            opened.append(str(path))
+            raise AssertionError("retired settings file was opened")
+        return real_builtin_open(path, *args, **kwargs)
+
+    def guarded_path_open(path, *args, **kwargs):
+        if path.resolve() == retired.resolve():
+            opened.append(str(path))
+            raise AssertionError("retired settings file was opened")
+        return real_path_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", guarded_builtin_open)
+    monkeypatch.setattr(Path, "open", guarded_path_open)
+    try:
+        client = TestClient(server.app)
+        page = client.get("/")
+        health = client.get("/api/connections/health")
+        mirror = client.get("/api/mirror/status")
+        privacy = client.get("/api/names/vault-conflict")
+
+        assert page.status_code == 200
+        assert "MCP connections" in page.text
+        assert 'id="generic-stdio-config"' in page.text
+        for response in (health, mirror):
+            assert response.status_code == 200
+            body = response.json()
+            assert body["ok"] is False
+            assert body["error"] == "legacy_storage_reappeared"
+            assert "never opened" in body["detail"]
+        assert mirror.json()["status"] == "unavailable"
+        assert privacy.status_code == 200
+        assert privacy.json()["safety_blocked"] is True
+        with pytest.raises(LegacyStorageReappearedError):
+            courses.saved_courses()
+        assert opened == []
+    finally:
+        monkeypatch.setattr(builtins, "open", real_builtin_open)
+        monkeypatch.setattr(Path, "open", real_path_open)
+
+    assert retired.read_text(encoding="utf-8") == "synthetic retired sentinel"
+    assert not retired.with_name("settings.json.migrated-synthetic").exists()
+
+
 def test_health_mapping_covers_client_mirror_privacy_and_overall_failure_paths():
     script = (Path(__file__).resolve().parents[2] / "api/webui/static/canvasagent.js").read_text(encoding="utf-8")
     for contract in (
         "status.connected && status.current",
         "health.python.available",
         "health.mcp.importable",
+        'health.error === "legacy_storage_reappeared"',
+        'label: "Retired storage file found"',
         "data.enabled",
         "data.workspace_configured",
         "data.serve_max_age_hours",

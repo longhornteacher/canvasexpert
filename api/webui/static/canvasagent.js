@@ -111,6 +111,7 @@
     return { state: state, current: !!(status && status.connected && status.current) };
   }
   function renderMcp(clients, health) {
+    var retiredStorage = health && health.error === "legacy_storage_reappeared";
     var runtime = !!(health && health.python && health.python.available && health.mcp && health.mcp.importable && health.mcp.entrypoint_present);
     var outcomes = [];
     document.querySelectorAll("[data-client-card]").forEach(function (card) {
@@ -118,9 +119,11 @@
       outcomes.push(renderClient(card, clients && clients[client]));
     });
     var ready = outcomes.some(function (item) { return item.current; });
-    var state = !runtime ? "unavailable" : ready ? "ready" : "attention";
-    var label = !runtime ? "MCP runtime unavailable" : ready ? "Ready" : "Connect an assistant";
-    var detail = !runtime ? "Canvas Expert’s local MCP server is not ready. Check the installation."
+    var state = retiredStorage || !runtime ? "unavailable" : ready ? "ready" : "attention";
+    var label = retiredStorage ? "Retired storage file found"
+      : !runtime ? "MCP runtime unavailable" : ready ? "Ready" : "Connect an assistant";
+    var detail = retiredStorage ? health.detail || "Student-data access is blocked. Review Local workspace & privacy."
+      : !runtime ? "Canvas Expert’s local MCP server is not ready. Check the installation."
       : ready ? "At least one desktop app has a current local connection. An unused app does not affect readiness."
       : "Connect one desktop app to enable local assistant access.";
     var card = document.getElementById("mcp-connections");
@@ -130,6 +133,11 @@
     return state;
   }
   function mirrorSummary(data) {
+    if (data && data.error === "legacy_storage_reappeared") return {
+      state: "unavailable", label: "Retired storage file found",
+      detail: data.detail || "CanvasMirror status is blocked. Review Local workspace & privacy.",
+      sync: false,
+    };
     if (!data || data.ok === false) return { state: "unavailable", label: "Status unavailable", detail: "CanvasMirror status could not be read.", sync: false };
     if (!data.enabled) return { state: "attention", label: "Sync is off", detail: "Enable CanvasMirror in Settings to keep course data current.", sync: false };
     if (!data.workspace_configured) return { state: "attention", label: "Workspace not configured", detail: "Choose a local workspace in Settings before syncing.", sync: false };

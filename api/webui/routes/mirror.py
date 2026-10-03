@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import JSONResponse
 
+from api.shared_storage import LegacyStorageReappearedError, reappeared_legacy_storage
 from .. import mirror_service
 
 router = APIRouter(tags=["mirror"])
@@ -11,7 +12,22 @@ router = APIRouter(tags=["mirror"])
 
 @router.get("/api/mirror/status")
 def mirror_status(plan_id: str = ""):
-    return JSONResponse(mirror_service.status(plan_id or None))
+    refusal = {
+        "ok": False,
+        "error": "legacy_storage_reappeared",
+        "detail": (
+            "Canvas Expert found a file at a retired vault or settings location. "
+            "Student-data access and shared settings are blocked; the file is never opened. "
+            "Review Local workspace & privacy."
+        ),
+        "status": "unavailable",
+    }
+    try:
+        if reappeared_legacy_storage():
+            return JSONResponse(refusal)
+        return JSONResponse(mirror_service.status(plan_id or None))
+    except LegacyStorageReappearedError:
+        return JSONResponse(refusal)
 
 
 @router.post("/api/mirror/sync-now", status_code=202)
