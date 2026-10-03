@@ -1,21 +1,24 @@
-# Late days from the first meaningful attempt, and resubmission awareness
+# Late days from the first meaningful attempt, resubmissions, and corrections
 
 Status: READY for a lead executor in a fresh session (Sonnet lead, Sonnet/Haiku subagents).
 Written 2026-10-03 with the teacher, after the previous batch (guidance reset and scoring
 preview, commits `ca495a6`..`a39b8de`, pushed to `origin/dev`). Baseline: `dev` at `a39b8de`.
+The teacher settled the three open decisions the same day; they are locked below (9 to 11).
 
 Objective: Canvas owns late points. Canvas Expert and the agent own one thing, late days. Make
-the days come from the student's first meaningful attempt, tell the agent what it needs to talk
-through second and later drafts, and flag the moment Canvas resets the late box on a
-resubmission. Canvas Expert holds no late-points arithmetic and never reads the course late policy.
+the days come from the student's first meaningful attempt in every course, tell the agent what it
+needs to talk through second and later drafts, flag the moment Canvas resets the late box on a
+resubmission, let a row already pushed be corrected through the same preview and go, and retire
+the missing sweep. Canvas Expert holds no late-points arithmetic and never reads the course late
+policy.
 
 ## Carried over from the previous batch
 
 - The teacher's live acceptance in Claude Desktop (a real Scoring Session to the preview) is
   still to do. Claude Desktop only shows `get_scoring_preview` after Canvas Expert restarts,
   because the running process holds the old code.
-- One live row posted during the previous run carries a late penalty the teacher now considers
-  wrong. The teacher fixes it in Canvas Live. No code action.
+- One live row posted during the previous run carries a late penalty the teacher considers
+  wrong. The correction path (A4) is the intended fix; the teacher may also fix it in Canvas Live.
 - Follow-ups noted there and not part of this batch: `ask_teacher_confirmation` attention action
   code (emitted from several places, pinned by tests); `requires_teacher_confirmation` (27
   references); `late_not_honored` looks unreachable; Writing Timeline output is not projected onto
@@ -46,6 +49,11 @@ resubmission. Canvas Expert holds no late-points arithmetic and never reads the 
 8. Carried standing decisions: warn before any push and wait for the teacher's go; the agent
    refreshes the mirror itself; pseudonyms at the agent boundary; live testing against the real
    workspace and Canvas is allowed on purpose.
+9. **Days apply in every course.** Lateness no longer depends on a `Grading Policy.txt`.
+10. **Retire the missing sweep.** Canvas has its own missing-submission policy. The effort floor
+    (`floor_percent`) stays.
+11. **Build a correction path for rows already pushed.** Fixing a pushed row's score or late days
+    goes through the same preview, warnings and explicit go as any push.
 
 ## Verified Canvas facts (canvas-lms master, read 2026-10-03)
 
@@ -72,6 +80,8 @@ leave them only here.
   Not verified: whether a manual late status survives a quiz retake (the quiz path is not
   `submit_homework`). Test on a real quiz before relying on it.
 - A closed grading period makes Canvas skip the late policy recompute.
+- Changing `late_policy_status` or `seconds_late_override` on a submission triggers Canvas to
+  recompute the deduction, so a correction that only changes late days is a valid write.
 
 ## Definition: first meaningful attempt
 
@@ -91,51 +101,34 @@ holds `attempt`, `submitted_at`, `submission_type`, scrubbed `body`, `attachment
 ## How to run this brief
 
 - **Lead (Sonnet):** reads `AGENTS.md`, this brief and only the references named here; runs the
-  preflight; launches the writers; owns the shared counters; runs the gate; makes one commit per
-  workstream on `dev`; does not push. End each message with
-  `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
-- **Writer 1 (code, one writer):** workstream A only. Three changes converge on `tools.py` and
-  `scoring_apply.py`, so splitting code writers would collide. Work them in order: days (A1),
-  packet facts (A2), resubmission flag (A3), running focused tests between steps.
-- **Writer 2 (docs):** workstream B, in parallel with writer 1, on disjoint files.
+  preflight; launches the writers; owns the shared counters (schema version, snapshot,
+  instruction and listing budgets); runs the gate; makes one commit per workstream on `dev`; does
+  not push. End each message with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
+- **Writer 1 (code):** workstream A, in order: A1 days, A2 packet facts, A3 resubmission flag,
+  A4 correction path, running focused tests between steps. One writer because all four converge
+  on `tools.py`, `scoring_apply.py` and `session_actions.py`. Workstream C follows once A is
+  committed (the lead may give C to a second writer then).
+- **Writer 2 (docs):** workstream B, in parallel with writer 1 on disjoint files. The names in
+  this brief (columns, `late` object, warning codes, `corrected`) are the contract between them.
 - **Haiku helpers (read only):** run focused suites, grep docs for leftover absolutes, check that
   no student data entered fixtures.
-- **Workstream C is conditional** and runs only after writer 1 lands, because it touches
-  `tools.py`, `server.py`, `contract.py` and the schema snapshot.
 - Leave the three untracked `docs/reference/State of the Repo 10-3 - *.md` files alone.
 - Fixtures use synthetic pseudonyms and synthetic dates. No real student data in the repo.
 
 ## Preflight (lead)
 
-1. `git status` is clean apart from the three State of the Repo files; `HEAD` is `a39b8de` or a
+1. `git status` is clean apart from the three State of the Repo files; `HEAD` is `d23e118` or a
    later commit that does not touch the files below.
 2. Confirm the seams exist (`grep` the names) and report any that moved: `suggested_late_days`
    (`api/grading_policy.py:209`), the `grading` block in `api/mcp_server/tools.py` (about 3600-3645),
-   `_LATE_LEGEND` / `late_decisions` / `preview_rows` and the late question in
-   `api/powergrader/scoring_apply.py`, `late_decision` / `late_waived` / `_payload` in
-   `api/powergrader/session_actions.py`, `submission_baseline` in
+   `_staged` (`scoring_apply.py:92`), `_LATE_LEGEND` / `late_decisions` / `preview_rows` and the
+   late question in `api/powergrader/scoring_apply.py`, `late_decision` / `late_waived` /
+   `_payload` / `push_grades` in `api/powergrader/session_actions.py`, `submission_baseline` in
    `api/powergrader/session_builder.py:97-127`, `_PACKET_STUDENT_COLUMNS` in `tools.py`.
 3. Trace why a real baseline can carry `canvas_score` but a null `entered_score`. The mirror row
    stores whatever Canvas returned (`api/mirror/store.py:784-792`), and Canvas's own
    `entered_score` method returns `score + points_deducted`. Find where it goes null (a delta
    fetch, a projection, a stale row) with a temporary pytest, and fix the cause if it is ours.
-4. Ask the teacher the **open decisions** below before writing code that depends on them.
-
-## Open decisions to settle in the first message of the session
-
-Recommended defaults are in brackets; ask, then proceed on the answer.
-
-- **D1. Days in every course, or only courses with a `Grading Policy.txt`?** Today the late
-  fields are sent only in a course with that file. [Every course: lateness should not depend on
-  the effort-floor policy file.] If every course, the `canvas` late decision and the
-  `late_canvas_policy` warning go away.
-- **D2. Retire the missing sweep?** CE writes scores on long-overdue blank rows from
-  `missing_percent` and `sweep_after_school_days`; Canvas has its own missing-submission policy.
-  [Retire.] Runs as workstream C only if the teacher says yes. The effort floor `floor_percent`
-  stays either way.
-- **D3. A correction path for already-posted rows is out of scope.** A posted row cannot be
-  restaged (`no_valid_results`); fixing its late box is Canvas Live only. Pull it into this batch
-  only if the teacher says so.
 
 ## Workstream A: code (writer 1)
 
@@ -143,16 +136,18 @@ Recommended defaults are in brackets; ask, then proceed on the answer.
 `api/powergrader/session_actions.py`, `api/powergrader/session_builder.py`,
 `api/powergrader/scoring_preparation.py`, `api/powergrader/scoring_discovery.py`,
 `api/mcp_server/tools.py`, a new pure helper `api/powergrader/attempt_history.py`, read-only use of
-`api/mirror/submission_history.py` and `api/score_ledger.py`, and tests under `api/tests/`.
+`api/mirror/submission_history.py`, `api/score_ledger.py` (append events only through its existing
+API), and tests under `api/tests/`.
 
-### A1. Days from the first meaningful attempt
+### A1. Days from the first meaningful attempt, in every course
 
 - New pure `attempt_history.py`: given the attempt records, return `first_meaningful`,
   `latest`, `count`, and `complete` (coverage check above). No I/O; the caller reads history.
 - `tools.py` grading block: replace `submission_baseline["submitted_at"]` with the first
   meaningful attempt's `submitted_at`. `grading_policy.suggested_late_days` stays as is (school
-  days, `Holidays.csv`, grace days). Per D1, compute days for every row Canvas marks late, not
-  only in policy courses.
+  days, `Holidays.csv`, grace days). Compute days for every row Canvas marks late in every course
+  (decision 9); the late logic no longer reads `Grading Policy.txt`, so the `canvas` late
+  decision goes away.
 - Zero days sends `late_policy_status: "none"` (existing `_payload` behavior). Days above zero
   send `late` plus `seconds_late_override = days * 86400`.
 - No default late question: the default session late policy applies the computed days. A row the
@@ -189,41 +184,86 @@ Recommended defaults are in brackets; ask, then proceed on the answer.
   than their `posted_attempt`, only if the ledger read is already cheap there; otherwise leave it
   out and say so in the result.
 
+### A4. Correction path for rows already pushed
+
+Today a pushed row cannot be restaged: `_staged` (`scoring_apply.py:92`) excludes `posted` rows,
+and `build_plan` returns `no_valid_results`. Behavior contract:
+
+- **Scope.** Rows Canvas Expert pushed in a session that is still the current session for its
+  assignment. A row whose last push is `sent_unknown` stays blocked (existing rule). Reopening an
+  older, superseded session is out of scope; if the executor finds a small clean way, ask first.
+- **Trigger.** `stage_scoring_results` receives a result for a pushed pseudonym whose score,
+  `late_days` or feedback differs from what was pushed. Identical content still returns
+  `no_valid_results`, with a message saying exactly this was already pushed.
+- **Memory of the push.** On each successful push store, privately on the session student,
+  `last_posted: {payload_digest, entered_score, late_days, feedback_digest, attempt}`. A
+  correction compares against it.
+- **Preview.** The row is a normal candidate with a `correction` object,
+  `{previous: {entered, late_days, attempt}}`, and the warning `correction_of_pushed_row`
+  ("This replaces what Canvas Expert pushed earlier: score X, N late days."). Same warnings and
+  explicit go as any push.
+- **Payload.** The score and late fields as usual. The comment is omitted when its text is
+  unchanged, so Canvas gains no duplicate comment; a changed comment goes as a new comment and the
+  preview says so. A late-days-only correction (for example 3 days to 0) sends the same entered
+  score with `late_policy_status: "none"`.
+- **Apply.** Same readback verification. The result row carries `corrected: true` and the counts
+  gain `corrected`.
+- **Ledger.** Append new `ce_apply` events (`intent`, then accepted and verified) carrying
+  `corrects_event_id` that points at the prior verified event. Append-only; never edit old events.
+- **Idempotency.** A correction has a new payload digest and its own slot; sending the same
+  correction twice is `already_applied`.
+- **No new MCP tool or parameter is expected.** If one turns out to be needed, stop and ask.
+
 **Focused tests (A):** the law is that days never depend on the latest attempt. Cases, with
 synthetic data: on-time first and late second (days 0, payload `none`); late first and later
 second (same days as the first); blank first attempt skipped; quiz-type attempt counts as
-meaningful; incomplete history asks instead of guessing; preview wording has no points language;
-`prior_entered` never equals a post-deduction score; `late_box_reset` fires only when a newer
-attempt follows a posted one. One example for the packet columns. Gate:
+meaningful; incomplete history asks instead of guessing; a course with no `Grading Policy.txt`
+still gets days; preview wording has no points language; `prior_entered` never equals a
+post-deduction score; `late_box_reset` fires only when a newer attempt follows a pushed one.
+Correction: an unchanged restage never sends; a changed score or days sends exactly the new
+score and late fields and no comment unless it changed; `sent_unknown` still blocks; the ledger
+events link through `corrects_event_id`; the preview shows the previous values; a days-only
+correction. One example for the packet columns. Gate:
 `py -m pytest -p no:randomly -q api/tests/powergrader api/tests/mcp_server api/tests/test_grading_policy.py api/tests/test_scoring_packet_mcp.py api/tests/mirror`.
 
 ## Workstream B: docs (writer 2, parallel)
 
 **Owns:** `docs/contracts/grading-policy-contract.md`, `docs/guides/scoring-sessions.md`,
-`docs/reference/powergrader-scoring-map.md`, `docs/mcp-server.md`,
-`api/default_docs/AI Authoring/START HERE - CanvasAgent.txt` (late passages only).
+`docs/reference/powergrader-scoring-map.md`, `docs/reference/gradebook-module-map.md`,
+`docs/mcp-server.md`, `api/default_docs/AI Authoring/START HERE - CanvasAgent.txt` (late and
+sweep passages only).
 
 - Contract: add the verified Canvas mechanics above; state the principle (Canvas owns late points,
   Canvas Expert owns days); define first meaningful attempt and the coverage rule; rewrite
-  sections 2, 3 and 5 so days come from the first attempt and the default has no late question;
-  correct the "resubmission resets status" line to cite `submit_homework`; state that anything
-  touching a score starts from the entered score.
-- Guide, scoring map, mcp-server.md, START HERE: the new packet columns, the preview `late` object
-  and warning codes, `late_box_reset`, and how the agent talks through second drafts (it proposes
-  the entered score in conversation). START HERE Appendix B has a 7,200-character cap on the
-  on-demand overview; measure before and after.
+  sections 2, 3 and 5 so days come from the first attempt in every course and the default has no
+  late question; correct the "resubmission resets status" line to cite `submit_homework`; state
+  that anything touching a score starts from the entered score; document the correction path
+  (A4); remove section 6 (missing sweep) and the `missing_percent` and `sweep_after_school_days`
+  keys from section 4 (the policy file keeps `floor_percent`; unknown keys are ignored).
+- Guide, scoring map, gradebook map, mcp-server.md, START HERE: the new packet columns, the
+  preview `late` object and warning codes, `late_box_reset`, the correction flow, how the agent
+  talks through second drafts (it proposes the entered score in conversation), and the removal of
+  the two sweep tools (67 tools, schema v75). START HERE Appendix B has a 7,200-character cap on
+  the on-demand overview; measure before and after.
+- `docs/mcp-server.md` is pinned to the live registry by a test; update it to match workstream C's
+  final tool list and run the pin test after C lands.
 - Voice: calm, plain, no em-dashes, no ALL-CAPS framing. Update tables rather than adding narrative.
 - Seeded default docs: a changed START HERE needs the replaced file's LF-normalized sha256 appended
   to `RETIRED_FILES["START HERE - CanvasAgent.txt"]` in `api/webui/ai_ta.py` (the lead does this).
 
-## Workstream C: retire the missing sweep (only if D2 is yes; after A lands)
+## Workstream C: retire the missing sweep (after A is committed)
 
-Delete `api/missing_sweep.py`, `api/operation_ledger/adapters/missing_fill.py`, the MCP tools
-`preview_missing_sweep` and `apply_missing_sweep` (`tools.py`, `server.py`), the
-`missing_percent` and `sweep_after_school_days` keys from `Grading Policy.txt` loading
-(`api/grading_policy.py`), and their docs and tests; add rows to `api/tests/test_retired_paths.py`.
-Bump `TOOL_SCHEMA_VERSION` (75), regenerate the snapshot under pytest, delete the old snapshot,
-update `docs/mcp-server.md`, re-measure the listing budget. Keep `floor_percent`.
+Delete `api/missing_sweep.py`, `api/operation_ledger/adapters/missing_fill.py` (and its export in
+`adapters/__init__.py`), the MCP tools `preview_missing_sweep` and `apply_missing_sweep`
+(`tools.py`, `server.py`), the `missing_percent` and `sweep_after_school_days` handling in
+`api/grading_policy.py` (`floor_percent` stays; a real `Grading Policy.txt` that still contains the
+old keys must keep loading, with the extra keys ignored), their tests (`test_missing_sweep.py`,
+`test_missing_sweep_operation.py`, and the sweep cases in `test_grading_policy.py`,
+`tests/conftest.py`, `mcp_server/test_tools.py`, `mcp_server/test_server_instructions.py`,
+`mcp_server/test_scoring_apply_tools.py`), and the `gradebook.missing_fill` owner in
+`docs/contracts/canvas-transport-owners.json`. Add rows to `api/tests/test_retired_paths.py`. Bump
+`TOOL_SCHEMA_VERSION` to 75, regenerate the snapshot under pytest, delete `tool_schema_v74.json`,
+and re-measure the instruction and listing budgets (69 tools becomes 67). Docs are workstream B's.
 
 ## Acceptance criteria
 
@@ -235,23 +275,30 @@ update `docs/mcp-server.md`, re-measure the listing budget. Keep `floor_percent`
 4. Incomplete attempt history never produces a guessed day count (test); the stage asks.
 5. No late question is asked by default; the preview shows days and the first and latest attempt
    dates; no preview or result text contains points or "penalty" language for late work.
-6. Packet rows carry `prior_entered`, `attempt_count`, `first_attempt_at`, `latest_attempt_at`,
+6. A course with no `Grading Policy.txt` gets days like any other (test).
+7. Packet rows carry `prior_entered`, `attempt_count`, `first_attempt_at`, `latest_attempt_at`,
    `posted_attempt`; `prior_entered` is never a post-deduction score (tests).
-7. `late_box_reset` fires exactly when a newer attempt follows a posted one (test).
-8. Canvas Expert contains no late-points arithmetic and no read of the course late policy
+8. `late_box_reset` fires exactly when a newer attempt follows a pushed one (test).
+9. Canvas Expert contains no late-points arithmetic and no read of the course late policy
    (`grep -rn "late_policy\b\|points_for_missing\|late_submission_deduction" api` finds only the
    session `late_policy` setting and the Canvas payload fields).
-9. The contract holds the verified Canvas facts; guide, scoring map, mcp-server.md and START HERE
-   match; the overview still fits its cap.
-10. Per D2: either the sweep is retired with schema v75 and the guard rows, or it is untouched.
-11. Full suite passes: `py -m pytest api/tests engine/tests -p no:randomly -q`. Baseline at
+10. A pushed row can be corrected: a changed score or `late_days` restages as a correction with a
+    `correction` object and `correction_of_pushed_row` warning, sends only the new score and late
+    fields (and a comment only if its text changed), verifies by readback, reports `corrected`,
+    and links its ledger events through `corrects_event_id`. An unchanged restage never sends.
+    `sent_unknown` still blocks (tests).
+11. The missing sweep is gone: tools, adapter, tests and docs removed, retired-paths rows added,
+    schema v75 with 67 tools, and a `Grading Policy.txt` with the old keys still loads.
+12. The contract holds the verified Canvas facts; guide, scoring map, gradebook map,
+    mcp-server.md and START HERE match; the overview still fits its cap.
+13. Full suite passes: `py -m pytest api/tests engine/tests -p no:randomly -q`. Baseline at
     `a39b8de`: 2684 passed, 5 warnings, about 143 seconds. Do not rerun the baseline.
 
 ## Non-goals
 
 - No reading of the Canvas late policy; no points shown or computed.
 - No extra-credit rule; no late-work calendar or sweep for late days.
-- No correction path for posted rows (D3) unless the teacher pulls it in.
+- No reopening of an older, superseded session for corrections (A4 scope).
 - No change to the effort floor, curves, or grade adjustment beyond teacher decision 7.
 - No Canvas writes during development; live runs stop before apply unless the teacher says go.
 
@@ -261,15 +308,15 @@ update `docs/mcp-server.md`, re-measure the listing budget. Keep `floor_percent`
   beside the one that owns the machine lock. Drive new code in-process against the real workspace
   with a small script, only the read, prepare, stage and preview functions.
 - A stage that returns `needs_teacher_input` is the teacher's question, even on a dry run. Ask.
-- A posted row cannot be restaged (`no_valid_results`).
+- A pushed row cannot be restaged until A4 lands (`no_valid_results`).
 
 ## Verification gate
 
 Focused: workstream A's command passes before integration. Full: after integration the full suite
 passes once; the lead reports the count and time. Optional live check, only with the teacher's OK
 in chat: one real Scoring Session through `get_scoring_preview`, no apply, reporting counts,
-warnings and the late object, not student content. Live acceptance in Claude Desktop is the
-teacher's.
+warnings and the late object, not student content. A live correction apply is the teacher's call,
+row by row. Live acceptance in Claude Desktop is the teacher's.
 
 Report: traffic light, commit hashes, changed files per workstream, commands and counts,
 deviations, open questions.
