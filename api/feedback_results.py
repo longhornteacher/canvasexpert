@@ -4,7 +4,6 @@ import re
 
 from api.feedback_vault import Vault
 from api.feedback_contract import CONTRACT_VERSION
-from api.powergrader import writing_timeline
 
 def _format_number(value) -> str | None:
     if value is None:
@@ -229,11 +228,11 @@ def validate_results(results, bundle: dict = None, vault: Vault = None,
         if not isinstance(feedback, str):
             _error(where, "feedback", "'feedback' must be text")
 
-        if "writing_process_observations" in r and not isinstance(
-            r.get("writing_process_observations"), str
+        if "agent_commentary" in r and not isinstance(
+            r.get("agent_commentary"), str
         ):
-            _error(where, "writing_process_observations",
-                   "'writing_process_observations' must be text")
+            _error(where, "agent_commentary",
+                   "'agent_commentary' must be text")
 
         if "insincere" in r and not isinstance(r.get("insincere"), bool):
             _error(where, "insincere", "'insincere' must be a boolean")
@@ -302,13 +301,9 @@ def reidentify(results: list, vault: Vault) -> list:
     out = []
     for r in results:
         who = vault.reverse(r.get("pseudonym", ""))
-        writing_observation = r.get("writing_process_observations", "")
-        if not isinstance(writing_observation, str):
-            writing_observation = ""
-        # The contract forbids integrity conclusions here; enforce it rather than
-        # trusting the prompt.  This is the single funnel where model results
-        # become teacher-facing rows, so the guard belongs here.
-        writing_observation = writing_timeline.sanitize_process_observation(writing_observation)
+        agent_commentary = r.get("agent_commentary", "")
+        if not isinstance(agent_commentary, str):
+            agent_commentary = ""
         out.append({
             "resolved":  who is not None,
             "real_name": (who or {}).get("real_name", ""),
@@ -319,7 +314,7 @@ def reidentify(results: list, vault: Vault) -> list:
             "feedback":  r.get("feedback", ""),
             "authored_feedback": r.get("authored_feedback", r.get("feedback", "")),
             "possible": r.get("possible"),
-            "writing_process_observations": writing_observation,
+            "agent_commentary": agent_commentary,
         })
     return out
 
@@ -361,10 +356,10 @@ def merge_rows_by_uid(rows: list) -> dict:
                 "item_id": ",".join(str(item.get("item_id") or "") for item in items),
                 "score": total,
                 "feedback": "\n\n".join(sections),
-                "writing_process_observations": "\n\n".join(
-                    str(item.get("writing_process_observations") or "").strip()
+                "agent_commentary": "\n\n".join(
+                    str(item.get("agent_commentary") or "").strip()
                     for item in items
-                    if str(item.get("writing_process_observations") or "").strip()
+                    if str(item.get("agent_commentary") or "").strip()
                 ),
             }
         merged[uid] = base

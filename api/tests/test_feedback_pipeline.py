@@ -63,6 +63,22 @@ def test_round_trip_reidentify(tmp_path):
     assert rows[1]["resolved"] is False                # unknown pseudonym flagged, not dropped
 
 
+def test_agent_commentary_reaches_the_teacher_row_exactly_as_written(tmp_path):
+    """LAW: nothing filters, rewrites, or drops the teacher-only note on its way through."""
+    v = Vault(str(tmp_path / "vault.json"))
+    pseudonym = v.get_or_assign("9001", "Ada Lovelace", "5001")
+    note = "Possible plagiarism: this reads as AI-generated and may be cheating."
+    results = [{"pseudonym": pseudonym, "item_id": item, "score": 3, "feedback": "Good.",
+                "agent_commentary": text} for item, text in (("a", note), ("b", "Second item note."))]
+
+    assert fp.validate_results(results)["ok"] is True
+    assert fp.validate_results([{**results[0], "agent_commentary": 5}])["ok"] is False
+
+    rows = fp.reidentify(fp.render_results(results), v)
+    assert [row["agent_commentary"] for row in rows] == [note, "Second item note."]
+    assert fp.merge_rows_by_uid(rows)["9001"]["agent_commentary"] == f"{note}\n\nSecond item note."
+
+
 # --------------------------------------------------------------------------
 # Phase B: assignment-API submissions path (pseudonymize_submissions)
 # --------------------------------------------------------------------------

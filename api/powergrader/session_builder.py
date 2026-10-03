@@ -104,7 +104,7 @@ def build_students(
             "status":        "pending",
             "ai_score":      ai.get("score"),
             "ai_feedback":   ai.get("feedback"),
-            "writing_process_observations": ai.get("writing_process_observations", ""),
+            "agent_commentary": ai.get("agent_commentary", ""),
             "ai_item_results": [dict(item) for item in ai_items],
             **({"ai_scoring_error": ai_failure} if ai_failure else {}),
             "teacher_score": None,

@@ -132,11 +132,11 @@ def prepare(course_id, assignment_id, *, use_existing_mirror=False, vault, cours
         if (comments.get("state") != "current" or comment_fresh.get("projection_state") != "current"
                 or base.get("state") == "unavailable" or not base.get("last_success_at")):
             return _fail("mirror_projection_unavailable",
-                         user_action="Ask the teacher to refresh the course mirror, including comments, then retry.")
+                         user_action="Refresh the course mirror, including comments, then retry.")
         if (base.get("requires_teacher_confirmation") or comment_fresh["requires_teacher_confirmation"]) and not use_existing_mirror:
-            return _fail("mirror_freshness_confirmation_required",
+            return _fail("mirror_refresh_needed",
                          last_success_at=min(base["last_success_at"], comment_fresh["last_success_at"]),
-                         user_action="Ask whether relevant Canvas work changed. Refresh only on teacher instruction, or acknowledge unchanged work with use_existing_mirror=true.")
+                         user_action="Refresh this course's mirror with refresh_mirror, then retry. If the teacher has said nothing changed, retry with use_existing_mirror=true instead.")
 
         replacements = feedback_scrub.build_replacement_map(vault.entries(), set())
         context = {"title": _scrub(str(assignment.get("name") or ""), replacements),

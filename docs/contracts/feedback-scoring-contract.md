@@ -38,8 +38,8 @@ use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id=
 requires one exact Current course and assignment and prepares it from valid
 local projections. It performs no refresh, Canvas write, or direct Canvas read.
 The product-owned result shape in `api/feedback_contract.py` requires only
-`pseudonym`, `item_id`, `score`, and `feedback`, with optional writing-process
-observations and grading flags. It appears on page zero. An explicit
+`pseudonym`, `item_id`, `score`, and `feedback`, with an optional teacher-only
+`agent_commentary` and grading flags. It appears on page zero. An explicit
 `feedback_contract_id` selects one workspace contract file; its body is carried
 verbatim in page zero and bound to the private session by a digest. It may guide
 pedagogy, length, structure, headings, exemplars, revision tasks, tone, and
@@ -76,6 +76,14 @@ segments. Each projected row identifies its `segment_index` and `segment_count`;
 segments concatenate in order to the exact original response and retain one result key
 `(pseudonym, item_id)`. `total`/`segment_total` count projected segment rows, while
 `source_response_total` counts original scorable responses.
+A response whose scrubbed text shares at least 25 words (in runs of 8 or more) with
+another student's response to the same item carries `evidence.overlap` on its first
+segment row: for each match, the other pseudonym, the item, `shared_words`, `share`,
+and up to two short samples of the response's own text. Wording that also appears in
+the assignment directions, rubric, shared materials, or item prompt is ignored. Canvas
+Expert recomputes this over the whole bundle on preparation and on refresh, so late
+work is compared with everything already in it. It is evidence for the agent to weigh,
+not a verdict, and rows below the threshold carry none.
 New sessions include only submissions Canvas still marks `submitted` or `pending_review`.
 Mirror preparation ignores an unmatched row only when it is demonstrably historical already-
 graded work (`workflow_state="graded"`, numeric score present, and empty `submitted_at`),
@@ -121,9 +129,17 @@ unchanged.
 | `item_id` | yes | Exact response item from that pseudonym's packet rows. |
 | `score` | yes | Number or `null`. On ordinary assignments, `null` may permit comment-only posting after explicit teacher confirmation. |
 | `feedback` | yes | Complete authored student-facing text. Any string is valid with a numeric score; it must be non-empty when `score` is null. |
-| `writing_process_observations` | no | Separate, teacher-only local observation; never student feedback or a score input. |
+| `agent_commentary` | no | Teacher-only note on anything the teacher should know about this submission, including possible integrity concerns. Never student feedback, never sent to Canvas, never a score input. |
 | `insincere` | no | A sincere-attempt proposal used only in `post_score`, in a course with a grading policy; must agree across every item row of one pseudonym. |
 | `late_days` | no | An integer 0-60 used only in `post_score`, in a course with a grading policy; must agree across every item row of one pseudonym. |
+
+`agent_commentary` is where the agent says what it found and how strong it thinks the
+evidence is, in plain words, citing what it relied on (`writing_timeline`,
+`evidence.overlap`, `get_submission_history`, `get_writing_history`, or its own checks
+such as a web search for distinctive phrases). Canvas Expert passes it through as written.
+It does not change the score or the student-facing feedback by itself; the teacher
+decides. Integrity concerns stay out of `feedback`, which the student reads, and an
+agent may name another student's pseudonym in `agent_commentary` when citing overlap.
 
 Duplicates, unknown pseudonyms/items, malformed values, and stale packet digests fail
 closed. The complete result set is validated before re-identification. A field-shape
@@ -251,16 +267,14 @@ authorizes apply for that exact stage; a review-only or no-submit direction stop
 Newly authored Scoring Session feedback is sent verbatim with no automatic gradebook or
 late-policy footer. A numeric score-only row sends no comment, even when effort credit changes
 the posted mark. Frozen stages that predate teacher-authored feedback retain their established
-legacy payload behavior. Canvas Expert does not read the resulting grade back. There is no post-write GET, no mirror
-refresh, no score equality comparison, no comment-count or latest-comment comparison, no
-`points_deducted` use, and no grade or score values, late-policy values, Canvas-returned
-grade outcomes, or raw Canvas response bodies in MCP results or receipts. MCP results
-may report the selected write mode as safe operation metadata and the existing
-aggregate transport statuses. Canvas may apply a late/missing policy or any other
-gradebook adjustment; CE neither changes that policy nor asks about, reads, calculates,
-displays, or treats the adjusted result as a write
-failure. The teacher reviews the result in Canvas and may edit it there; that review is not an
-automated CE responsibility. CE sends no `excuse` or other policy/gradebook adjustment field,
+legacy payload behavior. After the writes, Canvas Expert makes one batched, read-only
+submissions read to verify every accepted numeric score (see the next paragraphs and
+`docs/contracts/grading-policy-contract.md` section 5). There is no comment-count or
+latest-comment comparison, and no raw Canvas response bodies in MCP results or receipts. MCP
+results may report the selected write mode as safe operation metadata, the existing aggregate
+transport statuses, and the verification status per row. Canvas may apply a late/missing policy
+or any other gradebook adjustment; CE neither changes that policy nor treats the adjusted
+result as a write failure. The teacher reviews the result in Canvas and may edit it there. CE sends no `excuse` or other policy/gradebook adjustment field,
 and requests no course late policy. In a course with a grading policy
 (`docs/contracts/grading-policy-contract.md`), `posted_grade` is the effort-credit mark rather
 than the raw rubric score, and a Scoring Session sends `late_policy_status` and
@@ -269,9 +283,11 @@ than the raw rubric score, and a Scoring Session sends `late_policy_status` and
 the posted value stays the raw score, exactly as before. `feedback_only` does not calculate or send a gradebook mark or late-policy fields, regardless of course policy.
 
 A Canvas HTTP success means the write was accepted; CE records that compact receipt and moves
-on. The only read after a send is for late-decision rows (`waived` or `applied`): one batched,
-read-only submissions read that reports whether Canvas honored the late status, never retried
-and never used to correct a row (`docs/contracts/grading-policy-contract.md` section 5). A
+on. The only read after a send is one batched, read-only submissions read that verifies every
+posted numeric score (`score_readback_mismatch`, `score_readback_unavailable`) and, for
+late-decision rows (`waived` or `applied`), whether Canvas honored the late status
+(`late_not_honored`). It is never retried and never used to correct a row
+(`docs/contracts/grading-policy-contract.md` section 5). A
 non-HTTP transport error is `write_transport_unknown`: it performs no later verification
 and no automatic retry, and it is never reported as `canvas_write_attention`. An explicit
 Canvas HTTP rejection is a failed write. Neither outcome may trigger a second submission
@@ -289,8 +305,8 @@ assignment totals and assignment-level comments are not scoring fallbacks.
 
 The teacher's request authorizes valid results only for the exact course/assignment
 saved in that assignment-scoped session. It does not authorize another Scoring
-Session, SIS action, or arbitrary grade edit. Canvas Live is the review/edit
-surface. Canvas Expert has no local approval
+Session, SIS action, or arbitrary grade edit. The agent's preview is the first review and
+Canvas Live is the record and the place for later edits. Canvas Expert has no local approval
 queue, import workflow, or second blanket confirmation. Student feedback is not labeled
-as AI unless the teacher explicitly chose a signoff; writing-process observations never enter Canvas
+as AI unless the teacher explicitly chose a signoff; `agent_commentary` never enters Canvas
 feedback, scores, or receipts.

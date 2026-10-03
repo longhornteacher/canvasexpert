@@ -2,6 +2,7 @@
 import pytest
 
 from api import feedback_contract
+from api.powergrader import scoring_packet
 from api.powergrader.scoring_packet import build_packet, validate_safe_bundle
 
 
@@ -57,3 +58,28 @@ def test_packet_membership_counts_are_distinct_and_independent_of_response_pagin
         seen.extend(result["students"])
         offset = result.get("next_offset")
     assert len(seen) == expected_rows
+
+
+def test_overlap_evidence_rides_on_the_first_segment_row_only(monkeypatch):
+    """LAW: evidence is carried through the projection once per response, never stripped or repeated."""
+    monkeypatch.setattr(scoring_packet, "_TOKEN_BUDGET", 3_000)
+    evidence = {"overlap": [{"with": "Learner B", "item_id": "1", "shared_words": 30,
+                             "share": 0.5, "samples": ["a shared passage"]}]}
+    bundle = {"students": [
+        {"pseudonym": "Learner A", "responses": [
+            {"item_id": "1", "response": "word " * 6000, "evidence": evidence}]},
+        {"pseudonym": "Learner B", "responses": [{"item_id": "1", "response": "short"}]},
+    ]}
+    assert validate_safe_bundle(bundle)["ok"] is True
+
+    rows, offset = [], 0
+    while offset is not None:
+        page = build_packet({"session_id": "synthetic"}, bundle, offset=offset, limit=1,
+                            include_context=False)
+        rows.extend(page["students"])
+        offset = page.get("next_offset")
+
+    learner_a = [row for row in rows if row["pseudonym"] == "Learner A"]
+    assert len(learner_a) > 1
+    assert [row.get("evidence") for row in learner_a] == [evidence] + [None] * (len(learner_a) - 1)
+    assert all("evidence" not in row for row in rows if row["pseudonym"] == "Learner B")

@@ -313,7 +313,8 @@ def build_packet(
     - packet_digest: bundle identity, required by ``stage_scoring_results``
     - items: list of {item_id, prompt, possible}, deduplicated by item_id
     - students: list of {pseudonym, item_id, text, segment_index, segment_count}
-      for this page
+      for this page; a response's ``evidence`` (shared-wording overlap) rides on
+      its first segment row only
     - total/segment_total: projected segment rows in the whole bundle
     - source_response_total: original scorable responses before segmentation
     - students_total: distinct students holding at least one scorable row
@@ -374,6 +375,7 @@ def build_packet(
                 "pseudonym": pseudonym,
                 "item_id": item_id,
                 "text": text,
+                "evidence": response.get("evidence") or None,
             })
 
     source_response_total = len(scorable)
@@ -460,7 +462,8 @@ def build_packet(
         max(_TOKEN_BUDGET - _SEGMENT_RESERVE, sized_minimum),
     )
 
-    def row_fits(text_value, segment_index, segment_count, pseudonym="pseudonym", item_id="item_id"):
+    def row_fits(text_value, segment_index, segment_count, pseudonym="pseudonym", item_id="item_id",
+                 evidence=None):
         row = {
             "pseudonym": pseudonym,
             "item_id": item_id,
@@ -468,6 +471,8 @@ def build_packet(
             "segment_index": segment_index,
             "segment_count": segment_count,
         }
+        if evidence and segment_index == 1:
+            row["evidence"] = evidence
         return _estimated(_packet_shape(
             digest=digest, items=items, students=[row], total=1,
             source_response_total=source_response_total,
@@ -484,18 +489,22 @@ def build_packet(
         segments = _split_response(
             original["text"],
             fits=lambda value, index, count: row_fits(
-                value, index, count, original["pseudonym"], original["item_id"]
+                value, index, count, original["pseudonym"], original["item_id"],
+                original["evidence"],
             ),
         )
         count = len(segments)
         for index, segment in enumerate(segments, start=1):
-            projected.append({
+            row = {
                 "pseudonym": original["pseudonym"],
                 "item_id": original["item_id"],
                 "text": segment,
                 "segment_index": index,
                 "segment_count": count,
-            })
+            }
+            if original["evidence"] and index == 1:
+                row["evidence"] = original["evidence"]
+            projected.append(row)
 
     segment_total = len(projected)
     offset = max(0, int(offset or 0))

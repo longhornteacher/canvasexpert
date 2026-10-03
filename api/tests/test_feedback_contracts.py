@@ -225,7 +225,7 @@ def test_inherited_guidance_stays_non_authoritative_across_freshness_retry(monke
         "c1", "a1", use_existing_mirror=True, activate_session=activate,
     )
 
-    assert first["code"] == "mirror_freshness_confirmation_required"
+    assert first["code"] == "mirror_refresh_needed"
     assert second["code"] == "needs_scoring_norms"
     assert not saved
 

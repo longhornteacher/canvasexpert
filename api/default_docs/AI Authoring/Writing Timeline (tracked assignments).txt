@@ -14,10 +14,14 @@ revision trail at all, how large each insertion was and when it landed, roughly
 how long the document was open, and whether the file descended from a handout
 whose tracking was locked.
 
-The feature is called Writing Timeline. It is not an integrity checker, and it
-never produces a score, a percentage, or a likelihood. It reports observations
-with innocent explanations attached. A number would get quoted in a
-disciplinary meeting as though it meant something.
+The feature is called Writing Timeline. It is evidence for the teacher and the
+agent, not a verdict. It never produces a score, a percentage, or a likelihood
+of its own, and its observations often have innocent explanations. The agent may
+weigh them alongside other evidence (shared wording with classmates, submission
+history, writing history) and draw conclusions in teacher-only commentary,
+saying how strong the evidence is in plain words. A number would get quoted in a
+disciplinary meeting as though it meant something. The teacher decides what to
+do.
 
 
 Tracked or not tracked, the one thing to get right
@@ -140,11 +144,12 @@ raw author string, never another student's name or pseudonym.
 
 Writing Timeline is available in all three PowerGrader modes (Score myself,
 Score with AI chat, Auto-score with AI). An AI mode may return one optional
-teacher-only field of writing-process observations. It is shown to the teacher
-only: never copied into student feedback, never posted to Canvas, never fed
-into a score, an automatic post, or an automatic consequence. Observations
-only, so no integrity conclusion, no likelihood, no recommended penalty. That
-limit is enforced in code, not merely requested in a prompt.
+teacher-only note, agent_commentary, where the agent says what it found and how
+strong it thinks the evidence is, including any integrity concern. It is shown
+to the teacher only: never copied into student feedback, never posted to Canvas,
+never fed into a score, an automatic post, or an automatic consequence. The
+agent describes strength in plain words rather than inventing a percentage, and
+the teacher decides.
 
 
 Grading and planning

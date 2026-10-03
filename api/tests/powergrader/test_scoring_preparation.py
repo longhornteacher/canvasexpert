@@ -87,15 +87,16 @@ def test_mirror_failure_is_typed_and_identity_safe(monkeypatch, tmp_path):
     assert {"code", "stage", "retryable", "user_action"} <= result.keys()
 
 
-def test_old_snapshot_requires_explicit_teacher_confirmation(monkeypatch, tmp_path):
+def test_old_snapshot_asks_the_agent_to_refresh(monkeypatch, tmp_path):
     saved, prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(
         rubric=[{"description": "Reasoning", "points": 10, "ratings": []}]),
         freshness=_fresh(age=31, needs=True))
     result = prepare()
-    assert result["code"] == "mirror_freshness_confirmation_required"
+    assert result["code"] == "mirror_refresh_needed"
     assert result["stage"] == "freshness"
     assert result["retryable"] is True
-    assert "relevant Canvas work changed" in result["user_action"]
+    assert "refresh_mirror" in result["user_action"]
+    assert "use_existing_mirror=true" in result["user_action"]
     assert saved == {}
 
 
@@ -283,7 +284,7 @@ def test_refresh_never_overwrites_an_earlier_bundle_file(scoring_refresh_world):
     ("completed", "session_completed"),
     ("completed_with_holds", "session_completed"),
     ("sent_unknown", "canvas_write_attention"),
-    ("old_snapshot", "mirror_freshness_confirmation_required"),
+    ("old_snapshot", "mirror_refresh_needed"),
     ("not_current", "mirror_projection_unavailable"),
 ])
 def test_refresh_refusals_change_no_state(scoring_refresh_world, case, code):
@@ -425,3 +426,28 @@ def test_refresh_with_nothing_new_changes_nothing_but_the_recorded_mirror(scorin
     assert {k: v for k, v in after.items() if k not in mirror} == {
         k: v for k, v in before.items() if k not in mirror}
     assert _safe_files(world) == files
+
+
+def test_prepare_and_refresh_attach_overlap_evidence_to_the_safe_bundle(scoring_refresh_world):
+    """EXAMPLE: rows sharing wording carry evidence.overlap; a row below the threshold carries none."""
+    world = scoring_refresh_world
+    passage = " ".join(f"claim{i}" for i in range(30))
+    world.add("900001", "Synthetic First", body=f"Opening one. {passage} Ending one.")
+    world.add("900002", "Fictional Omega", body=f"Opening two. {passage} Wrapping two.")
+    world.add("900003", "Quiet Learner")
+    sid = world.prepare()
+    first, second, third = (world.pseudonym(uid) for uid in ("900001", "900002", "900003"))
+
+    rows = {s["pseudonym"]: s["responses"][0] for s in world.bundle()["students"]}
+    assert [(e["with"], e["shared_words"]) for e in rows[first]["evidence"]["overlap"]] == [(second, 30)]
+    assert rows[first]["evidence"]["overlap"][0]["samples"] == [passage]
+    assert "evidence" not in rows[third]
+
+    world.add("900004", "Late Arrival", body=f"Another opening. {passage} Final thoughts.")
+    scoring_preparation.refresh_scoring_session(sid)
+
+    late = world.pseudonym("900004")
+    rows = {s["pseudonym"]: s["responses"][0] for s in world.bundle(world.session(sid))["students"]}
+    assert {e["with"] for e in rows[first]["evidence"]["overlap"]} == {second, late}
+    assert {e["with"] for e in rows[late]["evidence"]["overlap"]} == {first, second}
+    assert "evidence" not in rows[third]

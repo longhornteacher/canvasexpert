@@ -15,6 +15,7 @@ from api.powergrader import (
     assignmentforge,
     context,
     media_recordings,
+    overlap,
     scoring_artifacts,
     session_builder,
     session_store,
@@ -218,6 +219,22 @@ def _safe_bundle_path(session: dict) -> str:
     return resolved if resolved and os.path.isfile(resolved) else ""
 
 
+def _attach_overlap_evidence(bundle_path: str, *basis_parts) -> None:
+    """Add shared-wording evidence to a freshly written SAFE bundle file.
+
+    Preparation and refresh both write their bundle through scoring_artifacts, so
+    both call this right after. A refresh's file is the whole merged bundle, which
+    is recomputed from scratch: late work is compared with everything already in it.
+    """
+    path = workspace.extended_path(bundle_path)
+    with open(path, encoding="utf-8") as handle:
+        bundle = json.load(handle)
+    overlap.attach_overlap_evidence(
+        bundle, basis_text="\n\n".join(str(part or "") for part in basis_parts))
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(bundle, handle, indent=2, ensure_ascii=False)
+
+
 def _ready_payload(session: dict) -> dict:
     """Return only identity-free facts after the private session is persisted."""
     from api.powergrader import scoring_packet
@@ -296,13 +313,12 @@ def _freshness_refusal(freshness: dict, use_existing_mirror: bool) -> dict | Non
     if (freshness.get("requires_teacher_confirmation")
             and not bool(use_existing_mirror)):
         return _typed_failure(
-            "mirror_freshness_confirmation_required", "freshness", retryable=True,
+            "mirror_refresh_needed", "freshness", retryable=True,
             user_action=(
-                "Ask whether relevant Canvas work changed since this snapshot. If not, "
-                "retry this exact call with use_existing_mirror=true; if yes or "
-                "unsure, wait for an explicit teacher request to refresh."
+                "Refresh this course's mirror with refresh_mirror, then retry. If the "
+                "teacher has said nothing changed, retry with use_existing_mirror=true instead."
             ),
-            error="The local CanvasMirror snapshot needs teacher freshness confirmation.",
+            error="The local CanvasMirror snapshot is older than the freshness policy allows.",
             freshness={
                 "last_success_at": str(freshness.get("last_success_at") or ""),
                 "age_minutes": int(freshness.get("age_minutes") or 0),
@@ -564,6 +580,17 @@ def prepare_scoring_session(
                 error="A student has a provisional pseudonym assignment.",
                 assignment_name=assignment_name,
             )
+        return _typed_failure(
+            "safe_preparation_failed", "prepare", retryable=True,
+            user_action="The SAFE scoring packet could not be prepared. Retry this exact assignment.",
+            error="The SAFE scoring packet could not be prepared.",
+            assignment_name=assignment_name,
+        )
+    try:
+        _attach_overlap_evidence(
+            ai_result["privacy_artifacts"]["safe_bundle"],
+            rubric_text_override, complete_guidance, assignment_description)
+    except Exception:
         return _typed_failure(
             "safe_preparation_failed", "prepare", retryable=True,
             user_action="The SAFE scoring packet could not be prepared. Retry this exact assignment.",
@@ -892,6 +919,15 @@ def refresh_scoring_session(
         if isinstance(ai_result, dict) and ai_result.get("code") == "pseudonym_provisional":
             return refuse("pseudonym_provisional",
                           "Resolve the provisional pseudonym in the local roster, then retry.")
+        return refuse("safe_refresh_failed",
+                      "The SAFE scoring packet could not be refreshed. Retry this call.",
+                      retryable=True)
+    try:
+        _attach_overlap_evidence(
+            ai_result["privacy_artifacts"]["safe_bundle"],
+            session.get("scoring_rubric_text"), session.get("teacher_scoring_guidance"),
+            session.get("assignment_description"))
+    except Exception:
         return refuse("safe_refresh_failed",
                       "The SAFE scoring packet could not be refreshed. Retry this call.",
                       retryable=True)

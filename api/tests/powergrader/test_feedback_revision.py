@@ -57,7 +57,7 @@ def test_complete_feedback_only_path_keeps_scores_and_history(feedback_revision_
     ("boolean_score", "feedback_score_invalid"),
     ("quiz", "feedback_revision_requires_ordinary_assignment"),
     ("stale_comments", "mirror_projection_unavailable"),
-    ("old_comments", "mirror_freshness_confirmation_required"),
+    ("old_comments", "mirror_refresh_needed"),
     ("oversized", "feedback_packet_too_large"),
     ("private_path", "feedback_packet_privacy_blocked"),
 ])

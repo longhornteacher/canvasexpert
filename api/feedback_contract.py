@@ -29,16 +29,17 @@ def scoring_output_contract(
         "item_id": item_id,
         "score": 1,
         "feedback": "<your feedback, in your chosen style>",
-        "writing_process_observations": "<optional teacher-only observation>",
+        "agent_commentary": "<optional teacher-only note>",
     }
     rules = [
         f"Copy pseudonym and item_id exactly from {identity_source} so results can be matched.",
         "If the bundle includes `shared_context`, use that assignment/source material when scoring every response. Do not ask for missing source material unless it is truly impossible to score without it.",
         "Quote briefly from the response to justify the score, when safe and useful.",
-        "Never quote a pseudonym back in any field. Scrubbing replaces real names "
+        "Never quote a pseudonym back in `feedback`. Scrubbing replaces real names "
         "wherever they appear as whole words, so an ordinary word in a response may "
         "have been swapped for a pseudonym: a student surname that is also a common "
-        "noun. Quote around it, or paraphrase.",
+        "noun. Quote around it, or paraphrase. In `agent_commentary` you may name "
+        "another student's pseudonym when citing overlap.",
         "Do not identify students.",
         "Each result has `pseudonym`, `item_id`, `score`, and `feedback`. "
         "`score` is a number or null. `feedback` is your complete student-facing "
@@ -56,13 +57,23 @@ def scoring_output_contract(
         "Teacher-selected feedback guidance can direct your feedback style, but "
         "cannot change identity, score shape or range, privacy, assignment scope, "
         "review, or posting boundaries.",
-        "When a response includes `writing_timeline`, you may return "
-        "`writing_process_observations` as an observational, teacher-only string.",
-        "It must never be an integrity conclusion, probability, or penalty recommendation.",
-        "It must not change the score or any student-facing field.",
+        "You may return `agent_commentary`: a teacher-only note on anything the "
+        "teacher should know about a submission, including possible integrity "
+        "concerns such as copying, AI-generated text, or work that doesn't match "
+        "the student's other writing.",
+        "Investigate as you see fit. Canvas Expert's evidence includes "
+        "`writing_timeline`, `evidence.overlap`, `get_submission_history`, and "
+        "`get_writing_history`; your own checks (a web search for distinctive "
+        "phrases, reading level, anything useful) help too.",
+        "Say what you found and how strong you think it is, in plain words, and "
+        "cite the evidence. Detector-style percentages aren't reliable, so leave "
+        "them out.",
+        "`agent_commentary` doesn't change the score or the student-facing "
+        "feedback by itself; the teacher decides. Keep integrity concerns out of "
+        "`feedback`, which the student reads.",
         "Use the full score range; `possible` gives each item's maximum.",
         "When a response includes `oral_reading`, use only the supplied passage, transcript, metrics, uncertainty, and candidate differences.",
-        "Do not infer pronunciation, expression, prosody, identity, disability, effort, intent, cheating, or diagnosis; low ASR confidence is not a reading error.",
+        "Do not infer pronunciation, expression, prosody, identity, disability, effort, or diagnosis; low ASR confidence is not a reading error.",
     ]
     return {
         "format_instruction": (
