@@ -1,261 +1,171 @@
 # Grading policy contract
 
-Status: current. Decided and built 2026-09-26 in three briefs (curve entered score `5890925`,
-Scoring Session effort credit and late days `e7de3cb`, missing sweep in the commit that
-retired its brief). Canvas behavior below comes from the Canvas API docs and canvas-lms source
-(master `1c9f0bb`), not a live test; the teacher chose to build without one, so each path's
-first real use is its first live run. `feedback-scoring-contract.md`,
-`grade-adjustment-contract.md`, and `canvas-transport-owners.json` carry the matching
-amendments.
+Status: current, updated 2026-10-03. This contract separates entered scores, late days,
+and Canvas's own late-points policy. Canvas owns late points; Canvas Expert owns the
+late-day value it sends. It does not read the course late policy or calculate deductions.
 
 ## 1. Purpose
 
-A teacher's classroom grading policy, applied the same way every time: honest feedback, a
-gradebook entry that reflects the impact of a 0-100 span, late days the teacher decides with
-their agent, and old missing work settled instead of lingering.
+Scoring Sessions preserve the teacher's entered score, determine late days from the
+student's first meaningful attempt, and send those days to Canvas. Canvas calculates
+any resulting deduction according to the course policy. Later drafts and corrections
+are discussed with the teacher and reviewed before a write.
 
-## 2. What this is not (read before building)
+## 2. Decisions
 
-Commit `406486b` (2026-09-16) retired a School Calendar, bell schedules, due-date extensions,
-and an automatic `gradebook.sweep` that recomputed school-day lateness and wrote
-`seconds_late_override` for a whole course. It went because nothing needed the calendar
-complex. This design keeps that decision:
-
-- Late days are proposed per submission and confirmed by the teacher in the scoring review.
-  Nothing recomputes lateness course-wide on its own.
-- "School days" is weekdays minus a flat list of no-school dates. No calendar model, bell
-  schedule, CSV import, or calendar page.
-- New files avoid every name in `api/tests/test_retired_paths.py`.
-
-## 3. Decisions
-
-- **Score and mark.** The *score* is the teacher/agent-authored rubric result. The *mark*
-  is what `posted_grade` carries. The teacher and agent choose whether feedback mentions
-  the score or mark.
+- **Score and mark.** The raw `score` is the teacher/agent's authored result. Effort
+  credit transforms it into the entered `mark` sent as `posted_grade`; Canvas may then
+  calculate a late deduction and expose the resulting score. Anything that changes a
+  score starts from `entered_score`, never the post-deduction `score`. If Canvas omits
+  `entered_score`, use `score + (points_deducted or 0)`.
 - **Effort credit (compressed scale) for sincere attempts.** `mark = F * P + (1 - F) * score`,
-  `F = 0.30`. 15/100 marks 40.5 before rounding; 100 stays 100. This is a fixed per-student
-  formula applied at scoring time. It is not class-relative; a class-relative curve is the
-  separate grade-adjustment lane.
-- Effort-credit eligibility remains limited to sincere attempts with a score above 0.
-  Rule curves use every eligible numeric `entered_score`, including zero, missing, and
-  teacher-confirmed insincere rows, unless the teacher excludes selected pseudonyms in the
-  reviewed adjustment.
-- **Curves work on the entered score, before any late deduction.** Canvas treats
-  `posted_grade` as the entered value and subtracts the late penalty after, so effort credit
-  is pre-late by construction. A later curve reads `entered_score`, not `score` (section 6a).
-- An attempt counts as sincere unless the teacher confirms otherwise (section 5).
-- **Missing work stays blank** until the sweep. The course's Canvas missing-submission policy
-  must be off, or Canvas fills missing work the night after the due date.
-- **Missing sweep.** After 15 school days past the student's effective due date (plus their
-  grace days), missing work gets 20% of points and an explicit Canvas missing status.
-- **Late days are the teacher's.** Canvas Expert suggests a count; the teacher and agent
-  confirm it; Canvas does the penalty math from that count.
-- **Grace days** come from the existing per-course extra-time list (accommodations). Softening
-  for any other student is a teacher decision in the late-days review, not a stored setting.
-- **Rounding.** Marks and the missing value round to whole points, half up.
+  where `F = floor_percent / 100`. It is a fixed per-student formula, not a class-relative
+  curve. A class-relative curve belongs to the separate grade-adjustment lane.
+- Effort-credit eligibility remains limited to sincere attempts with a score above zero.
+  Rule curves use eligible numeric entered scores, including zero, missing, and
+  teacher-confirmed insincere rows unless selected pseudonyms are excluded in the review.
+- **Late days come from the first meaningful attempt, in every course.** A literally
+  empty attempt is skipped. An online text entry is empty when its body is blank; an
+  online upload when it has no attachment names; an online URL when the mirror confirms
+  there is no URL. If an older URL attempt has no URL-presence evidence, its
+  meaningfulness is unknown and days require teacher input.
+  Every other recorded attempt, including quizzes, external tools, and media recordings,
+  is meaningful. Use the lowest-numbered meaningful attempt. Lateness is fixed by that
+  attempt against its own due date; a later draft does not change the days.
+- **Attempt coverage must be known.** The mirror retains earlier attempts only when
+  `submission_history` was fetched. If the current attempt number is greater than the
+  number of recorded attempts, history is incomplete and days are `unknown`; ask the
+  teacher for those rows' days rather than guessing. The agent may refresh the mirror first.
+- **Canvas owns late points.** Canvas Expert sends late status and seconds only. It never
+  reads `GET /courses/:id/late_policy`, shows deduction points, or calculates a late
+  deduction. The teacher may change Canvas's late policy without updating Canvas Expert.
+- **No default late question.** The default session applies the computed days. The teacher
+  can select `late_policy="ask"` to review known late rows, `waive` to set them to none,
+  or a row-specific `late_days` override. Incomplete history always needs per-row days or
+  an explicit waive.
+- **Second and later drafts are a conversation.** The agent discusses the new entered
+  score with the teacher, including any desired higher score for physical corrections,
+  then stages that score through the ordinary review. Canvas Expert has no extra-credit rule.
+- Rounding for effort-credit marks is to whole points, half up.
+
+## 3. Canvas mechanics (verified in canvas-lms master, 2026-10-03)
+
+These source paths describe Canvas behavior; quiz retake behavior called out below has
+not been verified in a live quiz.
+
+- [`Submission#late?`](https://github.com/instructure/canvas-lms/blob/master/app/models/submission.rb):
+  a present `late_policy_status` takes precedence and is late only when it is `late`.
+  Without one, Canvas compares the latest attempt's `submitted_at` with
+  `cached_due_date`.
+- [`seconds_late`](https://github.com/instructure/canvas-lms/blob/master/app/models/submission.rb):
+  with status `late`, Canvas uses `seconds_late_override || 0`; otherwise it measures
+  time past `cached_due_date`. Quizzes and New Quizzes subtract 60 seconds.
+- [`LatePolicy#points_deducted`](https://github.com/instructure/canvas-lms/blob/master/app/models/late_policy.rb):
+  deduction is `min(percent * ceil(seconds / interval), score% - minimum%) * possible / 100`.
+  It is a flat share of points possible. Canvas's `score` is entered score minus this
+  deduction, and `entered_score` is `score + points_deducted`.
+- [`submit_homework`](https://github.com/instructure/canvas-lms/blob/master/app/models/abstract_assignment.rb)
+  clears `late_policy_status` and `seconds_late_override` on each new submission with a
+  submission type. Canvas then evaluates the new latest attempt. Whether its deduction
+  is recomputed immediately was not confirmed live.
+- Submission JSON includes `entered_score`, `entered_grade`, `points_deducted`, `late`,
+  and `seconds_late`. `include[]=submission_history` returns attempts.
+- Quiz lateness comes from the latest attempt. Community reports say a penalty may affect
+  earlier on-time attempts and the highest raw score is kept. Whether a manual late status
+  survives a quiz retake is unverified because that path does not use `submit_homework`;
+  test a real quiz before relying on it.
+- A closed grading period makes Canvas skip late-policy recomputation.
+- Changing `late_policy_status` or `seconds_late_override` triggers Canvas to recompute
+  the deduction. A late-days-only correction is therefore a valid write.
 
 ## 4. Policy record and setup
 
-Two plain files in the synced workspace, both optional; neither is seeded or created by
-Canvas Expert. One policy applies to every course -- there is no per-course record and no
-Web UI panel.
+`Library/Grading Policy.txt` is optional and contains `floor_percent: N` for effort
+credit, an integer from 0 through 100. If present but invalid, it blocks scoring with
+`grading_policy_file_invalid`; Canvas Expert does not fall back to no-policy behavior.
+The file may retain the retired `missing_percent` and
+`sweep_after_school_days` keys; unknown keys are ignored. No missing-work sweep exists.
+Without the file, scoring uses raw scores with no effort credit and late-day behavior is unchanged.
 
-- `Library/Grading Policy.txt`: `key: value` lines, `#` starts a comment, blank lines
-  ignored, keys case-insensitive. Three required integer keys: `floor_percent`,
-  `missing_percent`, `sweep_after_school_days`, with `0 <= missing_percent <=
-  floor_percent <= 100` and `1 <= sweep_after_school_days <= 60`. A present but invalid
-  file (a missing key, a non-integer, or a value out of range) blocks both the Scoring
-  Session stage and the missing sweep preview with `grading_policy_file_invalid` and a
-  plain one-sentence message naming the exact problem -- it never falls back to
-  no-policy behavior.
-- `Library/Calendars/Holidays.csv`: each row is `start` or `start,end` or
-  `start,end,name` (`end` blank or absent means one day; `name` is ignored). A date cell
-  is ISO `YYYY-MM-DD` or US `M/D/YYYY` -- Excel rewrites an ISO date column to the US form
-  on save, so a file the teacher opened and saved in Excel, BOM and all, reads the same as
-  one written by hand. A header row, or any row whose first cell parses as neither form,
-  is skipped. A range expands to every date from `start` to `end` inclusive.
-
-Both files are read fresh on every use (`api/grading_policy.py`'s `load_policy` and
-`load_no_school_dates`); nothing is cached. No `Grading Policy.txt` means today's behavior
-everywhere: raw scores with no effort credit, and the missing sweep refuses
-`no_grading_policy`. No `Holidays.csv` means no no-school dates.
-
-The teacher edits both files directly; Canvas's own missing-submission policy and
-lowest-possible-grade settings remain the teacher's business to check in Canvas -- turn
-the missing-submission policy off, and keep the lowest possible grade at or above the
-missing value.
+`Library/Calendars/Holidays.csv` is optional. Each row is `start`, `start,end`, or
+`start,end,name`; dates accept ISO `YYYY-MM-DD` or US `M/D/YYYY`. A header or invalid
+first cell is skipped. A date range includes both endpoints. The file is read fresh for
+each use. Grace days come from the existing per-course extra-time list.
 
 ## 5. Scoring lane
 
-Effort credit and teacher-confirmed late days are Scoring Session features only; Score myself
-and Auto-score sessions are untouched. The AI results contract is unchanged except two optional
-row fields, `insincere` (a proposal) and `late_days` (an integer 0-60); both must agree across
-every item row of one pseudonym. `stage_scoring_results` reads them straight from the incoming
-results (index-aligned with the reidentified rows, mapped by canvas_id) and stamps a `grading`
-record on each staged student, in a course with a policy.
+Effort credit and late days apply to Scoring Sessions. Results may include `insincere`
+and `late_days` (integer 0-60), consistent across every item row for one pseudonym.
+Late days are calculated from the first meaningful attempt and apply in every course,
+regardless of a grading-policy file. School days count Monday through Friday after the
+due date through the submission date, excluding `Holidays.csv` dates and the student's
+grace days. A late attempt is at least one day; an on-time first meaningful attempt is zero.
 
-**Suggested late days.** Both the cached due date and the submission timestamp convert to
-`freshness_policy.LOCAL_TIMEZONE` local dates. Not late (`submitted_at <= cached_due_date`)
-suggests 0; otherwise `max(0, max(1, school_days_between(due_date, submitted_date)) -
-grace_days)`, where `school_days_between` counts Monday-Friday dates after the due date and
-through the submission date, excluding `no_school_dates`. A late submission is always at least
-1 day (same-day-late, or a Saturday right after a Friday due date, both suggest 1); weekends
-and no-school dates never add.
+Incomplete history produces `needs_teacher_input` for affected rows only. The question
+asks for days; do not infer a count. The default has no late-days question. A teacher can
+override a row with `late_days` or explicitly waive it.
 
-`scoring_apply.build_plan` adds two question kinds when the course has a policy:
+The staged preview's `late` object is `{decision, days, basis, first_attempt_at,
+latest_attempt_at}`. `basis` is `first_meaningful_attempt`, `teacher_set`, or `unknown`;
+dates are plain dates. Warnings are `late_days_set`, `late_none`, `late_waived`,
+`late_days_unknown`, and `late_box_reset`. Late warnings describe days and Canvas's
+policy, never points or penalties. `late_box_reset` flags a newer attempt after a prior
+Canvas Expert push.
 
-- **Insincere attempts.** Every row proposed insincere becomes a teacher question. An
-  unconfirmed row is treated as sincere.
-- **Late days.** One question listing each row Canvas marks late, with Canvas's day count and
-  a suggested count, asked when the session's `late_policy` is `ask` (the default). Its
-  options are `post_late_days`, `waive_late`, and `stop`; per-row mixing is a resubmission
-  with `late_days: 0` on the rows to waive. A one-line `legend` states that `canvas_days` is
-  Canvas's calendar-day count and `late_days` is school days after the due date (weekends and
-  Holidays.csv dates excluded, less any grace days), posted unless waived. The review states
-  only this generic rule and never a per-row reason for a difference from Canvas's count,
-  because grace days come from accommodations.
+The payload sends `submission.posted_grade` as the entered score. For positive days it
+sends `late_policy_status: "late"` and `seconds_late_override: days * 86400`; zero days
+sends `late_policy_status: "none"` with no override. Canvas computes the deduction.
+Feedback-only mode sends no score or late fields.
 
-`session_actions._payload` is the one place the mark and late fields are computed, so the
-projected payload in the plan digest is exactly what is sent:
+`prior_entered` in the packet is Canvas's `entered_score`, falling back to
+`score + (points_deducted or 0)`. The same entered-score rule applies to the session
+baseline and any preview warning about replacing a score. Packet rows also include
+`attempt_count`, `first_attempt_at`, `latest_attempt_at`, and `posted_attempt` (the last
+verified Canvas Expert push attempt, or null).
 
-- `submission.posted_grade` = the mark.
-- Late days above 0: `submission.late_policy_status = "late"` and
-  `submission.seconds_late_override = days * 86400`. Canvas computes intervals as
-  `ceil(seconds / 86400)`, so whole days map exactly.
-- Late days of 0: `submission.late_policy_status = "none"` (manual not-late; Canvas ignores
-  any override then).
-- Newly authored Scoring Session feedback is sent unchanged with no automatic gradebook or
-  late-policy footer; numeric score-only rows send no comment. Frozen legacy stages retain
-  their established payload behavior. Effort-credit and late-policy payload math is unchanged.
-- Waived (`waive_late` answer, or session `late_policy = "waive"`, in a course with or without
-  a policy): `submission.late_policy_status = "none"` and no `seconds_late_override`;
-  `posted_grade` is unchanged. The session `late_policy` is `ask | waive | apply`: `waive`
-  asks no question and waives every late row; `apply` in a policy course asks no question and
-  posts each row's confirmed or suggested count (in a no-policy course it equals `ask`, which
-  sends no late field). The `waive_late` answer is frozen in the stage; a changed
-  `late_policy` changes the plan digest, so a frozen stage refuses `stage_changed` at apply.
-  In `feedback_only` grade mode no submission object is sent, so there is no late decision:
-  no question, no per-row `late` block, no read-back, and `late_policy` is ignored.
-- Each late candidate row's decision is `waived`, `applied` (policy course), or `canvas` (no
-  late field; Canvas's own policy). Stage responses show it per row as
-  `late: {decision, late_days?}`.
+### Correcting a pushed row
 
-Unchanged: one write per student and no pre-write read. After the writes, one batched
-read-only submissions read covers every posted numeric score (`_verify_posted_scores`;
-score, entered_score, points_deducted, late_policy_status), and `score-ledger-contract.md`
-owns the comparison. A row whose stored status differs from the status sent, or a row sent
-`"none"` with `points_deducted` above 0, is reported `late_not_honored`
-(`score_readback_mismatch`); a failed read is `score_readback_unavailable`. The
-read is never retried and never corrects a row, and a confirmed write stays recorded as
-posted. The session student record gains `cached_due_date`, `canvas_late`, and
-`seconds_late` for every submission, not only New Quiz rows.
+A row from a previously verified numeric-score push in the current assignment session
+can be restaged when its entered score, late days, or feedback changes. Comment-only and
+feedback-only pushes are outside this correction path; use the existing feedback-revision
+tools for comment edits. An identical restage reports `no_valid_results`
+and says it was already pushed. A row with an ambiguous `sent_unknown` push remains
+blocked. Older superseded sessions are not reopened.
 
-Known Canvas behavior: a student resubmission resets the status and override to nil; the
-teacher re-enters late days if they rescore.
+When needed, prior push data is reconstructed from verified score-ledger evidence and
+the session push journal. The preview includes
+`correction: {previous: {entered, late_days, attempt}}` and the
+`correction_of_pushed_row` warning. The agent shows the same review and waits for the
+teacher's explicit go. A correction sends the new entered score and late fields. It omits
+an unchanged comment; a changed comment is sent as a new comment and identified in the
+preview. A late-days-only correction sends the same entered score. Apply verifies by
+readback, reports `corrected: true`, and increments the `corrected` count. New append-only
+`ce_apply` ledger events point to the prior verified event with `corrects_event_id`.
+Repeating the same correction is `already_applied`.
 
-## 6a. Curve lane fix (existing defect)
+Canvas clears the late box on a new assignment attempt. If the latest attempt is newer
+than the last verified Canvas Expert push, preview warns `late_box_reset` and says the
+planned days will be applied again from the first meaningful attempt.
 
-Today `gradebook.grade_adjustment` reads the mirror's and Canvas's `score`, which is after the
-late deduction, computes the new value from it, and writes that as `posted_grade`, which Canvas
-treats as the entered value before deduction. On a late submission with a deduction, Canvas
-subtracts the penalty a second time; the readback `score` then differs from `after`, the
-operation stops at that student as `grade_write_unverified`, and earlier students keep their
-writes. The fix:
+## 6. Entered-score curve lane
 
-- The mirror submission row stores `entered_score` (Canvas includes it in submission JSON).
-- Eligibility, rule math, the pre-write check, verification, and revert all use
-  `entered_score`.
-- Rule curves include all eligible numeric rows, including Canvas-missing, zero, and
-  teacher-confirmed insincere rows. The teacher may provide `exclude_pseudonyms` in the
-  adjustment; each exclusion must resolve to an eligible roster pseudonym. Exclusions are
-  removed from rule math and reported in preview. Each rule requires its model input:
-  `bump`, `target_avg_pct`, or `floor`, as appropriate. No target or floor is inferred.
-
-## 6. Missing sweep
-
-A new Operation Ledger kind, `gradebook.missing_fill`, separate from grade adjustment (whose
-numeric-score model, revert, and verification don't fit blank rows). One operation per course,
-one target per course, one step per row named `fill:{assignment_id}:{user_id}`, following grade
-adjustment's `initial_steps` / per-step `sent_unknown` reconcile pattern. The retired
-`gradebook.sweep` adapter at `406486b^` is a useful reference for a course-scoped, crash-safe
-ledger kind, not a template to copy.
-
-Eligible assignment: published, `grading_type == "points"`, `points_possible > 0`, submission
-types other than none / on paper / external tool (New Quizzes excepted via
-`is_quiz_lti_assignment`), not a group assignment unless students are graded individually
-(`grade_group_students_individually`), and not `in_closed_grading_period` when Canvas reports
-it. Assignment facts are not in the mirror, so they come from one live GET per *candidate*
-assignment at baseline capture (both preview and apply/retry), not a mirror schema change.
-Candidates are pre-filtered from the mirror (published, has a due date, at least one
-eligible-looking row), so a course with many assignments does not cost a live read of every
-one. Each exclusion is a counted skip reason.
-
-Eligible row, from a mirror within freshness policy: current enrollment, not excused,
-`workflow_state` unsubmitted, no score, Canvas `missing` true, `cached_due_date` present, and
-school days since `cached_due_date` of at least `sweep_after_school_days` plus the student's
-grace days. No policy for the course refuses with `no_grading_policy`.
-
-Write, per row, after a live GET confirms the row still has no submission, score, excuse,
-custom grade status, or extended late status (else skipped as `changed_since_preview`):
-`posted_grade` = the missing value and `late_policy_status = "missing"` in one request. Canvas
-keeps an explicit missing status with a score. Verify by reading back `entered_score` and
-`late_policy_status`.
-
-Failures: a definite Canvas HTTP rejection marks that one row failed and the sweep continues
-with the next row (one closed grading period must not stop a course sweep); the target ends
-`partial`. A transport-unknown error stops the operation as `sent_unknown`, exactly like grade
-adjustment, and resume reconciles that one step by live GET.
-
-Undo is a new preview from the receipt: a live GET must still show the swept value and
-`late_policy_status == "missing"` (else skipped as `changed_since_sweep`), then writes
-`posted_grade = ""` and `late_policy_status = "missing"`, which returns the row to blank with
-the Missing label kept. (Clearing to null would drop the label for good, because a recorded
-grader stops automatic missing.)
-
-Surface: `preview_missing_sweep(course_id, revert_operation_id="")` (a course sweep, or a
-revert of a completed one) and `apply_missing_sweep(operation_id, batch_id, review_digest)`,
-applied only on direct teacher instruction. Teacher-triggered; never scheduled.
+Eligibility, rule math, pre-write checks, verification, and revert use `entered_score`.
+The mirror stores Canvas's entered score. Rule curves include eligible numeric rows,
+including Canvas-missing, zero, and teacher-confirmed insincere rows. The teacher may
+exclude selected eligible pseudonyms in the reviewed adjustment; exclusions are reported
+in preview. Each rule requires its model input (`bump`, `target_avg_pct`, or `floor`);
+no target or floor is inferred. Canvas applies its late deduction after the entered
+score, so a post-deduction score must never be fed back into a score change.
 
 ## 7. Laws
 
-Each tested once, directly:
-
-- The mark is monotonic in score, `mark(P) = P`, and a 0 or confirmed-insincere row marks at
-  its score.
-- A sincere attempt with a score above 0 never marks below the missing value.
-- The school-day count excludes weekends and no-school dates.
-- The sweep never writes a row that has a submission, a score, or an excuse.
-- A curve computes from and verifies against `entered_score`, and never changes a missing,
-  zero, or insincere row.
-
-## 8. Contract and test updates when built
-
-- `feedback-scoring-contract.md`: posted value is the mark; the late fields above are sent.
-- `canvas-transport-owners.json`: scoring owner text; new `gradebook.missing_fill` owner.
-- `grade-adjustment-contract.md` sections 2 and 5: entered score, new skip reasons.
-- Tests that pin today's prohibitions: `test_powergrader_manual_push.py` (raw score, no late
-  fields), `test_feedback_results.py` (score line), `test_scoring_apply.py` (question kinds).
-- MCP: next free `TOOL_SCHEMA_VERSION` and snapshot; re-measure the listing budget (zero
-  headroom today); `docs/mcp-server.md`.
-
-## 9. Delivery
-
-Three briefs, in order:
-
-1. Curve lane fix (6a), minus the `insincere` skip reason. Fixes a live defect on its own.
-2. Scoring lane: policy record and panel, mark, insincere question, late-days question, and
-   the `insincere` curve skip reason.
-3. Missing sweep.
-
-## 10. Settled follow-ups (2026-09-26)
-
-- Marks and the missing value round to whole points, half up.
-- A later curve on work that already got effort credit curves the entered marks.
-- After the sweep the assignment stays open. A student who then submits shows up in scoring
-  discovery as usual, because Canvas moves the row back to needs-grading.
-- Canvas-graded quizzes (Classic and New Quizzes) get no effort credit, since Canvas Expert
-  never writes those scores; the teacher can still curve them through grade adjustment.
-- The new curve skip reasons (`missing`, `zero`, `insincere`) apply to `rule` adjustments
-  only. An `explicit` adjustment is the teacher fixing named rows and may target them.
-
-No open decisions remain.
+- For `0 <= score <= points_possible`, the effort-credit mark is monotonic in `score`
+  and equals `points_possible` at full credit. A zero or teacher-confirmed insincere
+  score is unchanged.
+- School-day counting excludes weekends and no-school dates.
+- Late days depend on the first meaningful attempt, not the latest attempt.
+- Empty attempts are skipped; quiz, external-tool, and media attempts are meaningful.
+- Incomplete history never produces guessed days.
+- Canvas Expert never computes late points or reads the course late policy.
+- Any score change starts from entered score, never post-deduction score.
+- A correction preserves append-only ledger history and never retries an ambiguous send.

@@ -60,7 +60,8 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 74 (69 tools). Version 74 adds `get_scoring_preview`, the read an
+Tool schema version 75 (67 tools). Version 75 removes the missing-sweep tools because
+Canvas owns its missing-submission policy. Version 74 adds `get_scoring_preview`, the read an
 agent shows the teacher between staging and pushing, and renames the staged
 teacher-only field to `agent_commentary` (it is now stored and returned in the preview);
 see `docs/guides/scoring-sessions.md`. Version 73 adds private durable score records,
@@ -70,10 +71,10 @@ Version 72 adds `refresh_scoring_session`, which
 brings late-arriving and resubmitted local-mirror work into an open Scoring Session
 without a Canvas call; `get_scoring_packet` now refuses a changed mirror with
 `session_mirror_changed` instead of superseding the session. See
-`docs/guides/scoring-sessions.md`. Version 71 adds the `late_policy` parameter
-(`ask | waive | apply`) to `prepare_scoring_session`; see `docs/guides/scoring-sessions.md`
-for the late decision per row and the read-back of posted scores after apply (none in
-`feedback_only` mode).
+`docs/guides/scoring-sessions.md`. Version 71 added a `late_policy` parameter to
+`prepare_scoring_session`; current sessions default to applying first-meaningful-attempt
+days without a question, while incomplete history always needs per-row days or a waive
+(none in `feedback_only` mode).
 Version 70 adds `prepare_feedback_revision`,
 `get_feedback_revision_packet`, `stage_feedback_revisions`, and
 `apply_staged_feedback_revisions` for revising selected existing staff comments
@@ -101,13 +102,8 @@ feedback comment only and sends no gradebook score or grade-policy fields. Versi
 online, Classic Quiz, or New Quiz): `grant` names `students` (`"all"` or an exact pseudonym list),
 `extra_attempts` (1 to 100, or `"unlimited"` for `"all"` only), and/or a `reopen` window. The
 review names attention items, and the result and receipt keep every pseudonym as granted,
-skipped, or failed with its before value. Version 65 adds `preview_missing_sweep` and
-`apply_missing_sweep`, the reviewed course-wide missing-work sweep: fills an eligible missing
-row with the policy's missing value and Canvas's explicit missing status after 15 school days
-(plus grace) past its due date, with an undo built from the receipt
-(`docs/contracts/grading-policy-contract.md`). Version 64 adds two optional `stage_scoring_results` result
-fields, `insincere` and `late_days`, for the scoring-lane effort-credit and teacher-confirmed
-late-day policy (`docs/contracts/grading-policy-contract.md`); no new tool. Version 63 replaces free-text scoring feedback with structured fields
+skipped, or failed with its before value. Version 64 adds optional `insincere` and
+`late_days` fields to `stage_scoring_results`; no new tool. Version 63 replaces free-text scoring feedback with structured fields
 Version 63 replaced free-text scoring feedback with structured feedback fields. Version 62 adds `stage_attachment(source_path)` for safely
 staging teacher-posted files from chat into the private Forge attachment inbox. Version 61 removes the legacy group field from differentiated quiz variants
 and removes student-group data from roster settings. Version 60 adds the reviewed existing-grade adjustment
@@ -159,8 +155,6 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `apply_grade_adjustment(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grade adjustment with live per-student checks, score readback, durable outcome evidence, and a receipt | Yes, pseudonymized |
 | `preview_attempts_grant(course_id, assignment_id, grant)` | Pseudonymized review of extra attempts and/or a reopened window for an exact pseudonym list or the whole class on a regular online, Classic Quiz, or New Quiz assignment; classified from one live read with base dates, each student's live before value is frozen, and `attention` names `window_locked`, `new_quiz_unverified`, and `grades_unchanged`. Never infers students from scores | Yes, pseudonymized |
 | `apply_attempts_grant(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grant through the Operation Ledger, one checkpointed write per step and a live re-read before each (an extension is set to before + N only while the live value is still the frozen before); returns each pseudonym as granted, skipped, or failed with its before value. Apply only on the teacher's direct instruction | Yes, pseudonymized |
-| `preview_missing_sweep(course_id, revert_operation_id="")` | Mirror-prefiltered, live-per-assignment-checked, pseudonymized review of every eligible missing row past the policy's window (plus grace); pass `revert_operation_id` for an undo preview of a completed sweep | Yes, pseudonymized |
-| `apply_missing_sweep(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed sweep or undo with a live per-row check before each write, readback verification, and a receipt; one rejected row is skipped and the rest continue | Yes, pseudonymized |
 | `refresh_mirror(course_id, include_comments=false)` | Sync a saved course's mirror when a read is outside policy (the agent calls it itself; skip it when data is within policy), report status and the successful pass's aggregate `canvas_external_count` (including zero), then retry the read | No, returns a sync status, never course data |
 | `list_feedback_contracts()` | List teacher-authored judgment and feedback-shape contracts available in the private workspace; returns ids, summaries, and projected sizes only | No |
 | `discover_scoring_work()` | Read every Current course locally and return student-free assignment, freshness, and attention tables; no refresh, preparation, or Canvas write | No |
@@ -169,19 +163,19 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `verify_live(course_id, kind, id="", title="")` | The one Live Canvas read an agent makes after a push: confirms one `assignment`/`page`/`quiz` by exact id or exact title. One Canvas call, or two only when `module_ids` isn't already on the object; writes nothing | No |
 | `resume_operation(operation_id)` | Continues one existing, teacher-approved operation from its last recorded step through the same executor retry path; refuses an operation that already applied, was abandoned, or is held by another attempt | No |
 | `abandon_operation(operation_id)` | Marks one existing, teacher-approved operation abandoned with no Canvas call; blocks later `resume_operation`/apply and returns a `repair_plan` of what was already created from recorded steps | No |
-| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="", late_policy="ask")` | Prepare one exact assignment from current local mirror projections; snapshots beyond the local-time threshold return `mirror_refresh_needed` (refresh with `refresh_mirror` and retry, or retry with `use_existing_mirror=true` when the teacher says nothing changed); missing norms return bounded teacher input; page zero includes the selected teacher feedback guidance and scoring basis; `late_policy` is `ask | waive | apply` (a refused value is `invalid_late_policy`) and, when passed to an already-open session, is saved on it and reported back | No |
+| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="", late_policy="")` | Prepare one exact assignment from current local mirror projections; empty `late_policy` keeps the existing setting or defaults to `apply` (first-meaningful-attempt days, no question); explicit `ask` asks about known late rows, while `waive` sets them to none; incomplete history always needs per-row days or an explicit waive | No |
 | `refresh_scoring_session(scoring_session_id, use_existing_mirror=false, replace_resubmitted=false)` | Append late-arriving and (optionally) replace resubmitted unposted work in an open session from the local mirror only; the agent calls it without asking and tells the teacher what it brought in; staged and posted rows are preserved; returns pseudonyms, `packet_digest`, and `first_new_offset` | Yes, pseudonymized |
 | `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
 | `list_work_items()` | Shared work-item holders, sync progress, and orphan counts without private session contents | No |
 | `get_work_item(work_id)` | One shared work item's holder and sync status | No |
 | `handoff_work_item(work_id)` | Release this device's lease so another device can resume after sync | No |
 | `take_over_work_item(work_id, confirm_stale=false)` | Acquire a released item after sync, or explicitly confirm takeover after a stale lease | No |
-| `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with an authoritative contract, untrusted response text, and frozen baseline raw/entered provenance and attempt-text consistency | Yes, pseudonymized |
+| `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with `prior_entered`, `attempt_count`, `first_attempt_at`, `latest_attempt_at`, `posted_attempt`, and attempt-text consistency | Yes, pseudonymized |
 | `create_score_curve_rule(course_id, formula, assignment_id="")` | Create an immutable local `gap_close` curve rule with a deterministic preview; course rules can be excluded per assignment without deactivating the course rule | No |
 | `deactivate_score_curve_rule(course_id, rule_id)` | Append a lifecycle event deactivating a local score curve rule; no Canvas grades change | No |
 | `get_score_ledger(course_id, assignment_id, pseudonyms="", offset=0, limit=50)` | Read paginated, pseudonymized recorded-only score events with complete scrubbed feedback and opaque device provenance; at most 100 events and 40,000 serialized characters per page | Yes, pseudonymized |
-| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, grade_mode="post_score")` | Validate one authored `feedback` string and numeric or null score per result, retain optional `insincere`/`late_days` flags, freeze active rule math and raw/entered values locally, and generate the disclosed `Raw X -> Entered Y` comment; keep optional teacher-only `agent_commentary` on the session; returns a `preview_summary`; writes nothing to Canvas (its one call reads the assignment's posting policy, and a failed read is a warning) | Yes, pseudonymized |
-| `get_scoring_preview(scoring_session_id, offset=0, limit=25)` | Read the staged results as Canvas would receive them: `rows` (`pseudonym`, `raw_score`, `entered`, `points_possible`, `late`, `comment`, `agent_commentary`, `warnings`), `held`, assignment `warnings`, `counts`, `stage_digest`, and paging; `nothing_staged` before any stage, `preview_stale` when the session no longer matches its stage | Yes, pseudonymized |
+| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, grade_mode="post_score")` | Validate results and optional `insincere`/`late_days`, freeze entered-score math, and stage new scores or corrections to previously verified numeric-score pushes in the current session; use feedback-revision tools for comment-only or feedback-only changes | Yes, pseudonymized |
+| `get_scoring_preview(scoring_session_id, offset=0, limit=25)` | Read projected Canvas payloads with `late: {decision, days, basis, first_attempt_at, latest_attempt_at}`, correction details, and warnings including `late_days_set`, `late_none`, `late_waived`, `late_days_unknown`, `late_box_reset`, and `correction_of_pushed_row` | Yes, pseudonymized |
 | `apply_staged_scoring_results(scoring_session_id, expected_stage_digest, idempotency_key="")` | Post only the unchanged private stage after the teacher says to push; reads back every posted numeric score once, preserves unknown/mismatch outcomes, and returns the stored result without I/O on repeat | Yes, pseudonymized |
 | `prepare_feedback_revision(course_id, assignment_id, use_existing_mirror=false)` | Reopen a graded ordinary assignment for feedback-only revision from the local mirror; scores are preserved and never sent | No |
 | `get_feedback_revision_packet(work_id, offset=0, limit=10)` | Complete scrubbed responses, existing staff feedback, and opaque comment keys; scores are context only | Yes, pseudonymized |
@@ -385,8 +379,9 @@ and shows the teacher the proposed scores and comments in its own conversation s
 student-facing comment exactly as returned, and agent commentary in a separate block
 highlighted yellow and labeled "Agent commentary (teacher only)". Rows are built from
 the same projected payloads Canvas would receive. Warnings are information, never
-blocking: the row replaces a Canvas score (as of session preparation), a late penalty
-is applied or waived (or Canvas's own policy decides it), the entered mark differs from
+blocking: the row replaces a Canvas score (as of session preparation), late days were
+set, waived, or are unknown, a newer attempt cleared the late box (`late_box_reset`),
+a pushed row is being corrected, the entered mark differs from
 the raw score, the assignment posts automatically, the posting policy could not be
 checked, or rows are held. Edits
 mean staging again; a session whose plan, packet, or score curve no longer matches its stage returns `preview_stale`
@@ -402,7 +397,9 @@ packet with `new_quiz_writing_requires_assignment`; the teacher grades them in C
 uses separate AssignmentForge assignments with teacher-chosen points for future writing portions. No transport type,
 operation token, or private local id crosses the MCP boundary. A stale packet,
 changed review plan, invalid answer, or ambiguous write fails closed. The preview is the
-first review; Canvas Live is the record and the place for later edits. The teacher's go
+first review; Canvas Live is the record. Previously verified numeric-score pushes in the
+current assignment session can use the reviewed correction path; comment-only and
+feedback-only edits use the feedback-revision tools. Later edits happen in Canvas Live. The teacher's go
 authorizes only the exact selected assignment set, not later discovered work.
 
 Preparation uses fresh local CanvasMirror roster, assignment, and submission
@@ -445,7 +442,10 @@ the gate has passed it, `get_scoring_packet` included.
 **Scoring Session writes.** `apply_staged_scoring_results()` sends ordinary assignment scores and
 comments through the frozen, verified assignment write lane, then reads back every posted
 numeric score once (`score_mismatch`, `late_not_honored` with `score_readback_mismatch`, or
-`score_readback_unavailable`; the write stays posted and nothing is retried or corrected).
+`score_readback_unavailable`). Previously verified numeric-score pushes in the current
+session can be corrected through a newly reviewed stage; identical restages do not send,
+and `sent_unknown` remains blocked. Comment-only and feedback-only edits use the existing
+feedback-revision tools.
 Canvas Expert does not write New Quiz item scores, per-item feedback, assignment totals, or
 fallback comments. Results return only aggregate counts and pseudonym-keyed outcomes. A teacher who directs
 the agent to score and post the selected assignments has authorized each exact stage to post,

@@ -80,8 +80,10 @@ The agent refreshes the mirror and the session itself (`refresh_mirror`,
   write. After the send, `_verify_posted_scores` makes one batched, read-only
   submissions read of every posted numeric score and records the result in the score
   ledger: `score_mismatch`, `late_not_honored` (`score_readback_mismatch`), or
-  `score_readback_unavailable`. Nothing is retried or corrected, and a confirmed write
-  stays posted. `feedback_only` sends no score, so it has no read-back.
+  `score_readback_unavailable`. Confirmed writes stay posted; previously verified
+  numeric-score rows in the current session may be corrected through a new reviewed
+  stage. `feedback_only` sends no score,
+  so it has no read-back.
 - Preview: `session_actions._payload` is the single builder of what Canvas receives, and
   `scoring_apply.build_plan` projects it per student into `plan["payloads"]`.
   `get_scoring_preview` builds its rows from those projected payloads, never from the
@@ -89,8 +91,9 @@ The agent refreshes the mirror and the session itself (`refresh_mirror`,
   exactly. It recomputes the plan and returns `preview_stale` when the stage digest, the packet,
   or the frozen score curve no longer matches (the same checks apply makes), or
   `nothing_staged`. Warnings are information and never block: the
-  row replaces a Canvas score as of session preparation, a late penalty applied or
-  waived, the entered mark differs from the raw score, the assignment posts
+  row replaces a Canvas score as of session preparation, late days were set, waived,
+  or are unknown, a newer attempt cleared the late box (`late_box_reset`), a pushed row
+  is being corrected, the entered mark differs from the raw score, the assignment posts
   automatically, the posting policy could not be checked, or rows are held.
 - Posting policy: stage time makes one read of the assignment through scoring's existing
   read transport and stores `posting_policy {post_manually, checked_at}` on the session.
@@ -105,6 +108,29 @@ The agent refreshes the mirror and the session itself (`refresh_mirror`,
   guaranteed anonymous.
 - `writing_timeline.py`, `student_attachments.py`, and the acquisition/evidence
   modules remain only where used by the SAFE packet. They do not authorize writes.
+
+## Late days and corrections
+
+The packet adds `prior_entered`, `attempt_count`, `first_attempt_at`,
+`latest_attempt_at`, and `posted_attempt`. `prior_entered` uses Canvas's `entered_score`
+or `score + (points_deducted or 0)`, never the post-deduction score. Late days come
+from the first meaningful attempt in every course. Blank text and upload attempts are
+skipped; a URL attempt is skipped only when the mirror confirms its URL is empty.
+Older URL attempts without presence evidence and any other incomplete history require
+teacher input. Canvas calculates late points from status and seconds; Canvas Expert
+does not read the course late policy or calculate deductions. Preview late data is
+`{decision, days, basis, first_attempt_at, latest_attempt_at}` with plain dates.
+Warnings include `late_days_set`, `late_none`, `late_waived`, `late_days_unknown`,
+and `late_box_reset`.
+
+A changed result for a previously verified numeric-score push in the current session is
+a correction. Comment-only and feedback-only pushes stay on the existing feedback-revision
+path. A correction uses the same stage, preview, and explicit apply boundary, exposes prior entered score, days,
+and attempt in `correction`, and warns `correction_of_pushed_row`. It reconstructs the
+prior push from verified score-ledger evidence and the session push journal when needed.
+For a second or later draft, the agent discusses the draft and proposes the entered score
+with the teacher. An unchanged comment is omitted. Verified correction events link to the prior verified
+event; ambiguous sends stay blocked and identical restaging does not send.
 
 ## Boundaries to keep
 
@@ -125,8 +151,9 @@ The agent refreshes the mirror and the session itself (`refresh_mirror`,
 - Ordinary assignments retain the plan digest, per-student idempotency, and a minimized
   transport receipt. There is no grade-state preflight. A Canvas HTTP success means the
   write was accepted, and every posted numeric score then gets one batched, read-only
-  submissions check after the writes (`_verify_posted_scores`), never retried or
-  corrected. A non-HTTP transport error is `write_transport_unknown` with no read-back
+  submissions check after the writes (`_verify_posted_scores`), with no automatic retry.
+  Previously verified numeric-score pushes in the current session can be corrected through
+  a new reviewed stage. A non-HTTP transport error is `write_transport_unknown` with no read-back
   and no automatic retry, and it is never reported as `canvas_write_attention`; explicit
   Canvas HTTP rejection remains failed. Canvas Expert does not
   write New Quiz item scores, per-item feedback, assignment totals, or fallback comments.

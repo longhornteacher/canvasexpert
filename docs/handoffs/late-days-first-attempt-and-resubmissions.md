@@ -1,6 +1,6 @@
 # Late days from the first meaningful attempt, resubmissions, and corrections
 
-Status: IN PROGRESS with Codex lead and gpt-6-luna subagents.
+Status: GREEN, accepted 2026-10-03; retired in this execution batch.
 Execution routing (2026-10-03): the teacher assigned Codex as lead with
 `gpt-6-luna` subagents, superseding the Sonnet/Haiku labels and commit attribution
 below. Commits identify the actual OpenAI executor rather than Claude.
@@ -326,9 +326,34 @@ deviations, open questions.
 
 ## Execution result
 
-In progress. Preflight: `dev` at `fc59cf3`; only the three protected State of the
-Repo notes are untracked. Since `d23e118`, only this brief changed. Named seams
-are present.
+GREEN. Acceptance criteria hold with the two teacher-approved adjustments below.
+Codex executed with gpt-6-luna writers and a read-only reviewer on `dev`; no push
+and no live Canvas calls or writes. The three protected State of the Repo notes
+remain untouched. Preflight started at `fc59cf3`; since `d23e118` only this brief
+had changed and the named seams were present. Origin was fetched and compared
+against both `origin/dev` and `origin/main` without incoming commits.
+
+Commits: A is `74ce093` (Use first-attempt late days and verified scoring
+corrections). B is the commit containing this completed record (Document
+first-attempt late days and scoring corrections). C follows it (Retire missing
+work sweep and close late-days handoff). Exact B/C hashes are reported in chat;
+this record is preserved in B's Git history before C retires the brief.
+
+Changed files by workstream:
+
+- A: `api/powergrader/attempt_history.py`, `session_builder.py`,
+  `assignment_refresh.py`, `scoring_preparation.py`, `scoring_apply.py`,
+  `session_actions.py`; `api/mirror/store.py`, `api/score_ledger.py`,
+  `api/mcp_server/tools.py`; focused mirror, packet, MCP apply, preparation,
+  session-builder, attempt-history and scoring-apply tests; this brief.
+- B: the six assigned contract, guide, module-map, MCP and START HERE files;
+  `api/webui/ai_ta.py` seeded-document hash; this completed execution record.
+- C: `api/grading_policy.py`; MCP `tools.py`, `server.py`, `contract.py`, schema
+  v74 retired and v75 generated; `api/missing_sweep.py` and
+  `operation_ledger/adapters/missing_fill.py` retired; ledger package/export
+  registration and stale adapter comments; `api/README.md`, transport-owner JSON;
+  policy, MCP registry/transport, packet, manual-push receipt, fixture and retired
+  path tests; brief retirement. Git commit file lists provide exact paths.
 
 Teacher-approved scope adjustment (2026-10-03): retained mirror attempt records
 omit URL evidence. Workstream A may extend the exact mirror record/projection
@@ -345,10 +370,10 @@ Preflight finding: a synthetic Canvas row with `score: 7`,
 normalization; session construction previously copied it unchanged. Workstream A
 derives the entered score at the session/packet/preview boundary.
 
-Workstream B draft complete: the six assigned documentation files were updated.
-START HERE's exact LF-normalized Appendix B slice, including heading and trimmed
-at Appendix C as the runtime does, is 6,390 characters (previously 7,115);
-the runtime overview gate remains to run.
+Workstream B complete. START HERE's exact LF-normalized runtime overview is
+6,631 characters (previously 7,115), below the 7,200-character cap. Schema v75
+contains 67 tools; measured listing is 23,700 characters and instructions are
+2,667 (budgets 23,700 and 2,700). The live-registry documentation pin passes.
 The replaced START HERE LF-normalized sha256 is
 `40c187d078f9772bc9500bbb3d628bdad5774558c61bcccb489e87e02e7785a7`,
 added to `api/webui/ai_ta.py`. Its focused seed test command
@@ -361,3 +386,34 @@ returned 881 passed in 45.26 seconds. No live Canvas calls or writes.
 The optional A3 assignment discovery count is omitted because discovery does not
 already read the private score ledger cheaply. Packet and preview attempt facts
 and `late_box_reset` are implemented.
+
+C focused command:
+`py -m pytest -p no:randomly -q api/tests/test_grading_policy.py api/tests/mcp_server/test_scoring_apply_tools.py api/tests/test_scoring_packet_mcp.py api/tests/test_retired_paths.py`
+returned 107 passed in 2.92 seconds. An extended C run initially had 247 passed
+and one stale 69-tool assertion, fixed to 67 before the full gate.
+
+The first full gate returned 2 failed, 2691 passed, 5 warnings in 127.25 seconds:
+START HERE had lost the existing per-assignment reconfirmation instruction, and
+the manual-push receipt test did not include its new truthful journal metadata.
+The instruction was restored; the exact receipt-shape assertion now checks
+`comment_sent: true` and `corrects_event_id: null` for the ordinary example while
+preserving its no-Canvas-read law. Follow-up command:
+`py -m pytest api/tests/test_canvasagent_instructions.py api/tests/test_beta075_mcp.py api/tests/webui/test_ai_ta.py api/tests/test_powergrader_manual_push.py api/tests/mcp_server/test_tools.py::test_get_product_guide_defaults_to_the_overview_briefing -p no:randomly -q`
+returned 52 passed in 1.17 seconds.
+
+Final full gate:
+`py -m pytest api/tests engine/tests -p no:randomly -q`
+returned **2693 passed, 5 warnings in 124.12 seconds**. The warnings are the
+existing mirror docstring invalid-escape warnings. `git diff --check` passed.
+Schema generation was performed under isolated pytest; no real stores were read.
+
+Bounded integration fixes: retirement also removes the ledger package factory
+registration, not just the adapter export. Packet projection previously called
+`Vault.reverse` with a Canvas ID although it expects a pseudonym; it now indexes
+private vault entries by Canvas ID. The regression proves actual packet entered
+score and attempt values, including the null entered-score fallback. These are
+within the required baseline diagnosis and sweep-retirement seams.
+
+No open implementation decisions. Optional live acceptance and any real correction
+remain the teacher's next use, outside this isolated development gate. Restart the
+connected MCP runtime before that use so it loads the new tool schema and behavior.

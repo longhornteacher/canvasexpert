@@ -121,6 +121,8 @@ RETIRED_FILES = {
         # Before the agent refreshed on its own, showed a scoring preview before
         # any push, and could write teacher-only integrity commentary.
         "e62733fcdf1635a63cfdb109d4c14c52c0a75fbe57d05f88572869b4a03cbb54",
+        # Before first-attempt late days, resubmission facts, and pushed-row corrections.
+        "40c187d078f9772bc9500bbb3d628bdad5774558c61bcccb489e87e02e7785a7",
     }),
     # Said the agent must not draw integrity conclusions from the timeline; it now
     # may, in teacher-only agent commentary.

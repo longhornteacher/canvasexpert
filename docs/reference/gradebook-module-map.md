@@ -13,9 +13,6 @@ own teacher grading work.
   one assignment (preview/apply service), with
   `api/operation_ledger/adapters/attempts_grant.py` (kind `gradebook.attempts_grant`)
   owning the per-kind Canvas transport, live re-reads, and checkpointed steps.
-- `api/missing_sweep.py` — missing-work preview/apply/undo service.
-- `api/operation_ledger/adapters/missing_fill.py` — reviewed per-assignment missing
-  fill discovery and Canvas writes for the missing-work operation.
 - `api/gradebook_snapshot.py` — pure `build_snapshot` aggregation and
   `needs_grading` classification shared by runtime consumers.
 - `api/gradebook_queries.py` — live Canvas-shaped assignment, roster, and submission
@@ -27,8 +24,7 @@ own teacher grading work.
 
 The MCP runtime owns bounded gradebook reads, explicit preparation and review, verified
 Canvas actions, and durable receipts. `get_gradebook_snapshot` serves the local mirror
-with pseudonymized student columns. Existing-grade adjustments and missing-work sweeps
-use the reviewed Operation Ledger path. The runtime has no console route or browser
+with pseudonymized student columns. Existing-grade adjustments use the reviewed Operation Ledger path. The runtime has no console route or browser
 presentation contract for these workflows.
 
 Canvas Live is the teacher's review and edit surface for grading. Course page Canvas
@@ -41,8 +37,6 @@ attention.
   `api/grade_adjustment.py` and its Operation Ledger adapter
 - extra attempts or a reopened window:
   `api/attempts_grant.py` and its Operation Ledger adapter
-- missing-work sweep or fill:
-  `api/missing_sweep.py` and `api/operation_ledger/adapters/missing_fill.py`
 - aggregate snapshot or grading classification:
   `api/gradebook_snapshot.py`
 - live assignment, roster, or submission query shape:
@@ -75,3 +69,17 @@ afterward, unless marked otherwise.
 - Write extension values as current + requested, never blind.
 - Remember that extra attempts are useless while the window is locked, so the reopen
   override and the attempts grant go together.
+
+## Scoring Session late days
+
+Canvas owns late points; Canvas Expert owns the days sent with a Scoring Session score.
+Days use the first meaningful attempt and apply in every course. Canvas Expert does not
+read the course late policy or compute point deductions. Packet baselines and score
+changes use entered score (`entered_score`, falling back to `score + points_deducted`),
+never the post-deduction score. A newer attempt after a verified push may clear Canvas's
+late box; the scoring preview flags `late_box_reset`. A previously verified numeric-score
+push in the current session can be corrected through the same preview and explicit apply
+path. Comment-only and feedback-only changes use the feedback-revision tools. Missing work is
+handled by Canvas's own missing-submission policy; Canvas Expert has no missing sweep.
+See [`grading-policy-contract.md`](../contracts/grading-policy-contract.md) and the
+Scoring Sessions guide for packet fields and warnings.
