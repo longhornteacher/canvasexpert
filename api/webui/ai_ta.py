@@ -118,6 +118,14 @@ RETIRED_FILES = {
         "fbb080b9c8804121f4400bda13321320f003b260a6531107faf9d8d833f9d5b4",
         # Before refresh_scoring_session: said never to refresh an open session.
         "a62638a1f17733812e2d46c3c2639c2b4a5368b82f8b39d575e8d0a17bdf3ebe",
+        # Before the agent refreshed on its own, showed a scoring preview before
+        # any push, and could write teacher-only integrity commentary.
+        "e62733fcdf1635a63cfdb109d4c14c52c0a75fbe57d05f88572869b4a03cbb54",
+    }),
+    # Said the agent must not draw integrity conclusions from the timeline; it now
+    # may, in teacher-only agent commentary.
+    "Writing Timeline (tracked assignments).txt": frozenset({
+        "7f69ea5e6f9171a2f2625b6fc7fed3e7fdb7cbe5253d816c0e249998dfb141c5",
     }),
 }
 

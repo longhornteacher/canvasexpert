@@ -56,6 +56,6 @@ def test_stage_scoring_results_schema_names_the_canvas_score_row():
     assert "glows" not in properties
     assert "grows" not in properties
     assert "fixes" not in properties
-    assert "writing_process_observations" in properties
+    assert "agent_commentary" in properties
     assert "title" not in result
     assert all("title" not in (prop or {}) for prop in properties.values())

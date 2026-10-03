@@ -4,7 +4,7 @@ The ordinary Assignment write is deliberately narrow: send the reviewed raw
 score and plain-text comment to the Canvas Submissions endpoint once, then
 record the transport outcome. This module does not read the resulting grade
 back, compare it, or interpret any gradebook or late-policy adjustment Canvas
-applies (the apply layer's one late-decision check lives in scoring_apply).
+applies (the apply layer verifies every posted numeric score once, in scoring_apply).
 A Canvas HTTP success means the write was accepted; a connection loss
 is transport-unknown and is never automatically retried or re-read.
 
@@ -257,7 +257,7 @@ def push_grades(
     """Send the reviewed raw score and comment once, then record the outcome.
 
     No Canvas read happens here, before or after the send (the apply layer makes
-    its own late-row check). ``waive_late_user_ids`` are rows a ``waive_late``
+    its own score verification). ``waive_late_user_ids`` are rows a ``waive_late``
     answer waived; the session's ``late_policy`` can waive every late row. A Canvas HTTP success
     finalizes the exact local idempotency slot; a non-HTTP transport error is
     ``write_transport_unknown`` and is never re-verified or automatically

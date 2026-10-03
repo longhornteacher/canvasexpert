@@ -28,30 +28,37 @@ from mcp.server.fastmcp import FastMCP
 from . import tools
 
 _SERVER_INSTRUCTIONS = (
-    "Local teacher-controlled runtime. Real identities, credentials and private paths stay local; "
-    "student rows use stable pseudonyms. Never read Identity Vault or teacher-only Web UI routes. "
-    "Use within_policy catalog/mirror; otherwise ask if Canvas changed. Never refresh "
-    "without an explicit teacher request. "
-    "For broad grading, discover_scoring_work reads every Current course mirror. Report all "
-    "assignment and attention rows; wait for teacher direction. Call prepare_scoring_session once per exact "
-    "assignment. If snapshot exceeds threshold, ask if Canvas changed; refresh only after an "
-    "explicit teacher request or retry with use_existing_mirror=true. On "
-    "scoring_session_already_open, work locally in that session; never re-prepare it. "
-    "Late/resubmitted work: refresh_scoring_session if teacher asks. For needs_scoring_norms, ask its question and retry "
-    "with bounded scoring guidance; never ask the teacher to choose a scoring transport or "
-    "assignment type. An explicit score/post direction authorizes the selected discovery rows together "
-    "without reconfirming each assignment, but never extends beyond those rows or another session. Read every SAFE "
-    "page with get_scoring_packet including contract/rubric; held "
-    "work and evidence gaps are not empty. Stage unchanged packet results with "
-    "expected_packet_digest via stage_scoring_results; summarize; call "
-    "apply_staged_scoring_results only on direct teacher instruction; never read back "
-    "grades. For needs_teacher_input, ask only its questions; resubmit the same results to "
-    "stage_scoring_results with its review digest and answers. Canvas Live is the review "
-    "surface; list_scoring_sessions resumes work; list_feedback_contracts gives rules. "
-    "Graded feedback: prepare_feedback_revision, get_feedback_revision_packet, stage_feedback_revisions, "
-    "then apply_staged_feedback_revisions on teacher instruction; scores stay fixed. "
-    "Across devices: handoff_work_item before switching, take_over_work_item after sync; "
-    "confirm stale takeover only once prior device stopped. Content: "
+    "Local teacher-controlled runtime; real identities, credentials and private paths stay local, "
+    "student rows are pseudonyms. Never read Identity Vault or teacher-only Web UI routes. "
+    "Use within_policy catalog/mirror as is; when outside policy, refresh it yourself "
+    "(refresh_mirror, refresh_course_structure, refresh_scoring_session) and continue. Tell the "
+    "teacher when a refresh finds new or resubmitted work. "
+    "For broad grading, discover_scoring_work reads every Current course mirror: report all "
+    "assignment and attention rows, wait for teacher direction. Call prepare_scoring_session once "
+    "per exact assignment; on a refresh refusal call refresh_mirror and retry "
+    "(use_existing_mirror=true only if the teacher says nothing changed). On "
+    "scoring_session_already_open, work locally in it; never re-prepare it. "
+    "For needs_scoring_norms, ask its question and retry with bounded scoring guidance; never ask "
+    "the teacher to choose a scoring transport or assignment type. An explicit score/post "
+    "direction authorizes the selected discovery rows together without reconfirming each "
+    "assignment, but never extends beyond those rows or another session. "
+    "Read every SAFE page with get_scoring_packet including contract/rubric; held work and evidence "
+    "gaps are not empty. Stage unchanged packet results via stage_scoring_results with "
+    "expected_packet_digest. Put integrity concerns and other teacher-only notes in "
+    "agent_commentary, citing CE's evidence and your own checks. For needs_teacher_input, ask only "
+    "its questions; resubmit the same results to stage_scoring_results with its review digest and "
+    "answers. "
+    "After staging, show get_scoring_preview (rendered if the host allows, else a table): "
+    "warnings first, student-facing comments exactly as returned, agent commentary in a separate "
+    "yellow block labeled \"Agent commentary (teacher only)\". Edits mean restaging. Before any "
+    "apply_* or push_content_live, say what changes and any warnings, then wait for the "
+    "teacher's go (one go may cover selected rows/assignments); apply_staged_scoring_results only "
+    "when told to push. "
+    "Canvas Live is the record and later edit surface; list_scoring_sessions resumes work; "
+    "list_feedback_contracts gives rules. Graded feedback: prepare_feedback_revision, "
+    "get_feedback_revision_packet, stage_feedback_revisions, then apply_staged_feedback_revisions; "
+    "scores stay fixed. Across devices: handoff_work_item before switching, take_over_work_item "
+    "after sync; confirm stale takeover only once prior device stopped. Content: "
     "get_authoring_contract or get_product_guide. Attachments: canvas_file by exact name or "
     "stage_attachment(source_path); never list course files or pass bytes. No path: teacher "
     "chooses Canvas Files."
@@ -67,7 +74,7 @@ class ScoringResult(TypedDict):
     item_id: str
     score: float | None
     feedback: str
-    writing_process_observations: NotRequired[str]
+    agent_commentary: NotRequired[str]
     insincere: NotRequired[bool]
     late_days: NotRequired[int]
 
@@ -615,7 +622,7 @@ def abandon_operation(operation_id: str) -> str:
 
 @mcp.tool(structured_output=False)
 def refresh_mirror(course_id: str, include_comments: bool = False) -> str:
-    """Refresh a saved course mirror on teacher request; include_comments acquires full staff comments."""
+    """Refresh a saved course mirror; include_comments acquires full staff comments."""
     return _compact(tools.refresh_mirror(course_id, include_comments))
 
 
@@ -655,7 +662,7 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
 @mcp.tool(structured_output=False)
 def refresh_scoring_session(scoring_session_id: str, use_existing_mirror: bool = False,
                             replace_resubmitted: bool = False) -> str:
-    """Add late or resubmitted mirror work to an open Scoring Session."""
+    """Add late or resubmitted mirror work to an open Scoring Session; tell the teacher what it added."""
     return _compact(tools.refresh_scoring_session(
         scoring_session_id, use_existing_mirror, replace_resubmitted))
 
@@ -747,6 +754,12 @@ def stage_scoring_results(
     return _compact(tools.stage_scoring_results(
         scoring_session_id, results, expected_packet_digest, review_digest, answers,
         grade_mode=grade_mode))
+
+
+@mcp.tool(structured_output=False)
+def get_scoring_preview(scoring_session_id: str, offset: int = 0, limit: int = 25) -> str:
+    """Read a page of the staged review exactly as Canvas will receive it, with warnings."""
+    return _compact(tools.get_scoring_preview(scoring_session_id, offset, limit))
 
 
 @mcp.tool(structured_output=False)

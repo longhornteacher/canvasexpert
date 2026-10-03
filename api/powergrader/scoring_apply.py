@@ -4,11 +4,11 @@ The ordinary Assignment write is one send: the reviewed raw score and
 plain-text comment go to the Canvas Submissions endpoint, and Canvas applies
 every gradebook and late-policy adjustment from there. This module performs no
 Canvas read before the send -- no existing-score lookup, no frozen baseline, no
-drift check. After the send it makes exactly one read-only check, and only for
-rows whose late decision was ``waived`` or ``applied``: a single batched
-submissions read to confirm Canvas honored that decision. It is never retried
-and never corrects a row. Canvas Live is the review surface; the teacher may
-edit the result there.
+drift check. (Staging makes one separate read of the assignment's posting policy,
+only to warn; see ``read_posting_policy``.) After the send it makes exactly one read-only check of every
+posted numeric score: a batched submissions read to confirm Canvas stored what
+was sent and honored any late decision. It is never retried and never corrects
+a row. Canvas Live is the record and the place for later edits.
 
 What still guards the write: the packet digest, the exact assignment scope, the
 session's currentness, result-shape and range validation, the outbound privacy
@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime, timezone
 from api import score_ledger
 
 from . import session_actions
@@ -98,11 +99,13 @@ def _staged(student: dict) -> bool:
 
 
 def _projected_payload(student: dict, session: dict | None = None, *,
-                       grade_mode: str = "post_score") -> dict:
+                       grade_mode: str = "post_score", waive_user_ids=()) -> dict:
     """What ``_payload`` will build once the staged values are approved.
 
     Mirrors the approval copy in ``approve_rows`` so the plan digest covers the
     bytes that will actually be sent, not the row's pre-approval state.
+    ``waive_user_ids`` carries a ``waive_late`` answer, which the apply send
+    honors; the plan digest itself is built without it.
     """
     projected = dict(student)
     if student.get("teacher_score") is None:
@@ -112,7 +115,7 @@ def _projected_payload(student: dict, session: dict | None = None, *,
     return session_actions._payload(
         projected, grade_mode=grade_mode,
         waive_late=session_actions.late_waived(
-            session or {}, student, grade_mode=grade_mode))
+            session or {}, student, waive_user_ids, grade_mode=grade_mode))
 
 
 def default_transports():
@@ -129,7 +132,7 @@ def default_transports():
 
 
 def default_read_transport():
-    """The read-only counterpart of ``default_transports`` for the late-row check.
+    """The read-only counterpart of ``default_transports`` for the posted-score check.
 
     Returns ``read(path, params) -> (rows, error)``; a list that could not be
     proven complete is an error, so a partial page never looks like a result.
@@ -143,6 +146,59 @@ def default_read_transport():
         return rows, None
 
     return read
+
+
+def default_assignment_read():
+    """One-object read of a single assignment, for the posting-policy check.
+
+    ``default_read_transport`` only accepts list pages; an assignment GET returns
+    one object. Returns ``read(path) -> (assignment, error)``. Like the other
+    transports here, this module owns the call so the MCP layer never imports
+    ``canvas_client``.
+    """
+    from api.platform_services.canvas_client import canvas_get
+
+    def read(path):
+        assignment, error = canvas_get(path, timeout=10)
+        if error or not isinstance(assignment, dict):
+            return None, error or "unexpected_response"
+        return assignment, None
+
+    return read
+
+
+def read_posting_policy(course_id, assignment_id, canvas_read=None) -> dict:
+    """One assignment read: does Canvas hold scores and comments back until posted?
+
+    ``post_manually`` is ``True`` or ``False``, or ``None`` when Canvas could not
+    be read or did not say. Never raises and never blocks staging; the answer
+    only becomes a warning. It is not part of any digest.
+    """
+    checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    post_manually = None
+    try:
+        read = canvas_read or default_assignment_read()
+        assignment, error = read(f"/api/v1/courses/{course_id}/assignments/{assignment_id}")
+        value = assignment.get("post_manually") if not error and isinstance(assignment, dict) else None
+        if isinstance(value, bool):
+            post_manually = value
+    except Exception:
+        post_manually = None
+    return {"post_manually": post_manually, "checked_at": checked_at}
+
+
+def posting_warnings(posting_policy: dict | None) -> list[dict]:
+    """Assignment-level warnings for what students see as soon as the push lands."""
+    post_manually = (posting_policy or {}).get("post_manually")
+    if post_manually is False:
+        return [{"code": "posts_automatically",
+                 "text": "This assignment posts automatically: students see scores "
+                         "and comments as soon as they are pushed."}]
+    if post_manually is None:
+        return [{"code": "posting_unchecked",
+                 "text": "Could not check this assignment's posting policy. Students "
+                         "may see scores and comments as soon as they are pushed."}]
+    return []
 
 
 def _question(kind: str, detail: str, user_ids: list[str], **extra) -> dict:
@@ -189,6 +245,86 @@ def late_decisions(session: dict, plan: dict, answers: dict | None = None) -> di
         if decision:
             out[uid] = decision
     return out
+
+
+def _finite(value):
+    if isinstance(value, bool) or value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def preview_rows(session: dict, plan: dict, user_ids, answers: dict | None = None) -> dict:
+    """Read-only ``{user_id: row}`` for rows a stage will post.
+
+    Every value that reaches Canvas is read from ``_projected_payload``, the same
+    builder the plan digest covers and ``push_grades`` sends from: ``comment`` is
+    the projected ``text_comment`` and ``entered`` the projected ``posted_grade``
+    (``None`` in feedback-only mode), so the preview cannot show anything Canvas
+    will not receive. ``agent_commentary`` is teacher-only and never in a payload.
+    Warnings are information, never blocking.
+    """
+    grade_mode = str(plan.get("grade_mode") or session.get("grade_mode") or "post_score")
+    waived = waived_user_ids(plan, answers)
+    decisions = late_decisions(session, plan, answers)
+    assignment = session.get("assignment") or {}
+    wanted = {str(uid) for uid in user_ids}
+    rows = {}
+    for student in session.get("students", []):
+        uid = str(student.get("user_id"))
+        if uid not in wanted:
+            continue
+        payload = _projected_payload(student, session, grade_mode=grade_mode,
+                                     waive_user_ids=waived)
+        submission = payload.get("submission") or {}
+        entered = submission.get("posted_grade")
+        raw = student.get("teacher_score") if student.get("teacher_score") is not None \
+            else student.get("ai_score")
+        possible = _effective_points_possible({}, assignment, None, student)
+        decision = decisions.get(uid)
+        late = None
+        warnings = []
+        if decision:
+            late = {**decision, "status": submission.get("late_policy_status")}
+            days = decision.get("late_days")
+            if decision["decision"] == "waived":
+                warnings.append({"code": "late_waived", "text": "Late penalty waived."})
+            elif decision["decision"] == "applied" and days:
+                warnings.append({"code": "late_penalty_applied",
+                                 "text": f"Late penalty applied: {days} school day(s)."})
+            elif decision["decision"] == "canvas":
+                warnings.append({"code": "late_canvas_policy",
+                                 "text": "Submitted late: Canvas's own late policy decides any deduction."})
+        baseline = student.get("submission_baseline") or {}
+        existing = _finite(baseline.get("entered_score"))
+        if existing is None:
+            existing = _finite(baseline.get("canvas_score"))
+        if _finite(entered) is not None and existing is not None \
+                and abs(existing - _finite(entered)) > 1e-9:
+            warnings.append({"code": "replaces_canvas_score",
+                             "text": f"Replaces a score already in Canvas "
+                                     f"({session_actions._format_number(existing)}), "
+                                     f"as of session preparation."})
+        if _finite(entered) is not None and _finite(raw) is not None \
+                and abs(_finite(raw) - _finite(entered)) > 1e-9:
+            reason = ("score curve" if student.get("frozen_curve")
+                      else "grading floor" if student.get("grading") else "adjustment")
+            warnings.append({"code": "entered_differs_from_raw",
+                             "text": f"Entered {entered} differs from raw "
+                                     f"{session_actions._format_number(raw)} ({reason})."})
+        rows[uid] = {
+            "raw_score": _finite(raw),
+            "entered": entered,
+            "points_possible": float(possible) if possible is not None else None,
+            "late": late,
+            "comment": (payload.get("comment") or {}).get("text_comment") or "",
+            "agent_commentary": str(student.get("agent_commentary") or ""),
+            "warnings": warnings,
+        }
+    return rows
 
 
 def build_plan(session: dict, *, pseudonyms=()) -> dict:
@@ -392,7 +528,7 @@ def approve_rows(session: dict, user_ids) -> None:
         student["status"] = "approved"
 
 
-def _check_late_rows(session_id: str, pushed: dict, load_session, canvas_read) -> None:
+def _verify_posted_scores(session_id: str, pushed: dict, load_session, canvas_read) -> None:
     """Verify every accepted numeric score with one bounded, read-only pass."""
     def finite_number(value):
         if isinstance(value, bool) or value is None:
@@ -534,8 +670,8 @@ def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
     the frozen answers are the only things standing between the preview the
     teacher read and the bytes that go out. Rows a ``waive_late`` answer waived
     go to ``push_grades`` by id, so ``_payload`` builds the waived bytes for
-    exactly those rows. After the send, ``_check_late_rows`` makes the one
-    read-only late-decision check.
+    exactly those rows. After the send, ``_verify_posted_scores`` makes the one
+    read-only check of every posted numeric score.
     """
     if canvas_send is None:
         canvas_send = default_transports()
@@ -570,7 +706,7 @@ def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
     if pushed.get("ok"):
         pushed = dict(pushed)
         pushed["skipped"] = resolved["skipped"]
-    _check_late_rows(session_id, pushed, load_session, canvas_read)
+    _verify_posted_scores(session_id, pushed, load_session, canvas_read)
     # Make retry state explicit even when Canvas accepted only part of the
     # batch.  The private session remains the source of truth for exact rows.
     current = load_session(session_id) or session

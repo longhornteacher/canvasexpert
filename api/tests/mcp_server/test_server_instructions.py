@@ -15,10 +15,14 @@ from api import feedback_vault
 from api.mcp_server import server, tools
 
 
-# Observed truncation in a real client landed near 2,300 characters. We cannot
-# hold every client to that, but we can stop the block growing: any addition
-# now has to earn its place by displacing something.
-INSTRUCTION_BUDGET = 2200
+# Observed truncation in a real client landed near 2,300 characters, and Claude
+# Code cuts the block near 2,050. We cannot hold every client to that, but we can
+# stop the block growing: any addition has to earn its place by displacing
+# something. Raised once from 2,200 to the measured 2,669 (rounded up) for the
+# preview, agent-commentary, self-refresh and warn-before-push rules; the
+# teacher-facing rules come first and the cross-device, content and attachment
+# hints last, because the tail is what gets cut.
+INSTRUCTION_BUDGET = 2700
 # Slice B moved post-call procedure into bounded result advisories. Raised once
 # from 17,717 for the staged-content push pair: preview_content_push carries the
 # delivery options as named parameters rather than one opaque object, so the
@@ -69,11 +73,13 @@ INSTRUCTION_BUDGET = 2200
 # Raised to the measured 22,962 for refresh_scoring_session (+349).
 # Raised by 986 measured characters for the three durable score-rule/ledger
 # tools added in schema v73; the descriptions and result summaries remain short.
-LISTING_BUDGET = 23948
+# Raised to the measured 24,279 for get_scoring_preview (schema v74, +331).
+LISTING_BUDGET = 24279
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
     "get_scoring_packet",
+    "get_scoring_preview",
     "prepare_scoring_session",
     "refresh_scoring_session",
     "preview_sis_grade_bridge",
@@ -102,7 +108,8 @@ def test_chat_scoring_uses_one_assignment_type_neutral_stage_apply_flow():
     assert "get_scoring_packet" in instructions
     assert "stage_scoring_results" in instructions
     assert "apply_staged_scoring_results" in instructions
-    assert "never read back" in instructions
+    assert "get_scoring_preview" in instructions
+    assert "agent_commentary" in instructions
     assert "PowerGrader" not in instructions
     assert "OpenRouter" not in instructions
 
@@ -115,23 +122,42 @@ def test_chat_side_canvas_landing_is_still_offered():
     assert "bounded scoring guidance" in instructions
 
 
-def test_local_discovery_does_not_offer_refresh_continuations():
+def test_the_agent_refreshes_itself_and_the_old_permission_rules_are_gone():
     instructions = server._SERVER_INSTRUCTIONS
 
     assert "mirror_refresh_in_progress" not in instructions
     assert "at most four total calls" not in instructions
-    assert "refresh only after an explicit teacher request" in instructions
+    assert "refresh it yourself" in instructions
+    for tool in ("refresh_mirror", "refresh_course_structure", "refresh_scoring_session"):
+        assert tool in instructions
+    assert "explicit teacher request" not in instructions
+    assert "never read back" not in instructions
 
 
 def test_scoring_preparation_wait_and_open_session_rules_are_explicit():
     instructions = server._SERVER_INSTRUCTIONS
 
-    assert "over " in instructions
     assert "use_existing_mirror=true" in instructions
     assert "scoring_session_already_open" in instructions
     assert "never re-prepare it" in instructions
-    assert "refresh_scoring_session if teacher asks" in instructions
     assert "work locally" in instructions
+
+
+def test_preview_commentary_and_warn_before_push_rules_are_stated_early():
+    """A client that cuts the tail must still deliver the preview and push rules,
+    so they sit ahead of the cross-device, content and attachment hints."""
+    instructions = server._SERVER_INSTRUCTIONS
+
+    assert "Agent commentary (teacher only)" in instructions
+    assert "exactly as returned" in instructions
+    assert "push_content_live" in instructions
+    assert "wait for the teacher's go" in instructions
+    assert (instructions.index("wait for the teacher's go")
+            < instructions.index("Across devices"))
+    # Claude Code cuts the block near 2,050 characters: the push rule has to end
+    # inside that, or the one rule that protects Canvas is the part that is lost.
+    push_rule = "apply_staged_scoring_results only when told to push."
+    assert instructions.index(push_rule) + len(push_rule) <= 2048
 
 
 def test_write_rules_precede_the_discovery_hints():
@@ -268,7 +294,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 68
+    assert len(listed) == 69
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -372,9 +398,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 68
-    assert len(_synthetic_mcp["calls"]) == 68
-    assert len(_synthetic_mcp["gated"]) == 68
+    assert len(results) == 69
+    assert len(_synthetic_mcp["calls"]) == 69
+    assert len(_synthetic_mcp["gated"]) == 69
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

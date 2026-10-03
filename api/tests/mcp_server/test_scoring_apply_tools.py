@@ -729,6 +729,7 @@ def test_apply_with_a_failed_read_reports_score_verification_unavailable(
     assert applied["counts"]["score_readback_unavailable"] == 1
     assert applied["code"] == "score_readback_unavailable"
     assert applied["results"][0]["late"]["readback"] == "unavailable"
+    assert applied["warnings"] == ["score_readback_unavailable"]
 
 
 def test_changing_late_policy_after_a_frozen_stage_refuses_stage_changed(
@@ -806,3 +807,340 @@ def test_a_real_name_supplied_as_a_pseudonym_is_never_echoed(
 
     assert refused["ok"] is False
     assert REAL_NAME not in _blob(refused)
+
+
+# ── Scoring preview, agent commentary, posting warnings ─────────────────────
+
+COMMENTARY = ("Possible plagiarism: CE found a long shared run of words with another "
+              "response, and a reading-level check suggests this is AI-generated. "
+              "That may be cheating, so worth a conversation.")
+
+
+def _canvas_recorder(monkeypatch):
+    """Record every Canvas send and echo it back to the posted-score check."""
+    from api.powergrader import scoring_apply
+
+    sent = []
+    monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
+        lambda method, path, payload, timeout=30: (
+            sent.append((method, path, payload)) or ({"id": 1}, None))
+    ))
+
+    def read(path, params):
+        rows = []
+        for uid in params["student_ids[]"]:
+            payload = next(item[2] for item in sent if item[1].endswith("/" + str(uid)))
+            entered = float(payload["submission"]["posted_grade"])
+            rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
+                         "points_deducted": None,
+                         "late_policy_status": payload["submission"].get("late_policy_status")})
+        return rows, None
+
+    monkeypatch.setattr(scoring_apply, "default_read_transport", lambda: read)
+    return sent
+
+
+def _posting_read(monkeypatch, read):
+    from api.powergrader import scoring_apply
+
+    monkeypatch.setattr(scoring_apply, "default_assignment_read", lambda: read)
+
+
+def test_stage_then_preview_returns_projected_rows_and_the_commentary_unchanged(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """EXAMPLE: integrity words in agent_commentary survive staging, are stored on
+    the session student and come back in get_scoring_preview, and only there."""
+    session, bundle, sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    session["students"][0]["submission_baseline"] = {
+        "attempt": 1, "entered_score": 5, "canvas_score": 5}
+    results = _result(8)
+    results[0]["agent_commentary"] = COMMENTARY
+
+    staged = tools.stage_scoring_results("session-1", results, _digest(bundle))
+
+    assert staged["status"] == "staged"
+    assert "get_scoring_preview" in staged["next"]
+    summary = staged["preview_summary"]
+    assert summary["posting"]["post_manually"] is True and summary["posting"]["checked_at"]
+    assert summary["warnings"] == []
+    assert summary["counts"] == {"ready": 1, "held": 0, "with_warnings": 1,
+                                 "with_agent_commentary": 1}
+    assert summary["attention"] == [PSEUDONYM]
+    assert "plagiarism" not in _blob(staged)
+    assert sessions["session-1"]["students"][0]["agent_commentary"] == COMMENTARY
+    assert sessions["session-1"]["posting_policy"]["post_manually"] is True
+
+    preview = tools.get_scoring_preview("session-1")
+
+    assert preview["ok"] is True, preview
+    assert preview["stage_digest"] == staged["stage_digest"]
+    assert preview["grade_mode"] == "post_score"
+    assert preview["held"] == [] and preview["total"] == 1 and "next_offset" not in preview
+    assert preview["rows"] == [{
+        "pseudonym": PSEUDONYM, "raw_score": 8.0, "entered": "8", "points_possible": 10.0,
+        "late": None, "comment": "Clear reasoning throughout the response.",
+        "agent_commentary": COMMENTARY,
+        "warnings": [{"code": "replaces_canvas_score",
+                      "text": "Replaces a score already in Canvas (5), as of session preparation."}],
+        "attention": True,
+    }]
+    for word in ("plagiarism", "AI-generated", "cheating"):
+        assert word in preview["rows"][0]["agent_commentary"]
+    assert REAL_ID not in _blob(preview) and REAL_NAME not in _blob(preview)
+
+
+@pytest.mark.parametrize("scenario", ["post_score", "feedback_only", "score_curve", "late_waived"])
+def test_preview_comment_and_entered_are_exactly_what_canvas_receives(
+    monkeypatch, tmp_path, _set_active_courses, grading_policy_files, scenario,
+):
+    """LAW: for every row the preview's comment is the projected text_comment,
+    character for character, and entered is the projected posted_grade (null in
+    feedback-only mode), checked against the bytes the apply actually sends."""
+    kwargs, answers = {}, None
+    results = _result(8)
+    if scenario == "late_waived":
+        session, bundle, sent, _reads = _late_policy_course(
+            monkeypatch, tmp_path, _set_active_courses, grading_policy_files)
+        results, answers = _late_results(6), {"late_days": "waive_late"}
+    else:
+        session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+        sent = _canvas_recorder(monkeypatch)
+    if scenario == "feedback_only":
+        kwargs["grade_mode"] = "feedback_only"
+    if scenario == "score_curve":
+        from api import score_curves
+        session["assignment"]["points_possible"] = 100
+        bundle["students"][0]["responses"][0]["possible"] = 100
+        (tmp_path / "safe-bundle.json").write_text(json.dumps(bundle), encoding="utf-8")
+        session["students"][0]["submission_baseline"] = {"attempt": 1, "entered_score": None}
+        score_curves.create_rule("course-1", {"model": "gap_close", "fraction": .30},
+                                 "assignment-1", root=tmp_path)
+        results = _result(53)
+    digest = _digest(bundle)
+    staged = tools.stage_scoring_results("session-1", results, digest, **kwargs)
+    if answers:
+        assert staged["status"] == "needs_teacher_input"
+        staged = tools.stage_scoring_results(
+            "session-1", results, digest, review_digest=staged["review_digest"],
+            answers=answers, **kwargs)
+    assert staged["status"] == "staged", staged
+
+    row = tools.get_scoring_preview("session-1")["rows"][0]
+    applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+
+    assert applied["counts"]["finalized"] == 1, applied
+    payload = sent[0][2]
+    assert row["comment"] == (payload.get("comment") or {}).get("text_comment", "")
+    assert row["entered"] == (payload.get("submission") or {}).get("posted_grade")
+    if scenario == "feedback_only":
+        assert row["entered"] is None and "submission" not in payload and row["late"] is None
+        assert row["comment"].startswith("Draft score: 8/10")
+    if scenario == "score_curve":
+        assert row["entered"] == "67" and "Raw 53 -> Entered 67." in row["comment"]
+        assert [w["code"] for w in row["warnings"]] == ["entered_differs_from_raw"]
+    if scenario == "late_waived":
+        assert row["late"] == {"decision": "waived", "status": "none"}
+        assert [w["code"] for w in row["warnings"]] == [
+            "late_waived", "entered_differs_from_raw"]
+        assert row["entered"] == "7" and "grading floor" in row["warnings"][1]["text"]
+
+
+@pytest.mark.parametrize("grade_mode", ["post_score", "feedback_only"])
+def test_agent_commentary_never_reaches_a_canvas_payload(
+    monkeypatch, tmp_path, _set_active_courses, grade_mode,
+):
+    """LAW: the agent's teacher-only note is not in the payload builder's output
+    nor in any send the apply makes, in either grade mode."""
+    from api.powergrader import scoring_apply, session_actions
+
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    sent = _canvas_recorder(monkeypatch)
+    results = _result(8)
+    results[0]["agent_commentary"] = COMMENTARY
+    staged = tools.stage_scoring_results(
+        "session-1", results, _digest(bundle), grade_mode=grade_mode)
+    student = session["students"][0]
+    assert staged["status"] == "staged" and student["agent_commentary"] == COMMENTARY
+
+    built = [
+        session_actions._payload({**student, "teacher_score": student["ai_score"],
+                                  "teacher_feedback": student["ai_feedback"]},
+                                 grade_mode=grade_mode),
+        scoring_apply._projected_payload(student, session, grade_mode=grade_mode),
+    ]
+    applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+
+    assert applied["counts"]["finalized"] == 1 and sent
+    for payload in built + [item[2] for item in sent]:
+        assert payload and "plagiarism" not in _blob(payload) and COMMENTARY not in _blob(payload)
+
+
+def test_preview_needs_a_stage_and_goes_stale_exactly_when_apply_would_refuse(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """LAW: no stage means nothing_staged; a session that no longer matches its
+    stage digest is preview_stale, the same condition apply refuses as stage_changed."""
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    assert tools.get_scoring_preview("session-1")["code"] == "nothing_staged"
+    assert tools.get_scoring_preview("missing")["code"] == "session_not_found"
+    staged = tools.stage_scoring_results("session-1", _result(8), _digest(bundle))
+    assert tools.get_scoring_preview("session-1")["ok"] is True
+
+    session["students"][0]["ai_feedback"] = "Edited after it was staged."
+
+    stale = tools.get_scoring_preview("session-1")
+    assert stale["ok"] is False and stale["code"] == "preview_stale"
+    refused = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+    assert refused["code"] == "stage_changed"
+
+
+def test_preview_goes_stale_when_the_packet_changes_after_staging(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """LAW: a packet that moved since staging is preview_stale, the same moment
+    apply refuses it as stale_packet, so the teacher never reviews a dead stage."""
+    _session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    staged = tools.stage_scoring_results("session-1", _result(8), _digest(bundle))
+    assert tools.get_scoring_preview("session-1")["ok"] is True
+
+    bundle["students"][0]["responses"][0]["response"] = "A different answer after a resubmission."
+    (tmp_path / "safe-bundle.json").write_text(json.dumps(bundle), encoding="utf-8")
+
+    assert tools.get_scoring_preview("session-1")["code"] == "preview_stale"
+    assert tools.apply_staged_scoring_results(
+        "session-1", staged["stage_digest"])["code"] == "stale_packet"
+
+
+def test_preview_goes_stale_when_the_staged_curve_is_deactivated(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """LAW: a curve rule deactivated after staging is preview_stale, the same
+    moment apply refuses it as stage_changed."""
+    from api import score_curves
+
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    _canvas_recorder(monkeypatch)
+    session["assignment"]["points_possible"] = 100
+    bundle["students"][0]["responses"][0]["possible"] = 100
+    (tmp_path / "safe-bundle.json").write_text(json.dumps(bundle), encoding="utf-8")
+    session["students"][0]["submission_baseline"] = {"attempt": 1, "entered_score": None}
+    rule = score_curves.create_rule("course-1", {"model": "gap_close", "fraction": .30},
+                                    "assignment-1", root=tmp_path)
+    staged = tools.stage_scoring_results("session-1", _result(53), _digest(bundle))
+    assert staged["status"] == "staged", staged
+    assert tools.get_scoring_preview("session-1")["rows"][0]["entered"] == "67"
+
+    score_curves.deactivate_rule("course-1", rule["rule_id"], root=tmp_path)
+
+    assert tools.get_scoring_preview("session-1")["code"] == "preview_stale"
+    assert tools.apply_staged_scoring_results(
+        "session-1", staged["stage_digest"])["code"] == "stage_changed"
+
+
+def test_the_posting_read_does_not_hold_the_scope_lock(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """LAW: a slow Canvas answer must not stall apply, refresh or prepare for the
+    assignment, so the posting-policy read happens before the scope lock is taken."""
+    import contextlib
+    from api.powergrader import session_store
+
+    _session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    held = []
+
+    @contextlib.contextmanager
+    def lock(_course, _assignment):
+        held.append(True)
+        try:
+            yield
+        finally:
+            held.pop()
+
+    monkeypatch.setattr(session_store, "scope_lock", lock)
+    seen = []
+    _posting_read(monkeypatch, lambda path: seen.append(bool(held)) or ({"post_manually": True}, None))
+
+    staged = tools.stage_scoring_results("session-1", _result(8), _digest(bundle))
+
+    assert staged["status"] == "staged", staged
+    assert seen == [False]
+
+
+@pytest.mark.parametrize("read, expected, post_manually", [
+    (lambda path: ({"post_manually": False}, None), ["posts_automatically"], False),
+    (lambda path: ({"post_manually": True}, None), [], True),
+    (lambda path: (None, "HTTP 500: boom"), ["posting_unchecked"], None),
+    (lambda path: ({"name": "no posting field"}, None), ["posting_unchecked"], None),
+], ids=["automatic", "manual", "failed_read", "field_missing"])
+def test_posting_policy_warning_never_blocks_staging(
+    monkeypatch, tmp_path, _set_active_courses, read, expected, post_manually,
+):
+    """CONTRACT: automatic or unknown posting is a warning on the stage and the
+    preview; manual posting is none; the read is one GET of the exact assignment."""
+    _session, bundle, sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    reads = []
+    _posting_read(monkeypatch, lambda path: reads.append(path) or read(path))
+
+    staged = tools.stage_scoring_results("session-1", _result(8), _digest(bundle))
+
+    assert staged["status"] == "staged", staged
+    assert reads == ["/api/v1/courses/course-1/assignments/assignment-1"]
+    summary = staged["preview_summary"]
+    assert [w["code"] for w in summary["warnings"]] == expected
+    assert summary["posting"]["post_manually"] is post_manually
+    assert sessions["session-1"]["posting_policy"] == summary["posting"]
+    preview = tools.get_scoring_preview("session-1")
+    assert [w["code"] for w in preview["warnings"]] == expected
+    assert preview["posting"] == summary["posting"]
+
+
+def test_a_raising_posting_read_is_a_warning_and_the_policy_is_not_in_the_stage_digest(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """LAW: posting_policy never changes the stage digest or makes the preview stale."""
+    _session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+
+    def boom(path):
+        raise RuntimeError("transport exploded")
+
+    _posting_read(monkeypatch, boom)
+    first = tools.stage_scoring_results("session-1", _result(8), _digest(bundle))
+    assert first["status"] == "staged"
+    assert [w["code"] for w in first["preview_summary"]["warnings"]] == ["posting_unchecked"]
+
+    _posting_read(monkeypatch, lambda path: ({"post_manually": False}, None))
+    second = tools.stage_scoring_results("session-1", _result(8), _digest(bundle))
+
+    assert second["stage_digest"] == first["stage_digest"]
+    assert [w["code"] for w in second["preview_summary"]["warnings"]] == ["posts_automatically"]
+    _posting_read(monkeypatch, lambda path: ({"post_manually": True}, None))
+    assert tools.get_scoring_preview("session-1")["ok"] is True
+
+
+def test_review_questions_carry_a_preview_summary_and_held_rows_are_listed(
+    monkeypatch, tmp_path, _set_active_courses,
+):
+    """EXAMPLE: needs_teacher_input also carries the summary; an unscored student
+    is listed as held with no invented reason."""
+    _session, bundle, _sessions = _wire_two_students(monkeypatch, tmp_path, _set_active_courses)
+    digest = _digest(bundle)
+    only_a = [_result_for(PSEUDONYM_A, 8)]
+
+    first = tools.stage_scoring_results("session-1", only_a, digest)
+
+    assert first["status"] == "needs_teacher_input"
+    assert [q["id"] for q in first["questions"]] == ["held_not_scored"]
+    assert first["preview_summary"]["counts"]["ready"] == 1
+    assert first["preview_summary"]["counts"]["held"] == 1
+
+    staged = tools.stage_scoring_results(
+        "session-1", only_a, digest, review_digest=first["review_digest"],
+        answers={"held_not_scored": "proceed"})
+    preview = tools.get_scoring_preview("session-1")
+
+    assert staged["status"] == "staged"
+    assert [row["pseudonym"] for row in preview["rows"]] == [PSEUDONYM_A]
+    assert preview["held"] == [{"pseudonym": PSEUDONYM_B, "reason": None}]
+    assert [w["code"] for w in preview["warnings"]] == ["held_rows"]
+    assert REAL_ID_B not in _blob(preview) and REAL_NAME_B not in _blob(preview)

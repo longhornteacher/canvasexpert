@@ -256,8 +256,8 @@ def _execute_target(adapter, operation: dict, payload: dict, target: dict) -> di
             # AC2: the local catalog/mirror being non-current is its own
             # answer, never a report of Canvas drift that did not happen.
             next_step = (
-                "Ask the teacher whether to refresh this course's structure "
-                "(refresh_course_structure). Do not refresh automatically."
+                "Refresh this course's structure with refresh_course_structure, "
+                "then retry."
             )
             _update_target_state(operation["operation_id"], target_key, "blocked",
                                  error_code="catalog_not_current",

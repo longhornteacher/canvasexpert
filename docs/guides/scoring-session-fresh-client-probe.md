@@ -54,8 +54,8 @@ Teacher-selected continuation prompt:
 > I direct Canvas Expert to score and post only the exact rows I selected: [course/assignment
 > rows]. Do not prepare or post any other discovered row. For each selected assignment,
 > use the existing `prepare_scoring_session` -> `get_scoring_packet` ->
-> `stage_scoring_results` -> `apply_staged_scoring_results` flow, ask every bounded teacher question returned by the
-> tools, read every SAFE page, and keep Canvas Live as the review surface. This direction
+> `stage_scoring_results` -> `get_scoring_preview` -> `apply_staged_scoring_results` flow, ask every bounded teacher question returned by the
+> tools, read every SAFE page, show the teacher the preview before pushing, and keep Canvas Live as the record. This direction
 > authorizes the selected set together; do not request a new blanket confirmation per
 > assignment or create a queue.
 

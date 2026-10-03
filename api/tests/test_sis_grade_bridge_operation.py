@@ -210,8 +210,8 @@ def test_stale_local_mirror_refuses_without_live_fallback(bridge_harness, monkey
         "sections": {"assignments": "stale"},
         "error": "The local course catalog is not current.",
         "next": (
-            "Ask the teacher whether to refresh this course's structure "
-            "(refresh_course_structure). Do not refresh automatically."
+            "Refresh this course's structure with refresh_course_structure, "
+            "then retry."
         ),
     }
 
@@ -237,8 +237,8 @@ def test_apply_with_non_current_catalog_blocks_as_catalog_not_current_not_drift(
     assert target["error_code"] == "catalog_not_current"
     assert target["error_code"] != "drift_detected"
     assert target["next"] == (
-        "Ask the teacher whether to refresh this course's structure "
-        "(refresh_course_structure). Do not refresh automatically."
+        "Refresh this course's structure with refresh_course_structure, "
+        "then retry."
     )
 
 

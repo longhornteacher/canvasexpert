@@ -56,6 +56,21 @@ def _synthetic_mcp(monkeypatch):
             "required_arguments": required_arguments}
 
 
+@pytest.fixture(autouse=True)
+def _posting_policy_read(monkeypatch):
+    """Staging reads one assignment from Canvas to learn its posting policy.
+
+    No test here may reach the real transport. The default is a manual-posting
+    assignment, so a stage carries no posting warning; a test that wants another
+    answer replaces ``scoring_apply.default_assignment_read`` itself.
+    """
+    from api.powergrader import scoring_apply
+
+    monkeypatch.setattr(
+        scoring_apply, "default_assignment_read",
+        lambda: (lambda path: ({"post_manually": True}, None)))
+
+
 @pytest.fixture
 def _rows():
     def rows(table: dict) -> list[dict]:

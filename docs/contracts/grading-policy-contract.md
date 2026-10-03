@@ -140,12 +140,12 @@ projected payload in the plan digest is exactly what is sent:
   late field; Canvas's own policy). Stage responses show it per row as
   `late: {decision, late_days?}`.
 
-Unchanged: one write per student, no pre-write read, no verification of any row other than the
-late-decision rows. After the writes, one batched read-only submissions read covers only the
-posted rows whose decision is `waived` or `applied` (score, entered_score, points_deducted,
-late_policy_status). A row whose stored status differs from the status sent, or a row sent
+Unchanged: one write per student and no pre-write read. After the writes, one batched
+read-only submissions read covers every posted numeric score (`_verify_posted_scores`;
+score, entered_score, points_deducted, late_policy_status), and `score-ledger-contract.md`
+owns the comparison. A row whose stored status differs from the status sent, or a row sent
 `"none"` with `points_deducted` above 0, is reported `late_not_honored`
-(`late_readback_mismatch`); a failed read is the warning `late_readback_unavailable`. The
+(`score_readback_mismatch`); a failed read is `score_readback_unavailable`. The
 read is never retried and never corrects a row, and a confirmed write stays recorded as
 posted. The session student record gains `cached_due_date`, `canvas_late`, and
 `seconds_late` for every submission, not only New Quiz rows.

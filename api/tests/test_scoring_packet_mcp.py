@@ -614,6 +614,7 @@ def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):
         "pseudonym", "item_id", "text", "segment_index", "segment_count",
         "baseline_raw", "baseline_entered", "baseline_basis", "baseline_rule_id",
         "baseline_event_id", "baseline_attempt", "baseline_consistency", "text_consistency",
+        "evidence",
     ]
     assert list(result["items"]["columns"]) == ["item_id", "prompt", "possible"]
     assert len(result["students"]["rows"]) == 6
@@ -626,6 +627,25 @@ def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):
     assert isinstance(without_context["next"], str)
     assert "contract" not in without_context
     assert "rubric" not in without_context
+
+
+def test_get_scoring_packet_hands_overlap_evidence_to_the_agent(monkeypatch, tmp_path):
+    people = _seed_vault(monkeypatch, tmp_path, count=2)
+    _set_active_courses(monkeypatch, ["111"])
+    bundle = _fake_safe_bundle(people, items=1)
+    overlap = [{"with": people[1]["pseudonym"], "item_id": "item-1", "shared_words": 31,
+                "share": 0.62, "samples": ["a shared passage"]}]
+    bundle["students"][0]["responses"][0]["evidence"] = {"overlap": overlap}
+    session = _fake_session("s1", "111", people)
+    _attach_bundle(session, tmp_path, bundle)
+    _bind_session_store(monkeypatch, {"s1": session})
+
+    result = tools.get_scoring_packet("s1", limit=10)
+
+    columns = list(result["students"]["columns"])
+    evidence = [row[columns.index("evidence")] for row in result["students"]["rows"]]
+    assert {"overlap": overlap} in evidence
+    assert evidence.count(None) == len(evidence) - 1
 
 
 def test_packet_freshness_digest_ignores_ineligible_rows(monkeypatch, tmp_path):

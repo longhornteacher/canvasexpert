@@ -135,7 +135,7 @@ For the full ownership map and current hotspot snapshot, see `docs/reference/ros
 
 The shared feedback/SAFE components are used by the MCP Scoring Session contract;
 there is no HTTP scoring route, compatibility redirect, manual import, or hosted
-model. Canvas Live is the only review/edit surface. See
+model. The agent's preview is the first review; Canvas Live is the record and the place for later edits. See
 `docs/reference/powergrader-scoring-map.md`.
 
 ---
@@ -361,8 +361,8 @@ path. New Quiz scores still appear in the Submissions API and are reported in th
 Canvas Expert has no local scoring queue, result-import panel, or hosted grader. The
 connected agent starts with the cross-course `discover_scoring_work` digest, reports it,
 and waits for teacher direction. Each selected assignment then receives its own SAFE
-pseudonymized packet and result submission, bounded to that assignment. Canvas Live is the
-only review/edit surface. See
+pseudonymized packet and result submission, bounded to that assignment. The agent's preview is the first
+review; Canvas Live is the record and the place for later edits. See
 `docs/guides/scoring-sessions.md` and `docs/reference/powergrader-scoring-map.md`.
 
 ---
