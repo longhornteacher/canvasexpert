@@ -732,7 +732,7 @@ def _attempt_record(entry: dict, replacement_map=None) -> dict | None:
     submitted_at = entry.get("submitted_at")
     if not attempt or not submitted_at:
         return None
-    return {
+    record = {
         "attempt": int(attempt),
         "submitted_at": str(submitted_at),
         "submission_type": str(entry.get("submission_type") or ""),
@@ -745,6 +745,13 @@ def _attempt_record(entry: dict, replacement_map=None) -> dict | None:
             if isinstance(a, dict)
         ],
     }
+    # URL contents are never retained. Capture a boolean only when Canvas
+    # supplied the field, so old/sparse rows remain distinguishable from an
+    # observed empty URL attempt.
+    if "url" in entry:
+        record["url_present"] = (isinstance(entry.get("url"), str)
+                                 and bool(entry["url"].strip()))
+    return record
 
 
 def _comment_record(entry: dict, replacement_map=None, vault=None) -> dict:
@@ -1102,6 +1109,8 @@ def merge_submissions(course_id, assignment_id, rows: list[dict], *,
                                 + list(incoming["attachment_names"])))
                         if incoming.get("submission_type"):
                             merged["submission_type"] = incoming["submission_type"]
+                        if "url_present" in incoming and "url_present" not in merged:
+                            merged["url_present"] = incoming["url_present"]
                         merged_attempts[attempt_key] = merged
                     else:
                         merged_attempts[attempt_key] = incoming

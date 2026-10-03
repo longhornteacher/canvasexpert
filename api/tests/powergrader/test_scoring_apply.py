@@ -7,10 +7,12 @@ The write is deliberately narrow: one send, no read-back. These tests pin that
 as a law, not an implementation detail.
 """
 import json
+import hashlib
 
 import pytest
 
 from api.powergrader import scoring_apply, session_actions
+from api import score_ledger
 
 def _session(**overrides):
     session = {
@@ -66,6 +68,14 @@ def test_feedback_payload_preserves_literal_punctuation_and_unicode():
     assert "en\u2013dash - em\u2013dash" in text
     # The payload is JSON-serializable exactly as supplied.
     assert json.loads(json.dumps(payload))["comment"]["text_comment"] == text
+
+
+def test_no_policy_keeps_fractional_score_unrounded():
+    payload = session_actions._payload({
+        "teacher_score": 7.5, "teacher_feedback": "Clear evidence.",
+        "grading": {"floor_percent": None, "points_possible": 10},
+    })
+    assert payload["submission"]["posted_grade"] == "7.5"
 
 
 # ── The plan ────────────────────────────────────────────────────────────────
@@ -515,16 +525,15 @@ def test_accepted_exact_payload_is_not_sent_twice():
 
 
 def _late_session(*, policy_course=True, late_policy=None, late_days=(2, 0)):
-    """Two late candidate rows; ``late_days`` is each row's confirmed count."""
+    """Two late candidate rows; ``late_days`` is each row's explicit override."""
     session = _session()
     if late_policy:
         session["late_policy"] = late_policy
     for student, days in zip(session["students"], late_days):
         student["canvas_late"] = True
-        if policy_course:
-            student["grading"] = {"floor_percent": 30, "points_possible": 10,
-                                  "insincere": False, "late_days": days,
-                                  "suggested_late_days": days, "canvas_late_days": 3}
+        student["grading"] = {"floor_percent": 30 if policy_course else None,
+                              "points_possible": 10, "insincere": False,
+                              "late_days": days, "suggested_late_days": days}
     return session
 
 
@@ -546,9 +555,9 @@ def test_late_decision_decides_the_late_fields_in_the_payload(
     """LAW: ``_payload`` is the one place late fields are computed, and waived
     sends status none with no override in any course; posted_grade stays the score."""
     student = {"user_id": "9001", "teacher_score": 8, "canvas_late": True}
-    if policy_course:
-        student["grading"] = {"floor_percent": 30, "points_possible": 10,
-                              "insincere": False, "late_days": late_days}
+    student["grading"] = {"floor_percent": 30 if policy_course else None,
+                          "points_possible": 10, "insincere": False,
+                          "late_days": late_days, "suggested_late_days": late_days}
 
     payload = session_actions._payload(student, waive_late=waive)
 
@@ -561,17 +570,16 @@ def test_a_row_that_is_not_late_has_no_late_decision():
     assert session_actions.late_decision({"user_id": "9001"}, waive=True) is None
 
 
-def test_late_days_question_offers_waive_and_explains_itself():
-    """CONTRACT: three options, a generic legend, and the per-row mixing route."""
-    plan = scoring_apply.build_plan(_late_session())
+def test_late_days_have_no_default_question_but_explicit_ask_reviews_them():
+    assert not any(q["kind"] == "late_days" for q in scoring_apply.build_plan(_late_session())["questions"])
+    plan = scoring_apply.build_plan(_late_session(late_policy="ask"))
     question = next(q for q in plan["questions"] if q["kind"] == "late_days")
 
     assert question["options"] == ["post_late_days", "waive_late", "stop"]
-    assert "weekends and Holidays.csv dates excluded" in question["legend"]
-    assert "late_days: 0" in question["detail"]
+    assert "first meaningful attempt" in question["detail"]
     assert "waive_late" in question["detail"] and "post_late_days" in question["detail"]
     # Generic text only: a per-row reason could disclose an accommodation.
-    assert all(set(row) == {"user_id", "canvas_days", "late_days"} for row in question["rows"])
+    assert all(set(row) == {"user_id", "late_days"} for row in question["rows"])
 
 
 @pytest.mark.parametrize("kind", sorted(scoring_apply.QUESTION_OPTIONS))
@@ -617,7 +625,7 @@ def _apply(session, answers, **kwargs):
 def test_waive_late_answer_sends_the_waived_bytes_for_exactly_the_listed_rows():
     """EXAMPLE: the answer waives every listed row; rows outside the question
     keep their own payload."""
-    session = _late_session()
+    session = _late_session(late_policy="ask")
     session["students"].append({"user_id": "9003", "ai_score": 7, "ai_feedback": "Fine."})
 
     result, sent, plan = _apply(session, {"late_days": "waive_late"})
@@ -631,7 +639,7 @@ def test_waive_late_answer_sends_the_waived_bytes_for_exactly_the_listed_rows():
 
 
 def test_post_late_days_answer_keeps_the_applied_payload():
-    session = _late_session()
+    session = _late_session(late_policy="ask")
 
     _result, sent, _plan = _apply(session, {"late_days": "post_late_days"},
                                   canvas_read=lambda *_a: ([], None))
@@ -646,8 +654,8 @@ def test_post_late_days_answer_keeps_the_applied_payload():
     (True, "apply", False, {"late_policy_status": "late", "seconds_late_override": 172800}),
     (True, "waive", False, {"late_policy_status": "none"}),
     (False, "waive", False, {"late_policy_status": "none"}),
-    (False, "apply", False, {}),
-    (False, "ask", False, {}),
+    (False, "apply", False, {"late_policy_status": "late", "seconds_late_override": 172800}),
+    (False, "ask", True, {"late_policy_status": "late", "seconds_late_override": 172800}),
 ])
 def test_session_late_policy_settles_the_question_and_the_payload(
         policy_course, late_policy, asks, expected_9001):
@@ -674,15 +682,164 @@ def test_changing_the_session_late_policy_changes_the_plan_digest():
 
 
 def test_late_decisions_reflect_the_post_answer_decision():
-    session = _late_session()
+    session = _late_session(late_policy="ask")
     plan = scoring_apply.build_plan(session)
 
     before = scoring_apply.late_decisions(session, plan)
     after = scoring_apply.late_decisions(session, plan, {"late_days": "waive_late"})
 
-    assert before == {"9001": {"decision": "applied", "late_days": 2},
-                      "9002": {"decision": "applied", "late_days": 0}}
-    assert after == {"9001": {"decision": "waived"}, "9002": {"decision": "waived"}}
+    assert before == {"9001": {"decision": "set", "late_days": 2, "basis": "teacher_set"},
+                      "9002": {"decision": "set", "late_days": 0, "basis": "teacher_set"}}
+    assert after == {"9001": {"decision": "waived", "late_days": 0, "basis": "teacher_set"},
+                     "9002": {"decision": "waived", "late_days": 0, "basis": "teacher_set"}}
+
+
+@pytest.mark.parametrize(("posted_attempt", "canvas_late", "grade_mode", "expected"), [
+    (None, False, "post_score", False), (3, False, "post_score", False),
+    (2, False, "post_score", True), (2, True, "post_score", True),
+    (2, True, "feedback_only", False),
+])
+def test_late_box_reset_requires_a_newer_attempt_and_score_payload(
+        posted_attempt, canvas_late, grade_mode, expected):
+    student = {"user_id": "9001", "ai_score": 8, "ai_feedback": "Feedback.",
+        "canvas_late": canvas_late, "posted_attempt": posted_attempt,
+        "grading": {"points_possible": 10, "late_days": 2,
+                    "suggested_late_days": 2, "floor_percent": None},
+        "submission_baseline": {"attempt": 3, "latest_attempt": 3,
+            "latest_attempt_at": "2026-09-28T10:00:00Z",
+            "first_attempt_at": "2026-09-25T10:00:00Z"}}
+    session = _session(students=[student], grade_mode=grade_mode, late_policy="apply")
+    plan = scoring_apply.build_plan(session)
+    preview = scoring_apply.preview_rows(session, plan, ["9001"])["9001"]
+    assert ("late_box_reset" in {warning["code"] for warning in preview["warnings"]}) is expected
+
+
+def test_preview_attempt_date_uses_classroom_timezone():
+    assert scoring_apply._plain_date("2026-09-26T02:00:00Z") == "2026-09-25"
+
+
+def _posted_correction_session(*, days=0, score=8, feedback="Same feedback"):
+    student = {
+        "user_id": "9001", "ai_score": score, "ai_feedback": feedback,
+        "teacher_score": None, "teacher_feedback": "", "_teacher_authored_feedback": True,
+        "posted": True, "status": "posted", "correction_pending": True,
+        "canvas_late": True, "grading": {"floor_percent": None, "points_possible": 10,
+                                          "late_days": days, "suggested_late_days": 2},
+        "submission_baseline": {"attempt": 1, "latest_attempt": 1},
+        "last_posted": {"event_id": "prior-verified", "payload_digest": "old-payload",
+                        "entered_score": 8, "late_days": 2, "attempt": 1,
+                        "feedback_digest": hashlib.sha256(feedback.encode()).hexdigest()},
+    }
+    return _session(students=[student], late_policy="apply")
+
+
+def test_days_only_correction_keeps_score_and_omits_duplicate_comment():
+    session = _posted_correction_session(days=0)
+    plan = scoring_apply.build_plan(session)
+    assert plan["candidate_ids"] == ["9001"]
+    preview = scoring_apply.preview_rows(session, plan, ["9001"])["9001"]
+    assert preview["correction"]["previous"] == {"entered": 8, "late_days": 2, "attempt": 1}
+    assert {warning["code"] for warning in preview["warnings"]} >= {
+        "correction_of_pushed_row", "correction_comment_unchanged"}
+    payload = scoring_apply._projected_payload(session["students"][0], session)
+    assert payload["submission"] == {"posted_grade": "8", "late_policy_status": "none"}
+    assert "comment" not in payload
+
+
+@pytest.mark.parametrize(("new_score", "new_feedback", "comment_sent"), [
+    (9, "Same feedback", False),
+    (8, "Changed feedback", True),
+])
+def test_score_or_feedback_correction_sends_only_changed_comment(
+        new_score, new_feedback, comment_sent):
+    session = _posted_correction_session(days=2)
+    student = session["students"][0]
+    student.update({"ai_score": new_score, "ai_feedback": new_feedback,
+                    "correction_pending": True,
+                    "grading": {"floor_percent": None, "points_possible": 10,
+                                "late_days": 2, "suggested_late_days": 2}})
+    result, sent, _plan = _apply(session, {})
+    assert result["results"][0]["corrected"] is True
+    assert sent["9001"]["submission"]["posted_grade"] == str(new_score)
+    assert ("comment" in sent["9001"]) is comment_sent
+
+
+def test_identical_verified_correction_is_already_pushed_and_does_not_send_again():
+    session = _posted_correction_session(days=0)
+    first, _sent, _plan = _apply(session, {})
+    assert first["results"][0]["corrected"] is True
+    student = session["students"][0]
+    student.update({"ai_score": 8, "ai_feedback": "Same feedback",
+                    "correction_pending": False})
+    plan = scoring_apply.build_plan(session)
+    assert plan["candidate_ids"] == []
+
+
+def test_correction_apply_verifies_and_links_new_events_to_prior_verified_event():
+    session = _posted_correction_session(days=0)
+    result, sent, _plan = _apply(session, {})
+    assert sent["9001"] == {"submission": {"posted_grade": "8", "late_policy_status": "none"}}
+    assert result["results"][0]["corrected"] is True
+    events = score_ledger.list_events("course-1", "assignment-1")
+    correction_events = [event for event in events
+                         if event.get("source") == "ce_apply"
+                         and event.get("corrects_event_id") == "prior-verified"]
+    assert {event["action"] for event in correction_events} >= {"intent", "accepted", "verified"}
+    assert all(event["corrects_event_id"] == "prior-verified" for event in correction_events)
+    verified = next(event for event in correction_events if event["action"] == "verified")
+    assert session["students"][0]["last_posted"]["event_id"] == verified["event_id"]
+    session["students"][0].pop("last_posted")
+    hydrated = session_actions.hydrate_last_posted(session, session["students"][0], events)
+    assert hydrated["feedback_digest"] == hashlib.sha256(
+        b"Same feedback").hexdigest()
+    assert session_actions.correction_changed(session["students"][0], session) is False
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_hydration_never_falls_back_when_latest_numeric_push_is_unverified(cached):
+    session = _posted_correction_session(days=0)
+    student = session["students"][0]
+    old_target, latest_target = "old-target", "latest-target"
+    session["push_log"] = [{"ts": "2026-01-01T00:00:00Z", "results": [{
+        "user_id": "9001", "status": "pushed", "request_digest": "old-request",
+        "target_digest": old_target, "entered_score": 8,
+    }]}, {"ts": "2026-01-02T00:00:00Z", "results": [{
+        "user_id": "9001", "status": "pushed", "request_digest": "new-request",
+        "target_digest": latest_target, "entered_score": 9,
+    }]}]
+    events = [{"source": "ce_apply", "action": "verified", "session_id": "session-1",
+        "student_id": "9001", "attempt": 1, "entered_score": 8,
+        "logical_event_key": f"verify:session-1:{old_target}:verified",
+        "timestamp": "2026-01-01T00:00:01Z", "event_id": "older-verified",
+        "feedback_sha256": hashlib.sha256(b"Same feedback").hexdigest()}]
+    if cached:
+        student["last_posted"] = {"event_id": "older-verified", "entered_score": 8,
+                                  "late_days": 2, "attempt": 1,
+                                  "feedback_digest": hashlib.sha256(b"Same feedback").hexdigest()}
+    assert session_actions.hydrate_last_posted(session, student, events) is None
+    assert "last_posted" not in student
+    assert session_actions.correction_changed(student, session) is False
+
+
+def test_correction_to_an_earlier_payload_uses_a_new_ledger_slot():
+    session = _posted_correction_session(days=0)
+    first, _sent, _plan = _apply(session, {})
+    assert first["ok"] is True
+    student = session["students"][0]
+    student.update({"ai_score": 8, "ai_feedback": "Same feedback",
+                    "teacher_score": None, "teacher_feedback": "",
+                    "correction_pending": True, "grading": {
+                        "floor_percent": None, "points_possible": 10,
+                        "late_days": 2, "suggested_late_days": 2}})
+    second, sent, _plan = _apply(session, {})
+    assert second["ok"] is True
+    assert sent["9001"]["submission"] == {"posted_grade": "8", "late_policy_status": "late",
+                                           "seconds_late_override": 172800}
+    events = score_ledger.list_events("course-1", "assignment-1")
+    verified = [event for event in events if event.get("source") == "ce_apply"
+                and event.get("action") == "verified"]
+    assert len(verified) == 2
+    assert len({event["logical_event_key"] for event in verified}) == 2
 
 
 # ── Late-row read-back (the one read after the write) ───────────────────────

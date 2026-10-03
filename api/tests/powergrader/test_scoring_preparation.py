@@ -187,7 +187,7 @@ def test_provenance_without_guidance_or_contract_is_ignored(monkeypatch, tmp_pat
     assert session_store.load_preparation_state("c1", "a1") == {}
 
 
-@pytest.mark.parametrize("policy, expected", [(None, "ask"), ("waive", "waive"), ("apply", "apply")])
+@pytest.mark.parametrize("policy, expected", [(None, "apply"), ("waive", "waive"), ("apply", "apply")])
 def test_the_late_policy_is_stored_on_the_private_session(monkeypatch, tmp_path, policy, expected):
     saved, _prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(
         rubric=[{"description": "Reasoning", "points": 10, "ratings": []}]))
@@ -426,6 +426,35 @@ def test_refresh_with_nothing_new_changes_nothing_but_the_recorded_mirror(scorin
     assert {k: v for k, v in after.items() if k not in mirror} == {
         k: v for k, v in before.items() if k not in mirror}
     assert _safe_files(world) == files
+
+
+def test_refresh_updates_newly_complete_attempt_history_without_detecting_a_resubmission(
+        scoring_refresh_world):
+    world = scoring_refresh_world
+    latest_at = "2026-09-19T10:00:00Z"
+    world.add("900001", "Synthetic First", attempt=2, submitted_at=latest_at,
+              _attempt_records=[{"attempt": 2, "submitted_at": latest_at,
+                                "submission_type": "online_text_entry", "body": "Second draft."}])
+    sid = world.prepare()
+    baseline = _student(world, sid, "900001")["submission_baseline"]
+    assert baseline["attempts_complete"] is False
+    first_at = "2026-09-18T10:00:00Z"
+    world.rows[0]["_attempt_records"] = [
+        {"attempt": 1, "submitted_at": first_at,
+         "submission_type": "online_text_entry", "body": "First draft."},
+        {"attempt": 2, "submitted_at": latest_at,
+         "submission_type": "online_text_entry", "body": "Second draft."},
+    ]
+
+    result = scoring_preparation.refresh_scoring_session(sid)
+
+    refreshed = _student(world, sid, "900001")["submission_baseline"]
+    assert result["changed"] is True
+    assert result["resubmitted_not_replaced"] == []
+    assert refreshed["submitted_at"] == latest_at
+    assert refreshed["first_attempt_at"] == first_at
+    assert refreshed["latest_attempt_at"] == latest_at
+    assert refreshed["attempts_complete"] is True
 
 
 def test_prepare_and_refresh_attach_overlap_evidence_to_the_safe_bundle(scoring_refresh_world):

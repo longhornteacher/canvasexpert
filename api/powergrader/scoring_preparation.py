@@ -22,6 +22,7 @@ from api.powergrader import (
     student_attachments,
     writing_timeline,
 )
+from api.powergrader.attempt_history import summarize as summarize_attempt_history
 
 
 MAX_TEACHER_SCORING_GUIDANCE_CHARS = 12000
@@ -336,7 +337,7 @@ def prepare_scoring_session(
     use_existing_mirror: bool = False,
     scoring_guidance_provenance: str = "",
     feedback_contract_id: str = "",
-    late_policy: str = "ask",
+    late_policy: str = "apply",
     save_session=None,
     activate_session=None,
 ) -> dict:
@@ -650,7 +651,7 @@ def prepare_scoring_session(
     ).hexdigest()
     session["scoring_basis"] = scoring_basis
     session["scoring_guidance_provenance"] = provenance or None
-    session["late_policy"] = str(late_policy or "ask")
+    session["late_policy"] = str(late_policy or "apply")
     session["scoring_freshness"] = {
         "state": str(freshness.get("state") or "current"),
         "last_success_at": str(freshness.get("last_success_at") or ""),
@@ -852,6 +853,31 @@ def refresh_scoring_session(
     session_uids = {str(s.get("user_id")) for s in students if s.get("user_id") is not None}
     added_rows = [row for row in eligible
                   if row.get("user_id") and str(row["user_id"]) not in session_uids]
+    attempt_history_changed = False
+    for student in students:
+        row = rows_by_uid.get(str(student.get("user_id") or ""))
+        baseline = student.get("submission_baseline")
+        if (not row or not isinstance(baseline, dict)
+                or (baseline.get("attempt") is None and baseline.get("submitted_at") is None)):
+            continue
+        if (baseline.get("attempt") is not None and row.get("attempt") is not None
+                and int(row.get("attempt") or 0) != int(baseline.get("attempt") or 0)):
+            continue
+        summary = summarize_attempt_history(row.get("_attempt_records") or (), row.get("attempt"))
+        first = summary.get("first_meaningful")
+        latest = summary.get("latest")
+        updates = {
+            "attempt_count": summary.get("count", 0),
+            "attempts_complete": summary.get("complete", False),
+            "attempts_known": summary.get("known", True),
+            "first_attempt_at": (first or {}).get("submitted_at"),
+            "latest_attempt_at": (latest or {}).get("submitted_at") or row.get("submitted_at"),
+            "latest_attempt": (latest or {}).get("attempt") or row.get("attempt"),
+        }
+        for key, value in updates.items():
+            if baseline.get(key) != value:
+                baseline[key] = value
+                attempt_history_changed = True
     resubmitted, posted_resubmitted, replaced_uids = [], [], []
     for student in students:
         uid = str(student.get("user_id"))
@@ -887,10 +913,12 @@ def refresh_scoring_session(
     }
 
     if not added_rows and not replaced_uids:
-        if any(session.get(key) != value for key, value in mirror_fields.items()):
+        mirror_changed = any(session.get(key) != value for key, value in mirror_fields.items())
+        if mirror_changed:
             session.update(mirror_fields)
+        if attempt_history_changed or mirror_changed:
             save_session(session)
-        return {**report, "changed": False, "added": [], "replaced": [], "held_added": 0,
+        return {**report, "changed": bool(attempt_history_changed), "added": [], "replaced": [], "held_added": 0,
                 "first_new_offset": None,
                 "packet_digest": scoring_packet.packet_digest(
                     session["session_id"], base_bundle, course_id=course_id,

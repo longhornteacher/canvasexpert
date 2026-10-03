@@ -28,6 +28,7 @@ _EVENT_FIELDS = (
     "new_canvas_score", "old_entered_score", "new_entered_score", "actor",
     "old_points_deducted", "new_points_deducted", "old_late_status", "new_late_status",
     "old_late_days", "new_late_days", "observation_at",
+    "corrects_event_id",
 )
 
 
@@ -128,7 +129,8 @@ def append_event(record: dict, *, idempotency_key: str, root=None) -> dict:
     """Publish one immutable event; a repeated key returns its original event."""
     if not isinstance(record, dict) or not idempotency_key:
         raise ScoreLedgerError("score_ledger_invalid_event")
-    event = {key: record.get(key) for key in _EVENT_FIELDS}
+    event = {key: record.get(key) for key in _EVENT_FIELDS
+             if key != "corrects_event_id" or record.get(key) not in (None, "")}
     if not str(event.get("course_id") or "").strip() or not str(event.get("assignment_id") or "").strip():
         raise ScoreLedgerError("score_ledger_invalid_scope")
     event.update({"schema_version": SCHEMA_VERSION, "timestamp": str(record.get("timestamp") or _timestamp()),

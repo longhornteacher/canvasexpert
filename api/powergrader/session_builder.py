@@ -6,6 +6,7 @@ from api.powergrader.student_attachments import eligibility_decision
 from api.powergrader import media_recordings
 from api.powergrader import oral_reading
 from api.mirror.attempt_text import digest as attempt_text_digest
+from api.powergrader.attempt_history import summarize as summarize_attempt_history
 
 
 def _attachment_metadata(attachment: dict) -> dict:
@@ -48,6 +49,16 @@ def build_students(
         extra_days = extra_time_map.get(uid, 0)
 
         body = s.get("body") or ""
+        attempt_summary = summarize_attempt_history(
+            s.get("_attempt_records") or (), s.get("attempt"))
+        first_attempt = attempt_summary.get("first_meaningful")
+        latest_attempt = attempt_summary.get("latest")
+        entered_score = s.get("entered_score")
+        if entered_score is None and s.get("score") is not None:
+            try:
+                entered_score = float(s.get("score")) + float(s.get("points_deducted") or 0)
+            except (TypeError, ValueError):
+                entered_score = None
         attachments = [
             _attachment_metadata({**a, "filename": a.get("filename") or a.get("display_name", "")})
             for a in (s.get("attachments") or [])
@@ -96,9 +107,18 @@ def build_students(
             "current_score": s.get("score"),
             "submission_baseline": {
                 "attempt": s.get("attempt"),
+                # Keep the current-attempt timestamp for refresh/resubmission
+                # detection. Late-day math uses first_attempt_at separately.
                 "submitted_at": s.get("submitted_at"),
-                "entered_score": s.get("entered_score"),
+                "first_attempt_at": (first_attempt or {}).get("submitted_at"),
+                "latest_attempt_at": (latest_attempt or {}).get("submitted_at") or s.get("submitted_at"),
+                "attempt_count": attempt_summary.get("count", 0),
+                "latest_attempt": (latest_attempt or {}).get("attempt") or s.get("attempt"),
+                "attempts_complete": attempt_summary.get("complete", False),
+                "attempts_known": attempt_summary.get("known", True),
+                "entered_score": entered_score,
                 "canvas_score": s.get("score"),
+                "points_deducted": s.get("points_deducted"),
                 "submission_digest": s.get("submission_digest") or attempt_text_digest(s.get("body")),
             },
             "status":        "pending",
@@ -195,6 +215,18 @@ def freeze_score_provenance(students: list[dict], course_id: str,
     for student in students:
         baseline = student.get("submission_baseline") or {}
         uid = str(student.get("user_id") or "")
+        verified_pushes = [event for event in events
+                           if event.get("source") == "ce_apply"
+                           and event.get("action") == "verified"
+                           and str(event.get("student_id") or "") == uid
+                           and event.get("attempt") not in (None, "")]
+        if verified_pushes:
+            latest_push = max(verified_pushes,
+                              key=lambda event: (str(event.get("timestamp") or ""),
+                                                 str(event.get("event_id") or "")))
+            student["posted_attempt"] = latest_push.get("attempt")
+        else:
+            student["posted_attempt"] = None
         attempt = str(baseline.get("attempt") or "")
         entered, canvas = baseline.get("entered_score"), baseline.get("canvas_score")
         if not uid or not attempt or entered is None or canvas is None:

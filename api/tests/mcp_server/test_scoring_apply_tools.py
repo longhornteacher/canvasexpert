@@ -101,6 +101,111 @@ def test_stage_is_local_and_apply_is_the_only_canvas_lane(monkeypatch, tmp_path,
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
 
 
+def test_stage_apply_corrects_posted_days_only_and_surfaces_corrected_count(
+        monkeypatch, tmp_path, _set_active_courses):
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    from api.powergrader import scoring_apply
+    from api.powergrader import session_actions
+    import hashlib
+
+    student = session["students"][0]
+    student.update({
+        "posted": True, "status": "posted", "canvas_late": True,
+        "submission_baseline": {"attempt": 1, "submitted_at": "2026-01-01T10:00:00Z",
+                                "first_attempt_at": "2026-01-01T10:00:00Z",
+                                "latest_attempt_at": "2026-01-01T10:00:00Z",
+                                "attempts_complete": True, "attempts_known": True},
+        "cached_due_date": "2026-01-01T09:00:00Z",
+        "grading": {"floor_percent": None, "points_possible": 10, "late_days": 2,
+                    "suggested_late_days": 2},
+        "ai_score": 8, "ai_feedback": "Clear reasoning throughout the response.",
+        "last_posted": {"event_id": "verified-before-correction", "entered_score": 8,
+                        "late_days": 2, "attempt": 1,
+                        "feedback_digest": hashlib.sha256(
+                            b"Clear reasoning throughout the response.").hexdigest()},
+    })
+    monkeypatch.setattr(session_actions, "hydrate_last_posted",
+                        lambda _session, row, _events=None: row.get("last_posted"))
+    digest = _digest(bundle)
+    result = _result(8)
+    result[0]["late_days"] = 0
+    staged = tools.stage_scoring_results("session-1", result, digest)
+    assert staged.get("status") == "staged", staged
+    assert session["students"][0]["correction_pending"] is True
+    assert session["students"][0]["last_posted"]["event_id"] == "verified-before-correction"
+
+    monkeypatch.setattr(scoring_apply, "apply_plan", lambda **_kw: (
+        {"ok": True, "pushed": [REAL_ID], "results": [{"user_id": REAL_ID,
+         "status": "pushed", "corrected": True}]}, 200))
+    applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+    assert applied["counts"]["corrected"] == 1
+    assert applied["results"] == [{"pseudonym": PSEUDONYM, "status": "finalized",
+                                    "corrected": True}]
+
+
+def test_incomplete_history_requests_days_only_for_affected_late_row(
+        monkeypatch, tmp_path, _set_active_courses):
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    session["students"][0].update({"canvas_late": True,
+                                   "cached_due_date": "2026-01-01T00:00:00Z",
+                                   "submission_baseline": {"attempt": 2,
+                                       "attempts_complete": False, "attempts_known": True,
+                                       "latest_attempt_at": "2026-01-02T00:00:00Z"}})
+    response = tools.stage_scoring_results("session-1", _result(), _digest(bundle))
+    assert response["status"] == "needs_teacher_input"
+    assert response["questions"][0]["kind"] == "late_days_unknown"
+    assert response["questions"][0]["pseudonyms"] == [PSEUDONYM]
+    assert response["rows"] == [{"pseudonym": PSEUDONYM,
+        "late": {"decision": "unknown", "days": None, "basis": "unknown",
+                 "first_attempt_at": None, "latest_attempt_at": "2026-01-01"},
+        "warnings": [{"code": "late_days_unknown",
+                      "text": "Enter late_days for this row; do not infer it from the latest attempt."}]}]
+
+
+def test_posted_comment_only_row_without_verified_score_receipt_is_bounded(
+        monkeypatch, tmp_path, _set_active_courses):
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    session["students"][0].update({"posted": True, "status": "posted",
+                                   "ai_score": None, "ai_feedback": "New comment."})
+    result = tools.stage_scoring_results("session-1", _result(), _digest(bundle),
+                                         grade_mode="feedback_only")
+    assert result["ok"] is False and result["code"] == "no_valid_results"
+    assert "no verified numeric-score receipt" in result["error"]
+    assert "feedback-revision tools" in result["error"]
+
+
+@pytest.mark.parametrize(("due", "first", "latest", "canvas_late", "posted_attempt",
+                          "expected_days", "expected_fields"), [
+    ("2026-09-25T23:59:00Z", "2026-09-25T10:00:00Z", "2026-09-28T10:00:00Z",
+     True, None, 0, {"late_policy_status": "none"}),
+    ("2026-09-23T23:59:00Z", "2026-09-25T10:00:00Z", "2026-10-01T10:00:00Z",
+     True, 1, 2, {"late_policy_status": "late", "seconds_late_override": 172800}),
+])
+def test_staging_uses_first_meaningful_attempt_and_defaults_to_computed_days(
+        monkeypatch, tmp_path, _set_active_courses, due, first, latest,
+        canvas_late, posted_attempt,
+        expected_days, expected_fields):
+    session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    student = session["students"][0]
+    student.update({"canvas_late": canvas_late, "posted_attempt": posted_attempt,
+                    "cached_due_date": due,
+        "submission_baseline": {"attempt": 2, "submitted_at": latest,
+            "attempt_count": 2, "attempts_complete": True, "attempts_known": True,
+            "first_attempt_at": first, "latest_attempt_at": latest,
+            "latest_attempt": 2}})
+    staged = tools.stage_scoring_results("session-1", _result(), _digest(bundle))
+    assert staged["status"] == "staged"
+    assert not any(question["kind"] == "late_days" for question in staged.get("questions", []))
+    preview = tools.get_scoring_preview("session-1")
+    assert preview["rows"][0]["late"]["days"] == expected_days
+    assert preview["rows"][0]["late"]["first_attempt_at"] == first[:10]
+    assert preview["rows"][0]["late"]["latest_attempt_at"] == latest[:10]
+    from api.powergrader import scoring_apply
+    plan = scoring_apply.build_plan(session)
+    payload = scoring_apply._projected_payload(student, session)
+    assert {key: payload["submission"][key] for key in expected_fields} == expected_fields
+
+
 def test_curve_stage_apply_ledger_and_ledger_driven_revert(monkeypatch, tmp_path, _set_active_courses):
     """EXAMPLE: one frozen 53→67 post is verified, recorded, replay-safe and revertible."""
     session, bundle, sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
@@ -136,10 +241,10 @@ def test_curve_stage_apply_ledger_and_ledger_driven_revert(monkeypatch, tmp_path
     applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
     assert applied["ok"] is True and applied["counts"]["finalized"] == 1
     result_row = applied["results"][0]
-    assert result_row["late"]["raw_score"] == 53
     assert result_row["late"]["entered_score"] == 67
-    assert result_row["late"]["canvas_score"] == 67
-    assert result_row["late"]["curve_rule_id"] == rule["rule_id"]
+    assert result_row["late"]["decision"] == "not_late"
+    assert "points_deducted" not in _blob(result_row)
+    assert "raw_score" not in result_row["late"]
     assert len(writes) == len(reads) == 1
     assert writes[0][1]["submission"]["posted_grade"] == "67"
     comment = writes[0][1]["comment"]["text_comment"]
@@ -395,6 +500,7 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
         "seconds_late": 100000,                            # canvas_late_days = 2
         "submission_baseline": {"attempt": 1, "submitted_at": "2026-09-28T08:00:00-05:00"},  # Monday
     })
+    session["late_policy"] = "ask"
 
     from api.platform_services import config
     from api.powergrader import scoring_apply
@@ -434,7 +540,7 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
     assert [q["id"] for q in first["questions"]] == ["late_days"]
     # Pseudonymized, with a per-row count -- criterion 6.
     assert first["questions"][0]["rows"] == [
-        {"student": PSEUDONYM, "canvas_days": 2, "late_days": 1}
+        {"student": PSEUDONYM, "late_days": 1}
     ]
     assert REAL_ID not in _blob(first) and REAL_NAME not in _blob(first)
 
@@ -617,6 +723,7 @@ def _late_policy_course(monkeypatch, tmp_path, _set_active_courses, grading_poli
         "seconds_late": 100000,
         "submission_baseline": {"attempt": 1, "submitted_at": "2026-09-28T08:00:00-05:00"},
     })
+    session["late_policy"] = "ask"
     from api.platform_services import config
     from api.powergrader import scoring_apply
     grading_policy_files.policy(floor_percent=30, missing_percent=20,
@@ -663,15 +770,18 @@ def test_waive_late_stage_shows_the_post_answer_decision_and_sends_the_waived_by
     assert first["status"] == "needs_teacher_input"
     question = first["questions"][0]
     assert question["answer_with"] == ["post_late_days", "waive_late", "stop"]
-    assert "school days after the due date" in question["legend"]
+    assert "first meaningful attempt" in question["legend"]
     assert first["rows"] == [{"pseudonym": PSEUDONYM,
-                              "late": {"decision": "applied", "late_days": 1}}]
+                              "late": {"decision": "set", "late_days": 1,
+                                       "basis": "teacher_set"}}]
 
     staged = tools.stage_scoring_results(
         "session-1", _late_results(), digest, 
         review_digest=first["review_digest"], answers={"late_days": "waive_late"})
     assert staged["status"] == "staged"
-    assert staged["rows"] == [{"pseudonym": PSEUDONYM, "late": {"decision": "waived"}}]
+    assert staged["rows"] == [{"pseudonym": PSEUDONYM,
+                                "late": {"decision": "waived", "late_days": 0,
+                                         "basis": "teacher_set"}}]
 
     applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
     assert applied["counts"]["finalized"] == 1
@@ -706,7 +816,7 @@ def test_apply_reports_a_waived_row_canvas_still_penalized(
     assert row["status"] == "score_mismatch"
     assert row["late"]["decision"] == "waived"
     assert row["late"]["verification"] == "score_mismatch"
-    assert row["late"]["points_deducted"] == 2
+    assert row["late"]["entered_score"] == 6
     assert applied["posted_rows"] == [PSEUDONYM]
     assert REAL_ID not in _blob(applied) and REAL_NAME not in _blob(applied)
 
@@ -879,7 +989,8 @@ def test_stage_then_preview_returns_projected_rows_and_the_commentary_unchanged(
     assert preview["held"] == [] and preview["total"] == 1 and "next_offset" not in preview
     assert preview["rows"] == [{
         "pseudonym": PSEUDONYM, "raw_score": 8.0, "entered": "8", "points_possible": 10.0,
-        "late": None, "comment": "Clear reasoning throughout the response.",
+        "late": None, "correction": None,
+        "comment": "Clear reasoning throughout the response.",
         "agent_commentary": COMMENTARY,
         "warnings": [{"code": "replaces_canvas_score",
                       "text": "Replaces a score already in Canvas (5), as of session preparation."}],
@@ -940,7 +1051,9 @@ def test_preview_comment_and_entered_are_exactly_what_canvas_receives(
         assert row["entered"] == "67" and "Raw 53 -> Entered 67." in row["comment"]
         assert [w["code"] for w in row["warnings"]] == ["entered_differs_from_raw"]
     if scenario == "late_waived":
-        assert row["late"] == {"decision": "waived", "status": "none"}
+        assert row["late"]["decision"] == "waived"
+        assert row["late"]["days"] == 0
+        assert row["late"]["basis"] == "teacher_set"
         assert [w["code"] for w in row["warnings"]] == [
             "late_waived", "entered_differs_from_raw"]
         assert row["entered"] == "7" and "grading floor" in row["warnings"][1]["text"]

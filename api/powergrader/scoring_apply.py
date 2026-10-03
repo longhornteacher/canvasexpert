@@ -30,6 +30,7 @@ import json
 import math
 from datetime import datetime, timezone
 from api import score_ledger
+from api.freshness_policy import LOCAL_TIMEZONE
 
 from . import session_actions
 from decimal import Decimal, InvalidOperation
@@ -72,15 +73,11 @@ _STOP_ANSWERS = {"stop"}
 _WAIVE_ANSWERS = {"waive_late"}
 
 _LATE_LEGEND = (
-    "canvas_days is Canvas's calendar-day count; late_days is school days after "
-    "the due date (weekends and Holidays.csv dates excluded, less any grace days) "
-    "and is the value posted unless waived."
+    "Late days come from the first meaningful attempt. Canvas applies its own late policy."
 )
 _LATE_DETAIL = (
-    "Decide how late work posts. post_late_days posts each row's late_days as "
-    "listed; waive_late posts every listed row with the late penalty waived; "
-    "stop abandons this apply. To mix per row, resubmit results with late_days: 0 "
-    "on the rows to waive and answer post_late_days."
+    "Review the late days calculated from each first meaningful attempt. "
+    "Choose post_late_days or waive_late, or stop. Individual rows can be restaged with late_days."
 )
 
 # held_not_scored names students who would receive nothing. They are not in
@@ -89,11 +86,13 @@ _LATE_DETAIL = (
 _ADVISORY_KINDS = {"held_not_scored"}
 
 
-def _staged(student: dict) -> bool:
-    """A row an assistant has scored and nobody has posted yet."""
-    if (student.get("posted") or student.get("status") == "posted"
-            or student.get("push_state") == "sent_unknown"):
+def _staged(student: dict, session=None) -> bool:
+    """A new row or verified correction candidate; unknown writes stay held."""
+    if student.get("push_state") == "sent_unknown":
         return False
+    if student.get("posted") or student.get("status") == "posted":
+        return bool(student.get("correction_pending")
+                    and session_actions.correction_changed(student, session))
     return student.get("ai_score") is not None or bool(
         (student.get("ai_feedback") or "").strip())
 
@@ -257,6 +256,16 @@ def _finite(value):
     return number if math.isfinite(number) else None
 
 
+def _plain_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(
+            LOCAL_TIMEZONE).date().isoformat()
+    except ValueError:
+        return str(value)[:10] or None
+
+
 def preview_rows(session: dict, plan: dict, user_ids, answers: dict | None = None) -> dict:
     """Read-only ``{user_id: row}`` for rows a stage will post.
 
@@ -288,20 +297,35 @@ def preview_rows(session: dict, plan: dict, user_ids, answers: dict | None = Non
         late = None
         warnings = []
         if decision:
-            late = {**decision, "status": submission.get("late_policy_status")}
+            baseline = student.get("submission_baseline") or {}
+            late = {
+                "decision": decision.get("decision"),
+                "days": decision.get("late_days"),
+                "basis": decision.get("basis", "unknown"),
+                "first_attempt_at": _plain_date(baseline.get("first_attempt_at")),
+                "latest_attempt_at": _plain_date(baseline.get("latest_attempt_at")),
+            }
             days = decision.get("late_days")
             if decision["decision"] == "waived":
-                warnings.append({"code": "late_waived", "text": "Late penalty waived."})
-            elif decision["decision"] == "applied" and days:
-                warnings.append({"code": "late_penalty_applied",
-                                 "text": f"Late penalty applied: {days} school day(s)."})
-            elif decision["decision"] == "canvas":
-                warnings.append({"code": "late_canvas_policy",
-                                 "text": "Submitted late: Canvas's own late policy decides any deduction."})
+                warnings.append({"code": "late_waived", "text": "Late days waived by teacher."})
+            elif decision["decision"] == "set" and days:
+                basis_text = (f"by teacher" if decision.get("basis") == "teacher_set"
+                              else f"from the first meaningful attempt on {late['first_attempt_at']}")
+                warnings.append({"code": "late_days_set",
+                                 "text": f"Late days set to {days} {basis_text}; Canvas applies its own late policy."})
+            elif decision["decision"] == "set" and days == 0:
+                text = ("Late days set to none by teacher." if decision.get("basis") == "teacher_set"
+                        else "First meaningful attempt was on time; late box set to none.")
+                warnings.append({"code": "late_none", "text": text})
+            elif decision["decision"] == "unknown":
+                warnings.append({"code": "late_days_unknown",
+                                 "text": "First meaningful attempt is unknown; provide late days or refresh the mirror."})
         baseline = student.get("submission_baseline") or {}
         existing = _finite(baseline.get("entered_score"))
         if existing is None:
-            existing = _finite(baseline.get("canvas_score"))
+            score = _finite(baseline.get("canvas_score"))
+            deducted = _finite(baseline.get("points_deducted"))
+            existing = (score + (deducted or 0)) if score is not None else None
         if _finite(entered) is not None and existing is not None \
                 and abs(existing - _finite(entered)) > 1e-9:
             warnings.append({"code": "replaces_canvas_score",
@@ -315,12 +339,41 @@ def preview_rows(session: dict, plan: dict, user_ids, answers: dict | None = Non
             warnings.append({"code": "entered_differs_from_raw",
                              "text": f"Entered {entered} differs from raw "
                                      f"{session_actions._format_number(raw)} ({reason})."})
+        correction = None
+        if student.get("correction_pending") and isinstance(student.get("last_posted"), dict):
+            previous = student["last_posted"]
+            correction = {"previous": {
+                "entered": previous.get("entered_score"),
+                "late_days": previous.get("late_days"),
+                "attempt": previous.get("attempt"),
+            }}
+            warnings.append({"code": "correction_of_pushed_row",
+                             "text": (f"This replaces what Canvas Expert pushed earlier: score "
+                                      f"{previous.get('entered_score')}, "
+                                      f"{previous.get('late_days') or 0} late days.")})
+            if not (payload.get("comment") or {}).get("text_comment"):
+                warnings.append({"code": "correction_comment_unchanged",
+                                 "text": "Feedback is unchanged; no new comment will post."})
+        posted_attempt = student.get("posted_attempt")
+        latest_attempt = baseline.get("latest_attempt") or baseline.get("attempt")
+        try:
+            reset = posted_attempt is not None and int(latest_attempt) > int(posted_attempt)
+        except (TypeError, ValueError):
+            reset = False
+        if reset and grade_mode == "post_score":
+            reset_text = (f"Canvas cleared the late box when attempt {latest_attempt} arrived; "
+                          "applying sets it again from the first meaningful attempt."
+                          if decision and decision.get("decision") == "set" else
+                          f"Canvas cleared the late box when attempt {latest_attempt} arrived; "
+                          "no late days are being set for this row.")
+            warnings.append({"code": "late_box_reset", "text": reset_text})
         rows[uid] = {
             "raw_score": _finite(raw),
             "entered": entered,
             "points_possible": float(possible) if possible is not None else None,
             "late": late,
             "comment": (payload.get("comment") or {}).get("text_comment") or "",
+            "correction": correction,
             "agent_commentary": str(student.get("agent_commentary") or ""),
             "warnings": warnings,
         }
@@ -345,7 +398,7 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
             "code": "canvas_write_attention",
             "error": "A previous Canvas write could not be confirmed. Review Canvas before retrying.",
         }
-    candidates = [s for s in students if _staged(s)]
+    candidates = [s for s in students if _staged(s, session)]
     candidate_ids = [str(s["user_id"]) for s in candidates]
 
     above, missing, tainted = [], [], []
@@ -373,19 +426,15 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
             tainted.append(user_id)
 
     receives_nothing = [str(s["user_id"]) for s in students
-                        if not _staged(s) and not s.get("posted")]
+                        if not _staged(s, session) and not s.get("posted")]
 
-    # Grading-policy facts, stamped only on candidates in a policy course
-    # (docs/contracts/grading-policy-contract.md section 5).
+    # Effort and late-day facts are stamped on staged rows.
     insincere = ([str(s["user_id"]) for s in candidates
                   if (s.get("grading") or {}).get("insincere")]
                  if grade_mode == "post_score" else [])
-    # The session's late_policy settles the question up front: waive and apply
-    # never ask. Only ask puts the late_days question to the teacher. Feedback-only
-    # sends no late fields, so it has no late decision and ignores late_policy.
     late_candidates = ([s for s in candidates
                         if s.get("grading") and s.get("canvas_late")
-                        and str(session.get("late_policy") or "ask") == "ask"]
+                        and str(session.get("late_policy") or "apply") == "ask"]
                        if grade_mode == "post_score" else [])
 
     questions = []
@@ -416,22 +465,16 @@ def build_plan(session: dict, *, pseudonyms=()) -> dict:
             insincere))
     if late_candidates:
         questions.append(_question(
-            "late_days",
-            _LATE_DETAIL,
+            "late_days", _LATE_DETAIL,
             [str(s["user_id"]) for s in late_candidates],
             legend=_LATE_LEGEND,
-            rows=[
-                {
-                    "user_id": str(s["user_id"]),
-                    "canvas_days": (s.get("grading") or {}).get("canvas_late_days"),
-                    "late_days": ((s["grading"].get("late_days"))
-                                 if (s["grading"].get("late_days")) is not None
-                                 else s["grading"].get("suggested_late_days")),
-                }
-                for s in sorted(late_candidates, key=lambda s: str(s["user_id"]))
-            ],
+            rows=[{
+                "user_id": str(s["user_id"]),
+                "late_days": ((s["grading"].get("late_days"))
+                              if (s["grading"].get("late_days")) is not None
+                              else s["grading"].get("suggested_late_days")),
+            } for s in sorted(late_candidates, key=lambda s: str(s["user_id"]))],
         ))
-
     return {
         "ok": True,
         "candidate_ids": candidate_ids,
@@ -521,6 +564,8 @@ def approve_rows(session: dict, user_ids) -> None:
     for student in session.get("students", []):
         if str(student.get("user_id")) not in wanted:
             continue
+        if student.get("correction_pending"):
+            student["posted"] = False
         if student.get("teacher_score") is None:
             student["teacher_score"] = student.get("ai_score")
         if not (student.get("teacher_feedback") or "").strip():
@@ -528,7 +573,8 @@ def approve_rows(session: dict, user_ids) -> None:
         student["status"] = "approved"
 
 
-def _verify_posted_scores(session_id: str, pushed: dict, load_session, canvas_read) -> None:
+def _verify_posted_scores(session_id: str, pushed: dict, load_session, canvas_read,
+                          save_session=None) -> None:
     """Verify every accepted numeric score with one bounded, read-only pass."""
     def finite_number(value):
         if isinstance(value, bool) or value is None:
@@ -569,7 +615,7 @@ def _verify_posted_scores(session_id: str, pushed: dict, load_session, canvas_re
         read_ok = False
 
     for row in rows:
-        late = row.setdefault("late", {"decision": "canvas", "sent_status": None})
+        late = row.setdefault("late", {"decision": "not_late", "sent_status": None})
         read = by_user.get(str(row["user_id"])) if read_ok else None
         if read is None:
             late.update({"readback": "unavailable", "verification": "score_readback_unavailable"})
@@ -598,7 +644,7 @@ def _verify_posted_scores(session_id: str, pushed: dict, load_session, canvas_re
         valid_statuses = {"late", "missing", "none", "extended"}
         match = (sent is not None and entered is not None and canvas_score is not None
                  and abs(entered - sent) <= 1e-6)
-        decision = str(late.get("decision") or "canvas")
+        decision = str(late.get("decision") or "not_late")
         sent_status = late.get("sent_status")
         if match and status and status not in valid_statuses:
             match = False
@@ -619,13 +665,16 @@ def _verify_posted_scores(session_id: str, pushed: dict, load_session, canvas_re
                             if str(item.get("user_id")) == str(row.get("user_id"))), {})
             baseline = student.get("submission_baseline") or {}
             action = "verified" if match else "failed"
-            sent_event = next((event for event in reversed(prior_events)
+            sent_events = [event for event in prior_events
                 if event.get("source") == "ce_apply" and event.get("action") in {"accepted", "intent"}
                 and str(event.get("student_id") or "") == str(row.get("user_id") or "")
                 and str(event.get("session_id") or "") == str(session_id)
                 and str(event.get("stage_id") or "") == str((session.get("staged_scoring_apply") or {}).get("stage_digest") or "")
-                and event.get("curve_rule_id") == (student.get("frozen_curve") or {}).get("rule_id")), None)
-            score_ledger.append_event({
+                and event.get("curve_rule_id") == (student.get("frozen_curve") or {}).get("rule_id")]
+            sent_events.sort(key=lambda event: (str(event.get("timestamp") or ""),
+                                                str(event.get("event_id") or "")))
+            sent_event = sent_events[-1] if sent_events else None
+            verified_event = score_ledger.append_event({
                 "source": "ce_apply", "action": action,
                 "course_id": session.get("course_id"), "assignment_id": session.get("assignment_id"),
                 "student_id": row.get("user_id"),
@@ -634,11 +683,36 @@ def _verify_posted_scores(session_id: str, pushed: dict, load_session, canvas_re
                 "raw_score": (student.get("frozen_curve") or {}).get("raw_score"),
                 "entered_score": entered, "canvas_score": canvas_score,
                 "points_deducted": deducted, "late_status": status,
-                "late_days": read.get("late_days"),
+                "late_days": ((sent_event or {}).get("late_days")
+                              if sent_event else read.get("late_days")),
                 "feedback": (sent_event or {}).get("feedback"),
                 "curve_rule_id": (student.get("frozen_curve") or {}).get("rule_id"),
                 "session_id": session_id, "stage_id": (session.get("staged_scoring_apply") or {}).get("stage_digest"),
-            }, idempotency_key=f"verify:{session_id}:{row.get('target_digest') or row.get('request_digest') or row.get('user_id')}:{action}")
+                "corrects_event_id": ((student.get("last_posted") or {}).get("event_id")
+                                      if student.get("correction_pending") else None),
+            }, idempotency_key=(
+                f"verify:{session_id}:{row.get('target_digest') or row.get('request_digest') or row.get('user_id')}"
+                + (f":corrects:{row.get('corrects_event_id')}" if row.get("corrects_event_id") else "")
+                + f":{action}"))
+            if match:
+                feedback_digest = ((sent_event or {}).get("feedback_sha256")
+                                   if row.get("comment_sent") else
+                                   (student.get("last_posted") or {}).get("feedback_digest"))
+                student["last_posted"] = {
+                    "event_id": verified_event.get("event_id"),
+                    "payload_digest": row.get("request_digest"),
+                    "entered_score": entered,
+                    "late_days": ((sent_event or {}).get("late_days")
+                                  if sent_event else read.get("late_days")),
+                    "feedback_digest": feedback_digest or (sent_event or {}).get("feedback_sha256"),
+                    "attempt": baseline.get("attempt") or student.get("current_attempt"),
+                }
+                student["posted_attempt"] = student["last_posted"]["attempt"]
+                student["correction_pending"] = False
+                if callable(save_session):
+                    save_session(session)
+            elif row.get("corrected"):
+                row.pop("corrected", None)
         except Exception:
             # Verification is still reflected in the in-memory result. The
             # accepted write is never retried to repair the private export.
@@ -706,7 +780,7 @@ def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
     if pushed.get("ok"):
         pushed = dict(pushed)
         pushed["skipped"] = resolved["skipped"]
-    _verify_posted_scores(session_id, pushed, load_session, canvas_read)
+    _verify_posted_scores(session_id, pushed, load_session, canvas_read, save_session)
     # Make retry state explicit even when Canvas accepted only part of the
     # batch.  The private session remains the source of truth for exact rows.
     current = load_session(session_id) or session

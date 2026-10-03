@@ -614,7 +614,8 @@ def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):
         "pseudonym", "item_id", "text", "segment_index", "segment_count",
         "baseline_raw", "baseline_entered", "baseline_basis", "baseline_rule_id",
         "baseline_event_id", "baseline_attempt", "baseline_consistency", "text_consistency",
-        "evidence",
+        "prior_entered", "attempt_count", "first_attempt_at", "latest_attempt_at",
+        "posted_attempt", "evidence",
     ]
     assert list(result["items"]["columns"]) == ["item_id", "prompt", "possible"]
     assert len(result["students"]["rows"]) == 6

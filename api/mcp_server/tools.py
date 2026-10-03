@@ -127,7 +127,8 @@ _PACKET_STUDENT_COLUMNS = (
     "pseudonym", "item_id", "text", "segment_index", "segment_count",
     "baseline_raw", "baseline_entered", "baseline_basis", "baseline_rule_id",
     "baseline_event_id", "baseline_attempt", "baseline_consistency",
-    "text_consistency", "evidence",
+    "text_consistency", "prior_entered", "attempt_count", "first_attempt_at",
+    "latest_attempt_at", "posted_attempt", "evidence",
 )
 _NEXT_STEPS = {
     "discover_scoring_work": (
@@ -2720,7 +2721,7 @@ def _open_scoring_session_refusal(course_id: str, assignment_id: str,
         return None
 
     session_id = str(session.get("session_id") or "")
-    current_policy = str(session.get("late_policy") or "ask")
+    current_policy = str(session.get("late_policy") or "apply")
     # "" means not supplied: only an explicit value changes the saved one.
     if late_policy and late_policy != current_policy:
         # A local preference, not packet content: save it on the open session.
@@ -2788,7 +2789,7 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
         return existing
     try:
         prepare_kwargs = {"use_existing_mirror": use_existing_mirror}
-        if policy and policy != "ask":
+        if policy:
             prepare_kwargs["late_policy"] = policy
         if str(scoring_guidance_provenance or "").strip():
             prepare_kwargs["scoring_guidance_provenance"] = scoring_guidance_provenance
@@ -3266,6 +3267,13 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
             "baseline_attempt": baseline.get("attempt"),
             "baseline_consistency": baseline.get("consistency") or "unknown",
             "text_consistency": baseline.get("text_consistency") or "source_unknown"})
+        row.update({
+            "prior_entered": baseline.get("entered_score"),
+            "attempt_count": baseline.get("attempt_count"),
+            "first_attempt_at": baseline.get("first_attempt_at"),
+            "latest_attempt_at": baseline.get("latest_attempt_at"),
+            "posted_attempt": student.get("posted_attempt"),
+        })
 
     # build_packet hands back dict rows so the scan can walk into the response
     # text. Tabulating first would bury every cell in a list, where the
@@ -3573,6 +3581,19 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
     candidate = copy.deepcopy(session)
     candidate["grade_mode"] = grade_mode
     students_by_uid = {str(st.get("user_id")): st for st in candidate.get("students") or []}
+    from api.powergrader import session_actions
+    try:
+        prior_events = score_ledger.list_events(
+            str(candidate.get("course_id") or ""), str(candidate.get("assignment_id") or ""))
+    except Exception:
+        prior_events = []
+    for user_id, student in students_by_uid.items():
+        if user_id not in by_uid:
+            continue
+        if student.get("posted") or student.get("status") == "posted":
+            session_actions.hydrate_last_posted(candidate, student, prior_events)
+            student["teacher_score"] = None
+            student["teacher_feedback"] = ""
     for user_id, update in mode_feedback_updates.items():
         if user_id in students_by_uid:
             students_by_uid[user_id].update(update)
@@ -3585,65 +3606,94 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
             student["agent_commentary"] = row.get("agent_commentary") or ""
             student["_teacher_authored_feedback"] = True
 
-    # Effort credit and teacher-confirmed late days -- Scoring Sessions only
-    # (grading-policy-contract.md section 5). insincere/late_days are read
-    # straight from the incoming results, index-aligned with rows by canvas_id,
-    # and never threaded through reidentify or merge_rows_by_uid.
+    # Effort credit and per-row late-day overrides -- Scoring Sessions only.
     if (session.get("session_kind") == "scoring_assignment"
             and grade_mode == "post_score"):
         try:
             policy = grading_policy.load_policy()
         except grading_policy.GradingPolicyFileError as exc:
             return {"ok": False, "code": "grading_policy_file_invalid", "error": str(exc)}
-        if policy:
-            grading_flags_by_uid: dict[str, dict] = {}
-            for raw, row in zip(results, rows):
-                if not isinstance(raw, dict):
-                    continue
-                canvas_id = str(row.get("canvas_id") or "")
-                if not canvas_id:
-                    continue
-                grading_flags_by_uid[canvas_id] = {
-                    "insincere": bool(raw.get("insincere", False)),
-                    "late_days": raw.get("late_days"),
-                }
-            grace_days_by_uid = {
-                str(entry.get("id")): int(entry.get("days") or 0)
-                for entry in (config.get_extra_time(session.get("course_id")) or [])
-                if entry.get("id") is not None
+        grading_flags_by_uid: dict[str, dict] = {}
+        for raw, row in zip(results, rows):
+            if not isinstance(raw, dict):
+                continue
+            canvas_id = str(row.get("canvas_id") or "")
+            if not canvas_id:
+                continue
+            grading_flags_by_uid[canvas_id] = {
+                "insincere": bool(raw.get("insincere", False)),
+                "late_days": raw.get("late_days"),
             }
-            no_school_dates = grading_policy.load_no_school_dates()
-            points_possible = float((candidate.get("assignment") or {}).get("points_possible") or 0)
-            # Only this call's staged rows (by_uid) get a stamp written or
-            # refreshed. A candidate staged earlier and left out of this call
-            # keeps its earlier stamp untouched, in both the candidate used
-            # for the plan digest and the persisted session -- otherwise the
-            # two disagree and apply refuses as stage_changed.
-            for user_id, student in students_by_uid.items():
-                if user_id not in by_uid:
-                    continue
-                flags = grading_flags_by_uid.get(user_id, {})
-                grading = {
-                    "floor_percent": int(policy.get("floor_percent") or 0),
-                    "points_possible": points_possible,
-                    "insincere": bool(flags.get("insincere", False)),
-                    "late_days": flags.get("late_days"),
-                    "suggested_late_days": None,
-                    "canvas_late_days": None,
-                }
-                if student.get("canvas_late"):
-                    grace_days = grace_days_by_uid.get(user_id, 0)
-                    submitted_at = (student.get("submission_baseline") or {}).get("submitted_at")
+        grace_days_by_uid = {
+            str(entry.get("id")): int(entry.get("days") or 0)
+            for entry in (config.get_extra_time(session.get("course_id")) or [])
+            if entry.get("id") is not None
+        }
+        no_school_dates = grading_policy.load_no_school_dates()
+        points_possible = float((candidate.get("assignment") or {}).get("points_possible") or 0)
+        unknown_late = []
+        for user_id, student in students_by_uid.items():
+            flags = grading_flags_by_uid.get(user_id, {})
+            baseline = student.get("submission_baseline") or {}
+            if (user_id in by_uid and student.get("canvas_late")
+                    and str(candidate.get("late_policy") or "apply") != "waive"
+                    and flags.get("late_days") is None
+                        and (not baseline.get("attempts_complete")
+                             or not baseline.get("attempts_known")
+                             or not baseline.get("first_attempt_at")
+                             or not student.get("cached_due_date"))):
+                unknown_late.append(user_id)
+        if unknown_late:
+            from api.powergrader import scoring_apply
+            unknown_rows = []
+            for uid in unknown_late:
+                baseline = students_by_uid[uid].get("submission_baseline") or {}
+                unknown_rows.append({
+                    "pseudonym": names.get(uid) or "(unknown student)",
+                    "late": {"decision": "unknown", "days": None, "basis": "unknown",
+                             "first_attempt_at": None,
+                             "latest_attempt_at": scoring_apply._plain_date(
+                                 baseline.get("latest_attempt_at"))},
+                    "warnings": [{"code": "late_days_unknown",
+                                  "text": "Enter late_days for this row; do not infer it from the latest attempt."}],
+                })
+            return pseudonym.gate({
+                "ok": True, "status": "needs_teacher_input",
+                "code": "late_days_unknown",
+            "error": "Attempt history is incomplete. Refresh the course mirror and this scoring session, or provide late_days for the listed rows.",
+                "questions": [{
+                    "kind": "late_days_unknown",
+                    "detail": "Enter late_days for these rows; do not infer it from the latest attempt.",
+                    "pseudonyms": sorted(names.get(uid) or "(unknown student)" for uid in unknown_late),
+                }],
+                "rows": unknown_rows,
+            }, vault)
+        # Only this call's staged rows (by_uid) get a stamp written or
+        # refreshed. A candidate staged earlier and left out of this call
+        # keeps its earlier stamp untouched, in both the candidate used
+        # for the plan digest and the persisted session -- otherwise the
+        # two disagree and apply refuses as stage_changed.
+        for user_id, student in students_by_uid.items():
+            if user_id not in by_uid:
+                continue
+            flags = grading_flags_by_uid.get(user_id, {})
+            grading = {
+                "floor_percent": (int(policy["floor_percent"])
+                                  if policy is not None else None),
+                "points_possible": points_possible,
+                "insincere": bool(flags.get("insincere", False)),
+                "late_days": flags.get("late_days"),
+                "suggested_late_days": None,
+                "canvas_late_days": None,
+            }
+            baseline = student.get("submission_baseline") or {}
+            if student.get("canvas_late"):
+                grace_days = grace_days_by_uid.get(user_id, 0)
+                submitted_at = baseline.get("first_attempt_at")
+                if student.get("cached_due_date") and submitted_at:
                     grading["suggested_late_days"] = grading_policy.suggested_late_days(
                         student.get("cached_due_date"), submitted_at, grace_days, no_school_dates)
-                    seconds_late = student.get("seconds_late")
-                    if seconds_late is not None:
-                        grading["canvas_late_days"] = math.ceil(float(seconds_late) / 86400)
-                student["grading"] = grading
-        else:
-            for user_id, student in students_by_uid.items():
-                if user_id in by_uid:
-                    student.pop("grading", None)
+            student["grading"] = grading
     elif session.get("session_kind") == "scoring_assignment":
         for student in students_by_uid.values():
             student.pop("grading", None)
@@ -3674,7 +3724,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                 try:
                     effort_input = (grading_policy.mark(
                         raw_score, points_possible, grading.get("floor_percent"), bool(grading.get("insincere")))
-                        if grading else raw_score)
+                        if grading and grading.get("floor_percent") is not None else raw_score)
                     math_row = score_curves.apply_formula(effort_input, points_possible, rule.get("formula") or {})
                 except Exception:
                     return {"ok": False, "code": "invalid_score_curve",
@@ -3688,6 +3738,11 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
         else:
             for student in students_by_uid.values():
                 student.pop("frozen_curve", None)
+
+    for user_id, student in students_by_uid.items():
+        if user_id in by_uid and (student.get("posted") or student.get("status") == "posted"):
+            student["correction_pending"] = session_actions.correction_changed(
+                student, candidate, grade_mode=grade_mode)
 
     # Ordinary assignment risk planning. Its internal user ids are translated
     # before any question can cross MCP. Planning performs no Canvas read.
@@ -3704,7 +3759,22 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
             return {"ok": False, "code": str(plan.get("code") or "canvas_preflight_failed"),
                     "error": "Canvas could not safely prepare this scoring submission."}
         if not plan.get("candidate_ids"):
-            return {"ok": False, "code": "no_valid_results", "error": "No scored results are ready to post."}
+            repeated = [students_by_uid.get(str(uid)) for uid in by_uid]
+            unchanged_posted = repeated and all(
+                student and student.get("posted") and student.get("last_posted")
+                and not student.get("correction_pending") for student in repeated)
+            unverified_posted = repeated and any(
+                student and (student.get("posted") or student.get("status") == "posted")
+                and (not isinstance(student.get("last_posted"), dict)
+                     or not student["last_posted"].get("event_id")
+                     or student["last_posted"].get("entered_score") is None)
+                for student in repeated)
+            return {"ok": False, "code": "no_valid_results",
+                    "error": ("This exact score, late days, and feedback were already pushed."
+                              if unchanged_posted else
+                              "This row has no verified numeric-score receipt for correction. "
+                              "Use the existing feedback-revision tools for comment-only work."
+                              if unverified_posted else "No scored results are ready to post.")}
         if plan.get("questions"):
             safe = _scoring_apply_safe(plan, names)
             if not review_digest:
@@ -3766,6 +3836,13 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                         target["agent_commentary"] = staged.get("agent_commentary") or ""
                         target["ai_item_results"] = staged.get("ai_item_results") or []
                         target["_teacher_authored_feedback"] = True
+                        if staged.get("posted") or staged.get("status") == "posted":
+                            if staged.get("correction_pending"):
+                                target["teacher_score"] = None
+                                target["teacher_feedback"] = ""
+                            target["correction_pending"] = bool(staged.get("correction_pending"))
+                            if isinstance(staged.get("last_posted"), dict):
+                                target["last_posted"] = copy.deepcopy(staged["last_posted"])
                         if "frozen_curve" in staged:
                             target["frozen_curve"] = staged["frozen_curve"]
                         else:
@@ -4240,9 +4317,10 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
     entered_score, score, late_policy_status and points_deducted. No gradebook
     total, comment text, or other Canvas response crosses.
     """
-    counts = {"finalized": 0, "already_applied": 0, "held": 0, "failed": 0,
-              "transport_unknown": 0, "late_not_honored": 0,
-              "score_mismatch": 0, "score_readback_unavailable": 0}
+    counts = {"finalized": 0, "already_applied": 0, "corrected": 0,
+              "held": 0, "failed": 0, "transport_unknown": 0,
+              "late_not_honored": 0, "score_mismatch": 0,
+              "score_readback_unavailable": 0}
     outcomes = []
     unavailable = False
     for item in payload.get("results") or []:
@@ -4260,15 +4338,18 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
         if public_status not in counts:
             public_status = "failed"
         counts[public_status] += 1
+        if item.get("corrected") and public_status == "finalized":
+            counts["corrected"] += 1
         outcome = {"pseudonym": names.get(str(item.get("user_id"))) or "(unknown student)",
                    "status": public_status,
+                   **({"corrected": True} if item.get("corrected") else {}),
                    **({"code": str(item.get("code") or "failed")}
                       if public_status in {"failed", "transport_unknown"} else {})}
         if late and public_status in {"finalized", "late_not_honored", "score_mismatch", "score_readback_unavailable"}:
-            shown = {key: late[key] for key in ("decision", "late_days", "late_policy_status",
-                                                "points_deducted", "score", "entered_score",
-                                                "canvas_score", "readback", "verification",
-                                                "raw_score", "curve_rule_id")
+            shown = {key: late[key] for key in ("decision", "late_days", "basis",
+                                                "first_attempt_at", "latest_attempt_at",
+                                                "sent_status", "late_policy_status",
+                                                "entered_score", "readback", "verification")
                      if key in late}
             if shown.get("curve_rule_id"):
                 shown["disclosure"] = (
@@ -4316,7 +4397,7 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
     if counts["late_not_honored"]:
         result.setdefault("code", "score_readback_mismatch")
         result["user_action"] = ("Review the late_not_honored rows in Canvas: the stored late "
-                                 "status or deduction does not match what was posted.")
+                                 "status does not match the late days that were sent.")
     return pseudonym.gate(result, vault)
 
 
@@ -4339,7 +4420,6 @@ def _scoring_apply_safe(plan: dict, names: dict) -> dict:
         if "rows" in question:
             safe["rows"] = [
                 {"student": label(row.get("user_id")),
-                 "canvas_days": row.get("canvas_days"),
                  "late_days": row.get("late_days")}
                 for row in question["rows"]
             ]

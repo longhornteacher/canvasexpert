@@ -14,6 +14,7 @@ safety) and docs/reference/powergrader-scoring-map.md.
 
 import hashlib
 import json
+import math
 import re
 from datetime import datetime, timezone
 from functools import wraps
@@ -44,9 +45,131 @@ def _iso(value: datetime) -> str:
     return value.isoformat(timespec="seconds")
 
 
+def _plain_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        return str(value)[:10] or None
+
+
 def _digest(value) -> str:
     raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _feedback_digest(value) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+def _finite_number(value):
+    if isinstance(value, bool) or value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _late_days_in_payload(payload: dict) -> int | None:
+    submission = (payload or {}).get("submission") or {}
+    status = submission.get("late_policy_status")
+    if status == "none":
+        return 0
+    if status == "late":
+        try:
+            return max(0, int(submission.get("seconds_late_override") or 0) // 86400)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def correction_changed(student: dict, session=None, *, grade_mode="post_score", waive_late=None) -> bool:
+    """Whether the current staged values differ from a verified prior push."""
+    prior = student.get("last_posted")
+    if (not isinstance(prior, dict) or not prior.get("event_id")
+            or _finite_number(prior.get("entered_score")) is None):
+        return False
+    if waive_late is None:
+        waive_late = late_waived(session or {}, student, grade_mode=grade_mode)
+    full_student = dict(student)
+    full_student["correction_pending"] = False
+    if full_student.get("teacher_score") is None:
+        full_student["teacher_score"] = full_student.get("ai_score")
+    if not (full_student.get("teacher_feedback") or "").strip():
+        full_student["teacher_feedback"] = full_student.get("ai_feedback") or ""
+    current = _payload(full_student, grade_mode=grade_mode, waive_late=waive_late)
+    sent_score = (current.get("submission") or {}).get("posted_grade")
+    try:
+        score_changed = (sent_score is None or prior.get("entered_score") is None
+                         or abs(float(sent_score) - float(prior["entered_score"])) > 1e-9)
+    except (TypeError, ValueError):
+        score_changed = True
+    old_days = prior.get("late_days")
+    new_days = _late_days_in_payload(current)
+    feedback = (current.get("comment") or {}).get("text_comment") or ""
+    feedback_changed = _feedback_digest(feedback) != str(prior.get("feedback_digest") or "")
+    return score_changed or old_days != new_days or feedback_changed
+
+
+def hydrate_last_posted(session: dict, student: dict, events=None) -> dict | None:
+    """Recover only a same-session push joined to a verified ledger event."""
+    student.pop("last_posted", None)
+    try:
+        events = events if events is not None else score_ledger.list_events(
+            str(session.get("course_id") or ""), str(session.get("assignment_id") or ""))
+    except Exception:
+        return None
+    baseline = student.get("submission_baseline") or {}
+    uid = str(student.get("user_id") or "")
+    attempt = str(baseline.get("attempt") or student.get("current_attempt") or "")
+    verified = [event for event in events
+                if event.get("source") == "ce_apply" and event.get("action") == "verified"
+                and str(event.get("session_id") or "") == str(session.get("session_id") or "")
+                and str(event.get("student_id") or "") == uid
+                and str(event.get("attempt") or "") == attempt]
+    verified.sort(key=lambda event: (str(event.get("timestamp") or ""),
+                                     str(event.get("event_id") or "")))
+    successful = sorted(
+        [(str(entry.get("ts") or ""), row)
+         for entry in session.get("push_log") or []
+         for row in entry.get("results") or []
+         if str(row.get("user_id") or "") == uid
+         and row.get("status") == "pushed" and row.get("request_digest")
+         and _finite_number(row.get("entered_score")) is not None],
+        key=lambda pair: (pair[0], str(pair[1].get("target_digest") or "")))
+    if not successful:
+        return None
+    _logged_at, pushed = successful[-1]
+    expected_key = (f"verify:{session.get('session_id')}:{pushed.get('target_digest') or pushed.get('request_digest')}"
+                    + (f":corrects:{pushed.get('corrects_event_id')}"
+                       if pushed.get("corrects_event_id") else "")
+                    + ":verified")
+    event = next((value for value in reversed(verified)
+                  if str(value.get("logical_event_key") or "") == expected_key), None)
+    if event is None:
+        return None
+    try:
+        agrees = (abs(float(event.get("entered_score"))
+                      - float(pushed.get("entered_score"))) <= 1e-6)
+    except (TypeError, ValueError):
+        agrees = False
+    if not agrees:
+        return None
+    prior = {
+        "event_id": event.get("event_id"),
+        "payload_digest": str(pushed.get("request_digest") or ""),
+        "entered_score": event.get("entered_score"),
+        "late_days": ((pushed.get("late") or {}).get("late_days")
+                      if (pushed.get("late") or {}).get("decision") != "waived"
+                      else 0),
+        "feedback_digest": event.get("feedback_sha256") or _feedback_digest(event.get("feedback")),
+        "attempt": event.get("attempt"),
+    }
+    student["last_posted"] = prior
+    return prior
 
 
 def _parse_ids(raw: str, *, allow_empty: bool = True) -> tuple[list[str] | None, str | None]:
@@ -78,26 +201,20 @@ def _strip_draft_banner(feedback: str) -> str:
 
 def late_decision(student: dict, *, waive: bool = False,
                   grade_mode: str = "post_score") -> dict | None:
-    """The one late decision a candidate row posts with, or ``None`` when not late.
-
-    ``waived`` sends status ``none`` and no override, with or without a Grading
-    Policy. ``applied`` (policy course only) posts the confirmed or suggested
-    ``late_days``. ``canvas`` sends no late fields and leaves Canvas's own policy
-    in charge. ``feedback_only`` sends no submission object, so there is no late
-    decision at all. See docs/contracts/grading-policy-contract.md section 5.
-    """
+    """Return the teacher's late-day decision for one late Canvas row."""
     if grade_mode == "feedback_only" or not student.get("canvas_late"):
         return None
     if waive:
-        return {"decision": "waived"}
+        return {"decision": "waived", "late_days": 0, "basis": "teacher_set"}
     grading = student.get("grading")
     if grading:
         days = grading.get("late_days")
         if days is None:
             days = grading.get("suggested_late_days")
         if days is not None:
-            return {"decision": "applied", "late_days": days}
-    return {"decision": "canvas"}
+            basis = "teacher_set" if grading.get("late_days") is not None else "first_meaningful_attempt"
+            return {"decision": "set", "late_days": days, "basis": basis}
+    return {"decision": "unknown", "late_days": None, "basis": "unknown"}
 
 
 def late_waived(session: dict, student: dict, waive_user_ids=(),
@@ -145,8 +262,8 @@ def _payload(student: dict, *, grade_mode: str = "post_score",
     else:
         decision = late_decision(student, waive=waive_late)
         days = (decision.get("late_days")
-                if decision and decision["decision"] == "applied" else None)
-        if grading:
+                if decision and decision["decision"] == "set" else None)
+        if grading and grading.get("floor_percent") is not None:
             points_possible = grading.get("points_possible")
             posted_grade = grading_policy.mark(
                 score, points_possible, grading.get("floor_percent"), bool(grading.get("insincere")),
@@ -156,8 +273,6 @@ def _payload(student: dict, *, grade_mode: str = "post_score",
                     and float(posted_grade) != float(score)):
                 line = (f"Entered in the gradebook: {_format_number(posted_grade)}"
                         f"/{_format_number(points_possible)}.")
-                if days is not None and days > 0:
-                    line += " Canvas applies the late penalty to that."
                 feedback = f"{feedback}\n\n{line}" if feedback else line
         else:
             posted_grade = score
@@ -185,6 +300,10 @@ def _payload(student: dict, *, grade_mode: str = "post_score",
                 payload["submission"]["late_policy_status"] = "none"
     if feedback:
         payload["comment"] = {"text_comment": feedback}
+    if student.get("correction_pending") and isinstance(student.get("last_posted"), dict):
+        prior = student["last_posted"].get("feedback_digest")
+        if prior and prior == _feedback_digest((payload.get("comment") or {}).get("text_comment")):
+            payload.pop("comment", None)
     return payload
 
 
@@ -296,7 +415,8 @@ def push_grades(
         if not student or not _payload(student, grade_mode=grade_mode, waive_late=waive):
             return {"ok": False, "code": "payload_changed",
                     "error": "The reviewed grade or feedback changed. Review again."}, 409
-        if student.get("status") != "approved" or student.get("posted"):
+        if (student.get("status") != "approved"
+                or (student.get("posted") and not student.get("correction_pending"))):
             return {"ok": False, "code": "payload_changed",
                     "error": "The reviewed grade or feedback changed. Review again."}, 409
         payload = _payload(student, grade_mode=grade_mode, waive_late=waive)
@@ -316,6 +436,10 @@ def push_grades(
         raw_score = (student.get("teacher_score") if student.get("teacher_score") is not None
                      else student.get("ai_score"))
         evidence_key = f"scoring:{session_id}:{idem_slot}:{target_digest}"
+        corrects_event_id = ((student.get("last_posted") or {}).get("event_id")
+                             if student.get("correction_pending") else None)
+        if corrects_event_id:
+            evidence_key += f":corrects:{corrects_event_id}"
         if sent_score is not None:
             baseline = student.get("submission_baseline") or {}
             try:
@@ -328,6 +452,9 @@ def push_grades(
                     "submission_digest": baseline.get("submission_digest"),
                     "raw_score": (student.get("frozen_curve") or {}).get("raw_score", raw_score),
                     "entered_score": sent_score,
+                    "late_days": _late_days_in_payload(payload),
+                    "corrects_event_id": ((student.get("last_posted") or {}).get("event_id")
+                                          if student.get("correction_pending") else None),
                     "curve_rule_id": (student.get("frozen_curve") or {}).get("rule_id"),
                     "feedback": (payload.get("comment") or {}).get("text_comment") or "",
                     "session_id": session_id, "stage_id": (session.get("staged_scoring_apply") or {}).get("stage_digest"),
@@ -375,18 +502,29 @@ def push_grades(
         result = {
             "user_id": user_id, "status": "pushed", "code": "pushed",
             "request_digest": payload_digest, "target_digest": target_digest,
+            "comment_sent": bool(payload.get("comment")),
+            "corrects_event_id": corrects_event_id,
         }
+        if student.get("correction_pending"):
+            result["corrected"] = True
         if sent_score is not None:
             result["entered_score"] = float(sent_score)
+        result["comment_sent"] = bool(payload.get("comment"))
         decision = late_decision(student, waive=waive, grade_mode=grade_mode)
         if decision:
-            result["late"] = {**decision, "sent_status": (
-                payload.get("submission") or {}).get("late_policy_status")}
+            baseline = student.get("submission_baseline") or {}
+            result["late"] = {
+                **decision,
+                "first_attempt_at": _plain_date(baseline.get("first_attempt_at")),
+                "latest_attempt_at": _plain_date(baseline.get("latest_attempt_at")),
+                "sent_status": (payload.get("submission") or {}).get("late_policy_status"),
+            }
         results.append(result)
 
     if results:
         session.setdefault("push_log", []).append({
             "ts": _iso(_now()),
+            "stage_id": (session.get("staged_scoring_apply") or {}).get("stage_digest"),
             "user_ids": requested,
             "results": results,
         })
@@ -414,6 +552,11 @@ def push_grades(
 
 def _append_score_outcome(key, action, session, student, entered, raw, payload):
     baseline = student.get("submission_baseline") or {}
+    feedback_payload = payload
+    if student.get("correction_pending") and not payload.get("comment"):
+        intended = dict(student)
+        intended["correction_pending"] = False
+        feedback_payload = _payload(intended, grade_mode="post_score")
     try:
         score_ledger.append_event({
             "source": "ce_apply", "action": action,
@@ -423,10 +566,13 @@ def _append_score_outcome(key, action, session, student, entered, raw, payload):
             "submission_digest": baseline.get("submission_digest"),
             "raw_score": (student.get("frozen_curve") or {}).get("raw_score", raw),
             "entered_score": entered,
+            "late_days": _late_days_in_payload(payload),
             "curve_rule_id": (student.get("frozen_curve") or {}).get("rule_id"),
-            "feedback": (payload.get("comment") or {}).get("text_comment") or "",
+            "feedback": (feedback_payload.get("comment") or {}).get("text_comment") or "",
             "session_id": session.get("session_id"),
             "stage_id": (session.get("staged_scoring_apply") or {}).get("stage_digest"),
+            "corrects_event_id": ((student.get("last_posted") or {}).get("event_id")
+                                  if student.get("correction_pending") else None),
         }, idempotency_key=key + ":" + action)
     except Exception:
         # The accepted Canvas write remains accepted. The durable intent is

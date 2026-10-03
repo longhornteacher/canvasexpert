@@ -1,6 +1,9 @@
 # Late days from the first meaningful attempt, resubmissions, and corrections
 
-Status: READY for a lead executor in a fresh session (Sonnet lead, Sonnet/Haiku subagents).
+Status: IN PROGRESS with Codex lead and gpt-6-luna subagents.
+Execution routing (2026-10-03): the teacher assigned Codex as lead with
+`gpt-6-luna` subagents, superseding the Sonnet/Haiku labels and commit attribution
+below. Commits identify the actual OpenAI executor rather than Claude.
 Written 2026-10-03 with the teacher, after the previous batch (guidance reset and scoring
 preview, commits `ca495a6`..`a39b8de`, pushed to `origin/dev`). Baseline: `dev` at `a39b8de`.
 The teacher settled the three open decisions the same day; they are locked below (9 to 11).
@@ -323,4 +326,38 @@ deviations, open questions.
 
 ## Execution result
 
-_(lead executor fills this in)_
+In progress. Preflight: `dev` at `fc59cf3`; only the three protected State of the
+Repo notes are untracked. Since `d23e118`, only this brief changed. Named seams
+are present.
+
+Teacher-approved scope adjustment (2026-10-03): retained mirror attempt records
+omit URL evidence. Workstream A may extend the exact mirror record/projection
+owners to retain a local URL-presence boolean, without retaining private URLs.
+Older URL records without that evidence remain unknown rather than guessed.
+
+Teacher clarification (2026-10-03): A4 corrections are limited to previously
+verified numeric-score pushes. Feedback-only and comment-only pushes have no
+verified score event to link; those use the existing feedback-revision workflow.
+Do not invent a verified score event for a comment-only write.
+
+Preflight finding: a synthetic Canvas row with `score: 7`,
+`points_deducted: 2`, and `entered_score: null` keeps the null in mirror
+normalization; session construction previously copied it unchanged. Workstream A
+derives the entered score at the session/packet/preview boundary.
+
+Workstream B draft complete: the six assigned documentation files were updated.
+START HERE's exact LF-normalized Appendix B slice, including heading and trimmed
+at Appendix C as the runtime does, is 6,390 characters (previously 7,115);
+the runtime overview gate remains to run.
+The replaced START HERE LF-normalized sha256 is
+`40c187d078f9772bc9500bbb3d628bdad5774558c61bcccb489e87e02e7785a7`,
+added to `api/webui/ai_ta.py`. Its focused seed test command
+`py -m pytest api/tests/webui/test_ai_ta.py -p no:randomly -q` passed:
+3 tests, 0.15 seconds, one existing mirror docstring warning.
+
+Workstream A focused gate passed:
+`py -m pytest -p no:randomly -q api/tests/powergrader api/tests/mcp_server api/tests/test_grading_policy.py api/tests/test_scoring_packet_mcp.py api/tests/mirror`
+returned 881 passed in 45.26 seconds. No live Canvas calls or writes.
+The optional A3 assignment discovery count is omitted because discovery does not
+already read the private score ledger cheaply. Packet and preview attempt facts
+and `late_box_reset` are implemented.

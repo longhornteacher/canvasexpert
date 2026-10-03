@@ -271,6 +271,27 @@ def test_merge_submissions_records_current_and_attempts(tmp_path):
     assert entry["attempts"]["1"]["attachment_names"] == ["draft.pdf"]
 
 
+def test_attempt_url_presence_is_stored_without_the_url_value(tmp_path):
+    row = _submission_row(history=[
+        {"attempt": 1, "submitted_at": "2026-07-01T10:00:00Z",
+         "submission_type": "online_url", "url": "https://example.invalid/private"},
+        {"attempt": 2, "submitted_at": "2026-07-02T10:00:00Z",
+         "submission_type": "online_url", "url": ""},
+        {"attempt": 3, "submitted_at": "2026-07-03T10:00:00Z",
+         "submission_type": "online_url", "url": None},
+        {"attempt": 4, "submitted_at": "2026-07-04T10:00:00Z",
+         "submission_type": "online_url"},
+    ])
+    store.merge_submissions(COURSE, "700010", [row], root=str(tmp_path))
+    attempts = store.read_submissions(
+        COURSE, "700010", root=str(tmp_path))["submissions"]["900001"]["attempts"]
+    assert attempts["1"]["url_present"] is True
+    assert attempts["2"]["url_present"] is False
+    assert attempts["3"]["url_present"] is False
+    assert "url_present" not in attempts["4"]
+    assert "private" not in str(attempts)
+
+
 def test_current_carries_per_student_due_and_late_fields(tmp_path):
     row = _submission_row(cached_due_date="2026-07-02T23:59:00Z",
                           seconds_late=172800)

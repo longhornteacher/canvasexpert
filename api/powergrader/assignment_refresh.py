@@ -444,6 +444,9 @@ def prepare_assignment_from_mirror(course_id: str, assignment_id: str):
             "attachments": attachments,
             "expected_attachment_count": len(attachments) if attachments else None,
             "_mirror_unreadable": unreadable,
+            # Private attempt evidence is consumed by session_builder and is
+            # never copied into the SAFE packet.
+            "_attempt_records": [dict(value) for value in attempts.values()],
         })
         rows.append(row)
     revisions = {
