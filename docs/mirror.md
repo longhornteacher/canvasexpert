@@ -8,23 +8,27 @@ the current contracts until its individual implementation briefs are completed.
 A disposable local mirror of Canvas course facts, kept fresh by deterministic
 background sync, living on this computer at `%LOCALAPPDATA%\CanvasExpert\cache\Canvas Mirror\`.
 Reads that used to cost live Canvas round trips are served from disk in
-milliseconds when the mirror is fresh. Two different rules apply to what
-happens when it isn't fresh, by design:
+milliseconds when the mirror is within its freshness policy. When it isn't,
+the agent tools and the control console handle it differently, by design.
 
-This document covers the runtime's read-safety boundary. The connected agent/MCP path is
-strictly mirror-only and is the primary agent-facing read surface. The browser is a
+This document covers the runtime's read boundary. The connected agent/MCP path is the
+primary agent-facing read surface and is served from the mirror. The browser is a
 retained control console, so its teacher-in-the-loop diagnostics and decision surfaces
-may use the explicitly documented live fallback; that exception must not leak into MCP
-results or become a generic browser-first architecture.
+may use the explicitly documented live fallback. That fallback stays in the console and
+doesn't turn into a generic browser-first architecture.
+
+For the agent:
 
 - **The AI-facing MCP tools** (`get_roster`, `get_submissions`,
-  `get_gradebook_snapshot`) never fall back to live Canvas. This is the strict
-  mirror-only law: the AI's whole path to Canvas must stay indirect — through
-  Canvas Expert's own sync engine, never a direct relay of a live fetch. A
-  stale or missing mirror makes these tools refuse with a clear error instead
-  of serving live data; the assistant calls `refresh_mirror` (also an MCP
-  tool) to trigger a sync and re-checks freshness, then re-reads. See "MCP
-  reads and the refresh tool" below.
+  `get_gradebook_snapshot`) read from the mirror rather than from live Canvas. This is a
+  design choice, with reasons: mirror reads are fast, consistent from one call to the
+  next, and go through the pseudonym gate on the way out; and Canvas Expert stays the
+  only thing that holds the token and talks to Canvas. When a read is outside the
+  freshness policy, the tool says so (a stale or missing mirror returns a clear error),
+  and the agent refreshes it itself (`refresh_mirror`, `refresh_course_structure`, or
+  `refresh_scoring_session`) and reads again, without asking the teacher first. Data
+  already within policy needs no refresh, and skipping one saves time. Staleness is
+  still reported honestly in every read. See "MCP reads and the refresh tool" below.
 
 ## Design laws
 
@@ -40,19 +44,25 @@ results or become a generic browser-first architecture.
 4. **Freshness is always visible.** Every collection carries an envelope
    (`state`, `last_success_at`, `last_attempt_at`, `error_code`); every
    mirror-served read is labeled `source: "mirror"` + `synced_at`; the web
-   UI's own live fallbacks are labeled `source: "canvas"`. Staleness is never
-   silent — and for the MCP tools, staleness is never quietly papered over
-   with a live fetch either (see law 6).
+   UI's own live fallbacks are labeled `source: "canvas"`. Staleness is reported
+   honestly in every read, so the agent can tell when a refresh is worth its
+   time (see law 6).
 5. **Foreground wins.** Sync runs on a background heartbeat and yields to
    whatever the teacher is doing.
-6. **The AI's path to Canvas always stays indirect.** `get_roster`,
-   `get_submissions`, and `get_gradebook_snapshot` serve ONLY from the mirror
-   and refuse rather than falling back to a live Canvas fetch. The only way
-   forward from a refusal is `refresh_mirror`, which triggers Canvas Expert's
-   own sync engine (the same coordinator behind "Sync now") and reports a
-   freshness status — never Canvas data itself. This is an absolute, not a
-   default: there is no config flag or fallback path that lets an MCP tool
-   relay a live Canvas response to the AI.
+6. **Agent reads come from the mirror, and the agent refreshes it itself.**
+   `get_roster`, `get_submissions`, and `get_gradebook_snapshot` serve from the
+   mirror. That is a design choice: mirror reads are fast, consistent, and go
+   through the pseudonym gate, and Canvas Expert stays the only thing that
+   talks to Canvas. When a read is outside the freshness policy, the agent
+   refreshes it without asking the teacher: `refresh_mirror` triggers Canvas
+   Expert's own sync engine (the same coordinator behind "Sync now") and
+   reports a freshness status rather than Canvas data;
+   `refresh_course_structure` refreshes a course's module structure; and
+   `refresh_scoring_session` brings late or resubmitted work from the mirror
+   into an open Scoring Session. The agent skips a refresh when the data is
+   already within policy, because a refresh costs time.
+   Canvas Expert does not relay live Canvas responses to the agent; newer data
+   arrives by refreshing the mirror and reading what Canvas Expert wrote.
 
 Grade-adjustment previews read the local mirror; the apply-time live prior-score
 check protects each reviewed write from overwriting a newer Canvas change.
@@ -209,8 +219,8 @@ heartbeat) ticks every 15 minutes for Current courses only:
   freshness authority.
 
 Config (machine-local): `mirror_enabled` (default true),
-`mirror_serve_max_age_hours` (default 6 — older than this, the control console's own
-readers fall back to live Canvas; the MCP tools refuse instead, per law 6).
+`mirror_serve_max_age_hours` (default 6; older than this, the control console's own
+readers fall back to live Canvas, while the MCP tools report it and the agent refreshes, per law 6).
 
 Routes: `GET /api/mirror/status` (per-course pass envelopes + watermarks, and
 sanitized plan progress when passed `plan_id`), `POST /api/mirror/sync-now`
@@ -304,20 +314,22 @@ no live path left for it to fall into.
 
 ## MCP reads and the refresh tool (`api/mcp_server/tools.py`, `server.py`)
 
-`get_roster`, `get_submissions`, and `get_gradebook_snapshot` are strict
-mirror-only (design law 6): a stale or missing mirror returns
-`{"ok": false, "error": "..."}` naming the problem, never a live Canvas
-payload. `refresh_mirror(course_id)` is the assistant's only lever to move
-past that: it calls `mirror_service.enqueue_sync` (the same manual-priority
+`get_roster`, `get_submissions`, and `get_gradebook_snapshot` are served from
+the mirror (design law 6): when it is outside the freshness policy they return
+`{"ok": false, "error": "..."}` naming the problem, rather than a live Canvas
+payload. `refresh_mirror(course_id)` is how the agent moves past that, and the
+agent calls it on its own, without asking the teacher. The tool calls
+`mirror_service.enqueue_sync` (the same manual-priority
 coordinator plan behind the control console's "Sync now") and waits up to
 `tools._REFRESH_TIMEOUT_SECONDS` (25s) via `mirror_service.wait_for_plan`,
 then reports `{"ok": true, "status": "synced"}`, `{"ok": true, "status":
-"syncing"}` (still running past the timeout — safe to retry shortly), or
+"syncing"}` (still running past the timeout, so retry shortly), or
 `{"ok": false, "status": "failed"}`. It never returns course, roster, or
 submission data itself, so it opens no identity vault and runs no outbound
-safety scan — the response is a sync status, full stop. This keeps the AI's
-entire path to Canvas indirect: it can only ask Canvas Expert to sync, then
-read whatever Canvas Expert wrote to disk.
+safety scan; the response is a sync status. This keeps Canvas Expert the only
+thing that talks to Canvas: the agent asks it to sync, then reads whatever
+Canvas Expert wrote to disk. When the data is already within policy, the agent
+skips the refresh, because it only costs time.
 
 `get_submission_history` reads the durable local archive independently of
 projection freshness and membership. It returns bounded, scrubbed observations

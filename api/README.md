@@ -34,7 +34,7 @@ The runtime supports:
 - **Daily Writing:** longitudinal Writing Record and tracked-assignment Writing Timeline
 - **Download** — submission bundles by assignment or by student
 
-Local-only, never served. See `AGENTS.md` Guardrails.
+Local-only, never served. See `AGENTS.md` Firm rules.
 
 The current version is `1.0.0-beta.5` (see `api/__init__.py`). The supported launcher is
 `py qf_ui.py` from `api/` or `py api/qf_ui.py` from the repository root; it binds

@@ -1,28 +1,29 @@
 # AGENTS.md - Canvas Expert
 
 Canonical guidance for agents working in this repository. Keep this file short: it
-defines safety, execution, and routing; detailed product knowledge belongs in the linked
-contract or reference document. Do not create parallel vendor-specific root guidance.
+defines the firm rules, the defaults, execution, and routing; detailed product knowledge
+belongs in the linked contract or reference document. Keep one canonical root guidance
+file rather than parallel vendor-specific copies, which drift apart.
 
 ## Required context
 
-Every agent reads this file. An implementation executor then reads:
+Every agent reads this file. A lead executor then reads:
 
 1. the single direct brief in `docs/handoffs/`;
 2. only the files and exact document sections named by that brief.
 
 **Before starting Scoring Sessions or AssignmentForge work**, read these agent-agnostic workspace resources (they persist across assistants and tools):
-- `docs/guides/scoring-sessions.md` — canonical Scoring Session reference
-- `api/default_docs/AI Authoring/Author an Assignment (AssignmentForge).txt` — canonical AssignmentForge authoring reference
+- `docs/guides/scoring-sessions.md`: canonical Scoring Session reference
+- `api/default_docs/AI Authoring/Author an Assignment (AssignmentForge).txt`: canonical AssignmentForge authoring reference
 
-Do not preload archived handoffs, every module map, `tools/TOOLS.md`, or a whole architecture
-vision. A handoff that cites a long document must name the required numbered sections.
-Historical handoffs are never implementation authority.
+Skip archived handoffs, every module map, `tools/TOOLS.md`, and whole architecture visions
+unless the brief names them; they cost context and rarely change the work. A handoff that
+cites a long document should name the required numbered sections. Historical handoffs are not
+implementation authority, because the code and current docs are.
 
-Before deciding whether work is in scope, read `docs/reference/project-state.md`: Canvas
-Expert is pre-launch with a single user through the first semester, so migration,
-backward-compatibility, and legacy-record code is out of scope by default — prefer clean
-breaks, and keep one source of truth per artifact.
+Read `docs/reference/project-state.md` before deciding scope: Canvas Expert is pre-launch
+with one user through the first semester, so compatibility code for hypothetical users is
+out of scope and clean breaks are preferred.
 
 For architecture, MCP, agent cooperation, or Web UI decisions, also use the current
 product contract: `docs/contracts/agent-runtime-product-contract.md`. It defines the
@@ -36,10 +37,11 @@ desktop AI agent. The runtime owns bounded Canvas reads, privacy checks, resumab
 sessions, explicit approval boundaries, verified Canvas actions, and durable receipts.
 
 The host agent may render previews and interactive HTML in its own conversation surface.
-Core Canvas Expert behavior must therefore return host-neutral semantic data, summaries,
-warnings, artifact references, and stable continuation fields. Do not build a second
-CE-specific presentation framework or make runtime behavior depend on ChatGPT, Claude,
-or another host's rendering features.
+Core Canvas Expert behavior therefore returns host-neutral semantic data, summaries,
+warnings, artifact references, and stable continuation fields. A second CE-specific
+presentation framework would duplicate what the host already does, and behavior that
+depends on ChatGPT, Claude, or another host's rendering features would break for every
+other host, so keep both out of the runtime.
 
 The Web UI is a small local control console for setup, readiness, mirror status and
 refresh, operation review/recovery, receipts, diagnostics, and private workspace
@@ -57,26 +59,28 @@ canonical owner of business logic.
   contracts, refusal behavior, privacy rules, session lifecycles, and receipts stable
   and host-neutral.
 - `api/webui/` is the runtime's control console. Keep setup, trust, review, recovery,
-  and diagnostics here; do not move the product center back into browser feature work.
+  and diagnostics here, and keep the product center in the runtime rather than in
+  browser feature work.
 - `engine/` is the offline parse/validate/render/package library. It has no token, network,
   or student data.
-- `api/default_docs/AI Authoring/Author a *.txt` are the canonical authoring contracts. Do not
-  change their meaning in backend code. Read `api/README.md` before changing Canvas push behavior.
+- `api/default_docs/AI Authoring/Author a *.txt` are the canonical authoring contracts.
+  Backend code should not change their meaning. Read `api/README.md` before changing
+  Canvas push behavior.
 
 ## Branch policy
 
 The only durable branches are `main` (stable) and `dev` (integration and default agent
-branch). Work on `dev` unless the user says otherwise. Do not create or preserve other
-long-lived branches. Before claiming the repository is current, fetch and compare against
-both `origin/dev` and `origin/main`. A temporary PR branch must target `dev` and be deleted
-after closure. Never merge histories or delete branches without checking unmerged commits
-and confirming the target.
+branch). Work on `dev` unless the user says otherwise. Other long-lived branches drift
+apart, so don't create or preserve them. Before claiming the repository is current, fetch
+and compare against both `origin/dev` and `origin/main`. A temporary PR branch targets `dev`
+and is deleted after closure. Merging histories and deleting branches are hard to undo, so
+check unmerged commits and confirm the target first.
 
 Parallel sessions share `dev`, so shared counters are settled at integration, not at
 authoring: the MCP `TOOL_SCHEMA_VERSION` and its snapshot, and the tool-listing budget in
 `api/tests/mcp_server/test_server_instructions.py`. An executor takes the next free number;
 whoever rebases onto a newer `dev` renumbers if it was taken, regenerates the snapshot under
-pytest, and re-measures the budget.
+pytest, and re-measures the budget. Within one brief, the lead executor owns them.
 
 ## Lazy routing index
 
@@ -87,105 +91,98 @@ Use only the row relevant to the active handoff.
 | Create / Course Expert | `docs/reference/course-expert-module-map.md` | Forge contracts are canonical; live content writes use the reviewed operation path. |
 | Forge presentation / tiers | `docs/contracts/forge-presentation-contract.md`; batch plan `docs/reference/forge-presentation-plan.md` (senior only, section-routed) | Agents author content only; Canvas Expert renders the look, palette, and printables. Three tiers; no student-to-tier knowledge. |
 | Settings | `docs/reference/settings-module-map.md` | Secrets stay in the credential store; district configuration stays outside the repo. |
-| Connections / diagnostics | `api/README.md`, then the exact owners named by the handoff | Read-only diagnostics; never edit client config, install software, change `PATH`, elevate, or start tunnels. |
+| Connections / diagnostics | `api/README.md`, then the exact owners named by the handoff | Diagnostics are read-only. One-click Connect/Disconnect (`api/ai_clients.py`) intentionally edits the Claude Desktop and ChatGPT config files, with merge, backup, and rollback. Nothing installs software, changes `PATH`, elevates, or starts tunnels. |
 | Gradebook | `docs/reference/gradebook-module-map.md` | Grade/status operations and roster context are private; write work is high risk. |
 | Roster | `docs/reference/roster-module-map.md` | Names, IDs, groups, accommodations, and monitored notes are student data. |
-| PowerGrader scoring / privacy engines | `docs/reference/powergrader-scoring-map.md`, `docs/contracts/feedback-scoring-contract.md` | AI results are drafts; review and Canvas writes belong to PowerGrader. |
-| PowerGrader | `docs/reference/powergrader-module-map.md` | Sessions are private; Canvas posting is review-first except for the two narrow default-off opt-ins documented there. |
+| PowerGrader / Scoring Sessions | `docs/reference/powergrader-scoring-map.md`, `docs/guides/scoring-sessions.md`, `docs/contracts/feedback-scoring-contract.md` | Sessions are private. Review happens in the agent's preview before a push and in Canvas Live after. Agent commentary is teacher-only and never reaches Canvas. |
+| Score records | `docs/contracts/score-ledger-contract.md`, `docs/contracts/submission-history-contract.md` | Private, append-only score evidence. |
+| Work discovery | `docs/contracts/work-registry-contract.md` | One cross-course index of resumable work; it does not own Canvas objects or student records. |
+| Oral reading | `docs/contracts/oral-reading-evidence-contract.md` | Audio and transcripts stay on the machine. |
+| Daily Writing / writing records | `docs/reference/writing-record-module-map.md` | Private, scrubbed writing evidence; the record is evidence, not a grading authority. |
 | Routines | `api/custom_routines/AUTHORING.md` | Local jobs only; scheduled Canvas posting requires a specific teacher opt-in and the PowerGrader write safeguards. |
-| CanvasMirror | `docs/mirror.md` for current behavior; exact sections of `docs/reference/canvasmirror-1.0beta-information-spine.md` for target design | The vision is section-routed only and never read wholesale for execution; cached state never authorizes a write. |
+| CanvasMirror | `docs/mirror.md` for current behavior; exact sections of `docs/reference/canvasmirror-1.0beta-information-spine.md` for target design (long, so read only the sections a brief names) | A disposable local copy for reads and planning. Operation-ledger writes re-check live Canvas before changing it. |
 | Course Catalog | `docs/contracts/course-catalog-contract.md` | Student-free navigation/search projection only; no PII, raw HTML, URLs, credentials, private paths, evidence, or write preflight. |
-| Agent runtime / MCP server | `docs/contracts/agent-runtime-product-contract.md`, `docs/mcp-server.md` | Primary agent-facing boundary: pseudonymized reads plus bounded local actions, explicit preparation/review/apply behavior, host-neutral semantic results, and no live Canvas response handed to the assistant. |
+| Agent runtime / MCP server | `docs/contracts/agent-runtime-product-contract.md`, `docs/mcp-server.md` | Primary agent-facing boundary: pseudonymized reads through CE, bounded local actions with prepare/review/apply behavior, host-neutral results. |
 | Learning Objectives | `api/learning_objectives.py`, with `api/default_docs/AI Authoring/Author a Learning Objective.txt` for the authoring grammar | Reviewed objectives are teacher-confirmed and revision-protected; a write applies only the exact reviewed preview. |
 | Operation Ledger | `docs/reference/operation-ledger-module-map.md` | High-risk Canvas write boundary; preserve checkpoints, idempotency, verification, and receipts. |
 | Classic Quizzes (stop-gap) | `docs/reference/classic-quiz-design.md` | Stop-gap until New Quizzes support drafted scores/feedback; one QuizForge contract with `quiz_engine: "classic"`; Hub differentiation only; verified Canvas facts live there. |
 | New Quizzes responses | `api/powergrader/new_quiz_fetch.py` | Response acquisition is read-only. Canvas Expert does not write New Quiz item scores or per-item feedback; grade existing writing in Canvas and author future writing portions as separate assignments. |
-| Control console / Web UI | `docs/contracts/agent-runtime-product-contract.md`, `api/webui/README.md`, then `docs/reference/webui-presentation-system.md` | Keep the console small and trustworthy: setup, readiness, mirror, review, recovery, receipts, diagnostics, and private workspace controls. Preserve route-specific load order and verify affected rendered routes; do not build UI parity with the agent host. |
-| Physical output | relevant Forge contract and rendering owner named by the handoff | PDF uses installed Microsoft Edge through Playwright; do not add managed browser downloads. DOCX uses `pypandoc-binary`. |
+| Control console / Web UI | `docs/contracts/agent-runtime-product-contract.md`, `api/webui/README.md`, then `docs/reference/webui-presentation-system.md` | Keep the console small and trustworthy: setup, readiness, mirror, review, recovery, receipts, diagnostics, and private workspace controls. Preserve route-specific load order and verify affected rendered routes; the host agent already renders, so skip UI parity with it. |
+| Physical output | relevant Forge contract and rendering owner named by the handoff | PDF uses installed Microsoft Edge through Playwright and DOCX uses `pypandoc-binary`. District machines have no admin rights, so don't add managed browser downloads. |
 
-## Non-negotiable guardrails
+## Firm rules
 
-1. **No secrets in the repo.** Web UI credentials live only in the OS credential store;
-   CLI credentials may live in gitignored `api/.env`. Never put tokens in tracked files,
-   logs, fixtures, output, or commit messages. The pre-commit hook is only a backstop.
-2. **No student data in the repo.** Names, IDs, submissions, grades, comments, private
-   notes, roster data, and course-derived exports never enter commits, fixtures, or
-   printable logs. Private output belongs in the user-selected workspace or gitignored
-   output directories. When uncertain, treat data as FERPA-protected.
-3. **No district-specific source configuration.** Canvas URLs, rosters, rubric names, and
-   teacher-identifying config belong in the UI/workspace, never source. `CANVAS_BASE_DEFAULT`
-   remains empty.
+These three hold everywhere. Everything else in this file is a default.
 
-4. **Local only.** The token-holding app binds `127.0.0.1`. Do not add public routes,
-   external exposure, or public-infrastructure assumptions.
-5. **Describe AI privacy honestly.** SAFE artifacts are pseudonymized and scrubbed, not
-   guaranteed anonymous or “FERPA safe.” Teachers review them before external upload.
-6. **Keep the agent boundary host-neutral.** Never make a core workflow depend on a
-   ChatGPT/Claude-specific HTML surface, client extension, hosted model, or conversation
-   behavior. The runtime must retain a useful structured/plain-text contract.
-7. **Run `api.*` code only under pytest.** The suite's autouse `conftest.py` fixture is
-   the only thing that isolates the real config, `%LOCALAPPDATA%`, credential, and
-   OneDrive workspace. An ad-hoc `py -c` or script that imports `api.*` reads and writes
-   the teacher's live stores. Debug with a temporary pytest test instead, and never start
-   the Web UI or MCP server against the real workspace to verify a change.
+1. **No secrets or student data in the repo.** Tokens live in the OS credential store (or the
+   gitignored `api/.env` for CLI use). Names, IDs, submissions, grades, comments, notes, and
+   roster data never go into commits, fixtures, logs, or output that leaves the teacher's
+   machine. Private output belongs in the teacher's workspace or gitignored folders. The
+   pre-commit hook is only a backstop.
+2. **Pseudonyms at the agent boundary.** Student data reaches an AI agent only as stable
+   pseudonyms through Canvas Expert's gate. Canvas Expert is the only thing that holds the
+   Canvas token and talks to Canvas.
+3. **Local only.** The token-holding app binds `127.0.0.1`. No public routes or external
+   exposure.
 
-## Execution model: senior design, one executor
+## Defaults
 
-The senior/orchestrator owns architecture, scope, and acceptance. One implementation
-executor performs the bounded handoff. The distinction is about the size/cost of the model of the agent.
-Only the executor writes for a brief. Read-only helpers (preflight, test baselines, research
-fan-out) may run alongside it on smaller models; they report, they do not edit.
+Good practice, each with its reason. When a default doesn't fit the situation, say so and ask
+the teacher instead of following it blindly or quietly working around it.
 
-### Senior responsibilities
+- **Keep district and teacher configuration out of source.** The repo is public. Canvas URLs,
+  rosters, rubric names, time zones, and school hours belong in the workspace or settings, and
+  `CANVAS_BASE_DEFAULT` stays empty.
+- **Describe AI privacy honestly.** SAFE artifacts are pseudonymized and scrubbed, not
+  anonymous. Don't call them "FERPA safe."
+- **Keep the runtime host-neutral.** Return semantic data, summaries, and warnings any MCP host
+  can use. Hosts render previews their own way; core behavior shouldn't depend on one host.
+- **Tests stay isolated; live runs are fine on purpose.** `api/tests/conftest.py` isolates
+  config, `%LOCALAPPDATA%`, credentials, and the workspace, so test `api.*` code under pytest. A
+  stray `py -c` that imports `api.*` touches the teacher's real stores, so don't do that by
+  accident. Deliberately running the app or MCP server against the real workspace and real
+  Canvas is fine and often the best check: Canvas is the staging ground. Say what you'll touch
+  first, and keep anything students could see unpublished or unposted unless the teacher says
+  otherwise.
+- **Ask, don't guess.** If a brief, a doc, or the code disagrees with the situation in front of
+  you, ask the teacher. Never tighten or reverse a teacher's decision without asking, and record
+  decisions where the next agent will find them.
+- **Deleted means deleted, not banned.** Removing a feature records a decision, not a rule.
+  `api/tests/test_retired_paths.py` catches accidental resurrection (old-lineage merges); if the
+  teacher wants something back, delete its row.
 
-- Understand the relevant teacher path and make the hard product/technical decisions.
-- Discuss choices that materially change the user's direction.
-- Write one durable brief before delegation.
-- Prefer one meaningful vertical improvement (normally half a day to two days), not a
-  chain of numbered micro-slices.
-- Author independently checkable acceptance criteria and explicit non-goals before execution,
-  then lock exact boundaries, insertion points, references, risk, the named test gate, and
-  stop conditions. The executor should not need architecture discovery or define success.
-- Accept from the report and inspect only risk seams or missing evidence; do not
-  automatically reread the repository or rerun successful checks.
+## Execution model
 
-### Executor responsibilities
+A senior agent owns architecture, scope, and acceptance, and writes one brief in
+`docs/handoffs/`. A lead executor runs it. The lead may split the work across parallel
+subagents (for example Sonnet or Haiku) that read, test, or write. Give each writing subagent
+its own files so two never edit the same file; the brief's workstreams say who owns what. The
+lead integrates, runs the gate, and reports.
 
-- Read this file, the active brief, and only its routed references.
-- Preserve unrelated worktree changes and stay within authorized scope.
-- Run the brief's preflight before writing; stop when an assumption is false.
-- Implement the entire brief and self-review against its locked decisions.
-- Run the brief's named acceptance gate and only the required proportional verification;
-  report evidence, not a self-defined definition of success.
-- Reuse the same context for corrections; do not replace the executor for routine repair.
-- Put the compact return report in both chat and the brief's `Execution result`: traffic
-  light, commit hash if any, changed files, commands/counts, deviations, and unresolved
-  decisions.
+### Senior
+
+- Understand the teacher-visible outcome, and talk through choices that change direction.
+- Write the brief: objective, teacher decisions, acceptance criteria, non-goals, workstreams
+  with file ownership, the test gate, and what to ask about.
+- Accept against the brief. Check risky seams and missing evidence instead of redoing the work.
+
+### Lead executor
+
+- Read this file, the brief, and the references it names.
+- Preserve unrelated worktree changes.
+- Run the brief's preflight. If an assumption is false, ask.
+- Run workstreams in parallel where the brief allows, then integrate and self-review.
+- Run the gate. Report in chat and in the brief's `Execution result`: traffic light, commit
+  hashes, changed files, commands and counts, deviations, open questions.
 
 ### Traffic lights
 
-- **GREEN:** every pre-authored acceptance criterion holds, the named gate passes, and there
-  is no undeclared deviation. The senior accepts against the brief, not the executor's view
-  of completeness.
-- **YELLOW:** bounded incomplete work, unavailable required check, or one senior decision
-  needed. Return to the same executor after direction.
-- **RED:** repository truth contradicts the brief, a guardrail is underspecified, or a
-  public contract/architecture expansion is required. Stop implementation.
+- **GREEN:** the acceptance criteria hold, the gate passes, and nothing deviates undeclared.
+- **YELLOW:** something bounded is unfinished, or one teacher or senior decision is needed.
+- **RED:** the repo contradicts the brief in a way that changes the plan.
 
-### Durable context and escalation
-
-No important decision may live only in chat or agent memory. The active brief contains
-the current objective, acceptance criteria, explicit non-goals, locked decisions, scope,
-references, named verification gate, stop conditions, and latest result. Durable product decisions belong in `docs/contracts/` or
-`docs/reference/`; the brief links to them instead of copying them.
-
-After compaction or executor replacement, resume from the active brief, current diff/commit,
-and narrow follow-up direction. Do not repeat broad discovery.
-
-Stop rather than guess when a named seam does not exist, current behavior contradicts the
-brief, materially different implementations remain possible, another subsystem/public
-contract would need to change, a side effect or guardrail is underspecified, or an
-out-of-scope regression appears.
+Decisions that matter go in the brief, a contract, or `docs/reference/`, not only in chat or
+agent memory. After compaction, resume from the brief and the current diff.
 
 ## Lean engineering defaults
 
@@ -193,14 +190,15 @@ out-of-scope regression appears.
 - For agent-facing work, start from the cooperation loop: discover, prepare, decide,
   act, verify, and resume. Treat the MCP/runtime path as primary and the browser as a
   supporting control console.
-- Add a Web UI surface only for setup, trust, review, recovery, diagnostics, private
-  workspace management, or a genuinely local-only operation that an agent cannot safely
-  own. Do not duplicate host-agent previews or build dashboard parity by default.
+- Add a Web UI surface for setup, trust, review, recovery, diagnostics, private workspace
+  management, or a genuinely local-only operation that an agent cannot safely own. The host
+  agent already renders previews, so don't duplicate them or build dashboard parity by default.
 - Keep MCP wrappers, routes, and templates thin. Shared application services own business
   behavior so the agent runtime can operate without starting FastAPI.
-- Add no registry, adapter, persistence format, or durable contract without an immediate
-  consumer in the same agreed work.
-- Do not abstract after one implementation or build sibling features for symmetry.
+- Add a registry, adapter, persistence format, or durable contract when the same agreed work
+  has a consumer for it; one built ahead of use becomes upkeep nobody asked for.
+- Wait for a second implementation before abstracting, and build a sibling feature when it is
+  needed rather than for symmetry.
 - Prefer reversible local behavior and the smallest complete change.
 - Let real use, defects, or measured friction pull future integration.
 - Batch related work when context and verification carry over; process-only acceptance,
@@ -208,15 +206,16 @@ out-of-scope regression appears.
 
 ## Test taxonomy and addressing
 
-Every test is exactly one of these three kinds. If a proposed test is none of them, do not
-write it.
+Most tests fit one of these three kinds, which keeps the suite small and easy to navigate.
 
 - **Law.** An invariant that must never break. Test it directly, at the law, once. Laws are
   few and load-bearing; a law tested only through its consumers is not tested.
 - **Contract.** A shape agreement at a boundary, parametrized over the boundary's members
   and driven from the registry or list that defines them, so a new member is covered without
   a new test.
-- **Example.** One happy path per feature, for documentation value. One, by rule.
+- **Example.** A happy path for a feature, for documentation value.
+
+A regression test for a real bug is always welcome.
 
 A test path mirrors its module path. Shared setup lives in the nearest `conftest.py` as a
 named fixture. This makes finding and placing a test derivable from the source tree and keeps
@@ -253,33 +252,32 @@ broad deselected matrix. Baseline unrelated existing failures once at a known co
 vision or current brief, with the exact reproduction command and observed result. Later
 slices cite that record rather than rerunning, re-explaining, or silently absorbing it.
 
-Run the full API or engine suite only at an explicitly declared integration/release
-checkpoint, after genuinely cross-cutting changes, or when focused failures show unexpected
-coupling. Do not rerun a successful executor matrix unless evidence is missing, the
-environment changed, or the relevant diff changed.
+The full suite (`py -m pytest api/tests engine/tests -p no:randomly -q`) takes about two
+minutes. Run it whenever it helps, and before reporting GREEN on anything that crosses
+subsystems. Rerunning a check is cheap.
 
-Tests must derive paths from the repository and contain no developer-specific absolute
-paths or private data. Source-text tests do not prove browser behavior. Shared scripts,
-templates, navigation, initialization, or safety controls require loading every affected
-route in the local app, checking required globals/state, and confirming zero new browser
-console errors.
+Tests derive paths from the repository and contain no developer-specific absolute paths or
+private data, so they run on any machine and the repo stays clean. Source-text tests don't
+prove browser behavior, so shared scripts, templates, navigation, initialization, or safety
+controls need every affected route loaded in the local app, with required globals/state
+checked and zero new browser console errors confirmed.
 
 ## Handoff and document hygiene
 
-- `docs/handoffs/` contains at most one current direct brief.
-  Do not store a future queue there; create a brief only when it is ready for execution.
+- `docs/handoffs/` holds one current brief. Write a brief when it is ready to execute
+  rather than keeping a future queue there, where it goes stale.
 - Close GREEN work by accepting it and retiring its brief in the same batch (Git history is
   its record). A RED/YELLOW brief remains current only while the senior is actively deciding
   or correcting it. Superseded or abandoned briefs are retired with an explicit status.
-- Closing a GREEN brief that finishes or advances a vision-doc batch (spine §17.1) must
-  leave a single current pointer to the next batch — never a log — naming
-  the next batch-table row, the exact vision-doc sections it requires, and any outstanding
-  senior decisions carried over from other batches. A new senior reads only that pointer and
-  the sections it names, never the whole vision document, to find the next unit of work.
-- Never route an executor to a retired or superseded brief; Git history is history, not
+- Closing a GREEN brief that finishes or advances a vision-doc batch (spine §17.1) leaves a
+  single current pointer to the next batch, not a log, naming the next batch-table row, the
+  exact vision-doc sections it requires, and any outstanding senior decisions carried over
+  from other batches. A new senior reads only that pointer and the sections it names, not the
+  whole vision document, to find the next unit of work.
+- Don't route an executor to a retired or superseded brief: Git history is a record, not
   current authority.
 - Keep the brief concise and slice-specific. Link contracts and exact reference sections;
-  do not paste product history or whole architecture narratives into it.
+  skip product history and whole architecture narratives, which belong in the linked docs.
 - `docs/contracts/` holds durable data/behavior contracts; `docs/guides/` durable usage;
   `docs/reference/` current architecture, safety facts, and module route cards.
 
@@ -288,12 +286,12 @@ console errors.
 Tool discovery is conditional, not mandatory reading. Consult `tools/TOOLS.md` and only the
 relevant manifest before brute-force inspection of a large/repetitive document, log, diff,
 HTML/API response, or unfamiliar repository area. Skip it when the active brief already
-names a small set of files and symbols. A `planned` tool is unavailable and must not block
-execution.
+names a small set of files and symbols. A `planned` tool isn't available, so work without it.
 
 Prefer tools for retrieval, parsing, validation, and compact summaries. Use reasoning for
-architecture decisions, tradeoffs, review, and specifications. Never use repository-wide
-indexing to evade a handoff's bounded reference list.
+architecture decisions, tradeoffs, review, and specifications. Don't use repository-wide
+indexing to get around a handoff's bounded reference list; the list is there to keep
+context small.
 
 ## Build, test, and run
 
@@ -309,7 +307,7 @@ py -m pytest api/tests
 py -m pytest engine/tests
 
 # Focused PowerGrader regressions
-py -m pytest api/tests/test_powergrader_packet.py api/tests/test_powergrader_copilot_packet.py api/tests/test_powergrader_import_results.py api/tests/test_route_contract.py
+py -m pytest api/tests/powergrader api/tests/test_route_contract.py
 
 # Dependencies
 py -m pip install -r api/requirements.txt

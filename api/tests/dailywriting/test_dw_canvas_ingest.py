@@ -510,11 +510,12 @@ def test_typed_only_assignment_makes_zero_canvas_calls(monkeypatch, tmp_path):
 
 
 def test_no_mcp_module_reaches_the_ingest_path():
-    """The binding constraint: ingest must never be exposed as an MCP tool.
+    """The constraint: ingest is not exposed as an MCP tool.
 
     A live Canvas path under the assistant is what `docs/mirror.md` design law
-    6 forbids, so the assistant-facing package must not import this driver or
-    its acquisition seam -- directly or by re-export.
+    6 avoids on purpose (Canvas Expert is the only thing that talks to Canvas),
+    so the assistant-facing package must not import this driver or its
+    acquisition seam -- directly or by re-export.
 
     `api.platform_services.canvas_client` is held to the same rule. It is the raw Canvas
     HTTP transport, and the MCP tools have no business holding it: they serve

@@ -7,13 +7,13 @@ submission. There is no cached copy to read, so this module makes the writing
 record's only live Canvas calls: one focused submission fetch and one bounded
 file download, for a submission the mirror shows as an upload with no text.
 
-That is permitted where the mirror-only law does not reach. `docs/mirror.md`
-Design law 6 scopes it to the AI-facing MCP tools, whose whole path to Canvas
-must stay indirect; `api/portfolio_service.py` and `api/student_packet.py`
-already make the same kind of focused per-submission call for a teacher-invoked
-report. The binding constraint that comes with it: **this path must never be
-exposed as an MCP tool.** Doing so would put a live Canvas path under the
-assistant, which is exactly what the law forbids.
+That is fine here because `docs/mirror.md` design law 6 (agent reads come from
+the mirror) covers the AI-facing MCP tools, whose whole path to Canvas stays
+indirect; `api/portfolio_service.py` and `api/student_packet.py` already make
+the same kind of focused per-submission call for a teacher-invoked report. The
+constraint that comes with it: this path should not be exposed as an MCP tool,
+because that would put a live Canvas path under the assistant, and Canvas
+Expert is meant to be the only thing that talks to Canvas.
 
 Both calls go through `api.platform_services.canvas_client` rather than
 `api.submission_transport`, which builds its own session with neither Canvas

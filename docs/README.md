@@ -1,7 +1,7 @@
 # Documentation Index
 
 This directory contains durable project documentation and senior-authored execution briefs.
-For canonical AI-agent guidance and safety rules, read `../AGENTS.md` first.
+For canonical AI-agent guidance (the firm rules and the defaults), read `../AGENTS.md` first.
 
 The locked product direction is in
 [`contracts/agent-runtime-product-contract.md`](contracts/agent-runtime-product-contract.md):
@@ -42,8 +42,7 @@ Useful starting references for new debugging and refactor sessions:
   spine without weakening live write preflights.
 - `docs/reference/course-expert-module-map.md` - Work tools push/download route, script, and template ownership map.
 - `docs/reference/settings-module-map.md` - Settings route/script/config ownership map.
-- `docs/reference/powergrader-scoring-map.md` - internal/private Scoring Session packet, privacy, and guarded-write implementation map (legacy filename).
-- `docs/reference/powergrader-module-map.md` - internal/private Scoring Session backend module map (legacy filename); no teacher-facing scoring UI remains.
+- `docs/reference/powergrader-scoring-map.md` - internal/private Scoring Session packet, privacy, and guarded-write implementation map (legacy filename); no teacher-facing scoring UI remains.
 - `docs/reference/gradebook-module-map.md` - Remaining gradebook services and runtime routing map; no Gradebook console page.
 - `docs/reference/roster-module-map.md` - Roster route/script ownership and current hotspot map.
 - `docs/reference/assignment-corrections-design.md` - accepted private correction behavior for
@@ -54,19 +53,20 @@ Useful starting references for new debugging and refactor sessions:
 
 ## Handoff Convention
 
-The senior/orchestrator makes the difficult product and architecture decisions, then writes
-one substantial brief. One executor implements it.
+The senior agent makes the difficult product and architecture decisions, then writes
+one substantial brief. A lead executor runs it, and may split the work across parallel
+subagents that each own their own files.
 
 Keep one active brief by default in handoffs/. The brief is the durable context checkpoint when a chat is
-compacted, an executor changes, or work moves between agents. It must lock scope,
-decisions, references, verification, and stop conditions before implementation starts. The
-executor records its compact traffic-light result in that same brief before handback so test
-evidence and current state do not exist only in chat.
+compacted, an executor changes, or work moves between agents. It locks scope,
+decisions, file ownership, references, verification, and what to ask about before
+implementation starts. The lead records its compact traffic-light result in that same
+brief before handback so test evidence and current state don't exist only in chat.
 
 Handoff closure belongs to the implementation batch. Archive a completed brief only when it
 has continuing reference value; otherwise it may be deleted because Git preserves history.
-Never create a separate acceptance or archive pass merely to move documentation.
+A separate acceptance or archive pass just to move documentation adds no product value.
 
 Verification is risk-proportional. Focused checks are normal, affected subsystem checks are
-used for shared changes, and full suites are reserved for integration/release boundaries or
-genuinely cross-cutting/high-risk work. See `AGENTS.md` for the authoritative policy.
+used for shared changes, and the full suite (about two minutes) is run whenever it helps and
+before reporting GREEN on anything that crosses subsystems. See `AGENTS.md` for the policy.

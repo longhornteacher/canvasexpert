@@ -1,4 +1,9 @@
-"""Guard the repository's deliberate removals against accidental resurrection."""
+"""Tripwire for accidental resurrection of deliberately deleted paths.
+
+These paths were deleted on purpose. Deleted is not banned: this test only catches a
+path coming back by accident, most often through a merge of an old lineage. If a
+revival is intentional, delete the path's row below.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +12,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Keep the reason beside each path.  A failure should tell the next maintainer
-# which historical decision they are about to undo.
+# which decision the returning path would undo.
 RETIRED_PATHS = (
     ("CLAUDE.md", "bfe1877", "Add TAForge and canonical agent guidance"),
     (
@@ -194,4 +199,9 @@ def test_retired_paths_are_absent():
             )
             present.append(f"{relative}: present; {origin}; {subject}")
 
-    assert not present, "Retired path resurrection detected:\n" + "\n".join(present)
+    assert not present, (
+        "These paths were deleted on purpose and are back:\n"
+        + "\n".join(present)
+        + "\nIf this is an intentional revival, delete the row for it in RETIRED_PATHS. "
+        "If not, it is probably an old-lineage merge."
+    )

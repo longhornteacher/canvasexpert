@@ -26,11 +26,10 @@ submissions, scoring work, and grade history.
 There is no multi-user compatibility population, but the pilot now has live teacher state.
 Therefore:
 
-- **No migration code.** Do not write folder-rename migrations, dual-read
-  shims, retirement notices, backward-compatibility mappings, or "URL stability"
-  indirection for hypothetical future users. Source and unsupported local formats may
-  still take clean breaks when the active brief explicitly establishes that no live pilot
-  state depends on them.
+- **No compatibility code for hypothetical users.** Don't write dual-read shims,
+  backward-compatibility mappings, retirement notices, or URL-stability indirection for
+  users who don't exist. A one-time migration of the teacher's own live state is fine when
+  the teacher wants it; delete it once it has run.
 - **Protect live pilot state.** Never assume Canvas objects, submissions, grades,
   operation receipts, scoring sessions, or the private workspace are disposable. A clean
   source break does not authorize destructive cleanup or loss of teacher history.
@@ -59,12 +58,13 @@ slice-specific.
   ability; ship the runtime contract and narrow reference material, not a second
   harness around it. A standalone CanvasAgent reference may still include appendices
   for chat-only or setup use when no runtime connection is available.
-- **The app reports; it never accuses.** Where a feature could be read as an
-  integrity judgement about a student — the Writing Timeline being the current
-  example — it reports observable facts and states its own limits, and any rule
-  against concluding is enforced in code rather than in prompt text. A model
-  instruction is not an enforcement boundary. See
-  `docs/reference/powergrader-module-map.md` → *Writing Timeline*.
+- **Integrity help is part of the job.** Canvas Expert gathers evidence (writing
+  timeline, submission history, writing history, text overlap between submissions). The
+  agent may investigate further (web search, reading level, anything useful) and tell the
+  teacher plainly what it thinks, in teacher-only agent commentary. The teacher decides
+  what happens. Agent commentary never reaches a student or Canvas; that boundary is
+  enforced in code. See
+  `api/default_docs/AI Authoring/Writing Timeline (tracked assignments).txt`.
 
 See also `AGENTS.md` → *Lean engineering defaults* for the engineering-side
 expression of the same instinct.
