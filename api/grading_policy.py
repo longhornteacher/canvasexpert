@@ -20,7 +20,7 @@ POLICY_FILENAME = "Grading Policy.txt"
 HOLIDAYS_SUBFOLDER = "Calendars"
 HOLIDAYS_FILENAME = "Holidays.csv"
 
-_POLICY_KEYS = ("floor_percent", "missing_percent", "sweep_after_school_days")
+_POLICY_KEYS = ("floor_percent",)
 _US_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
 
 
@@ -47,10 +47,9 @@ def load_policy(root=None) -> dict | None:
     """Read ``Library/Grading Policy.txt``, or ``None`` when the file is absent.
 
     ``key: value`` lines, ``#`` starts a comment, blank lines are ignored,
-    and keys are case-insensitive. All three keys (``floor_percent``,
-    ``missing_percent``, ``sweep_after_school_days``) are required integers
-    with ``0 <= missing_percent <= floor_percent <= 100`` and
-    ``1 <= sweep_after_school_days <= 60``. A present but invalid file raises
+    and keys are case-insensitive. ``floor_percent`` is the only recognized
+    key and must be an integer from 0 through 100. Unknown keys are ignored,
+    so older files may keep retired settings. A present but invalid file raises
     ``GradingPolicyFileError`` naming the exact problem. The file is read
     fresh every call; nothing is cached.
     """
@@ -81,16 +80,9 @@ def load_policy(root=None) -> dict | None:
                 f"Grading Policy.txt's {key} must be a whole number, not "
                 f"'{raw_value}'.") from None
     floor_percent = parsed["floor_percent"]
-    missing_percent = parsed["missing_percent"]
-    sweep_after_school_days = parsed["sweep_after_school_days"]
-    if not (0 <= missing_percent <= floor_percent <= 100):
+    if not (0 <= floor_percent <= 100):
         raise GradingPolicyFileError(
-            "Grading Policy.txt's floor_percent must be at or above "
-            "missing_percent, and both must be between 0 and 100.")
-    if not (1 <= sweep_after_school_days <= 60):
-        raise GradingPolicyFileError(
-            "Grading Policy.txt's sweep_after_school_days must be between "
-            "1 and 60.")
+            "Grading Policy.txt's floor_percent must be between 0 and 100.")
     return parsed
 
 
@@ -155,7 +147,7 @@ def round_half_up(value) -> int:
     """Round to the nearest whole number, half away from zero.
 
     Python's ``round()`` is banker's rounding (round-half-to-even) and must
-    never be used for a posted grade or the missing value.
+    never be used for a posted grade.
     """
     return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 

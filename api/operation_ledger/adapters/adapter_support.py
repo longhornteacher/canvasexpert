@@ -120,9 +120,8 @@ def mirror_freshness_attention(roster: dict, assignments: dict, submissions: dic
 
     Returns ``{}`` when the mirror is inside the freshness policy window
     (current or stale-but-within-policy), else a ``blocking_error`` envelope
-    naming ``freshness_attention``. Moved out of the grade-adjustment adapter
-    so the missing-sweep adapter shares the exact same behavior rather than a
-    second copy (grading-policy-contract.md section 6).
+    naming ``freshness_attention``. Shared by operation adapters that need the
+    same behavior (grading-policy-contract.md section 6).
     """
     timestamps = [
         str(scope.get("last_success_at") or "")

@@ -504,8 +504,7 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
 
     from api.platform_services import config
     from api.powergrader import scoring_apply
-    grading_policy_files.policy(floor_percent=30, missing_percent=20,
-                                sweep_after_school_days=15)
+    grading_policy_files.policy(floor_percent=30)
     monkeypatch.setattr(config, "get_extra_time", lambda course_id: [])
     sent = []
     monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
@@ -568,16 +567,13 @@ def test_stage_scoring_results_refuses_when_grading_policy_file_is_invalid(
     staging with grading_policy_file_invalid and load_policy's own readable
     message, before anything is frozen."""
     _session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
-    grading_policy_files.raw_policy(
-        "floor_percent: 10\nmissing_percent: 20\nsweep_after_school_days: 15\n")
+    grading_policy_files.raw_policy("floor_percent: 101\n")
 
     result = tools.stage_scoring_results(
         "session-1", _result(8), _digest(bundle))
 
     assert result == {"ok": False, "code": "grading_policy_file_invalid",
-                      "error": ("Grading Policy.txt's floor_percent must be at or "
-                               "above missing_percent, and both must be between "
-                               "0 and 100.")}
+                      "error": "Grading Policy.txt's floor_percent must be between 0 and 100."}
 
 
 REAL_ID_A, REAL_NAME_A, PSEUDONYM_A = REAL_ID, REAL_NAME, PSEUDONYM
@@ -646,8 +642,7 @@ def test_a_students_earlier_stamp_and_question_survive_staging_only_b_again(
     _session, bundle, sessions = _wire_two_students(monkeypatch, tmp_path, _set_active_courses)
     from api.platform_services import config
     from api.powergrader import scoring_apply
-    grading_policy_files.policy(floor_percent=30, missing_percent=20,
-                                sweep_after_school_days=15)
+    grading_policy_files.policy(floor_percent=30)
     monkeypatch.setattr(config, "get_extra_time", lambda course_id: [])
     sent = []
     monkeypatch.setattr(scoring_apply, "default_transports", lambda: (
@@ -726,8 +721,7 @@ def _late_policy_course(monkeypatch, tmp_path, _set_active_courses, grading_poli
     session["late_policy"] = "ask"
     from api.platform_services import config
     from api.powergrader import scoring_apply
-    grading_policy_files.policy(floor_percent=30, missing_percent=20,
-                                sweep_after_school_days=15)
+    grading_policy_files.policy(floor_percent=30)
     monkeypatch.setattr(config, "get_extra_time", lambda course_id: [])
     sent, reads = [], []
     monkeypatch.setattr(scoring_apply, "default_transports", lambda: (

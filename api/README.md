@@ -13,7 +13,7 @@ The runtime supports:
 - **Push Assignments** (AssignmentForge JSON → live whole-class assignments)
 - **Push Pages** (PageForge JSON → live pages)
 - **Printable outputs** (QuizForge JSON → local DOCX + PDF files)
-- **Gradebook services** — reviewed grade adjustments, missing-work operations, and bounded runtime reads
+- **Gradebook services** — reviewed grade adjustments, attempt grants, and bounded runtime reads
 - **Scoring Sessions** — MCP-connected agent discovers work across every Current course,
   waits for teacher direction, then prepares one exact assignment at a time using an
   assignment-bounded SAFE packet and writes the reviewed score/mark and authored plain-text
@@ -335,4 +335,4 @@ ANTHROPIC_KEY=
 - Late-policy `PATCH` returns **204 (no body)** — response handling must tolerate
   an empty body (`_canvas_send` does).
 - **School-day math runs in school-local time** — a 23:59 CST due date is 05:59Z
-  next day; weekday/holiday checks must use local time, not UTC (the sweep does).
+  next day; weekday/holiday checks must use local time, not UTC.

@@ -54,10 +54,6 @@ INSTRUCTION_BUDGET = 2700
 # Raised to the measured 18,964 for the scoring-lane effort-credit brief:
 # ScoringResult (stage_scoring_results's per-row shape) gains two optional
 # fields, insincere and late_days.
-# Raised to the measured 19,543 for the two new missing-sweep tools
-# (preview_missing_sweep, apply_missing_sweep): a course-wide reviewed fill
-# of long-overdue missing work, separate from grade adjustment because its
-# revert and verification model does not fit a blank row.
 # Raised to the measured 20,291 for the reviewed attempts-grant pair
 # (preview_attempts_grant, apply_attempts_grant, +748): extra attempts and a
 # reopened window for a pseudonym list or the whole class, across regular,
@@ -74,7 +70,8 @@ INSTRUCTION_BUDGET = 2700
 # Raised by 986 measured characters for the three durable score-rule/ledger
 # tools added in schema v73; the descriptions and result summaries remain short.
 # Raised to the measured 24,279 for get_scoring_preview (schema v74, +331).
-LISTING_BUDGET = 24279
+# Schema v75 retires two missing-sweep tools; measured wire size is 23,700.
+LISTING_BUDGET = 23700
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
@@ -236,7 +233,7 @@ def test_next_procedures_are_static_bounded_and_gate_safe():
     expected_next = RESULT_NEXT_TOOLS | {
         "discover_scoring_work", "stage_scoring_results",
         "apply_staged_scoring_results", "preview_grade_adjustment",
-        "preview_attempts_grant", "preview_missing_sweep",
+        "preview_attempts_grant",
     }
     assert set(tools._NEXT_STEPS) == expected_next
     assert RESULT_NEXT_TOOLS < registered
@@ -294,7 +291,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 69
+    assert len(listed) == 67
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -398,9 +395,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 69
-    assert len(_synthetic_mcp["calls"]) == 69
-    assert len(_synthetic_mcp["gated"]) == 69
+    assert len(results) == 67
+    assert len(_synthetic_mcp["calls"]) == 67
+    assert len(_synthetic_mcp["gated"]) == 67
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

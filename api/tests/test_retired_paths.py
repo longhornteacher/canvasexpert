@@ -185,6 +185,10 @@ RETIRED_PATHS = (
     ("api/webui/routes/feedback_library.py", "(none)", "Consistent scoring feedback: personas removed entirely, /api/feedback/* is gone"),
     ("api/tests/webui/routes/test_feedback_library.py", "(none)", "Consistent scoring feedback: retired persona route, retired test"),
     ("api/default_docs/Feedback Contracts/Glows & Grows (Basic).md", "(none)", "Consistent scoring feedback: base shape is product-owned Python text, not a seeded workspace file"),
+    ("api/missing_sweep.py", "(none)", "Retire the Canvas Expert missing-work sweep; Canvas owns its missing-submission policy"),
+    ("api/operation_ledger/adapters/missing_fill.py", "(none)", "Retire the Canvas Expert missing-work sweep; Canvas owns its missing-submission policy"),
+    ("api/tests/test_missing_sweep.py", "(none)", "Retire the Canvas Expert missing-work sweep and its tests"),
+    ("api/tests/test_missing_sweep_operation.py", "(none)", "Retire the Canvas Expert missing-work sweep and its tests"),
 )
 
 

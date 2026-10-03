@@ -94,21 +94,22 @@ def test_load_policy_valid_file_parses_case_insensitive_keys_and_comments(gradin
         "# a comment line\n"
         "\n"
         "FLOOR_PERCENT: 30  # inline comment\n"
-        "missing_percent:20\n"
-        "Sweep_After_School_Days: 15\n"
     )
-    assert grading_policy.load_policy() == {
-        "floor_percent": 30, "missing_percent": 20, "sweep_after_school_days": 15,
-    }
+    assert grading_policy.load_policy() == {"floor_percent": 30}
+
+
+def test_load_policy_ignores_legacy_missing_sweep_keys(grading_policy_files):
+    grading_policy_files.raw_policy(
+        "floor_percent: 25\nmissing_percent: 500\nsweep_after_school_days: invalid\n")
+    assert grading_policy.load_policy() == {"floor_percent": 25}
 
 
 @pytest.mark.parametrize("raw", [
-    "floor_percent: 30\nmissing_percent: 20\n",  # missing sweep_after_school_days
-    "floor_percent: 10\nmissing_percent: 20\nsweep_after_school_days: 15\n",  # floor below missing
-    "floor_percent: abc\nmissing_percent: 20\nsweep_after_school_days: 15\n",  # non-integer
-    "floor_percent: 30\nmissing_percent: 20\nsweep_after_school_days: 0\n",  # sweep out of range (low)
-    "floor_percent: 30\nmissing_percent: 20\nsweep_after_school_days: 61\n",  # sweep out of range (high)
-], ids=["missing_key", "floor_below_missing", "non_integer", "sweep_too_low", "sweep_too_high"])
+    "",  # missing floor_percent
+    "floor_percent: abc\n",  # non-integer
+    "floor_percent: -1\n",  # below range
+    "floor_percent: 101\n",  # above range
+], ids=["missing_key", "non_integer", "too_low", "too_high"])
 def test_load_policy_invalid_file_raises_with_a_readable_message(grading_policy_files, raw):
     grading_policy_files.raw_policy(raw)
     with pytest.raises(grading_policy.GradingPolicyFileError):

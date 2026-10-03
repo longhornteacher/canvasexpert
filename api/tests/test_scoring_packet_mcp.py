@@ -630,6 +630,38 @@ def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):
     assert "rubric" not in without_context
 
 
+def test_packet_baseline_entered_fallback_and_attempt_columns(monkeypatch, tmp_path):
+    people = _seed_vault(monkeypatch, tmp_path, count=1)
+    _set_active_courses(monkeypatch, ["111"])
+    session = _fake_session("s1", "111", people)
+    session["students"][0].update({
+        "submission_baseline": {
+            "entered_score": None,
+            "canvas_score": 7,
+            "points_deducted": 2,
+            "attempt_count": 3,
+            "first_attempt_at": "2026-09-20T08:00:00Z",
+            "latest_attempt_at": "2026-09-22T08:00:00Z",
+        },
+        "posted_attempt": 2,
+    })
+    _attach_bundle(session, tmp_path, _fake_safe_bundle(people, items=1))
+    _bind_session_store(monkeypatch, {"s1": session})
+
+    result = tools.get_scoring_packet("s1", limit=10, include_context=True)
+
+    assert result["ok"] is True, result
+    columns = list(result["students"]["columns"])
+    row = result["students"]["rows"][0]
+    values = dict(zip(columns, row))
+    assert values["baseline_entered"] == 9
+    assert values["prior_entered"] == 9
+    assert values["attempt_count"] == 3
+    assert values["first_attempt_at"] == "2026-09-20T08:00:00Z"
+    assert values["latest_attempt_at"] == "2026-09-22T08:00:00Z"
+    assert values["posted_attempt"] == 2
+
+
 def test_get_scoring_packet_hands_overlap_evidence_to_the_agent(monkeypatch, tmp_path):
     people = _seed_vault(monkeypatch, tmp_path, count=2)
     _set_active_courses(monkeypatch, ["111"])

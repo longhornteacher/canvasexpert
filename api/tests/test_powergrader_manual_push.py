@@ -132,8 +132,11 @@ def test_successful_send_performs_no_canvas_read():
     # The accepted-write receipt retains the exact score sent for provenance.
     receipt = session["push_log"][-1]["results"][0]
     assert set(receipt) == {"user_id", "status", "code",
-                            "request_digest", "target_digest", "entered_score"}
+                            "request_digest", "target_digest", "entered_score",
+                            "comment_sent", "corrects_event_id"}
     assert receipt["entered_score"] == 4.0
+    assert receipt["comment_sent"] is True
+    assert receipt["corrects_event_id"] is None
 
 
 def test_transport_error_is_unknown_without_idempotency_or_repeat():

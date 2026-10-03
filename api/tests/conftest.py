@@ -62,14 +62,12 @@ def grading_policy_files(tmp_path, monkeypatch):
     """
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
 
-    def policy(floor_percent=30, missing_percent=20, sweep_after_school_days=15):
+    def policy(floor_percent=30):
         path = os.path.join(workspace.library_root(), grading_policy.POLICY_FILENAME)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(
                 f"floor_percent: {floor_percent}\n"
-                f"missing_percent: {missing_percent}\n"
-                f"sweep_after_school_days: {sweep_after_school_days}\n"
             )
 
     def raw_policy(text):

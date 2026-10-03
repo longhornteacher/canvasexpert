@@ -56,8 +56,8 @@ def _assignment_digest(assignment: dict) -> str:
 
 
 def _freshness_attention(roster: dict, assignments: dict, submissions: dict) -> dict:
-    # Shared with the missing-sweep adapter -- see adapter_support for the
-    # actual behavior (grading-policy-contract.md section 6). Kept as a
+    # See adapter_support for the shared behavior
+    # (grading-policy-contract.md section 6). Kept as a
     # module-level name here so existing direct callers/tests are unaffected.
     return adapter_support.mirror_freshness_attention(roster, assignments, submissions)
 
