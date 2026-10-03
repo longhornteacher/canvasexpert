@@ -1,7 +1,7 @@
 """QuizForge quiz adapter tests — prepare, review, apply, retry, reconcile.
 
 Tests the full operation-ledger lifecycle for ``content.quiz`` using mocked
-Canvas calls and a mocked plan subprocess. No live Canvas interaction.
+Canvas calls and a mocked in-process plan builder. No live Canvas interaction.
 """
 import json
 import os
@@ -88,16 +88,16 @@ def _mock_active_courses(monkeypatch, courses=None):
     monkeypatch.setattr(config, "active_courses", lambda: courses)
 
 
-def _mock_plan_subprocess(monkeypatch, plan=None, fail=False):
-    """Mock run_json_object at the adapter's import path."""
+def _mock_plan_builder(monkeypatch, plan=None, fail=False):
+    """Mock the in-process planner used by the adapter."""
     plan = plan or SAMPLE_PLAN
 
-    def fake_run_json_object(args, extra_env=None, timeout=30, max_output_bytes=2_000_000):
+    def fake_build_push_plan(_path, _settings):
         if fail:
             raise ValueError("planner failed")
         return plan
 
-    monkeypatch.setattr(quiz_adapter_module, "run_json_object", fake_run_json_object)
+    monkeypatch.setattr(quiz_adapter_module.qf_pusher, "build_push_plan", fake_build_push_plan)
 
 
 def _mock_canvas_send(monkeypatch, responses=None):
@@ -155,7 +155,7 @@ def test_adapter_is_registered():
 def test_prepare_with_valid_plan(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
     adapter = QuizAdapter()
     payload = adapter.build_payload({"path": "/tmp/algebra.txt", "settings": {}})
@@ -175,7 +175,7 @@ def test_prepare_with_valid_plan(tmp_path, monkeypatch):
 def test_prepare_rejects_differentiated_mode(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
     adapter = QuizAdapter()
     with pytest.raises(ValueError, match="at least two variants"):
@@ -184,7 +184,7 @@ def test_prepare_rejects_differentiated_mode(tmp_path, monkeypatch):
 
 def test_prepare_rejects_empty_items(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
-    _mock_plan_subprocess(monkeypatch, plan={**SAMPLE_PLAN, "items": []})
+    _mock_plan_builder(monkeypatch, plan={**SAMPLE_PLAN, "items": []})
 
     adapter = QuizAdapter()
     with pytest.raises(ValueError, match="plan has no items"):
@@ -193,16 +193,16 @@ def test_prepare_rejects_empty_items(tmp_path, monkeypatch):
 
 def test_prepare_rejects_missing_quiz_payload(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
-    _mock_plan_subprocess(monkeypatch, plan={**SAMPLE_PLAN, "quiz_payload": {}})
+    _mock_plan_builder(monkeypatch, plan={**SAMPLE_PLAN, "quiz_payload": {}})
 
     adapter = QuizAdapter()
     with pytest.raises(ValueError, match="plan missing quiz_payload"):
         adapter.build_payload({"path": "/tmp/algebra.txt"})
 
 
-def test_prepare_rejects_plan_subprocess_failure(tmp_path, monkeypatch):
+def test_prepare_rejects_plan_failure(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
-    _mock_plan_subprocess(monkeypatch, fail=True)
+    _mock_plan_builder(monkeypatch, fail=True)
 
     adapter = QuizAdapter()
     with pytest.raises(ValueError, match="planner failed"):
@@ -212,7 +212,7 @@ def test_prepare_rejects_plan_subprocess_failure(tmp_path, monkeypatch):
 def test_prepare_unknown_course_rejected(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch, [{"id": "101", "name": "Only Course", "active": True}])
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
     adapter = QuizAdapter()
     payload = adapter.build_payload({"path": "/tmp/algebra.txt"})
@@ -222,7 +222,7 @@ def test_prepare_unknown_course_rejected(tmp_path, monkeypatch):
 
 def test_source_digest_deterministic(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
     adapter = QuizAdapter()
     p1 = adapter.build_payload({"path": "/tmp/algebra.txt"})
@@ -235,7 +235,7 @@ def test_source_digest_deterministic(tmp_path, monkeypatch):
 def test_capture_baseline_no_existing(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([], None),  # no existing assignments
     ])
@@ -250,7 +250,7 @@ def test_capture_baseline_no_existing(tmp_path, monkeypatch):
 def test_capture_baseline_with_existing_new_quiz(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([{"id": 555, "name": "Algebra Quiz 1", "new_quizzes": True,
            "published": False, "html_url": "http://canvas/assignments/555"}], None),
@@ -267,7 +267,7 @@ def test_capture_baseline_with_existing_new_quiz(tmp_path, monkeypatch):
 def test_drift_blocks_unknown_same_title(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
     adapter = QuizAdapter()
     payload = adapter.build_payload({"path": "/tmp/algebra.txt"})
@@ -280,7 +280,7 @@ def test_drift_blocks_unknown_same_title(tmp_path, monkeypatch):
 def test_drift_allows_known_exact_id(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
     adapter = QuizAdapter()
     payload = adapter.build_payload({"path": "/tmp/algebra.txt"})
@@ -297,7 +297,7 @@ def test_drift_allows_known_exact_id(tmp_path, monkeypatch):
 def test_no_drift_when_no_existing(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
     adapter = QuizAdapter()
     payload = adapter.build_payload({"path": "/tmp/algebra.txt"})
@@ -310,7 +310,7 @@ def test_no_drift_when_no_existing(tmp_path, monkeypatch):
 def test_review_freezes_per_target_summaries(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([], None),  # course 101: no existing
         ([], None),  # course 102: no existing
@@ -341,7 +341,7 @@ def test_review_freezes_per_target_summaries(tmp_path, monkeypatch):
 def test_review_with_existing_quiz(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([{"id": 555, "name": "Algebra Quiz 1", "new_quizzes": True,
            "published": False, "html_url": "http://canvas/assignments/555"}], None),
@@ -361,7 +361,7 @@ def test_review_with_existing_quiz(tmp_path, monkeypatch):
 def test_batch_review_digest_computed(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([], None), ([], None),
     ])
@@ -403,7 +403,7 @@ def test_batch_review_digest_computed(tmp_path, monkeypatch):
 def test_apply_creates_quiz_and_items(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     # capture_baseline: setup (1) + apply-time (1) + verify after patch (1)
     _mockcanvas_get(monkeypatch, [
         ([], None),  # setup capture_baseline (assignments search)
@@ -476,7 +476,7 @@ def test_apply_creates_quiz_and_items(tmp_path, monkeypatch):
 def test_apply_without_module(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch, plan=SAMPLE_PLAN_NO_MODULE)
+    _mock_plan_builder(monkeypatch, plan=SAMPLE_PLAN_NO_MODULE)
     _mockcanvas_get(monkeypatch, [
         ([], None),  # setup capture_baseline
         ([], None),  # apply-time capture_baseline
@@ -523,7 +523,7 @@ def test_apply_without_module(tmp_path, monkeypatch):
 def test_apply_without_assignment_settings(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch, plan=SAMPLE_PLAN_NO_SETTINGS)
+    _mock_plan_builder(monkeypatch, plan=SAMPLE_PLAN_NO_SETTINGS)
     _mockcanvas_get(monkeypatch, [
         ([], None),  # setup capture_baseline
         ([], None),  # apply-time capture_baseline
@@ -568,7 +568,7 @@ def test_apply_without_assignment_settings(tmp_path, monkeypatch):
 def test_apply_quiz_create_failure(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([], None),  # setup capture_baseline
         ([], None),  # apply-time capture_baseline
@@ -611,7 +611,7 @@ def test_apply_quiz_create_failure(tmp_path, monkeypatch):
 def test_apply_item_create_failure(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([], None),  # setup capture_baseline
         ([], None),  # apply-time capture_baseline
@@ -667,7 +667,7 @@ def test_apply_item_create_failure(tmp_path, monkeypatch):
 def test_apply_item_rejection_reports_cleanup_when_rollback_fails(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [([], None), ([], None), ([], None)])
     send_calls = _mock_canvas_send(monkeypatch, [
         ({"id": 1001}, None),
@@ -709,7 +709,7 @@ def test_apply_item_rejection_reports_cleanup_when_rollback_fails(tmp_path, monk
 def test_apply_quiz_create_sent_unknown(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([], None),  # setup capture_baseline
         ([], None),  # apply-time capture_baseline
@@ -752,7 +752,7 @@ def test_apply_retry_resumes_unfinished_item(tmp_path, monkeypatch):
     """Retry after partial item creation resumes at the first unfinished item."""
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([], None),  # setup capture_baseline
         ([], None),  # apply-time capture_baseline
@@ -815,7 +815,7 @@ def test_apply_retry_resumes_unfinished_item(tmp_path, monkeypatch):
 def test_reconcile_applied_quiz(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ({"id": 1001, "title": "Algebra Quiz 1"}, None),  # quiz verify
         ({"id": 2001}, None),  # item 1 verify
@@ -852,7 +852,7 @@ def test_reconcile_applied_quiz(tmp_path, monkeypatch):
 def test_reconcile_pending_when_no_quiz_id_and_no_marker(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([], None),  # no matching assignments
     ])
@@ -867,7 +867,7 @@ def test_reconcile_pending_when_no_quiz_id_and_no_marker(tmp_path, monkeypatch):
 def test_reconcile_sent_unknown_when_quiz_missing_and_has_marker(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         (None, "HTTP 404"),  # quiz not found
     ])
@@ -891,7 +891,7 @@ def test_reconcile_sent_unknown_when_quiz_missing_and_has_marker(tmp_path, monke
 def test_retry_selector_returns_unresolved_targets(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
     adapter = QuizAdapter()
     operation = {
@@ -913,7 +913,7 @@ def test_retry_selector_returns_unresolved_targets(tmp_path, monkeypatch):
 def test_reversal_not_supported(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
 
 
@@ -923,7 +923,7 @@ def test_plan_determinism(tmp_path, monkeypatch):
     """Same input produces same plan."""
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
     adapter = QuizAdapter()
     p1 = adapter.build_payload({"path": "/tmp/algebra.txt", "settings": {"published": True}})
@@ -935,7 +935,7 @@ def test_plan_no_network(tmp_path, monkeypatch):
     """build_payload must not call Canvas client."""
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
 
     # Verify canvas_client is never called during build_payload
     original_get = canvas_client.canvas_get
@@ -964,7 +964,7 @@ def test_review_no_full_item_bodies(tmp_path, monkeypatch):
     """Review must not expose full item payloads."""
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
-    _mock_plan_subprocess(monkeypatch)
+    _mock_plan_builder(monkeypatch)
     _mockcanvas_get(monkeypatch, [
         ([], None),
     ])

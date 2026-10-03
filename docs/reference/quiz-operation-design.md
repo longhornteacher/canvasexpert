@@ -8,9 +8,10 @@
 
 ## Existing live path
 
-Course Expert and standalone Quiz use the typed `content.quiz` Operation Ledger
-prepare/review/apply path. `qf_pusher.py` remains the local plan and whole-quiz transport owner
-consumed by the adapter. Differentiated delivery cannot bypass the reviewed family operation.
+Course Expert and quizzes use the typed `content.quiz` Operation Ledger prepare/review/apply
+path. `qf_pusher.py` is the local plan builder consumed by the adapter; it has no Canvas
+transport or standalone push entrypoint. Differentiated delivery cannot bypass the reviewed
+family operation.
 
 The live planner accepts auto-graded QuizForge types only. `ESSAY` and `FILEUPLOAD` are
 rejected immediately after local parse and before preparation, transformation, or Canvas;
@@ -35,12 +36,11 @@ Sources:
 
 ## Locked decisions
 
-### Planning and subprocess isolation
+### Planning boundary
 
 - `qf_pusher.py::build_push_plan(path, settings)` produces a local normalized quiz-create
   payload, ordered item payloads, assignment settings, metadata, and module request.
-- Preparation invokes JSON-plan mode through a bounded subprocess and validates the output before
-  persisting it. The adapter never invokes a legacy live-write subprocess.
+- Preparation calls the planner in-process and validates its output before persisting it.
 - Whole-class mode keeps one ordinary quiz and preserves its existing publish, module, date,
   category, and SIS choices.
 

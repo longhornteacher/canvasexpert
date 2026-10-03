@@ -1,6 +1,6 @@
 """QuizForge adapter for the crash-safe ``content.quiz`` operation kind.
 
-Pure plan subprocess, then checkpointed New Quiz create/item/assignment/module
+Pure in-process plan, then checkpointed New Quiz create/item/assignment/module
 writes with exact-ID reconciliation. Supports whole-class and differentiated
 (variant-based) modes. A plan that declares ``quiz_engine: "classic"`` routes to
 ``quiz_classic`` at each branch point below; every other plan is untouched.
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import copy
-import json
 import math
+import re
 from datetime import datetime, timezone
 
 from .. import models
@@ -28,10 +28,25 @@ from .adapter_support import (
 )
 from .module_placement import attach_assignment_type_module_item
 from api.platform_services import canvas_client, config
-from api.webui.runner import run_json_object
+from api import qf_pusher
 
 
 KIND = "content.quiz"
+_PATH_SEGMENT = r"[^\\/\r\n'\"]"
+_PATHISH = re.compile(
+    rf"(?:[A-Za-z]:[\\/]|[\\/])(?:{_PATH_SEGMENT}*[\\/])+{_PATH_SEGMENT}*"
+)
+
+
+def _build_plan(path: str, settings: dict) -> dict:
+    """Plan locally while preserving the old subprocess error presented to teachers."""
+    try:
+        return qf_pusher.build_push_plan(path, settings)
+    except Exception as exc:
+        lines = [line.strip() for line in f"plan error: {exc}".splitlines() if line.strip()]
+        detail = _PATHISH.sub("<path>", lines[-1] if lines else "")[:200]
+        message = f"planner failed: {detail}" if detail else "planner failed"
+        raise ValueError(message) from exc
 
 
 def _variant_identity(variant: dict, index: int) -> str:
@@ -61,11 +76,7 @@ class QuizAdapter:
             raise ValueError("path is required")
         settings = prepare_request.get("settings") or {}
 
-        # Run the no-network plan subprocess
-        plan = run_json_object(
-            ["qf_pusher.py", path, "--plan-json"],
-            extra_env={"QF_PUSH_SETTINGS": json.dumps(settings)},
-        )
+        plan = _build_plan(path, settings)
         if not isinstance(plan, dict):
             raise ValueError("planner did not return a JSON object")
         if plan.get("version") != 1:
@@ -104,10 +115,7 @@ class QuizAdapter:
             path = row.get("path")
             if not path:
                 raise ValueError("each variant requires a staged path")
-            plan = run_json_object(
-                ["qf_pusher.py", path, "--plan-json"],
-                extra_env={"QF_PUSH_SETTINGS": json.dumps(settings)},
-            )
+            plan = _build_plan(path, settings)
             if not isinstance(plan, dict):
                 raise ValueError("planner did not return a JSON object for variant")
             if plan.get("quiz_engine") == "classic":

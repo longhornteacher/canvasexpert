@@ -190,15 +190,10 @@ Canvas content. They remain classified `canvas_read_acquisition`, reconciliation
   `requests.post` onto a local name (`http_post = requests.post`) rather than
   calling it directly — the scanner has a dedicated alias-assignment detector
   for exactly this shape.
-- **Generic transport internals** (`webui/canvas_client.py _canvas_send`,
-  `api/canvas.py request`): the shared low-level HTTP call each owner above
+- **Generic transport internals** (`api/platform_services/canvas_client.py _canvas_send`):
+  the shared low-level HTTP call each owner above
   ultimately runs through. Classified `generic_transport_internal` rather
   than silently excluded, per the brief's requirement.
-- **Sandbox/demo CLI script** (`api/qf_pusher.py`, routed through `api/canvas.py`):
-  this is a standalone experimental tool
-  with zero CanvasMirror or operation-ledger integration — reconciliation
-  `n/a` because no reconciliation concept applies to it, not because
-  reconciliation was skipped.
 
 ## Batch 7 seeds (named gaps, in priority order)
 

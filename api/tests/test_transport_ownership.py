@@ -37,7 +37,6 @@ CLIENT_CTORS = {"Session", "Client", "AsyncClient"}
 ALLOWED_DIRECT_HTTP = {
     # Shared Canvas transports (the intended chokepoints)
     "api/platform_services/canvas_client.py",    # shared platform Canvas client (_canvas_send/canvas_get)
-    "api/canvas.py",                     # shared transport for standalone sandbox scripts
     # External / diagnostic / sandbox owners
     "api/webui/self_update.py",          # pinned GitHub self-update transport (not Canvas); see the self-update brief's D5
     "api/local_runtime.py",              # loopback-only 127.0.0.1 ping of this machine's own runtime (not Canvas)

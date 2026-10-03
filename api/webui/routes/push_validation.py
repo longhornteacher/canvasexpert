@@ -1,13 +1,14 @@
 """Validation, physical-render, and dry-run preview routes used by the push UI."""
 import os
+import json
 import uuid as _uuid
 
 from fastapi import File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
-from api.platform_services import config
-from .. import af, pf, runner
+from .. import af, pf
 from api import operational_log, runtime_paths
+from api import qf_pusher
 from ..deps import TEMP_DIR, REPO_ROOT
 
 
@@ -46,15 +47,24 @@ def register_validation_routes(
 
     @router.post("/api/push/preview")
     def api_push_preview(course_id: str = Form(...), path: str = Form(...), settings: str = Form("")):
-        """Dry-run preview: run qf_pusher.py with --dry-run for one course."""
+        """Build a local quiz plan summary without Canvas calls."""
         try:
-            env = config.resolve_env(course_id)
-        except ValueError as e:
-            return JSONResponse({"ok": False, "error": str(e)})
-        if settings:
-            env["QF_PUSH_SETTINGS"] = settings
-        code, output = runner.run_capture(["qf_pusher.py", path, "--dry-run"], env)
-        return JSONResponse({"ok": code == 0, "output": output})
+            push_settings = json.loads(settings) if settings.strip() else {}
+            plan = qf_pusher.build_push_plan(path, push_settings)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "output": f"plan error: {exc}"})
+        quiz = plan.get("quiz_payload", {}).get("quiz", {})
+        engine = "Classic Quiz" if plan.get("quiz_engine") == "classic" else "New Quiz"
+        points = quiz.get("points_possible_expected", quiz.get("points_possible", 0))
+        summary = [
+            f"Title: {plan.get('title', '')}",
+            f"Engine: {engine}",
+            f"Questions: {len(plan.get('items', []))}",
+            f"Points: {points}",
+            "Settings: " + (json.dumps(push_settings, ensure_ascii=False, sort_keys=True)
+                            if push_settings else "default settings"),
+        ]
+        return JSONResponse({"ok": True, "output": "\n".join(summary)})
 
     @router.post("/api/validate")
     def api_validate(path: str = Form(...)):

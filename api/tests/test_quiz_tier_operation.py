@@ -33,7 +33,8 @@ def _plan(tier="Support", title="Reading Check", points=20):
 def _plans(monkeypatch, first=None, second=None):
     rows = {"a.txt": copy.deepcopy(first or _plan()),
             "b.txt": copy.deepcopy(second or _plan("Accelerate"))}
-    monkeypatch.setattr(quiz_module, "run_json_object", lambda args, extra_env=None: copy.deepcopy(rows[args[1]]))
+    monkeypatch.setattr(quiz_module.qf_pusher, "build_push_plan",
+                        lambda path, _settings: copy.deepcopy(rows[path]))
     monkeypatch.setattr(config, "get_tier_tags", lambda: {
         "Support": "Red", "Core": "Blue", "Accelerate": "Silver",
     })
@@ -318,7 +319,8 @@ def test_differentiated_quiz_family_publishes_unrestricted_sources_in_module(mon
 
 
 def test_whole_quiz_plan_has_no_bridge(monkeypatch):
-    monkeypatch.setattr(quiz_module, "run_json_object", lambda *args, **kwargs: _plan("Core", "Whole"))
+    monkeypatch.setattr(quiz_module.qf_pusher, "build_push_plan",
+                        lambda _path, _settings: _plan("Core", "Whole"))
     payload = QuizAdapter().build_payload({"mode": "whole", "path": "whole.txt", "settings": {}})
     assert payload["mode"] == "whole"
     assert "bridge_due_at" not in payload

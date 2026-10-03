@@ -17,7 +17,6 @@ def test_supported_entrypoints_use_one_module_identity_and_activity_is_retired(t
     entrypoints = {
         Path("api/qf_ui.py"),
         Path("api/mcp_server/__main__.py"),
-        Path("api/qf_pusher.py"),
         Path("api/validate_qf.py"),
     }
 
@@ -114,10 +113,7 @@ for filename, names in owners.items():
         )
         assert result.returncode == 0, result.stderr or result.stdout
 
-        for args in (
-            [str(api_root / "qf_pusher.py")],
-            [str(api_root / "validate_qf.py")],
-        ):
+        for args in ([str(api_root / "validate_qf.py")],):
             smoke = subprocess.run(
                 [sys.executable, *args],
                 cwd=cwd,
@@ -144,3 +140,25 @@ for filename, names in owners.items():
     assert "/api/work" in route_paths
     assert "/api/receipts" in route_paths
     assert "/api/operations" in route_paths
+
+
+def test_quiz_planner_import_does_not_load_canvas_transport(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    code = r'''
+import sys
+from pathlib import Path
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root))
+import api.qf_pusher
+assert "api.canvas" not in sys.modules
+assert "api.platform_services.canvas_client" not in sys.modules
+assert "requests" not in sys.modules
+assert "httpx" not in sys.modules
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(repo_root)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout

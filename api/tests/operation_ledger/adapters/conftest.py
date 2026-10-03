@@ -11,9 +11,7 @@ import json
 
 import pytest
 
-from api import qf_pusher
 from api.operation_ledger import batches, executor, models, operations, paths
-from api.operation_ledger.adapters import quiz as quiz_adapter_module
 from api.operation_ledger.adapters import QuizAdapter
 from api.platform_services import canvas_client, config
 
@@ -193,12 +191,6 @@ def classic_push(classic_canvas, tmp_path, monkeypatch):
     synthetic QuizForge file to Canvas writes is exercised without a subprocess.
     """
     monkeypatch.setattr(paths, "private_root", lambda: tmp_path / "local-private")
-
-    def planner(args, extra_env=None, **_kwargs):
-        settings = json.loads((extra_env or {}).get("QF_PUSH_SETTINGS") or "{}")
-        return json.loads(json.dumps(qf_pusher.build_push_plan(args[1], settings)))
-
-    monkeypatch.setattr(quiz_adapter_module, "run_json_object", planner)
 
     def push(envelope: dict, settings: dict | None = None, *, apply: bool = True):
         path = tmp_path / "classic-quiz.txt"

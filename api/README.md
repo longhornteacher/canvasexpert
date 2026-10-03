@@ -85,7 +85,8 @@ bundled Pandoc through `pypandoc-binary`.
 
 ### CLI (for automation)
 
-- **Quiz**: `py qf_pusher.py "<quiz.txt>"` → live New Quiz (unpublished)
+- **Quiz**: prepare, review, and apply QuizForge operations through the connected agent.
+  `qf_pusher.py` is an internal, no-network planner; it does not push quizzes.
 - **Validate**: `py validate_qf.py <file.txt>`
 
 Differentiated live delivery has no direct CLI. Use the reviewed AssignmentForge or
@@ -213,11 +214,10 @@ safety remain part of the reviewed family operation. Tier placement is manual an
 
 | File | Role |
 |---|---|
-| `canvas.py` | API client (core REST + New Quizzes surfaces), reads `.env` |
 | `transform.py` | Auto-graded QuizForge item → Canvas item (feedback composition) |
 | `codefmt.py` | VSCode-style code highlighting (Pygments → inline styles) |
 | `teks.py` | TEKS coverage report + visible labels |
-| `qf_pusher.py` | Driver: envelope → live quiz (points, settings, stimulus, TEKS) |
+| `qf_pusher.py` | No-network QuizForge planner: envelope → normalized quiz/item payloads |
 | `downloader.py` | Submission downloader → canonical `Student Work/Submissions/<course>/Assignments/<assignment>/<student>/Attempt <n>/` tree; no duplicate raw by-student mirror |
 | `validate_qf.py` | QuizForge compliance checker |
 | `qf_ui.py` | Launches the local control console (see "Control console" above) |
@@ -233,7 +233,7 @@ safety remain part of the reviewed family operation. Tier placement is manual an
 | `custom_routines/` | Teacher-authored local automation jobs and the routine authoring contract |
 | `learning_objectives.py` | Reviewed, revision-protected per-course Learning Objectives storage and validation |
 | `course_catalog.py` | Student-free local course, module, assignment, and page catalog reads |
-| `webui/` | Local control console: FastAPI app (`server.py`), single-account + bookmark config, templates/static, retained feature scripts, subprocess/SSE runner |
+| `webui/` | Local control console: FastAPI app (`server.py`), single-account + bookmark config, templates/static, retained feature scripts |
 | `qf_materials/qf quiz examples/` | QuizForge fixtures (contract lives at `default_docs/AI Authoring/Author a Quiz (QuizForge).txt`) |
 
 ## Setup

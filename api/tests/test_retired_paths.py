@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # Keep the reason beside each path.  A failure should tell the next maintainer
 # which decision the returning path would undo.
 RETIRED_PATHS = (
+    ("api/canvas.py", "(none)", "Close the standalone QuizForge Canvas transport"),
     ("CLAUDE.md", "bfe1877", "Add TAForge and canonical agent guidance"),
     (
         "api/default_docs/AI Authoring/NoteForge_Base.md",
@@ -24,6 +25,7 @@ RETIRED_PATHS = (
     ("api/tests/test_downloader.py", "f8a8f22", "Retire duplicate Download Work workflow"),
     ("api/tests/test_noteforge_physical_routes.py", "926b4f2", "Modularize live-fire workflows"),
     ("api/webui/activity.py", "6110c48", "Complete 0.75beta local hardening and MCP support"),
+    ("api/webui/runner.py", "(none)", "Remove quiz planner subprocess transport"),
     ("api/webui/config.py", "87b2a80", "Refactor web UI modules and document next slices"),
     ("api/webui/push_service.py", "cbd6738", "Cleanup legacy Course Expert standalone push surfaces"),
     ("api/webui/static/style.css", "1c2d9f7", "Complete WebUI presentation migration"),
