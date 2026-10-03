@@ -1,6 +1,7 @@
 # Legacy storage code and the quiz CLI: addition by subtraction
 
-Status: ready to execute. Written 2026-10-03 with the teacher. Baseline: `dev` at `6cdc057`.
+Status: GREEN, accepted 2026-10-03; retiring this brief in the same batch.
+Written 2026-10-03 with the teacher. Baseline: `dev` at `6cdc057`.
 
 Objective: delete the code that only existed to carry the teacher's state across the September
 storage moves, which have finished on every machine, and close the second way to write a quiz
@@ -259,16 +260,189 @@ From the same review, still open after this batch:
 
 ## Execution result
 
-In progress, orchestrated with GPT-6-Luna writers.
+**GREEN.** Accepted against all nine criteria, with the two teacher-approved adjustments
+below. Three GPT-6-Luna writers executed A, B, and C; the lead reviewed the seams,
+integrated, ran the full gate, and verified the rendered console. No Canvas writes,
+operations, or private workspace deletions were performed. The three unrelated State of
+the Repo notes remain untouched.
+
+Commits: A `b4b6068`, B `8e70130`, C `f25c352`; approved safety-display extension
+`0c22095`. The initial brief/preflight record is `7e28490`. No push performed.
 
 - Preflight: `dev` / `origin/dev` both `6cdc057e3916ff5c8fd02ec836201ab4ceb28c6f`;
   `dev` is 11 commits ahead of `origin/main`, none behind. Both dependency checks passed.
 - Baseline: `py -m pytest api/tests engine/tests -p no:randomly -q`:
   **2693 passed, 5 warnings in 162.09s**.
-- Live mirror roster baseline: **26** pseudonyms; SHA-256 of newline-joined sorted
+- Final full gate: same command, **2687 passed, 5 warnings in 141.14s**:
+  six fewer tests (deleted migration coverage and one added refusal integration test),
+  20.95 seconds faster in this run. The five existing invalid-escape warnings remain.
+- Live mirror roster before and after: **26** pseudonyms; SHA-256 of newline-joined sorted
   pseudonyms: `c377e5ad3aa5258fc15802e9ae69ee39d96c7bbfe100c31a7565da8baa0aedab`.
-  No identities or row data emitted.
+  The final deliberate in-process read-only script reported `matches_baseline: true`.
+  No identities or row data emitted. The existing current-seed pseudonym tests also pass.
 - Teacher-approved verification adjustment (2026-10-03): use a valid test quiz and
   record the Inbox limitation. All 18 marker-gated Inbox quizzes were already
   invalid at baseline: 16 lack required explicit item points, two contain invalid
   JSON. No Inbox file was changed and no Canvas write or operation was opened.
+- Teacher-approved safety-display extension (2026-10-03): rendered verification
+  found that a retired settings file correctly refuses configuration access but
+  causes the root console's mirror preload/status reads to raise before the privacy
+  warning renders. The root and Web UI health/mirror status endpoints now return safe
+  refusal summaries, preserving the guard and runtime/MCP contracts. An integration
+  test checks all endpoints, continued settings refusal, and no sentinel open.
+
+Focused commands and results (all use `py -m pytest` and `-p no:randomly -q`):
+
+- A: `api/tests/test_beta075_storage.py api/tests/test_shared_kv.py
+  api/tests/test_shared_vault.py api/tests/test_vault_conflict.py
+  api/tests/test_vault_conflict_endpoint.py api/tests/webui/test_workspace.py
+  api/tests/operation_ledger/adapters/test_forge_files.py`: **68 passed in 2.32s**.
+- B: `api/tests/test_planner_subprocess.py api/tests/test_qf_pusher.py
+  api/tests/test_quiz_operation.py api/tests/test_beta075_imports.py
+  api/tests/operation_ledger/adapters/test_quiz_classic.py
+  api/tests/test_quiz_tier_operation.py api/tests/test_route_contract.py
+  api/tests/test_canvas_mutation_ownership.py api/tests/test_transport_ownership.py
+  api/tests/test_retired_paths.py`: **102 passed, 5 existing warnings in 13.81s**.
+- C: `api/tests/test_routines_scheduler.py api/tests/test_routines_builtin_sis_grade_bridge.py
+  api/tests/test_roster_routes.py api/tests/test_work_discovery.py
+  api/tests/test_work_providers_mirror.py api/tests/test_work_registry.py`:
+  **98 passed in 4.45s**.
+- Safety display: `api/tests/test_desk_routes.py api/tests/test_beta075_connections.py
+  api/tests/webui/test_mirror_service.py`: **57 passed in 3.44s**. Final JS warning
+  wording also verified by `api/tests/test_desk_routes.py`: **5 passed in 2.09s**.
+- `git diff --exit-code 6cdc057 -- api/mcp_server/contract.py
+  api/mcp_server/tool_schema_v75.json`: unchanged, version **75**. `git diff --check`: passed.
+
+Rendered verification used a temporary local synthetic workspace, mocked credentials
+and Canvas reads, Canvas writes that raise, and disabled startup routines. Loaded `/`,
+`/course-expert`, `/roster`, `/routines`, and `/settings`; route initialization and script
+order worked, with no new browser warnings/errors. Root privacy was available normally;
+each retired-file sentinel independently produced the explicit refusal without a migrated
+backup, disabled refresh, and recovered after sentinel removal. A valid synthetic Library
+quiz's Dry-run preview reported title, New Quiz engine, one question, 1.0 point, and shuffle
+settings. No ledger operation opened. Roster warnings and routine registration/save behavior
+were verified. All temporary sentinels were removed; the teacher's workspace was untouched.
+
+Ownership extensions: A removed dead migration-only settings UI/MCP exception handling
+and adjusted config exports and SharedKV tests. B updated direct-call adapter fixtures and
+import/transport smoke tests. C added the runtime module and registry import-boundary tests.
+These are required callers/test seams of the named cuts. The only product scope extension
+was the teacher-approved root/status display repair. No undeclared deviations remain.
+
+Remaining non-test `legacy` mentions, from
+`rg -il legacy api engine --glob '!**/tests/**' --glob '!**/__pycache__/**'` (36 files):
+
+- `engine/config.py`: supported text/JSON QuizForge input modes.
+- `engine/importers.py`: supported text/domain input model.
+- `engine/docs/README.md`: supported text input documentation.
+- `engine/docs/ARCHITECTURE.md`: text parser documentation.
+- `engine/docs/AGENT_MAP.md`: text parser routing.
+- `engine/parsing/text_parser.py`: historical authoring header format.
+- `engine/rendering/physical/reference_doc.py`: established printable styles.
+- `api/default_docs/AI Authoring/Author a Quiz (QuizForge).txt`: explicitly requestable older quiz input schema.
+- `api/default_docs/AI Authoring/Reference/QF_REF_Stimulus_Formatting.md`: older formatting inputs.
+- `api/feedback_artifacts.py`: existing code-file submission evidence, not state migration.
+- `api/platform_services/workspace.py`: Windows MAX_PATH wording and metadata-only old assignment candidates for explicit workspace reset; no migration/dual read.
+- `api/mirror/read_service.py`: direct callers predating lifecycle sidecars.
+- `api/mirror/sync.py`: supported injected Canvas client interface.
+- `api/platform_services/canvas_client.py`: established Canvas API wrappers.
+- `api/operation_ledger/adapters/differentiated_bridge.py`: existing bridge-item shapes.
+- `api/powergrader/session_actions.py`: stripping historical feedback banners.
+- `api/powergrader/scoring_preparation.py`: preserves in-flight scoring artifacts; private session compatibility is outside this slice.
+- `api/shared_storage.py`: simplified retired-file guard.
+- `api/shared_vault.py`: retired-file guard invocation only.
+- `api/shared_kv.py`: retired-file guard invocation only.
+- `api/requirements.txt`: upstream Starlette removed-API note.
+- `api/README.md`: general supported CLI/headless workflows.
+- `api/sis_grade_bridge.py`: existing unsuffixed SIS rows.
+- `api/mirror/store.py`: roster convenience field generated at read time.
+- `api/webui/mirror_reads.py`: shim with live consumers.
+- `api/webui/mirror_service.py`: existing cadence/injected-client behavior.
+- `api/webui/README.md`: retired HTTP streaming history.
+- `api/webui/source_materials.py`: unsupported old Office formats.
+- `api/webui/source_material_extractors.py`: old Office input formats.
+- `api/webui/routes/names.py`: retired-file guard/privacy status.
+- `api/webui/routes/pages.py`: Windows long-path containment wording.
+- `api/webui/static/app_context.js`: **uncertain, retained** old localStorage course-picker preference migration; no proof it ran on every machine.
+- `api/mcp_server/tools.py`: ignores historical variant-group input fields.
+- `api/webui/routes/connections.py`: safe retired-storage status refusal.
+- `api/webui/routes/mirror.py`: safe retired-storage status refusal.
+- `api/webui/static/canvasagent.js`: renders the retired-storage status refusal.
+
+Open questions: none blocking this batch. The guide retains the two-computer field checks
+unchanged; they remain teacher/laptop work. Restart the running MCP process on this PC to
+load the new code, then check the laptop's privacy card after its normal update. Optional
+manual cleanup and the separate senior decisions in Next remain outside this execution.
+
+Changed files per workstream follow (deletions included):
+
+### A (b4b6068)
+
+- `api/identity_ledger.py`
+- `api/identity_vault_service.py`
+- `api/mcp_server/tools.py`
+- `api/operation_ledger/adapters/forge_files.py`
+- `api/platform_services/config/__init__.py`
+- `api/platform_services/config/_io.py`
+- `api/platform_services/workspace.py`
+- `api/runtime_paths.py`
+- `api/shared_kv.py`
+- `api/shared_storage.py`
+- `api/shared_vault.py`
+- `api/tests/conftest.py`
+- `api/tests/operation_ledger/adapters/test_forge_files.py`
+- `api/tests/test_beta075_storage.py`
+- `api/tests/test_shared_kv.py`
+- `api/tests/test_shared_vault.py`
+- `api/tests/test_vault_conflict_endpoint.py`
+- `api/tests/webui/test_workspace.py`
+- `api/webui/profiles.py`
+- `api/webui/routes/settings.py`
+- `api/webui/server.py`
+- `api/webui/static/canvasagent.js`
+- `api/webui/static/settings/identity-vault.js`
+
+### B (8e70130)
+
+- `api/README.md`
+- `api/canvas.py`
+- `api/operation_ledger/adapters/quiz.py`
+- `api/qf_pusher.py`
+- `api/tests/operation_ledger/adapters/conftest.py`
+- `api/tests/test_beta075_imports.py`
+- `api/tests/test_planner_subprocess.py`
+- `api/tests/test_quiz_operation.py`
+- `api/tests/test_quiz_tier_operation.py`
+- `api/tests/test_retired_paths.py`
+- `api/tests/test_transport_ownership.py`
+- `api/webui/routes/push_validation.py`
+- `api/webui/runner.py`
+- `docs/contracts/canvas-transport-owners.json`
+- `docs/reference/course-expert-module-map.md`
+- `docs/reference/mutation-reconciliation-map.md`
+- `docs/reference/quiz-operation-design.md`
+
+### C (f25c352)
+
+- `AGENTS.md`
+- `MIGRATION.md`
+- `api/README.md`
+- `api/roster_service.py`
+- `api/routine_runtime.py`
+- `api/tests/test_routines_builtin_sis_grade_bridge.py`
+- `api/tests/test_routines_scheduler.py`
+- `api/tests/test_work_registry.py`
+- `api/webui/routes/roster.py`
+- `api/webui/routes/roster_helpers.py`
+- `api/webui/routes/routines.py`
+- `api/work_registry/adapters.py`
+- `api/work_registry/providers/roster_warnings.py`
+- `docs/guides/more-than-one-computer.md`
+- `docs/reference/workbench-canonical-flow-map.md`
+
+### Approved display extension (0c22095)
+
+- `api/tests/test_desk_routes.py`
+- `api/webui/routes/connections.py`
+- `api/webui/routes/mirror.py`
+- `api/webui/static/canvasagent.js`
