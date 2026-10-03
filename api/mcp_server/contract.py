@@ -6,14 +6,13 @@ from pathlib import Path
 
 
 TOOL_SCHEMA_VERSION = 73
-_SUPPORTED_SCHEMA_VERSIONS = tuple(range(1, TOOL_SCHEMA_VERSION + 1))
 _SCHEMA_DIR = Path(__file__).resolve().parent
 
 
-def load_contract(version: int = TOOL_SCHEMA_VERSION) -> dict:
-    if version not in _SUPPORTED_SCHEMA_VERSIONS:
-        raise ValueError(f"unsupported MCP tool schema version: {version}")
-    with (_SCHEMA_DIR / f"tool_schema_v{version}.json").open(encoding="utf-8") as handle:
+def load_contract() -> dict:
+    """Load the snapshot for the current version; older snapshots live in Git."""
+    path = _SCHEMA_DIR / f"tool_schema_v{TOOL_SCHEMA_VERSION}.json"
+    with path.open(encoding="utf-8") as handle:
         contract = json.load(handle)
     contract["tools"] = sorted(contract.get("tools") or [], key=lambda tool: tool["name"])
     for tool in contract["tools"]:

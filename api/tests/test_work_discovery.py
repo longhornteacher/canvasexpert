@@ -9,7 +9,7 @@ import pytest
 
 from api.work_registry import discovery, storage
 from api.work_registry.models import material_version, stable_fingerprint
-from api.work_registry.providers import CalendarNeedsAttention, WorkCourseReads, finding
+from api.work_registry.providers import WorkCourseReads, finding
 from api.work_registry.providers import grading_debt, home_attention, roster_warnings
 
 

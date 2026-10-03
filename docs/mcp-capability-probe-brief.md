@@ -60,8 +60,8 @@ For each job below, write the full call sequence you would use, start to finish,
 
 - **Job A:** a teacher has a class set of written work to score, wants AI help scoring it, and wants the result in front of them for review.
 - **Job B:** a teacher wants something new in a Canvas course (a page, an assignment, a quiz, your choice).
-- **Job C:** a teacher wants next week's schedule and school calendar straight, including a
-  date that has changed.
+- **Job C:** a teacher wants to see which assignments in a course are missing work, and
+  what the surface lets them do about it.
 
 Where a sequence has a gap you cannot fill, say so and name the tool you expected to exist there.
 

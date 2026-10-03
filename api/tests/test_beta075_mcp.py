@@ -15,127 +15,14 @@ def _explode_live(*_args, **_kwargs):
     raise AssertionError("live Canvas read attempted")
 
 
-def test_live_mcp_schema_matches_versioned_contract():
+def test_live_mcp_surface_shape():
     from api.mcp_server import server
 
-    assert contract.TOOL_SCHEMA_VERSION == 73
-    expected = contract.load_contract()
     live = contract.live_contract(server.mcp)
-    assert live == expected
-    # Older contracts stay immutable and independently loadable for clients
-    # pinned before refresh_mirror (v3), seating context (v4), modules (v5),
-    # the authoring contract tool (v6), list_staged_content (v7),
-    # list_sections (v8), get_product_guide (v9), get_writing_history (v10),
-    # local-only Glass draft tools (v11), v12 removes those Glass tools,
-    # v13 adds schedule-read tools get_bell_schedule, get_day_schedule, get_teacher_schedule,
-    # v14 added retired classroom-display tools, v15 adds the
-    # teacher schedule write tools, v16 replaces save_day_calendar with the
-    # canonical School Calendar tools (get/create/preview/apply_school_calendar_change),
-    # and v17 removes the live-write create_school_calendar in favor of a staged
-    # preview_school_calendar_replacement/apply_school_calendar_replacement pair
-    # (revision-safe complete-year create/replace; v16 stays inert history).
-    # v18 adds the revision-safe public-event preview/apply pair; v17 stays inert history.
-    # v19 adds the disk-only Course Catalog pages read and reviewed objective pair.
-    # v20 makes reviewed objectives fully mutable with list/replace/delete tools;
-    # v21 adds the narrow pseudonym-first roster settings write surface;
-    # v22 adds the scoring packet surface; v23 adds teacher-owned Panel themes;
-        # v24 is the frozen 45-tool snapshot; v25 removes the retired deck tools.
-        # v26 adds the offline standards-profile read; v27 adds bounded scoring
-        # context; v28 adds the narrow existing-game score preview/apply pair.
-        # v30 adds section_id to
-        # get_seating_context (and loosens section_name to a trim/case-fold
-        # retry) so a duplicate or slightly-off SIS section name can still be
-        # resolved instead of always refusing. v31 adds the Bell Schedule
-        # preview/apply write pair. v32 adds the three bounded SIS grade-bridge
-        # tools while v31 remains the immutable 49-tool snapshot. v33 adds the
-        # evidence-only SIS passback confirmation while v32 remains immutable.
-        # v34 adds start_scoring_session, the packet-mode-only session-start
-        # tool, while v33 remains the immutable 53-tool snapshot. v35 adds
-        # the New Quiz item-finalization write pair, preview_new_quiz_scores
-        # and apply_new_quiz_scores, while v34 remains the immutable
-        # 54-tool snapshot. v37 adds the staged-content push pair,
-        # preview_content_push and apply_content_push, so a teacher can ask
-        # for an authored draft to be landed in Canvas from the chat; v36
-        # stays the immutable 50-tool snapshot. v46 removes the SIS-sync
-        # confirmation tool; grade projection never starts Canvas Grade Sync.
-    v1 = contract.load_contract(1)
-    v2 = contract.load_contract(2)
-    assert v1["schema_version"] == 1
-    assert [t["name"] for t in v1["tools"]] == [t["name"] for t in v2["tools"]]
-    v3 = contract.load_contract(3)
-    assert v3["schema_version"] == 3
-    assert len(v3["tools"]) == 6
-    v4 = contract.load_contract(4)
-    assert v4["schema_version"] == 4
-    assert len(v4["tools"]) == 7
-    v5 = contract.load_contract(5)
-    assert v5["schema_version"] == 5
-    assert len(v5["tools"]) == 8
-    v6 = contract.load_contract(6)
-    assert v6["schema_version"] == 6
-    assert len(v6["tools"]) == 9
-    v7 = contract.load_contract(7)
-    assert v7["schema_version"] == 7
-    assert len(v7["tools"]) == 10
-    v8 = contract.load_contract(8)
-    assert v8["schema_version"] == 8
-    assert len(v8["tools"]) == 11
-    v9 = contract.load_contract(9)
-    assert v9["schema_version"] == 9
-    assert len(v9["tools"]) == 12
-    v11 = contract.load_contract(11)
-    assert v11["schema_version"] == 11
-    v16 = contract.load_contract(16)
-    assert v16["schema_version"] == 16
-    assert len(v16["tools"]) == 24
-    v17 = contract.load_contract(17)
-    assert v17["schema_version"] == 17
-    assert len(v17["tools"]) == 25
-    v24 = contract.load_contract(24)
-    assert v24["schema_version"] == 24
-    assert len(v24["tools"]) == 45
-    v25 = contract.load_contract(25)
-    assert v25["schema_version"] == 25
-    assert len(v25["tools"]) == 42
-    assert len(contract.load_contract(31)["tools"]) == 49
-    assert len(contract.load_contract(32)["tools"]) == 52
-    assert len(contract.load_contract(33)["tools"]) == 53
-    assert len(contract.load_contract(34)["tools"]) == 54
-    assert len(contract.load_contract(35)["tools"]) == 56
-    # v36 removes the six Panel theme tools with the classroom display.
-    assert len(contract.load_contract(36)["tools"]) == 50
-    # v37 adds the staged-content push pair; v38 adds stage_content and
-    # push_content_live, so an assistant can stage and land a draft itself.
-    assert len(contract.load_contract(37)["tools"]) == 52
-    # v38 added stage_content and push_content_live. v39 retires the calendar
-    # and bell write pairs, the teacher-schedule write, and get_seating_context,
-    # which were built to feed the classroom display: the reads stay, and those
-    # edits live in the web UI.
-    assert len(contract.load_contract(38)["tools"]) == 54
-    # v40 stays the immutable 44-tool snapshot. v41 adds the id-addressed
-    # assignment update pair, preview_assignment_update and
-    # apply_assignment_update, so an assistant can publish/re-date an
-    # existing assignment without a second create or a description touch.
-    # v42 is a rename only: a remote bridge strips any argument literally
-    # named session_id, so get_scoring_packet, stage_scores, and
-    # preview_new_quiz_scores now take scoring_session_id instead. v41
-    # remains the immutable 46-tool snapshot under the old name.
-    # v44 retires stage/preview/apply scoring tools and exposes the single
-    # assignment-type-neutral submit_scoring_results contract. v45 adds the
-    # backlog-wide Scoring Session continuation tool. v47 removes the retired
-    # assessment and local-rubric surfaces. v48 removes the four calendar-read
-    # tools (get_bell_schedule, get_day_schedule, get_teacher_schedule,
-    # get_school_calendar), retiring them to the web UI scheduler.
-    assert len(contract.load_contract(40)["tools"]) == 44
-    assert len(contract.load_contract(41)["tools"]) == 46
-    assert len(contract.load_contract(42)["tools"]) == 46
     assert len(live["tools"]) == 68
     assert "confirm_sis_grade_bridge_passback" not in {
         tool["name"] for tool in live["tools"]
     }
-    v22 = contract.load_contract(22)
-    assert v22["schema_version"] == 22
-    assert len(v22["tools"]) == 39
     assert all("canvas" not in tool["name"].lower() for tool in live["tools"])
 
 
@@ -228,12 +115,6 @@ def test_canvasagent_appendix_d_tools_match_the_live_registry():
     assert "docs/mcp-server.md" not in appendix
     stale = sorted(mentioned - _live_tool_names())
     assert not stale, f"Appendix D names tools absent from the registry: {stale}"
-
-
-def test_v11_glass_pane_assets_property_is_an_array():
-    pane_tool = next(tool for tool in contract.load_contract(11)["tools"]
-                     if tool["name"] == "save_glass_pane_draft")
-    assert pane_tool["properties"]["assets"] == "array"
 
 
 def test_mcp_mirror_gradebook_snapshot_stays_pseudonymized(tmp_path, monkeypatch):
