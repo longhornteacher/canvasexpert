@@ -545,4 +545,83 @@ the instruction length and budget, deviations, open questions.
 
 ## Execution result
 
-_(lead executor fills this in)_
+Lead: Sonnet 5.5, 2026-10-03. Not pushed.
+
+**Traffic light: GREEN** on the 14 acceptance criteria and the full gate. Live acceptance
+(teacher) and the optional live run are still to do; see Open questions.
+
+**Commits on `dev`**
+
+- A `ca495a6`: AGENTS.md (Firm rules, Defaults, Execution model, routing), project-state.md,
+  mirror.md, docs/README.md, powergrader-module-map.md deleted, retired-paths guard message,
+  plus softened "mirror-only law" wording in `api/README.md` and two dailywriting docstrings.
+- B `cbecdac`: integrity ban removed, `agent_commentary` rename, new `api/powergrader/overlap.py`
+  and its hook, packet rules, `mirror_refresh_needed` rename.
+- C `003b15d`: `get_scoring_preview`, preview/warnings/refresh instructions, readback rename,
+  schema v74, scoring docs, START HERE and seeded-doc refresh.
+
+**Gate**
+
+- Full: `py -m pytest api/tests engine/tests -p no:randomly -q`: 2684 passed, 5 warnings
+  (same five as baseline), 143.50s. Baseline was 2660, so 24 tests added.
+- Focused (at the time each writer finished): A 41 passed; B 428 passed; C 382 passed with one
+  failure that was the START HERE overview size cap, fixed before the full run.
+- Acceptance grep for the removed names returns only stale `.pyc` files.
+- Instruction block 2,667 characters; `INSTRUCTION_BUDGET` raised 2,200 to 2,700 (the brief's
+  measured-length rule). `LISTING_BUDGET` 23,948 to 24,279 for the new tool. 69 tools, schema
+  v74 is the only snapshot.
+
+**Review.** One independent read-only review of the riskiest seams found three real defects,
+all fixed and tested before the commits: (1) the preview did not go stale when apply would
+refuse for a changed packet or a deactivated curve, so those checks are now shared helpers
+used by both; (2) the posting-policy read ran under the scope lock, so it now runs before it;
+(3) the agent rules contradicted each other on quoting pseudonyms, and nothing told the agent
+to keep integrity concerns out of student-facing `feedback`. It found no `agent_commentary`
+leak path to Canvas, receipts, the ledger, or any other MCP result.
+
+**Deviations from the brief (all small, none change what the teacher sees beyond the brief)**
+
+1. Workstream C ran as two writers (code, docs) on disjoint files.
+2. The posting-policy read needed a new single-object read, `scoring_apply.default_assignment_read`
+   and `read_posting_policy`, because the existing scoring read transport only accepts list
+   pages. The MCP layer still never imports `canvas_client`.
+3. `build_plan` has no `payloads`; the preview calls `scoring_apply.preview_rows`, built on
+   `_projected_payload`, the builder the plan digest covers. It gained an optional
+   `waive_user_ids` so a `waive_late` answer previews the waived bytes.
+4. Readback rename was narrower than the brief implied: `score_readback_*` already existed as
+   verification statuses. Renamed the remaining `late_readback_*` strings and
+   `_check_late_rows` to `_verify_posted_scores`.
+5. Overlap hook: `build_packet` only projects pages. The SAFE bundle is written by
+   `scoring_artifacts.build_scoring_artifacts`, which was not in workstream B's file list, so
+   `_attach_overlap_evidence` in `scoring_preparation.py` runs right after it in both prepare
+   and refresh. `evidence` also had to be added to `_PACKET_STUDENT_COLUMNS` in `tools.py` and
+   carried by `build_packet` (first segment only) so the agent actually receives it.
+6. Edits outside the brief, all wording that contradicted decisions 4, 5 or 9:
+   `mirror_freshness_confirmation_required` renamed in `feedback_revision.py` too; "ask the
+   teacher whether to refresh" strings in `sis_grade_bridge.py`, `operation_ledger/executor.py`
+   and three test pins; `_freshness_attention` and catalog stale notes in `tools.py`; content
+   push next-step text, the authoring-contract footer, `docs/mcp-server.md` and START HERE now
+   say "say what will land and wait for the go" instead of "their ask is the authorization"
+   (text only, no content-push behavior change); `RETIRED_FILES` gained the replaced START HERE
+   and Writing Timeline hashes so existing workspaces refresh; the stale PowerGrader test
+   command in AGENTS.md was repointed; START HERE Appendix B was tightened to 7,115 characters
+   (cap 7,200) to make room.
+
+**Open questions and follow-ups**
+
+- The `ask_teacher_confirmation` attention action code is unchanged. It is emitted from several
+  places (`tools.py`, `attempts_grant`, `grade_adjustment`, two ledger adapters) and pinned by tests; only
+  its reason text now says to refresh. Renaming the code is a wider change.
+- `requires_teacher_confirmation` has 27 references and was left.
+- Writing Timeline output is not projected onto packet pages today (`build_packet` never
+  carries `writing_timeline`), though the new agent rule lists it as evidence. Follow-up if the
+  agent should see it in the packet rather than via `get_writing_history`.
+- Minor, unfixed: overlap `shared_words` counts positions, so a response that repeats a passage
+  can look one-sided; a sample's 30-word cap counts tokens, not whitespace words; multi-item
+  `agent_commentary` is joined with no item label; `late_not_honored` looks unreachable because
+  `score_mismatch` classifies first.
+- Claude Code still cuts the instruction block near 2,048 characters. The preview, commentary
+  and push rules now end at 2,043 (pinned by a test); the cross-device, content and attachment
+  hints at the tail remain cut, as before.
+- Not run: the optional live preview run (needs the teacher's OK in chat) and the teacher's
+  live acceptance in Claude Desktop.
