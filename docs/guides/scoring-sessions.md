@@ -120,8 +120,12 @@ course mirror and retry.
 7. Call `apply_staged_scoring_results(scoring_session_id, expected_stage_digest,
    idempotency_key="")` only after that direct request. The tool accepts no
    replacement result rows, review answers, or plan. It rechecks the private
-   packet and frozen plan, then uses the existing narrow score/comment write lane
-   once. It performs no mirror refresh and no automatic retry. After the send it
+   packet and frozen plan, then makes one batched, read-only live-grade check before
+   using the existing narrow score/comment write lane. If a row's score, entered
+   score, workflow state, or graded time changed, it sends nothing and returns
+   `canvas_grade_changed` with pseudonymized expected/live rows; re-stage without
+   those rows or refresh the session and re-stage. It performs no mirror refresh and
+   no automatic retry. After the send it
    makes one batched, read-only check of every posted numeric score
    (`_verify_posted_scores`), comparing what Canvas stored (score, entered score,
    late status, and deduction) with what was sent; `feedback_only` mode sends no

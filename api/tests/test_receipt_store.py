@@ -5,10 +5,11 @@ import json
 import threading
 
 import pytest
+from starlette.requests import Request
 
 from api.operation_ledger import receipts, storage
 from api.operation_ledger import paths
-from api.webui.routes.receipts import list_receipts as list_route
+from api.webui.routes.receipts import list_receipts as list_route, receipt_page
 
 
 def _root(tmp_path, monkeypatch):
@@ -91,3 +92,19 @@ def test_list_is_pii_minimized_detail_hydrates_private_data(tmp_path, monkeypatc
     assert "Private Learner" not in text and "Private detail" not in text
     assert body["receipts"][0]["detail_url"] == "/api/receipts/safe-id"
     assert receipts.get_receipt("safe-id")["targets"][0]["private"]["real_name"] == "Private Learner"
+
+
+def test_historical_routine_receipt_renders(tmp_path, monkeypatch):
+    _root(tmp_path, monkeypatch)
+    receipt = _receipt("routine-receipt")
+    receipt["subject_type"] = "routine"
+    receipt["kind"] = "sis.grade.bridge"
+    receipts.create_receipt(receipt)
+
+    response = receipt_page(
+        Request({"type": "http", "method": "GET", "path": "/receipts/routine-receipt",
+                 "headers": []}),
+        "routine-receipt",
+    )
+
+    assert response.status_code == 200

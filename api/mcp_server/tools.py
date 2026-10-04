@@ -1372,6 +1372,7 @@ def preview_content_push(
     module_id: str = "",
     create_module: bool = False,
     variants: list | None = None,
+    quiz_settings: dict | None = None,
 ) -> dict:
     """Freeze one staged draft (quiz/assignment/page, by the label
     list_staged_content returns) into a persisted, digest-protected review for
@@ -1401,14 +1402,15 @@ def preview_content_push(
             module_name=module_name, assignment_group_name=assignment_group_name,
             due_at=due_at, unlock_at=unlock_at, lock_at=lock_at,
             post_to_sis=False if post_to_sis is None else post_to_sis,
-            module_id=module_id, create_module=create_module))
+            module_id=module_id, create_module=create_module,
+            quiz_settings=quiz_settings))
     return _with_next("preview_content_push", content_push.preview_content_push(
         course_id, kind, label,
         published=published, module_name=module_name,
         assignment_group_name=assignment_group_name,
         due_at=due_at, unlock_at=unlock_at, lock_at=lock_at,
         post_to_sis=post_to_sis, module_id=module_id,
-        create_module=create_module,
+        create_module=create_module, quiz_settings=quiz_settings,
     ))
 
 
@@ -1476,6 +1478,7 @@ def push_content_live(
     module_name: str = "",
     assignment_group_name: str = "",
     post_to_sis: bool | None = None, module_id: str = "", create_module: bool = False,
+    quiz_settings: dict | None = None,
 ) -> dict:
     """Stage one authored draft and create it in Canvas in a single call.
 
@@ -1493,7 +1496,7 @@ def push_content_live(
         published=published, module_name=module_name,
         assignment_group_name=assignment_group_name,
         post_to_sis=post_to_sis, module_id=module_id,
-        create_module=create_module,
+        create_module=create_module, quiz_settings=quiz_settings,
     )
 
 
@@ -3766,6 +3769,7 @@ def _apply_staged_scoring_results_locked(scoring_session_id: str,
             "load_session": session_store.load_session,
             "save_session": session_store.save_session,
             "pseudonyms": pseudonyms,
+            "pseudonym_names": names,
         }
         if str(idempotency_key or ""):
             apply_kwargs["idempotency_key"] = str(idempotency_key)
@@ -3885,6 +3889,32 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
     entered_score, score, late_policy_status and points_deducted. No gradebook
     total, comment text, or other Canvas response crosses.
     """
+    if payload.get("code") == "canvas_grade_changed":
+        changed_rows = []
+        for row in payload.get("changed_rows") or []:
+            if not isinstance(row, dict):
+                continue
+            user_id = str(row.get("user_id") or "")
+            changed_rows.append({
+                "pseudonym": names.get(user_id) or "(unknown student)",
+                "expected": dict(row.get("expected") or {}),
+                "live": row.get("live"),
+            })
+        return pseudonym_boundary.gate({
+            "ok": False,
+            "status": "needs_teacher_input",
+            "code": "canvas_grade_changed",
+            "error": str(payload.get("error") or "Canvas grades changed. Nothing was sent."),
+            "changed_rows": changed_rows,
+            "next_steps": list(payload.get("next_steps") or ()),
+        }, vault)
+    if payload.get("code") == "canvas_grade_check_unavailable":
+        return {
+            "ok": False,
+            "code": "canvas_grade_check_unavailable",
+            "error": str(payload.get("error") or "Canvas could not confirm the live grades. Nothing was sent."),
+        }
+
     counts = {"finalized": 0, "already_applied": 0, "corrected": 0,
               "held": 0, "failed": 0, "transport_unknown": 0,
               "late_not_honored": 0, "score_mismatch": 0,

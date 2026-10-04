@@ -102,10 +102,7 @@ class SisGradeBridgeAdapter:
             "module_name": None,
             "read_source": "mirror",
             "bridge_only": True,
-            "write_origin": (
-                "routine" if prepare_request.get("write_origin") == "routine"
-                else "assistant"
-            ),
+            "write_origin": "assistant",
         }
         if registration:
             if not isinstance(registration, dict):

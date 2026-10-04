@@ -23,12 +23,15 @@ from api.platform_services import canvas_client
 from api.powergrader import assignment_refresh, scoring_local, session_store
 from api import source_materials
 from api.shared_work import SharedWorkStore, WorkItemNotFound
-from api.work_registry.providers import home_attention
 
 
 TOKEN_BUDGET = 25_000
 ATTACHMENT_LABEL = "Reference document for your revision."
 _PRIVATE_TEXT = re.compile(r"https?://|file://|[A-Za-z]:[\\/]|\\\\|\b(?:api[_-]?key|access[_-]?token|authorization)\s*[:=]", re.I)
+_PROVEN_STAFF_ROLES = {
+    "admin", "administrator", "instructor", "staff", "ta", "teacher",
+    "teaching_assistant",
+}
 
 
 def _digest(value):
@@ -46,6 +49,24 @@ def _work_id(course_id, assignment_id):
 
 def _coordinate(value):
     return isinstance(value, str) and re.fullmatch(r"[1-9][0-9]*", value) is not None
+
+
+def _comment_author_id(comment: dict) -> str:
+    author = comment.get("author") if isinstance(comment.get("author"), dict) else {}
+    direct = str(comment.get("author_id") or "").strip()
+    nested = str(author.get("id") or "").strip()
+    if direct and nested and direct != nested:
+        return ""
+    return direct or nested
+
+
+def _is_proven_staff_comment(comment: dict, author_id: str, student_id: str) -> bool:
+    author = comment.get("author") if isinstance(comment.get("author"), dict) else {}
+    role = str(
+        comment.get("author_role") or comment.get("author_type")
+        or author.get("role") or author.get("type") or ""
+    ).strip().casefold()
+    return author_id != student_id and role in _PROVEN_STAFF_ROLES
 
 
 def _save(store, state):
@@ -174,8 +195,8 @@ def prepare(course_id, assignment_id, *, use_existing_mirror=False, vault, cours
                 return _fail("identity_unavailable")
             included = 0
             for comment in raw_comments:
-                author_id = home_attention._author_id(comment)
-                if not author_id or not home_attention._is_proven_staff(comment, author_id, user_id):
+                author_id = _comment_author_id(comment)
+                if not author_id or not _is_proven_staff_comment(comment, author_id, user_id):
                     counts["excluded_comments"] += 1
                     continue
                 comment_id = str(comment.get("id") or "")
@@ -281,8 +302,8 @@ def _plan(state, revisions, vault):
                        if str(e.get("canvas_id") or "") == target["user_id"])):
             return None
         original = target["original_comment"]
-        author_id = home_attention._author_id(original)
-        if not author_id or not home_attention._is_proven_staff(original, author_id, target["user_id"]):
+        author_id = _comment_author_id(original)
+        if not author_id or not _is_proven_staff_comment(original, author_id, target["user_id"]):
             return None
         seen.add(pair)
         plan.append({**row, "user_id": target["user_id"], "comment_id": target["comment_id"],

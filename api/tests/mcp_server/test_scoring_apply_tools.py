@@ -81,6 +81,24 @@ def _blob(payload):
     return json.dumps(payload, default=str)
 
 
+def _baseline_rows(session, params):
+    by_user = {
+        str(student["user_id"]): dict(student.get("submission_baseline") or {})
+        for student in session.get("students") or []
+    }
+    return [
+        {
+            "user_id": int(user_id),
+            "entered_score": by_user.get(str(user_id), {}).get("entered_score"),
+            "score": by_user.get(str(user_id), {}).get(
+                "score", by_user.get(str(user_id), {}).get("canvas_score")),
+            "workflow_state": by_user.get(str(user_id), {}).get("workflow_state", ""),
+            "graded_at": by_user.get(str(user_id), {}).get("graded_at"),
+        }
+        for user_id in params["student_ids[]"]
+    ]
+
+
 def test_stage_is_local_and_apply_is_the_only_canvas_lane(monkeypatch, tmp_path, _set_active_courses):
     session, bundle, sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
     from api.powergrader import scoring_apply
@@ -99,6 +117,36 @@ def test_stage_is_local_and_apply_is_the_only_canvas_lane(monkeypatch, tmp_path,
     assert writes == [True]
     assert result["counts"]["finalized"] == 1
     assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
+
+
+def test_apply_projects_live_grade_changes_to_pseudonyms(monkeypatch, tmp_path, _set_active_courses):
+    session, bundle, sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
+    from api.powergrader import scoring_apply
+    monkeypatch.setattr(scoring_apply, "build_plan", lambda *_a, **_kw: {
+        "ok": True, "candidate_ids": [REAL_ID], "questions": [],
+        "digest": "frozen-review", "notes": []})
+    monkeypatch.setattr(scoring_apply, "apply_plan", lambda **_kw: ({
+        "ok": False,
+        "status": "needs_teacher_input",
+        "code": "canvas_grade_changed",
+        "error": "Canvas grades changed since this Scoring Session was prepared. Nothing was sent.",
+        "changed_rows": [{
+            "user_id": REAL_ID,
+            "expected": {"score": 4.0, "entered_score": 4.0, "workflow_state": "graded", "graded_at": None},
+            "live": {"score": 8.0, "entered_score": 8.0, "workflow_state": "graded", "graded_at": None},
+        }],
+        "next_steps": ["Re-stage without the changed rows.",
+                       "Refresh the Scoring Session, then re-stage the results."],
+    }, 200))
+
+    staged = tools.stage_scoring_results("session-1", _result(), _digest(bundle))
+    result = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
+
+    assert result["status"] == "needs_teacher_input"
+    assert result["code"] == "canvas_grade_changed"
+    assert result["changed_rows"][0]["pseudonym"] == PSEUDONYM
+    assert REAL_ID not in _blob(result) and REAL_NAME not in _blob(result)
+    assert sessions["session-1"]["status"] == "needs_teacher_input"
 
 
 def test_stage_apply_corrects_posted_days_only_and_surfaces_corrected_count(
@@ -229,6 +277,8 @@ def test_curve_stage_apply_ledger_and_ledger_driven_revert(monkeypatch, tmp_path
         return {"ok": True}, None
     def read(path, params):
         reads.append((path, params))
+        if not writes:
+            return _baseline_rows(session, params), None
         return ([{"user_id": int(REAL_ID), "entered_score": 67, "score": 67,
                   "points_deducted": None, "late_policy_status": None}], None)
     monkeypatch.setattr(scoring_apply, "default_transports", lambda: send)
@@ -245,7 +295,7 @@ def test_curve_stage_apply_ledger_and_ledger_driven_revert(monkeypatch, tmp_path
     assert result_row["late"]["decision"] == "not_late"
     assert "points_deducted" not in _blob(result_row)
     assert "raw_score" not in result_row["late"]
-    assert len(writes) == len(reads) == 1
+    assert len(writes) == 1 and len(reads) == 2
     assert writes[0][1]["submission"]["posted_grade"] == "67"
     comment = writes[0][1]["comment"]["text_comment"]
     assert "Raw 53 -> Entered 67." in comment
@@ -253,7 +303,7 @@ def test_curve_stage_apply_ledger_and_ledger_driven_revert(monkeypatch, tmp_path
     replay = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
     assert replay["counts"] == applied["counts"]
     assert replay["results"] == applied["results"]
-    assert len(writes) == len(reads) == 1
+    assert len(writes) == 1 and len(reads) == 2
     ledger = tools.get_score_ledger("course-1", "assignment-1")
     assert ledger.get("coverage") == "recorded_only" and ledger.get("first_recorded_at"), ledger
     staged_event = next(event for event in ledger["events"] if event["source"] == "ce_stage")
@@ -372,10 +422,15 @@ def test_transport_unknown_is_projected_without_grade_facts(monkeypatch, tmp_pat
 
 def _fake_plan_and_canvas(monkeypatch, writes):
     from api.powergrader import scoring_apply
+    baseline_by_user = {}
 
     def build_plan(session, *, pseudonyms=()):
         candidates = [student for student in session.get("students", [])
                      if student.get("ai_score") is not None or student.get("ai_feedback")]
+        baseline_by_user.update({
+            str(student["user_id"]): dict(student.get("submission_baseline") or {})
+            for student in candidates
+        })
         return {"ok": True,
                 "candidate_ids": [str(student["user_id"]) for student in candidates],
                 "questions": [], "digest": "frozen-review", "notes": [],
@@ -387,6 +442,16 @@ def _fake_plan_and_canvas(monkeypatch, writes):
             writes.append((method, path, payload)) or ({"id": 1}, None))
     ))
     def read(path, params):
+        if not writes:
+            return ([
+                {"user_id": int(uid),
+                 "entered_score": baseline_by_user.get(str(uid), {}).get("entered_score"),
+                 "score": baseline_by_user.get(str(uid), {}).get(
+                     "score", baseline_by_user.get(str(uid), {}).get("canvas_score")),
+                 "workflow_state": baseline_by_user.get(str(uid), {}).get("workflow_state", ""),
+                 "graded_at": baseline_by_user.get(str(uid), {}).get("graded_at")}
+                for uid in params["student_ids[]"]
+            ], None)
         rows = []
         for uid in params["student_ids[]"]:
             payload = next(item[2] for item in writes if item[1].endswith("/" + str(uid)))
@@ -511,6 +576,8 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
         lambda method, path, payload, timeout=30: (sent.append((method, path, payload)) or ({"id": 1}, None))
     ))
     def read(path, params):
+        if not sent:
+            return _baseline_rows(session, params), None
         rows = []
         for uid in params["student_ids[]"]:
             payload = next(item[2] for item in sent if item[1].endswith("/" + str(uid)))
@@ -521,6 +588,8 @@ def test_stage_to_plan_to_apply_for_a_policy_course_posts_the_mark_and_late_fiel
         return rows, None
     monkeypatch.setattr(scoring_apply, "default_read_transport", lambda: read)
     def neutral_read(path, params):
+        if not sent:
+            return _baseline_rows(session, params), None
         rows = []
         for uid in params["student_ids[]"]:
             payload = next(item[2] for item in sent if item[1].endswith("/" + str(uid)))
@@ -639,7 +708,7 @@ def test_a_students_earlier_stamp_and_question_survive_staging_only_b_again(
     its earlier stamp -- in both the candidate used for the plan digest and
     the persisted session -- and the plan must still carry A's insincere
     question, all the way through a clean apply (no stage_changed)."""
-    _session, bundle, sessions = _wire_two_students(monkeypatch, tmp_path, _set_active_courses)
+    session, bundle, sessions = _wire_two_students(monkeypatch, tmp_path, _set_active_courses)
     from api.platform_services import config
     from api.powergrader import scoring_apply
     grading_policy_files.policy(floor_percent=30)
@@ -649,6 +718,8 @@ def test_a_students_earlier_stamp_and_question_survive_staging_only_b_again(
         lambda method, path, payload, timeout=30: (sent.append((method, path, payload)) or ({"id": 1}, None))
     ))
     def read(path, params):
+        if not sent:
+            return _baseline_rows(session, params), None
         rows = []
         for uid in params["student_ids[]"]:
             payload = next(item[2] for item in sent if item[1].endswith("/" + str(uid)))
@@ -730,6 +801,8 @@ def _late_policy_course(monkeypatch, tmp_path, _set_active_courses, grading_poli
 
     def read(path, params):
         reads.append((path, params))
+        if not sent:
+            return _baseline_rows(session, params), None
         if reader:
             return reader(path, params)
         rows = []
@@ -802,7 +875,7 @@ def test_apply_reports_a_waived_row_canvas_still_penalized(
 
     applied = tools.apply_staged_scoring_results("session-1", staged["stage_digest"])
 
-    assert len(reads) == 1
+    assert len(reads) == 2
     assert applied["ok"] is False
     assert applied["code"] == "score_mismatch"
     assert applied["counts"]["score_mismatch"] == 1 and applied["counts"]["finalized"] == 0
@@ -920,7 +993,7 @@ COMMENTARY = ("Possible plagiarism: CE found a long shared run of words with ano
               "That may be cheating, so worth a conversation.")
 
 
-def _canvas_recorder(monkeypatch):
+def _canvas_recorder(monkeypatch, session):
     """Record every Canvas send and echo it back to the posted-score check."""
     from api.powergrader import scoring_apply
 
@@ -929,8 +1002,11 @@ def _canvas_recorder(monkeypatch):
         lambda method, path, payload, timeout=30: (
             sent.append((method, path, payload)) or ({"id": 1}, None))
     ))
-
     def read(path, params):
+        if not sent:
+            return _baseline_rows(session, params), None
+        if not sent:
+            return _baseline_rows(session, params), None
         rows = []
         for uid in params["student_ids[]"]:
             payload = next(item[2] for item in sent if item[1].endswith("/" + str(uid)))
@@ -1010,7 +1086,7 @@ def test_preview_comment_and_entered_are_exactly_what_canvas_receives(
         results, answers = _late_results(6), {"late_days": "waive_late"}
     else:
         session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
-        sent = _canvas_recorder(monkeypatch)
+        sent = _canvas_recorder(monkeypatch, session)
     if scenario == "feedback_only":
         kwargs["grade_mode"] = "feedback_only"
     if scenario == "score_curve":
@@ -1062,7 +1138,7 @@ def test_agent_commentary_never_reaches_a_canvas_payload(
     from api.powergrader import scoring_apply, session_actions
 
     session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
-    sent = _canvas_recorder(monkeypatch)
+    sent = _canvas_recorder(monkeypatch, session)
     results = _result(8)
     results[0]["agent_commentary"] = COMMENTARY
     staged = tools.stage_scoring_results(
@@ -1127,7 +1203,7 @@ def test_preview_goes_stale_when_the_staged_curve_is_deactivated(
     from api import score_curves
 
     session, bundle, _sessions = _wire(monkeypatch, tmp_path, _set_active_courses)
-    _canvas_recorder(monkeypatch)
+    _canvas_recorder(monkeypatch, session)
     session["assignment"]["points_possible"] = 100
     bundle["students"][0]["responses"][0]["possible"] = 100
     (tmp_path / "safe-bundle.json").write_text(json.dumps(bundle), encoding="utf-8")

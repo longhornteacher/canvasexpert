@@ -91,7 +91,6 @@ Use only the row relevant to the active handoff.
 | Roster | `docs/reference/roster-module-map.md` | Names, IDs, groups, accommodations, and monitored notes are student data. |
 | PowerGrader / Scoring Sessions | `docs/reference/powergrader-scoring-map.md`, `docs/guides/scoring-sessions.md`, `docs/contracts/feedback-scoring-contract.md` | Sessions are private. Review happens in the agent's preview before a push and in Canvas Live after. Agent commentary is teacher-only and never reaches Canvas. |
 | Score records | `docs/contracts/score-ledger-contract.md`, `docs/contracts/submission-history-contract.md` | Private, append-only score evidence. |
-| Work discovery | `docs/contracts/work-registry-contract.md` | One cross-course index of resumable work; it does not own Canvas objects or student records. |
 | CanvasMirror | `docs/mirror.md` for current behavior; exact sections of `docs/reference/canvasmirror-1.0beta-information-spine.md` for target design (long, so read only the sections a brief names) | A disposable local copy for reads and planning. Operation-ledger writes re-check live Canvas before changing it. |
 | Course Catalog | `docs/contracts/course-catalog-contract.md` | Student-free navigation/search projection only; no PII, raw HTML, URLs, credentials, private paths, evidence, or write preflight. |
 | Agent runtime / MCP server | `docs/contracts/agent-runtime-product-contract.md`, `docs/mcp-server.md` | Primary agent-facing boundary: pseudonymized reads through CE, bounded local actions with prepare/review/apply behavior, host-neutral results. |

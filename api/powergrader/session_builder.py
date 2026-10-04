@@ -108,6 +108,8 @@ def build_students(
                 "attempts_known": attempt_summary.get("known", True),
                 "entered_score": entered_score,
                 "canvas_score": s.get("score"),
+                "workflow_state": s.get("workflow_state"),
+                "graded_at": s.get("graded_at"),
                 "points_deducted": s.get("points_deducted"),
                 "submission_digest": s.get("submission_digest") or attempt_text_digest(s.get("body")),
             },

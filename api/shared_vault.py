@@ -287,6 +287,7 @@ class SharedVault(feedback_vault.IdentityVault):
             raise PseudonymSecretRequired("pseudonym_secret_not_configured")
         used = {str(event["pokemon"]).casefold() for event in self._assignment_events}
         used.update(str(pseudo).casefold() for pseudo in self._by_pseudo)
+        used.update(self._vault_identity_tokens())
         k = max(self._max_k.get(canvas_id, -1) + 1, 0)
         for candidate_k in range(k, k + len(feedback_vault._REGISTRY_WORDS) * 4):
             payload = f"{canvas_id}:{candidate_k}".encode("utf-8")

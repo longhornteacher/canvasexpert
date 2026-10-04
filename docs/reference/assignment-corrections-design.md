@@ -7,10 +7,11 @@ current implementation intentionally preserves.
 
 ## Behavior
 
-An AssignmentForge envelope may carry a private `corrections` map keyed by exact Scoring Session
-packet `item_id`. Each entry contains either one shared `{answer, why}` correction or a non-empty
-`by_tier` map using a canonical tier label or configured public tag. `api/af.py` validates the
-shape.
+For an assignment with objectively scorable items, the AssignmentForge envelope carries a private
+`corrections` map keyed by exact Scoring Session packet `item_id`. Each entry contains either one
+shared `{answer, why}` correction or a non-empty `by_tier` map using a canonical tier label or
+configured public tag. `api/af.py` validates the shape; `why` is exactly two sentences explaining
+why the correct answer is correct.
 
 The Operation Ledger keeps the map in the private operation record. During scoring preparation,
 that record is associated with the exact course-and-assignment ID returned by the AssignmentForge
@@ -20,7 +21,9 @@ Student-facing feedback is what the teacher and agent author; see
 `docs/contracts/feedback-scoring-contract.md`.
 
 Corrections are teacher-authored content, not model output, and are not derived from student work.
-They never enter the SAFE packet or MCP response.
+They stay in the reviewed operation package for the assignment push and are presented to the
+agent in green text. They never enter student-facing assignment HTML, the SAFE packet, or the MCP
+response.
 
 ## Identity and ordering constraints
 

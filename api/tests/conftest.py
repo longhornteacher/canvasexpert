@@ -571,6 +571,18 @@ def scoring_refresh_world(tmp_path, monkeypatch):
                              if path.endswith(f"/submissions/{user_id}")
                              or path.endswith(f"/submissions/{user_id}?")), None)
                 if sent is None:
+                    current = next(
+                        (row for row in world.rows if str(row["user_id"]) == str(user_id)),
+                        None,
+                    )
+                    if current is not None:
+                        rows.append({
+                            "user_id": str(user_id),
+                            "score": current.get("score"),
+                            "entered_score": current.get("entered_score"),
+                            "workflow_state": current.get("workflow_state"),
+                            "graded_at": current.get("graded_at"),
+                        })
                     continue
                 grade = sent.get("submission", {}).get("posted_grade")
                 if grade is None:

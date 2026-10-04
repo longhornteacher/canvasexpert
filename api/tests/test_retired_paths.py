@@ -262,6 +262,8 @@ RETIRED_PATHS = (
     ("docs/reference/authoring-contract-drift.md", "(none)", "Move the remaining Accelerate finding into the current differentiation reference"),
     ("docs/reference/operation-ledger-design.md", "(none)", "Merge operation-ledger design into its current module map"),
     ("docs/guides/Holidays.csv", "(none)", "Keep calendar defaults in one canonical source"),
+    ("api/work_registry", "(none)", "Remove the unread work-registry projection"),
+    ("docs/contracts/work-registry-contract.md", "(none)", "Remove the retired work-registry contract"),
 )
 
 

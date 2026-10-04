@@ -3,8 +3,8 @@
 Canvas is faked at the ``canvas_send`` injection point these functions already
 take. No live scoring run, no real student data.
 
-The write is deliberately narrow: one send, no read-back. These tests pin that
-as a law, not an implementation detail.
+The write is deliberately narrow: one candidate-set read gates the batch, then
+each selected row is sent once. These tests pin that boundary as a law.
 """
 import json
 import hashlib
@@ -19,8 +19,12 @@ def _session(**overrides):
         "session_id": "session-1", "course_id": "course-1", "assignment_id": "assignment-1",
         "assignment": {"points_possible": 10},
         "students": [
-            {"user_id": "9001", "ai_score": 8, "ai_feedback": "Clear evidence."},
-            {"user_id": "9002", "ai_score": 6, "ai_feedback": "Good structure."},
+            {"user_id": "9001", "ai_score": 8, "ai_feedback": "Clear evidence.",
+             "submission_baseline": {"score": None, "entered_score": None,
+                                     "workflow_state": "submitted", "graded_at": None}},
+            {"user_id": "9002", "ai_score": 6, "ai_feedback": "Good structure.",
+             "submission_baseline": {"score": None, "entered_score": None,
+                                     "workflow_state": "submitted", "graded_at": None}},
         ],
     }
     session.update(overrides)
@@ -316,11 +320,16 @@ def _store(session):
 def _readback_for(sent, params):
     rows = []
     for uid in params.get("student_ids[]", []):
-        payload = next(item[-1] for item in sent if item[-2].endswith("/" + str(uid)))
-        entered = float(payload["submission"]["posted_grade"])
-        rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
-                     "points_deducted": None,
-                     "late_policy_status": payload["submission"].get("late_policy_status")})
+        payload = next((item[-1] for item in sent if item[-2].endswith("/" + str(uid))), None)
+        if payload is None:
+            rows.append({"user_id": int(uid), "entered_score": None, "score": None,
+                         "workflow_state": "submitted", "graded_at": None})
+        else:
+            entered = float(payload["submission"]["posted_grade"])
+            rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
+                         "workflow_state": "graded", "graded_at": None,
+                         "points_deducted": None,
+                         "late_policy_status": payload["submission"].get("late_policy_status")})
     return rows, None
 
 
@@ -412,15 +421,96 @@ def test_apply_plan_reports_exact_partial_post_recovery_rows():
             return None, "HTTP 400 rejected"
         return {"id": 1}, None
 
+    def canvas_read(_path, params):
+        return [{
+            "user_id": int(uid),
+            "score": 8 if uid in sent else None,
+            "entered_score": 8 if uid in sent else None,
+            "workflow_state": "graded" if uid in sent else "submitted",
+            "graded_at": None,
+        } for uid in params["student_ids[]"]], None
+
     plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers={},
-        load_session=load, save_session=save, canvas_send=canvas_send)
+        load_session=load, save_session=save, canvas_send=canvas_send,
+        canvas_read=canvas_read)
 
     assert sent == ["9001", "9002"]
     assert result["code"] == "partial_post_remaining"
     assert result["posted_rows"] == ["9001"]
     assert result["remaining_rows"] == ["9002"]
+
+
+def test_changed_live_grade_blocks_the_whole_apply_before_any_send():
+    session = _session()
+    load, save, _saved = _store(session)
+    sent = []
+    reads = []
+    plan = scoring_apply.build_plan(session)
+
+    def canvas_read(_path, _params):
+        reads.append(_params)
+        return [
+            {"user_id": 9001, "score": 7, "entered_score": 7,
+             "workflow_state": "graded", "graded_at": "2026-10-04T10:00:00Z"},
+            {"user_id": 9002, "score": None, "entered_score": None,
+             "workflow_state": "submitted", "graded_at": None},
+        ], None
+
+    result, status = scoring_apply.apply_plan(
+        "session-1", expected_digest=plan["digest"], answers={},
+        load_session=load, save_session=save,
+        canvas_send=lambda *args, **kwargs: sent.append(args) or ({}, None),
+        canvas_read=canvas_read, pseudonyms={"9001": "Pseudonym One"})
+
+    assert status == 200
+    assert result["code"] == "canvas_grade_changed"
+    assert result["changed_rows"] == [{
+        "user_id": "9001", "pseudonym": "Pseudonym One",
+        "expected": {"score": None, "entered_score": None,
+                     "workflow_state": "submitted", "graded_at": None},
+        "live": {"score": 7.0, "entered_score": 7.0,
+                 "workflow_state": "graded", "graded_at": "2026-10-04T10:00:00Z"},
+    }]
+    assert sent == []
+    assert reads == [{"student_ids[]": ["9001", "9002"], "per_page": 100}]
+
+
+def test_failed_live_grade_check_refuses_before_any_send():
+    session = _session()
+    load, save, _saved = _store(session)
+    sent = []
+    plan = scoring_apply.build_plan(session)
+
+    result, status = scoring_apply.apply_plan(
+        "session-1", expected_digest=plan["digest"], answers={},
+        load_session=load, save_session=save,
+        canvas_send=lambda *args, **kwargs: sent.append(args) or ({}, None),
+        canvas_read=lambda *_args: (None, "HTTP 500"))
+
+    assert status == 200
+    assert result["code"] == "canvas_grade_check_unavailable"
+    assert sent == []
+
+
+def test_verified_ce_push_state_overrides_the_preparation_baseline():
+    session = _session()
+    session["students"][0]["submission_baseline"].update(
+        {"score": None, "entered_score": None, "workflow_state": "submitted", "graded_at": None})
+    session["students"][0]["last_posted"] = {
+        "grade_state": {"score": 8.0, "entered_score": 8.0,
+                        "workflow_state": "graded", "graded_at": "2026-10-04T09:00:00Z"},
+    }
+
+    result = scoring_apply.check_live_grade_state(
+        session, ["9001"],
+        canvas_read=lambda *_args: ([{
+            "user_id": 9001, "score": 8, "entered_score": 8,
+            "workflow_state": "graded", "graded_at": "2026-10-04T09:00:00Z",
+        }], None))
+
+    assert result == {"ok": True, "checked_rows": 1}
 
 
 # ── Score read-back ────────────────────────────────────────────────────────
@@ -447,7 +537,7 @@ def test_successful_numeric_send_gets_score_readback():
         canvas_read=canvas_read)
 
     assert result["ok"] is True
-    assert len(reads) == 1
+    assert len(reads) == 2
     receipt = session["push_log"][-1]["results"][0]
     assert receipt["entered_score"] == 8
     assert result["results"][0]["late"]["verification"] == "verified"
@@ -468,7 +558,10 @@ def test_transport_unknown_never_repeats_or_reverifies():
     plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers={},
-        load_session=load, save_session=save, canvas_send=canvas_send)
+        load_session=load, save_session=save, canvas_send=canvas_send,
+        canvas_read=lambda _path, params: _readback_for(
+            [(None, path, {"submission": {"posted_grade": 8 if path.endswith("9001") else 6}})
+             for path in sent], params))
 
     assert result["ok"] is False
     assert result["code"] == "write_transport_unknown"
@@ -492,6 +585,9 @@ def test_accepted_exact_payload_is_not_sent_twice():
     scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers={},
         load_session=load, save_session=save, canvas_send=canvas_send,
+        canvas_read=lambda _path, params: _readback_for(
+            [(None, path, {"submission": {"posted_grade": 8 if path.endswith("9001") else 6}})
+             for path in sent], params),
         idempotency_key="batch-1")
     first_count = len(sent)
 
@@ -502,6 +598,9 @@ def test_accepted_exact_payload_is_not_sent_twice():
     again, _status = scoring_apply.apply_plan(
         "session-1", expected_digest=plan["digest"], answers={},
         load_session=load, save_session=save, canvas_send=canvas_send,
+        canvas_read=lambda _path, params: _readback_for(
+            [(None, path, {"submission": {"posted_grade": 8 if path.endswith("9001") else 6}})
+             for path in sent], params),
         idempotency_key="batch-1")
 
     assert len(sent) == first_count, "an accepted payload was sent twice"
@@ -594,13 +693,47 @@ def _apply(session, answers, **kwargs):
         rows = []
         for uid in params.get("student_ids[]", []):
             payload = dict(sent).get(str(uid), {})
+            if not payload:
+                student = next(item for item in session["students"]
+                               if str(item["user_id"]) == str(uid))
+                baseline = student.get("submission_baseline") or {}
+                rows.append({"user_id": int(uid),
+                             "entered_score": baseline.get("entered_score"),
+                             "score": baseline.get("score", baseline.get("canvas_score")),
+                             "workflow_state": baseline.get("workflow_state", "submitted"),
+                             "graded_at": baseline.get("graded_at")})
+                continue
             entered = float((payload.get("submission") or {}).get("posted_grade"))
             late_status = (payload.get("submission") or {}).get("late_policy_status")
             rows.append({"user_id": int(uid), "entered_score": entered, "score": entered,
+                         "workflow_state": "graded", "graded_at": None,
                          "points_deducted": None, "late_policy_status": late_status})
         return rows, None
 
-    kwargs.setdefault("canvas_read", canvas_read)
+    if "canvas_read" in kwargs:
+        post_read = kwargs["canvas_read"]
+        preflight_pending = True
+
+        def canvas_read_with_baseline(path, params):
+            nonlocal preflight_pending
+            if not preflight_pending:
+                return post_read(path, params)
+            preflight_pending = False
+            rows = []
+            for uid in params.get("student_ids[]", []):
+                student = next(item for item in session["students"]
+                               if str(item["user_id"]) == str(uid))
+                baseline = student.get("submission_baseline") or {}
+                rows.append({"user_id": int(uid),
+                             "entered_score": baseline.get("entered_score"),
+                             "score": baseline.get("score", baseline.get("canvas_score")),
+                             "workflow_state": baseline.get("workflow_state", "submitted"),
+                             "graded_at": baseline.get("graded_at")})
+            return rows, None
+
+        kwargs["canvas_read"] = canvas_read_with_baseline
+    else:
+        kwargs["canvas_read"] = canvas_read
 
     plan = scoring_apply.build_plan(session)
     result, _status = scoring_apply.apply_plan(
@@ -613,7 +746,13 @@ def test_waive_late_answer_sends_the_waived_bytes_for_exactly_the_listed_rows():
     """EXAMPLE: the answer waives every listed row; rows outside the question
     keep their own payload."""
     session = _late_session(late_policy="ask")
-    session["students"].append({"user_id": "9003", "ai_score": 7, "ai_feedback": "Fine."})
+    session["students"].append({
+        "user_id": "9003", "ai_score": 7, "ai_feedback": "Fine.",
+        "submission_baseline": {
+            "score": None, "entered_score": None,
+            "workflow_state": "submitted", "graded_at": None,
+        },
+    })
 
     result, sent, plan = _apply(session, {"late_days": "waive_late"})
 
@@ -712,7 +851,9 @@ def _posted_correction_session(*, days=0, score=8, feedback="Same feedback"):
         "posted": True, "status": "posted", "correction_pending": True,
         "canvas_late": True, "grading": {"floor_percent": None, "points_possible": 10,
                                           "late_days": days, "suggested_late_days": 2},
-        "submission_baseline": {"attempt": 1, "latest_attempt": 1},
+        "submission_baseline": {"attempt": 1, "latest_attempt": 1,
+                                "canvas_score": 8, "entered_score": 8,
+                                "workflow_state": "graded", "graded_at": None},
         "last_posted": {"event_id": "prior-verified", "payload_digest": "old-payload",
                         "entered_score": 8, "late_days": 2, "attempt": 1,
                         "feedback_digest": hashlib.sha256(feedback.encode()).hexdigest()},

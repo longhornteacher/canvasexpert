@@ -2,13 +2,14 @@
 
 The ordinary Assignment write is one send: the reviewed raw score and
 plain-text comment go to the Canvas Submissions endpoint, and Canvas applies
-every gradebook and late-policy adjustment from there. This module performs no
-Canvas read before the send -- no existing-score lookup, no frozen baseline, no
-drift check. (Staging makes one separate read of the assignment's posting policy,
-only to warn; see ``read_posting_policy``.) After the send it makes exactly one read-only check of every
-posted numeric score: a batched submissions read to confirm Canvas stored what
-was sent and honored any late decision. It is never retried and never corrects
-a row. Canvas Live is the record and the place for later edits.
+every gradebook and late-policy adjustment from there. One bounded read of the
+candidate submissions runs immediately before the send and refuses the complete
+batch if any recorded grade state drifted. (Staging makes one separate read of
+the assignment's posting policy, only to warn; see ``read_posting_policy``.)
+After the send it makes exactly one read-only check of every posted numeric
+score: a batched submissions read to confirm Canvas stored what was sent and
+honored any late decision. It is never retried and never corrects a row. Canvas
+Live is the record and the place for later edits.
 
 What still guards the write: the packet digest, the exact assignment scope, the
 session's currentness, result-shape and range validation, the outbound privacy
@@ -570,6 +571,84 @@ def approve_rows(session: dict, user_ids) -> None:
         student["status"] = "approved"
 
 
+def _grade_state(row: dict) -> dict:
+    """Return the grading fields that must not change between stage and send."""
+    score = row.get("score")
+    if score is None:
+        score = row.get("canvas_score")
+    return {
+        "score": _finite(score),
+        "entered_score": _finite(row.get("entered_score")),
+        "workflow_state": str(row.get("workflow_state") or ""),
+        "graded_at": row.get("graded_at"),
+    }
+
+
+def _expected_grade_state(student: dict) -> dict:
+    """Use a verified CE push when available; otherwise use the session baseline."""
+    pushed = student.get("last_posted")
+    if isinstance(pushed, dict) and isinstance(pushed.get("grade_state"), dict):
+        return pushed["grade_state"]
+    baseline = student.get("submission_baseline")
+    return _grade_state(baseline if isinstance(baseline, dict) else {})
+
+
+def check_live_grade_state(session: dict, user_ids, canvas_read=None, *, pseudonyms=None) -> dict:
+    """Read candidate submissions once and refuse an apply whose grades drifted.
+
+    The caller holds the scoring-session lock. This function has no side
+    effects, so the runtime can also expose it for a teacher's read-only check.
+    """
+    selected = {str(user_id) for user_id in user_ids}
+    students = {str(student.get("user_id")): student
+                for student in session.get("students") or []
+                if str(student.get("user_id") or "") in selected}
+    if len(students) != len(selected):
+        return {"ok": False, "code": "canvas_grade_check_unavailable",
+                "error": "The staged scoring rows are unavailable. Nothing was sent."}
+    if canvas_read is None:
+        canvas_read = default_read_transport()
+    try:
+        found, error = canvas_read(
+            f"/api/v1/courses/{session['course_id']}/assignments/{session['assignment_id']}/submissions",
+            {"student_ids[]": sorted(selected), "per_page": 100},
+        )
+    except Exception:
+        found, error = None, "read_exception"
+    if error or not isinstance(found, list):
+        return {"ok": False, "code": "canvas_grade_check_unavailable",
+                "error": "Canvas could not confirm the live grades. Nothing was sent."}
+
+    live_by_user = {str(row.get("user_id")): row for row in found if isinstance(row, dict)}
+    changed = []
+    for user_id in sorted(selected):
+        student = students[user_id]
+        expected = _expected_grade_state(student)
+        live_row = live_by_user.get(user_id)
+        live = _grade_state(live_row) if live_row is not None else None
+        if live != expected:
+            label = (pseudonyms or {}).get(user_id) if isinstance(pseudonyms, dict) else None
+            changed.append({
+                "user_id": user_id,
+                **({"pseudonym": str(label)} if label else {}),
+                "expected": expected,
+                "live": live,
+            })
+    if changed:
+        return {
+            "ok": False,
+            "status": "needs_teacher_input",
+            "code": "canvas_grade_changed",
+            "error": "Canvas grades changed since this Scoring Session was prepared. Nothing was sent.",
+            "changed_rows": changed,
+            "next_steps": [
+                "Re-stage without the changed rows.",
+                "Refresh the Scoring Session, then re-stage the results.",
+            ],
+        }
+    return {"ok": True, "checked_rows": len(selected)}
+
+
 def _verify_posted_scores(session_id: str, pushed: dict, load_session, canvas_read,
                           save_session=None) -> None:
     """Verify every accepted numeric score with one bounded, read-only pass."""
@@ -699,6 +778,7 @@ def _verify_posted_scores(session_id: str, pushed: dict, load_session, canvas_re
                     "event_id": verified_event.get("event_id"),
                     "payload_digest": row.get("request_digest"),
                     "entered_score": entered,
+                    "grade_state": _grade_state(read),
                     "late_days": ((sent_event or {}).get("late_days")
                                   if sent_event else read.get("late_days")),
                     "feedback_digest": feedback_digest or (sent_event or {}).get("feedback_sha256"),
@@ -733,16 +813,14 @@ def _verify_posted_scores(session_id: str, pushed: dict, load_session, canvas_re
 
 def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
                load_session, save_session, canvas_send=None, canvas_read=None,
-               pseudonyms=(), idempotency_key: str = "") -> tuple[dict, int]:
+               pseudonyms=(), pseudonym_names: dict | None = None,
+               idempotency_key: str = "") -> tuple[dict, int]:
     """Approve and send exactly what a matching preview described.
 
-    ``approve_rows`` runs before the send, so ``push_grades`` sees ordinary
-    approved rows. There is no freeze and no drift check: the plan digest and
-    the frozen answers are the only things standing between the preview the
-    teacher read and the bytes that go out. Rows a ``waive_late`` answer waived
-    go to ``push_grades`` by id, so ``_payload`` builds the waived bytes for
-    exactly those rows. After the send, ``_verify_posted_scores`` makes the one
-    read-only check of every posted numeric score.
+    A single live-grade read gates the complete selected set before approval or
+    sends. Rows a ``waive_late`` answer waived go to ``push_grades`` by id, so
+    ``_payload`` builds the waived bytes for exactly those rows. After the send,
+    ``_verify_posted_scores`` keeps its existing numeric-score verification.
     """
     if canvas_send is None:
         canvas_send = default_transports()
@@ -764,6 +842,13 @@ def apply_plan(session_id: str, *, expected_digest: str, answers: dict | None,
         return resolved, 409
 
     user_ids = resolved["user_ids"]
+    if plan["grade_mode"] == "post_score":
+        grade_check = check_live_grade_state(
+            session, user_ids, canvas_read,
+            pseudonyms=pseudonym_names if pseudonym_names is not None else pseudonyms,
+        )
+        if not grade_check.get("ok"):
+            return grade_check, 200
     approve_rows(session, user_ids)
     save_session(session)
 

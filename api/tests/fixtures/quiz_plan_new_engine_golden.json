@@ -1,651 +1,651 @@
 {
- "all_types_rich_settings": {
-  "version": 1,
-  "title": "All Question Types Sampler (CS)",
-  "metadata": {
-   "subject": "Intro to Computer Science",
-   "grade": 8,
-   "standard": "Mixed - fixture exercising every QuizForge item type.",
-   "variant_group": "all_types_sampler",
-   "variant_label": "Coverage fixture"
-  },
-  "quiz_payload": {
-   "quiz": {
+  "all_types_rich_settings": {
+    "version": 1,
     "title": "All Question Types Sampler (CS)",
-    "points_possible": 100.0,
-    "grading_type": "points",
-    "quiz_settings": {
-     "shuffle_answers": false,
-     "shuffle_questions": true,
-     "require_student_access_code": true,
-     "student_access_code": "abc",
-     "multiple_attempts": {
-      "multiple_attempts_enabled": true,
-      "score_to_keep": "latest",
-      "build_on_last_attempt": true,
-      "attempt_limit": true,
-      "max_attempts": 3,
-      "cooling_period": true,
-      "cooling_period_seconds": 300
-     },
-     "has_time_limit": true,
-     "session_time_limit_in_seconds": 1800,
-     "calculator_type": "basic",
-     "one_at_a_time_type": "question",
-     "allow_backtracking": false,
-     "result_view_settings": {
-      "result_view_restricted": true,
-      "display_points_awarded": false,
-      "display_points_possible": false,
-      "display_items": false
-     }
-    }
-   }
-  },
-  "items": [
-   {
-    "index": 1,
-    "source_item_id": "mc_snippet_out",
-    "source_type": "MC",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 1,
-      "points_possible": 12.5,
-      "entry": {
-       "title": "mc_snippet_out",
-       "item_body": "<pre style='background-color:#272822;color:#F8F8F2;padding:12px;border-radius:6px;font-family:Consolas,Monaco,\"Courier New\",monospace;font-size:14px;line-height:1.5;overflow-x:auto;white-space:pre;display:block;'><code><span style=\"color: #F8F8F2\">x</span> <span style=\"color: #FF4689\">=</span> <span style=\"color: #AE81FF\">5</span>\n<span style=\"color: #F8F8F2\">print(x</span> <span style=\"color: #FF4689\">*</span> <span style=\"color: #AE81FF\">2</span><span style=\"color: #F8F8F2\">)</span></code></pre><p>What does the program above print?</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(4)(A)</em></p>",
-       "interaction_type_slug": "choice",
-       "interaction_data": {
-        "choices": [
-         {
-          "id": "uuid-000000",
-          "position": 1,
-          "item_body": "<p>10</p>"
-         },
-         {
-          "id": "uuid-000001",
-          "position": 2,
-          "item_body": "<p>52</p>"
-         },
-         {
-          "id": "uuid-000002",
-          "position": 3,
-          "item_body": "<p>5 * 2</p>"
-         }
-        ]
-       },
-       "scoring_data": {
-        "value": "uuid-000000"
-       },
-       "scoring_algorithm": "Equivalence",
-       "answer_feedback": {
-        "uuid-000000": "<p>Python evaluates an expression's variables and operators to produce a single result before printing it. x holds 5, so 5 * 2 evaluates to 10, which the program prints.</p>",
-        "uuid-000001": "<p>Python evaluates an expression's variables and operators to produce a single result before printing it. 52 looks like joining the digits 5 and 2 as text, but x is a number, so Python multiplies them.</p>",
-        "uuid-000002": "<p>Python evaluates an expression's variables and operators to produce a single result before printing it. 5 * 2 is the code's own text, but Python evaluates it and prints the result, 10.</p>"
-       }
-      }
-     }
-    }
-   },
-   {
-    "index": 2,
-    "source_item_id": "tf_indent",
-    "source_type": "TF",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 2,
-      "points_possible": 12.5,
-      "entry": {
-       "title": "tf_indent",
-       "item_body": "<p>In Python, indentation is part of the syntax and changes how code runs.</p>",
-       "interaction_type_slug": "true-false",
-       "interaction_data": {
-        "true_choice": "True",
-        "false_choice": "False"
-       },
-       "scoring_data": {
-        "value": true
-       },
-       "scoring_algorithm": "Equivalence",
-       "feedback": {
-        "neutral": "<p>In Python, indentation is not just style; it defines which lines belong to a code block. This statement is true: changing indentation changes which lines run together and how the program behaves.</p>"
-       }
-      }
-     }
-    }
-   },
-   {
-    "index": 3,
-    "source_item_id": "ma_outputs",
-    "source_type": "MA",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 3,
-      "points_possible": 12.5,
-      "entry": {
-       "title": "ma_outputs",
-       "item_body": "<p>Which of the following are ways a program can show information to a user? Select all that apply.</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(5)(A)</em></p>",
-       "interaction_type_slug": "multi-answer",
-       "interaction_data": {
-        "choices": [
-         {
-          "id": "uuid-000003",
-          "position": 1,
-          "item_body": "<p>print() to the screen</p>"
-         },
-         {
-          "id": "uuid-000004",
-          "position": 2,
-          "item_body": "<p>Writing text to a file</p>"
-         },
-         {
-          "id": "uuid-000005",
-          "position": 3,
-          "item_body": "<p>Declaring a variable</p>"
-         },
-         {
-          "id": "uuid-000006",
-          "position": 4,
-          "item_body": "<p>Adding a comment with #</p>"
-         }
-        ]
-       },
-       "scoring_data": {
-        "value": [
-         "uuid-000003",
-         "uuid-000004"
-        ]
-       },
-       "scoring_algorithm": "AllOrNothing",
-       "answer_feedback": {
-        "uuid-000003": "<p>A program's output is any information it sends where a user can see or access it. print() sends text straight to the screen, so it counts as output the user sees.</p>",
-        "uuid-000004": "<p>A program's output is any information it sends where a user can see or access it. Writing to a file also sends information somewhere the user can later open and read.</p>",
-        "uuid-000005": "<p>A program's output is any information it sends where a user can see or access it. Declaring a variable only stores a value in memory; it shows nothing to the user.</p>",
-        "uuid-000006": "<p>A program's output is any information it sends where a user can see or access it. Comments are ignored when the program runs, so they never appear anywhere the user looks.</p>"
-       }
-      }
-     }
-    }
-   },
-   {
-    "index": 4,
-    "source_item_id": "match_symbols",
-    "source_type": "MATCHING",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 4,
-      "points_possible": 12.5,
-      "entry": {
-       "title": "match_symbols",
-       "item_body": "<p>Match each Python symbol to its meaning.</p>",
-       "interaction_type_slug": "matching",
-       "interaction_data": {
-        "answers": [
-         "Assigns a value to a variable",
-         "Checks whether two values are equal",
-         "Adds two numbers",
-         "Checks whether two values are NOT equal"
-        ],
-        "questions": [
-         {
-          "id": "10001",
-          "item_body": "="
-         },
-         {
-          "id": "10002",
-          "item_body": "=="
-         },
-         {
-          "id": "10003",
-          "item_body": "+"
-         }
-        ]
-       },
-       "scoring_data": {
-        "value": {
-         "10001": "Assigns a value to a variable",
-         "10002": "Checks whether two values are equal",
-         "10003": "Adds two numbers"
-        },
-        "edit_data": {
-         "matches": [
-          {
-           "answer_body": "Assigns a value to a variable",
-           "question_id": "10001",
-           "question_body": "="
+    "metadata": {
+      "subject": "Intro to Computer Science",
+      "grade": 8,
+      "standard": "Mixed - fixture exercising every QuizForge item type.",
+      "variant_group": "all_types_sampler",
+      "variant_label": "Coverage fixture"
+    },
+    "quiz_payload": {
+      "quiz": {
+        "title": "All Question Types Sampler (CS)",
+        "points_possible": 100.0,
+        "grading_type": "points",
+        "quiz_settings": {
+          "shuffle_answers": false,
+          "shuffle_questions": true,
+          "require_student_access_code": true,
+          "student_access_code": "abc",
+          "multiple_attempts": {
+            "multiple_attempts_enabled": true,
+            "score_to_keep": "latest",
+            "build_on_last_attempt": true,
+            "attempt_limit": true,
+            "max_attempts": 3,
+            "cooling_period": true,
+            "cooling_period_seconds": 300
           },
-          {
-           "answer_body": "Checks whether two values are equal",
-           "question_id": "10002",
-           "question_body": "=="
-          },
-          {
-           "answer_body": "Adds two numbers",
-           "question_id": "10003",
-           "question_body": "+"
+          "has_time_limit": true,
+          "session_time_limit_in_seconds": 1800,
+          "calculator_type": "basic",
+          "one_at_a_time_type": "question",
+          "allow_backtracking": false,
+          "result_view_settings": {
+            "result_view_restricted": true,
+            "display_points_awarded": false,
+            "display_points_possible": false,
+            "display_items": false
           }
-         ],
-         "distractors": [
-          "Checks whether two values are NOT equal"
-         ]
         }
-       },
-       "scoring_algorithm": "DeepEquals",
-       "feedback": {
-        "neutral": "<p>Python uses different symbols for assignment, comparison, and arithmetic, and each one has one specific job. Here = assigns, == checks equality, + adds, and the unlisted != checks for inequality instead.</p>"
-       }
       }
-     }
-    }
-   },
-   {
-    "index": 5,
-    "source_item_id": "fitb_variable",
-    "source_type": "FITB",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 5,
-      "points_possible": 12.5,
-      "entry": {
-       "title": "fitb_variable",
-       "item_body": "<p>A `Blank` is a named container that stores a value you can use later.</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(4)(A)</em></p>",
-       "interaction_type_slug": "rich-fill-blank",
-       "interaction_data": {
-        "blanks": [
-         {
-          "id": "uuid-000007",
-          "answer_type": "openEntry"
-         }
-        ],
-        "word_bank_choices": [],
-        "reuse_word_bank_choices": false
-       },
-       "scoring_data": {
-        "value": [
-         {
-          "id": "uuid-000007",
-          "scoring_data": {
-           "value": "variable",
-           "blank_text": "variable",
-           "ignore_case": true,
-           "edit_distance": 1
-          },
-          "scoring_algorithm": "TextCloseEnough"
-         }
-        ],
-        "working_item_body": "<p>A `Blank` is a named container that stores a value you can use later.</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(4)(A)</em></p>"
-       },
-       "scoring_algorithm": "MultipleMethods",
-       "feedback": {
-        "neutral": "<p>A variable is a named container that stores a value so a program can use it later. The blank names exactly that idea, so the correct word to fill in is variable.</p>"
-       }
-      }
-     }
-    }
-   },
-   {
-    "index": 6,
-    "source_item_id": "num_modulo",
-    "source_type": "NUMERICAL",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 6,
-      "points_possible": 12.5,
-      "entry": {
-       "title": "num_modulo",
-       "item_body": "<p>In Python, what is the result of <code>7 % 3</code>?</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(4)(C)</em></p>",
-       "interaction_type_slug": "numeric",
-       "interaction_data": {},
-       "scoring_data": {
-        "value": [
-         {
-          "id": "uuid-000008",
-          "type": "exactResponse",
-          "value": "1"
-         }
-        ]
-       },
-       "scoring_algorithm": "Numeric",
-       "feedback": {
-        "neutral": "<p>The % operator, called modulo, returns the remainder left over after one number divides another. Dividing 7 by 3 goes in twice with 1 left over, so the answer is 1.</p>"
-       }
-      }
-     }
-    }
-   },
-   {
-    "index": 7,
-    "source_item_id": "order_steps",
-    "source_type": "ORDERING",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 7,
-      "points_possible": 12.5,
-      "entry": {
-       "title": "order_steps",
-       "item_body": "<p>Put the steps of writing and running a Python program in the correct order.</p>",
-       "interaction_type_slug": "ordering",
-       "interaction_data": {
-        "choices": {
-         "uuid-000009": {
-          "id": "uuid-000009",
-          "item_body": "Write the code in the editor"
-         },
-         "uuid-000010": {
-          "id": "uuid-000010",
-          "item_body": "Save the file"
-         },
-         "uuid-000011": {
-          "id": "uuid-000011",
-          "item_body": "Run the program"
-         },
-         "uuid-000012": {
-          "id": "uuid-000012",
-          "item_body": "Read the output"
-         }
+    },
+    "items": [
+      {
+        "index": 1,
+        "source_item_id": "mc_snippet_out",
+        "source_type": "MC",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 1,
+            "points_possible": 12.5,
+            "entry": {
+              "title": "mc_snippet_out",
+              "item_body": "<pre style='background-color:#272822;color:#F8F8F2;padding:12px;border-radius:6px;font-family:Consolas,Monaco,\"Courier New\",monospace;font-size:14px;line-height:1.5;overflow-x:auto;white-space:pre;display:block;'><code><span style=\"color: #F8F8F2\">x</span> <span style=\"color: #FF4689\">=</span> <span style=\"color: #AE81FF\">5</span>\n<span style=\"color: #A6E22E\">print</span><span style=\"color: #F8F8F2\">(x</span> <span style=\"color: #FF4689\">*</span> <span style=\"color: #AE81FF\">2</span><span style=\"color: #F8F8F2\">)</span></code></pre><p>What does the program above print?</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(4)(A)</em></p>",
+              "interaction_type_slug": "choice",
+              "interaction_data": {
+                "choices": [
+                  {
+                    "id": "uuid-000000",
+                    "position": 1,
+                    "item_body": "<p>10</p>"
+                  },
+                  {
+                    "id": "uuid-000001",
+                    "position": 2,
+                    "item_body": "<p>52</p>"
+                  },
+                  {
+                    "id": "uuid-000002",
+                    "position": 3,
+                    "item_body": "<p>5 * 2</p>"
+                  }
+                ]
+              },
+              "scoring_data": {
+                "value": "uuid-000000"
+              },
+              "scoring_algorithm": "Equivalence",
+              "answer_feedback": {
+                "uuid-000000": "<p>Python evaluates an expression's variables and operators to produce a single result before printing it. x holds 5, so 5 * 2 evaluates to 10, which the program prints.</p>",
+                "uuid-000001": "<p>Python evaluates an expression's variables and operators to produce a single result before printing it. 52 looks like joining the digits 5 and 2 as text, but x is a number, so Python multiplies them.</p>",
+                "uuid-000002": "<p>Python evaluates an expression's variables and operators to produce a single result before printing it. 5 * 2 is the code's own text, but Python evaluates it and prints the result, 10.</p>"
+              }
+            }
+          }
         }
-       },
-       "scoring_data": {
-        "value": [
-         "uuid-000009",
-         "uuid-000010",
-         "uuid-000011",
-         "uuid-000012"
-        ]
-       },
-       "scoring_algorithm": "DeepEquals",
-       "feedback": {
-        "neutral": "<p>Running a program follows a fixed order: you cannot see output before the code has actually run. Here that order is write the code, save the file, run the program, then read the output.</p>"
-       }
+      },
+      {
+        "index": 2,
+        "source_item_id": "tf_indent",
+        "source_type": "TF",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 2,
+            "points_possible": 12.5,
+            "entry": {
+              "title": "tf_indent",
+              "item_body": "<p>In Python, indentation is part of the syntax and changes how code runs.</p>",
+              "interaction_type_slug": "true-false",
+              "interaction_data": {
+                "true_choice": "True",
+                "false_choice": "False"
+              },
+              "scoring_data": {
+                "value": true
+              },
+              "scoring_algorithm": "Equivalence",
+              "feedback": {
+                "neutral": "<p>In Python, indentation is not just style; it defines which lines belong to a code block. This statement is true: changing indentation changes which lines run together and how the program behaves.</p>"
+              }
+            }
+          }
+        }
+      },
+      {
+        "index": 3,
+        "source_item_id": "ma_outputs",
+        "source_type": "MA",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 3,
+            "points_possible": 12.5,
+            "entry": {
+              "title": "ma_outputs",
+              "item_body": "<p>Which of the following are ways a program can show information to a user? Select all that apply.</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(5)(A)</em></p>",
+              "interaction_type_slug": "multi-answer",
+              "interaction_data": {
+                "choices": [
+                  {
+                    "id": "uuid-000003",
+                    "position": 1,
+                    "item_body": "<p>print() to the screen</p>"
+                  },
+                  {
+                    "id": "uuid-000004",
+                    "position": 2,
+                    "item_body": "<p>Writing text to a file</p>"
+                  },
+                  {
+                    "id": "uuid-000005",
+                    "position": 3,
+                    "item_body": "<p>Declaring a variable</p>"
+                  },
+                  {
+                    "id": "uuid-000006",
+                    "position": 4,
+                    "item_body": "<p>Adding a comment with #</p>"
+                  }
+                ]
+              },
+              "scoring_data": {
+                "value": [
+                  "uuid-000003",
+                  "uuid-000004"
+                ]
+              },
+              "scoring_algorithm": "AllOrNothing",
+              "answer_feedback": {
+                "uuid-000003": "<p>A program's output is any information it sends where a user can see or access it. print() sends text straight to the screen, so it counts as output the user sees.</p>",
+                "uuid-000004": "<p>A program's output is any information it sends where a user can see or access it. Writing to a file also sends information somewhere the user can later open and read.</p>",
+                "uuid-000005": "<p>A program's output is any information it sends where a user can see or access it. Declaring a variable only stores a value in memory; it shows nothing to the user.</p>",
+                "uuid-000006": "<p>A program's output is any information it sends where a user can see or access it. Comments are ignored when the program runs, so they never appear anywhere the user looks.</p>"
+              }
+            }
+          }
+        }
+      },
+      {
+        "index": 4,
+        "source_item_id": "match_symbols",
+        "source_type": "MATCHING",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 4,
+            "points_possible": 12.5,
+            "entry": {
+              "title": "match_symbols",
+              "item_body": "<p>Match each Python symbol to its meaning.</p>",
+              "interaction_type_slug": "matching",
+              "interaction_data": {
+                "answers": [
+                  "Assigns a value to a variable",
+                  "Checks whether two values are equal",
+                  "Adds two numbers",
+                  "Checks whether two values are NOT equal"
+                ],
+                "questions": [
+                  {
+                    "id": "10001",
+                    "item_body": "="
+                  },
+                  {
+                    "id": "10002",
+                    "item_body": "=="
+                  },
+                  {
+                    "id": "10003",
+                    "item_body": "+"
+                  }
+                ]
+              },
+              "scoring_data": {
+                "value": {
+                  "10001": "Assigns a value to a variable",
+                  "10002": "Checks whether two values are equal",
+                  "10003": "Adds two numbers"
+                },
+                "edit_data": {
+                  "matches": [
+                    {
+                      "answer_body": "Assigns a value to a variable",
+                      "question_id": "10001",
+                      "question_body": "="
+                    },
+                    {
+                      "answer_body": "Checks whether two values are equal",
+                      "question_id": "10002",
+                      "question_body": "=="
+                    },
+                    {
+                      "answer_body": "Adds two numbers",
+                      "question_id": "10003",
+                      "question_body": "+"
+                    }
+                  ],
+                  "distractors": [
+                    "Checks whether two values are NOT equal"
+                  ]
+                }
+              },
+              "scoring_algorithm": "DeepEquals",
+              "feedback": {
+                "neutral": "<p>Python uses different symbols for assignment, comparison, and arithmetic, and each one has one specific job. Here = assigns, == checks equality, + adds, and the unlisted != checks for inequality instead.</p>"
+              }
+            }
+          }
+        }
+      },
+      {
+        "index": 5,
+        "source_item_id": "fitb_variable",
+        "source_type": "FITB",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 5,
+            "points_possible": 12.5,
+            "entry": {
+              "title": "fitb_variable",
+              "item_body": "<p>A `Blank` is a named container that stores a value you can use later.</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(4)(A)</em></p>",
+              "interaction_type_slug": "rich-fill-blank",
+              "interaction_data": {
+                "blanks": [
+                  {
+                    "id": "uuid-000007",
+                    "answer_type": "openEntry"
+                  }
+                ],
+                "word_bank_choices": [],
+                "reuse_word_bank_choices": false
+              },
+              "scoring_data": {
+                "value": [
+                  {
+                    "id": "uuid-000007",
+                    "scoring_data": {
+                      "value": "variable",
+                      "blank_text": "variable",
+                      "ignore_case": true,
+                      "edit_distance": 1
+                    },
+                    "scoring_algorithm": "TextCloseEnough"
+                  }
+                ],
+                "working_item_body": "<p>A `Blank` is a named container that stores a value you can use later.</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(4)(A)</em></p>"
+              },
+              "scoring_algorithm": "MultipleMethods",
+              "feedback": {
+                "neutral": "<p>A variable is a named container that stores a value so a program can use it later. The blank names exactly that idea, so the correct word to fill in is variable.</p>"
+              }
+            }
+          }
+        }
+      },
+      {
+        "index": 6,
+        "source_item_id": "num_modulo",
+        "source_type": "NUMERICAL",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 6,
+            "points_possible": 12.5,
+            "entry": {
+              "title": "num_modulo",
+              "item_body": "<p>In Python, what is the result of <code>7 % 3</code>?</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(4)(C)</em></p>",
+              "interaction_type_slug": "numeric",
+              "interaction_data": {},
+              "scoring_data": {
+                "value": [
+                  {
+                    "id": "uuid-000008",
+                    "type": "exactResponse",
+                    "value": "1"
+                  }
+                ]
+              },
+              "scoring_algorithm": "Numeric",
+              "feedback": {
+                "neutral": "<p>The % operator, called modulo, returns the remainder left over after one number divides another. Dividing 7 by 3 goes in twice with 1 left over, so the answer is 1.</p>"
+              }
+            }
+          }
+        }
+      },
+      {
+        "index": 7,
+        "source_item_id": "order_steps",
+        "source_type": "ORDERING",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 7,
+            "points_possible": 12.5,
+            "entry": {
+              "title": "order_steps",
+              "item_body": "<p>Put the steps of writing and running a Python program in the correct order.</p>",
+              "interaction_type_slug": "ordering",
+              "interaction_data": {
+                "choices": {
+                  "uuid-000009": {
+                    "id": "uuid-000009",
+                    "item_body": "Write the code in the editor"
+                  },
+                  "uuid-000010": {
+                    "id": "uuid-000010",
+                    "item_body": "Save the file"
+                  },
+                  "uuid-000011": {
+                    "id": "uuid-000011",
+                    "item_body": "Run the program"
+                  },
+                  "uuid-000012": {
+                    "id": "uuid-000012",
+                    "item_body": "Read the output"
+                  }
+                }
+              },
+              "scoring_data": {
+                "value": [
+                  "uuid-000009",
+                  "uuid-000010",
+                  "uuid-000011",
+                  "uuid-000012"
+                ]
+              },
+              "scoring_algorithm": "DeepEquals",
+              "feedback": {
+                "neutral": "<p>Running a program follows a fixed order: you cannot see output before the code has actually run. Here that order is write the code, save the file, run the program, then read the output.</p>"
+              }
+            }
+          }
+        }
+      },
+      {
+        "index": 8,
+        "source_item_id": "cat_tokens",
+        "source_type": "CATEGORIZATION",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 8,
+            "points_possible": 12.5,
+            "entry": {
+              "title": "cat_tokens",
+              "item_body": "<p>Sort each Python piece into the correct group.</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(4)(A)</em></p>",
+              "interaction_type_slug": "categorization",
+              "interaction_data": {
+                "categories": {
+                  "uuid-000013": {
+                    "id": "uuid-000013",
+                    "item_body": "Keyword"
+                  },
+                  "uuid-000014": {
+                    "id": "uuid-000014",
+                    "item_body": "Operator"
+                  }
+                },
+                "distractors": {
+                  "uuid-000015": {
+                    "id": "uuid-000015",
+                    "item_body": "for"
+                  },
+                  "uuid-000016": {
+                    "id": "uuid-000016",
+                    "item_body": "if"
+                  },
+                  "uuid-000017": {
+                    "id": "uuid-000017",
+                    "item_body": "+"
+                  },
+                  "uuid-000018": {
+                    "id": "uuid-000018",
+                    "item_body": "=="
+                  }
+                },
+                "category_order": [
+                  "uuid-000013",
+                  "uuid-000014"
+                ]
+              },
+              "scoring_data": {
+                "value": [
+                  {
+                    "id": "uuid-000013",
+                    "scoring_data": {
+                      "value": [
+                        "uuid-000015",
+                        "uuid-000016"
+                      ]
+                    },
+                    "scoring_algorithm": "AllOrNothing"
+                  },
+                  {
+                    "id": "uuid-000014",
+                    "scoring_data": {
+                      "value": [
+                        "uuid-000017",
+                        "uuid-000018"
+                      ]
+                    },
+                    "scoring_algorithm": "AllOrNothing"
+                  }
+                ],
+                "score_method": "all_or_nothing"
+              },
+              "scoring_algorithm": "Categorization",
+              "feedback": {
+                "neutral": "<p>Python code is built from keywords that control structure and operators that act on values. Here for and if are keywords, while + and == are operators, matching each group correctly.</p>"
+              }
+            }
+          }
+        }
       }
-     }
+    ],
+    "assignment_settings": {
+      "due_at": "2026-10-01T23:59:00Z",
+      "unlock_at": "2026-09-30T08:00:00Z",
+      "lock_at": "2026-10-02T23:59:00Z",
+      "assignment_group_name": "Quizzes",
+      "post_to_sis": true,
+      "published": true,
+      "allow_multiple_attempts": true,
+      "allowed_attempts": 3
+    },
+    "module": {
+      "module_name": "Unit 1"
     }
-   },
-   {
-    "index": 8,
-    "source_item_id": "cat_tokens",
-    "source_type": "CATEGORIZATION",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 8,
-      "points_possible": 12.5,
-      "entry": {
-       "title": "cat_tokens",
-       "item_body": "<p>Sort each Python piece into the correct group.</p><p style='font-size:12px;color:#999;margin-top:10px;'><em>TEKS: 126.34(c)(4)(A)</em></p>",
-       "interaction_type_slug": "categorization",
-       "interaction_data": {
-        "categories": {
-         "uuid-000013": {
-          "id": "uuid-000013",
-          "item_body": "Keyword"
-         },
-         "uuid-000014": {
-          "id": "uuid-000014",
-          "item_body": "Operator"
-         }
-        },
-        "distractors": {
-         "uuid-000015": {
-          "id": "uuid-000015",
-          "item_body": "for"
-         },
-         "uuid-000016": {
-          "id": "uuid-000016",
-          "item_body": "if"
-         },
-         "uuid-000017": {
-          "id": "uuid-000017",
-          "item_body": "+"
-         },
-         "uuid-000018": {
-          "id": "uuid-000018",
-          "item_body": "=="
-         }
-        },
-        "category_order": [
-         "uuid-000013",
-         "uuid-000014"
-        ]
-       },
-       "scoring_data": {
-        "value": [
-         {
-          "id": "uuid-000013",
-          "scoring_data": {
-           "value": [
-            "uuid-000015",
-            "uuid-000016"
-           ]
-          },
-          "scoring_algorithm": "AllOrNothing"
-         },
-         {
-          "id": "uuid-000014",
-          "scoring_data": {
-           "value": [
-            "uuid-000017",
-            "uuid-000018"
-           ]
-          },
-          "scoring_algorithm": "AllOrNothing"
-         }
-        ],
-        "score_method": "all_or_nothing"
-       },
-       "scoring_algorithm": "Categorization",
-       "feedback": {
-        "neutral": "<p>Python code is built from keywords that control structure and operators that act on values. Here for and if are keywords, while + and == are operators, matching each group correctly.</p>"
-       }
-      }
-     }
-    }
-   }
-  ],
-  "assignment_settings": {
-   "due_at": "2026-10-01T23:59:00Z",
-   "unlock_at": "2026-09-30T08:00:00Z",
-   "lock_at": "2026-10-02T23:59:00Z",
-   "assignment_group_name": "Quizzes",
-   "post_to_sis": true,
-   "published": true,
-   "allow_multiple_attempts": true,
-   "allowed_attempts": 3
   },
-  "module": {
-   "module_name": "Unit 1"
-  }
- },
- "lantern_form_a_default": {
-  "version": 1,
-  "title": "Reading Check: \"The Lantern\" (Form A)",
-  "metadata": {
-   "subject": "ELA 7",
-   "grade": 7,
-   "standard": "Determine theme/central idea and interpret word meaning in context (RL.7.1, RL.7.2, RL.7.4).",
-   "variant_group": "ela7_lantern",
-   "variant_label": "Form A"
-  },
-  "quiz_payload": {
-   "quiz": {
+  "lantern_form_a_default": {
+    "version": 1,
     "title": "Reading Check: \"The Lantern\" (Form A)",
-    "points_possible": 100.0,
-    "grading_type": "points",
-    "quiz_settings": {
-     "shuffle_answers": true,
-     "shuffle_questions": false,
-     "result_view_settings": {
-      "result_view_restricted": true,
-      "display_points_awarded": true,
-      "display_points_possible": true,
-      "display_items": true,
-      "display_item_response": true,
-      "display_item_response_correctness": true,
-      "display_item_response_qualifier": "after_last_attempt",
-      "display_item_correct_answer": true,
-      "display_item_feedback": true
-     }
-    }
-   }
-  },
-  "items": [
-   {
-    "index": 1,
-    "source_item_id": "mc_theme",
-    "source_type": "MC",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 1,
-      "points_possible": 33.33,
-      "entry": {
-       "title": "mc_theme",
-       "item_body": "<p><strong>The Lantern</strong></p><p>Every evening, just as the sky turned the color of ash, old Mr. Hale climbed the spiral stair of the lighthouse. He carried a single lantern, its flame held steady against the wind that pushed through the cracks. The fishing boats far out on the water watched for his light the way travelers watch for a familiar face. Some nights the storms were fierce, and the climb left his hands raw on the cold rail. Still, he never missed a night. The town below slept easier knowing the old keeper and his lantern stood guard.</p><p>Which statement best expresses a central idea of the passage?</p>",
-       "interaction_type_slug": "choice",
-       "interaction_data": {
-        "choices": [
-         {
-          "id": "uuid-000019",
-          "position": 1,
-          "item_body": "<p>Quiet, faithful dedication can protect and reassure others.</p>"
-         },
-         {
-          "id": "uuid-000020",
-          "position": 2,
-          "item_body": "<p>Lighthouses are difficult and dangerous to operate.</p>"
-         },
-         {
-          "id": "uuid-000021",
-          "position": 3,
-          "item_body": "<p>Storms at sea are impossible to predict.</p>"
-         },
-         {
-          "id": "uuid-000022",
-          "position": 4,
-          "item_body": "<p>Old age makes hard work impossible.</p>"
-         }
-        ]
-       },
-       "scoring_data": {
-        "value": "uuid-000019"
-       },
-       "scoring_algorithm": "Equivalence",
-       "answer_feedback": {
-        "uuid-000019": "<p>A passage's central idea is the main point it keeps returning to, not just any detail mentioned. Here the keeper's steady nightly service, which lets the town sleep easier, points to faithful dedication.</p>",
-        "uuid-000020": "<p>A passage's central idea is the main point it keeps returning to, not just any detail mentioned. Difficulty is only a detail here, since the passage's real focus is his reliable, steady care.</p>",
-        "uuid-000021": "<p>A passage's central idea is the main point it keeps returning to, not just any detail mentioned. Storms are mentioned, but the passage centers on the keeper, not on predicting weather.</p>",
-        "uuid-000022": "<p>A passage's central idea is the main point it keeps returning to, not just any detail mentioned. The passage shows the opposite: despite his age, the keeper never misses a night.</p>"
-       }
+    "metadata": {
+      "subject": "ELA 7",
+      "grade": 7,
+      "standard": "Determine theme/central idea and interpret word meaning in context (RL.7.1, RL.7.2, RL.7.4).",
+      "variant_group": "ela7_lantern",
+      "variant_label": "Form A"
+    },
+    "quiz_payload": {
+      "quiz": {
+        "title": "Reading Check: \"The Lantern\" (Form A)",
+        "points_possible": 100.0,
+        "grading_type": "points",
+        "quiz_settings": {
+          "shuffle_answers": true,
+          "shuffle_questions": false,
+          "result_view_settings": {
+            "result_view_restricted": true,
+            "display_points_awarded": true,
+            "display_points_possible": true,
+            "display_items": true,
+            "display_item_response": true,
+            "display_item_response_correctness": true,
+            "display_item_response_qualifier": "after_last_attempt",
+            "display_item_correct_answer": true,
+            "display_item_feedback": true
+          }
+        }
       }
-     }
-    }
-   },
-   {
-    "index": 2,
-    "source_item_id": "mc_vocab_dusk",
-    "source_type": "MC",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 2,
-      "points_possible": 33.33,
-      "entry": {
-       "title": "mc_vocab_dusk",
-       "item_body": "<p><strong>The Lantern</strong></p><p>Every evening, just as the sky turned the color of ash, old Mr. Hale climbed the spiral stair of the lighthouse. He carried a single lantern, its flame held steady against the wind that pushed through the cracks. The fishing boats far out on the water watched for his light the way travelers watch for a familiar face. Some nights the storms were fierce, and the climb left his hands raw on the cold rail. Still, he never missed a night. The town below slept easier knowing the old keeper and his lantern stood guard.</p><p>The passage says the keeper climbed the stair when <em>the sky turned the color of ash</em>. This phrase most nearly describes:</p>",
-       "interaction_type_slug": "choice",
-       "interaction_data": {
-        "choices": [
-         {
-          "id": "uuid-000023",
-          "position": 1,
-          "item_body": "<p>evening, as daylight fades to gray</p>"
-         },
-         {
-          "id": "uuid-000024",
-          "position": 2,
-          "item_body": "<p>a bright, sunny morning</p>"
-         },
-         {
-          "id": "uuid-000025",
-          "position": 3,
-          "item_body": "<p>the middle of a rainstorm</p>"
-         },
-         {
-          "id": "uuid-000026",
-          "position": 4,
-          "item_body": "<p>a fire near the lighthouse</p>"
-         }
-        ]
-       },
-       "scoring_data": {
-        "value": "uuid-000023"
-       },
-       "scoring_algorithm": "Equivalence",
-       "answer_feedback": {
-        "uuid-000023": "<p>A descriptive phrase's meaning comes from the details around it, not from reading each word literally. Here ash is gray, and the keeper climbs each evening, so the phrase points to fading daylight.</p>",
-        "uuid-000024": "<p>A descriptive phrase's meaning comes from the details around it, not from reading each word literally. Bright morning sunlight is not the color of ash, and the passage says every evening instead.</p>",
-        "uuid-000025": "<p>A descriptive phrase's meaning comes from the details around it, not from reading each word literally. Rain appears elsewhere in the passage, but this phrase describes the sky's color, not a storm.</p>",
-        "uuid-000026": "<p>A descriptive phrase's meaning comes from the details around it, not from reading each word literally. The color of ash compares the sky to gray light, not to literal fire or flame.</p>"
-       }
+    },
+    "items": [
+      {
+        "index": 1,
+        "source_item_id": "mc_theme",
+        "source_type": "MC",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 1,
+            "points_possible": 33.33,
+            "entry": {
+              "title": "mc_theme",
+              "item_body": "<p><strong>The Lantern</strong></p><p>Every evening, just as the sky turned the color of ash, old Mr. Hale climbed the spiral stair of the lighthouse. He carried a single lantern, its flame held steady against the wind that pushed through the cracks. The fishing boats far out on the water watched for his light the way travelers watch for a familiar face. Some nights the storms were fierce, and the climb left his hands raw on the cold rail. Still, he never missed a night. The town below slept easier knowing the old keeper and his lantern stood guard.</p><p>Which statement best expresses a central idea of the passage?</p>",
+              "interaction_type_slug": "choice",
+              "interaction_data": {
+                "choices": [
+                  {
+                    "id": "uuid-000019",
+                    "position": 1,
+                    "item_body": "<p>Quiet, faithful dedication can protect and reassure others.</p>"
+                  },
+                  {
+                    "id": "uuid-000020",
+                    "position": 2,
+                    "item_body": "<p>Lighthouses are difficult and dangerous to operate.</p>"
+                  },
+                  {
+                    "id": "uuid-000021",
+                    "position": 3,
+                    "item_body": "<p>Storms at sea are impossible to predict.</p>"
+                  },
+                  {
+                    "id": "uuid-000022",
+                    "position": 4,
+                    "item_body": "<p>Old age makes hard work impossible.</p>"
+                  }
+                ]
+              },
+              "scoring_data": {
+                "value": "uuid-000019"
+              },
+              "scoring_algorithm": "Equivalence",
+              "answer_feedback": {
+                "uuid-000019": "<p>A passage's central idea is the main point it keeps returning to, not just any detail mentioned. Here the keeper's steady nightly service, which lets the town sleep easier, points to faithful dedication.</p>",
+                "uuid-000020": "<p>A passage's central idea is the main point it keeps returning to, not just any detail mentioned. Difficulty is only a detail here, since the passage's real focus is his reliable, steady care.</p>",
+                "uuid-000021": "<p>A passage's central idea is the main point it keeps returning to, not just any detail mentioned. Storms are mentioned, but the passage centers on the keeper, not on predicting weather.</p>",
+                "uuid-000022": "<p>A passage's central idea is the main point it keeps returning to, not just any detail mentioned. The passage shows the opposite: despite his age, the keeper never misses a night.</p>"
+              }
+            }
+          }
+        }
+      },
+      {
+        "index": 2,
+        "source_item_id": "mc_vocab_dusk",
+        "source_type": "MC",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 2,
+            "points_possible": 33.33,
+            "entry": {
+              "title": "mc_vocab_dusk",
+              "item_body": "<p><strong>The Lantern</strong></p><p>Every evening, just as the sky turned the color of ash, old Mr. Hale climbed the spiral stair of the lighthouse. He carried a single lantern, its flame held steady against the wind that pushed through the cracks. The fishing boats far out on the water watched for his light the way travelers watch for a familiar face. Some nights the storms were fierce, and the climb left his hands raw on the cold rail. Still, he never missed a night. The town below slept easier knowing the old keeper and his lantern stood guard.</p><p>The passage says the keeper climbed the stair when <em>the sky turned the color of ash</em>. This phrase most nearly describes:</p>",
+              "interaction_type_slug": "choice",
+              "interaction_data": {
+                "choices": [
+                  {
+                    "id": "uuid-000023",
+                    "position": 1,
+                    "item_body": "<p>evening, as daylight fades to gray</p>"
+                  },
+                  {
+                    "id": "uuid-000024",
+                    "position": 2,
+                    "item_body": "<p>a bright, sunny morning</p>"
+                  },
+                  {
+                    "id": "uuid-000025",
+                    "position": 3,
+                    "item_body": "<p>the middle of a rainstorm</p>"
+                  },
+                  {
+                    "id": "uuid-000026",
+                    "position": 4,
+                    "item_body": "<p>a fire near the lighthouse</p>"
+                  }
+                ]
+              },
+              "scoring_data": {
+                "value": "uuid-000023"
+              },
+              "scoring_algorithm": "Equivalence",
+              "answer_feedback": {
+                "uuid-000023": "<p>A descriptive phrase's meaning comes from the details around it, not from reading each word literally. Here ash is gray, and the keeper climbs each evening, so the phrase points to fading daylight.</p>",
+                "uuid-000024": "<p>A descriptive phrase's meaning comes from the details around it, not from reading each word literally. Bright morning sunlight is not the color of ash, and the passage says every evening instead.</p>",
+                "uuid-000025": "<p>A descriptive phrase's meaning comes from the details around it, not from reading each word literally. Rain appears elsewhere in the passage, but this phrase describes the sky's color, not a storm.</p>",
+                "uuid-000026": "<p>A descriptive phrase's meaning comes from the details around it, not from reading each word literally. The color of ash compares the sky to gray light, not to literal fire or flame.</p>"
+              }
+            }
+          }
+        }
+      },
+      {
+        "index": 3,
+        "source_item_id": "fitb_setting",
+        "source_type": "FITB",
+        "payload": {
+          "item": {
+            "entry_type": "Item",
+            "position": 3,
+            "points_possible": 33.34,
+            "entry": {
+              "title": "fitb_setting",
+              "item_body": "<p><strong>The Lantern</strong></p><p>Every evening, just as the sky turned the color of ash, old Mr. Hale climbed the spiral stair of the lighthouse. He carried a single lantern, its flame held steady against the wind that pushed through the cracks. The fishing boats far out on the water watched for his light the way travelers watch for a familiar face. Some nights the storms were fierce, and the climb left his hands raw on the cold rail. Still, he never missed a night. The town below slept easier knowing the old keeper and his lantern stood guard.</p><p>The events of the passage take place at a `Blank`.</p>",
+              "interaction_type_slug": "rich-fill-blank",
+              "interaction_data": {
+                "blanks": [
+                  {
+                    "id": "uuid-000027",
+                    "answer_type": "openEntry"
+                  }
+                ],
+                "word_bank_choices": [],
+                "reuse_word_bank_choices": false
+              },
+              "scoring_data": {
+                "value": [
+                  {
+                    "id": "uuid-000027",
+                    "scoring_data": {
+                      "value": "lighthouse",
+                      "blank_text": "lighthouse",
+                      "ignore_case": true,
+                      "edit_distance": 1
+                    },
+                    "scoring_algorithm": "TextCloseEnough"
+                  }
+                ],
+                "working_item_body": "<p><strong>The Lantern</strong></p><p>Every evening, just as the sky turned the color of ash, old Mr. Hale climbed the spiral stair of the lighthouse. He carried a single lantern, its flame held steady against the wind that pushed through the cracks. The fishing boats far out on the water watched for his light the way travelers watch for a familiar face. Some nights the storms were fierce, and the climb left his hands raw on the cold rail. Still, he never missed a night. The town below slept easier knowing the old keeper and his lantern stood guard.</p><p>The events of the passage take place at a `Blank`.</p>"
+              },
+              "scoring_algorithm": "MultipleMethods",
+              "feedback": {
+                "neutral": "<p>A story's setting is the place and time where its events actually happen. Here the keeper climbs the lighthouse stair every night, so the blank answer is lighthouse.</p>"
+              }
+            }
+          }
+        }
       }
-     }
-    }
-   },
-   {
-    "index": 3,
-    "source_item_id": "fitb_setting",
-    "source_type": "FITB",
-    "payload": {
-     "item": {
-      "entry_type": "Item",
-      "position": 3,
-      "points_possible": 33.34,
-      "entry": {
-       "title": "fitb_setting",
-       "item_body": "<p><strong>The Lantern</strong></p><p>Every evening, just as the sky turned the color of ash, old Mr. Hale climbed the spiral stair of the lighthouse. He carried a single lantern, its flame held steady against the wind that pushed through the cracks. The fishing boats far out on the water watched for his light the way travelers watch for a familiar face. Some nights the storms were fierce, and the climb left his hands raw on the cold rail. Still, he never missed a night. The town below slept easier knowing the old keeper and his lantern stood guard.</p><p>The events of the passage take place at a `Blank`.</p>",
-       "interaction_type_slug": "rich-fill-blank",
-       "interaction_data": {
-        "blanks": [
-         {
-          "id": "uuid-000027",
-          "answer_type": "openEntry"
-         }
-        ],
-        "word_bank_choices": [],
-        "reuse_word_bank_choices": false
-       },
-       "scoring_data": {
-        "value": [
-         {
-          "id": "uuid-000027",
-          "scoring_data": {
-           "value": "lighthouse",
-           "blank_text": "lighthouse",
-           "ignore_case": true,
-           "edit_distance": 1
-          },
-          "scoring_algorithm": "TextCloseEnough"
-         }
-        ],
-        "working_item_body": "<p><strong>The Lantern</strong></p><p>Every evening, just as the sky turned the color of ash, old Mr. Hale climbed the spiral stair of the lighthouse. He carried a single lantern, its flame held steady against the wind that pushed through the cracks. The fishing boats far out on the water watched for his light the way travelers watch for a familiar face. Some nights the storms were fierce, and the climb left his hands raw on the cold rail. Still, he never missed a night. The town below slept easier knowing the old keeper and his lantern stood guard.</p><p>The events of the passage take place at a `Blank`.</p>"
-       },
-       "scoring_algorithm": "MultipleMethods",
-       "feedback": {
-        "neutral": "<p>A story's setting is the place and time where its events actually happen. Here the keeper climbs the lighthouse stair every night, so the blank answer is lighthouse.</p>"
-       }
-      }
-     }
-    }
-   }
-  ],
-  "assignment_settings": {},
-  "module": {}
- }
+    ],
+    "assignment_settings": {},
+    "module": {}
+  }
 }

@@ -39,10 +39,10 @@ def test_public_module_selection_options_refuse_mixed_or_implicit_create(monkeyp
     from api import content_push
     assert "module_id and create_module" in content_push._collect_options(
         "assignment", {"module_id": "501", "create_module": True}
-    )[1]
+    )[1]["error"]
     assert "non-empty module_name" in content_push._collect_options(
         "assignment", {"create_module": True, "module_name": ""}
-    )[1]
+    )[1]["error"]
 
     fake = FakeCanvas()
     monkeypatch.setattr(canvas_client, "canvas_get", fake.get)

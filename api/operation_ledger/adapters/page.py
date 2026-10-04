@@ -57,11 +57,19 @@ class PageAdapter:
         module_name = prepare_request.get("module_name") or None
         if module_name:
             module_name = str(module_name).strip() or None
+        module_id = str(prepare_request.get("module_id") or "").strip() or None
+        create_module = bool(prepare_request.get("create_module"))
+        if create_module and not module_name:
+            raise ValueError("create_module requires module_name")
+        if create_module and module_id:
+            raise ValueError("create_module cannot be combined with module_id")
         return {
             "title": title,
             "body": body,
             "published": published,
             "module_name": module_name,
+            "module_id": module_id,
+            "create_module": create_module,
             "source_path": path,
             "attachments": attachments,
         }
@@ -72,6 +80,8 @@ class PageAdapter:
             "body": payload.get("body"),
             "published": payload.get("published"),
             "module_name": payload.get("module_name"),
+            "module_id": payload.get("module_id"),
+            "create_module": payload.get("create_module"),
             "attachments": payload.get("attachments"),
         })
 
@@ -135,6 +145,8 @@ class PageAdapter:
             "body": payload.get("body"),
             "published": payload.get("published"),
             "module_name": payload.get("module_name"),
+            "module_id": payload.get("module_id"),
+            "create_module": payload.get("create_module"),
             "baseline_has_existing_page": existing is not None,
             "baseline_page_url": existing.get("url") if existing else None,
             "attachments": [_attachment_review_row(row)
@@ -176,6 +188,8 @@ class PageAdapter:
         page_body = payload.get("body", "")
         published = bool(payload.get("published"))
         module_name = payload.get("module_name")
+        requested_module_id = payload.get("module_id")
+        create_module = bool(payload.get("create_module"))
         steps = _ordered_steps(target)
         canvas_files = {}
         for index, record in enumerate(payload.get("attachments", [])):
@@ -276,24 +290,36 @@ class PageAdapter:
                 page_step, returned_object_id=page_slug, returned_object_url=page_url)
             _replace_local_step(steps, page_step)
 
-        if not module_name:
+        if not (module_name or requested_module_id or create_module):
             return _build_result("applied", steps=steps,
                                  returned_object_id=page_slug,
                                  returned_object_url=page_url)
 
         create_module_step = _find_step(steps, "create_module")
         attach_step = _find_step(steps, "attach_module")
-        module_id = _module_id_from_steps(create_module_step, attach_step)
+        module_id = str(_module_id_from_steps(create_module_step, attach_step) or "")
 
-        if not module_id:
-            modules, error = _read_modules(course_id)
-            if error:
-                return _build_result("sent_unknown", steps=steps,
+        if requested_module_id:
+            module_id = str(requested_module_id)
+            module, error = canvas_client.canvas_get(
+                f"/api/v1/courses/{course_id}/modules/{module_id}")
+            if error or not isinstance(module, dict) or str(module.get("id")) != module_id:
+                return _build_result("blocked" if not error else "sent_unknown", steps=steps,
                                      returned_object_id=page_slug,
                                      returned_object_url=page_url,
-                                     error_code="module_lookup_failed")
-            matches = [module for module in modules
-                       if _normalize_title(module.get("name")) == _normalize_title(module_name)]
+                                     error_code="module_exact_id_unverified")
+        elif not module_id:
+            if create_module:
+                matches = []
+            else:
+                modules, error = _read_modules(course_id)
+                if error:
+                    return _build_result("sent_unknown", steps=steps,
+                                         returned_object_id=page_slug,
+                                         returned_object_url=page_url,
+                                         error_code="module_lookup_failed")
+                matches = [module for module in modules
+                           if _normalize_title(module.get("name")) == _normalize_title(module_name)]
             if len(matches) > 1:
                 return _build_result("blocked", steps=steps,
                                      returned_object_id=page_slug,
@@ -471,7 +497,8 @@ class PageAdapter:
 
         result = {"state": "applied", "returned_object_id": page_slug,
                   "returned_object_url": page.get("html_url")}
-        if not payload.get("module_name"):
+        if not (payload.get("module_name") or payload.get("module_id")
+                or payload.get("create_module")):
             return result
 
         create_module_step = _find_step(steps, "create_module")

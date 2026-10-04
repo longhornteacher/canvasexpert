@@ -51,6 +51,8 @@ RETIRED_FILES = {
         # Before the console charter and removal of generated printables.
         "936f2bd4688abc25e8d519009b751f44715791fc27843360753665121e48713b",
         "9194737963ee24d8de9e65990bd2aa9f58eb88abffde4c5643cacaf0a2daca7e",
+        # Before the required private correction package guidance.
+        "2581440c2cd2720125390d5d7ff3c84ba2979d8e668e68936bc0a21f846f53d3",
     }),
     "Author a Page (PageForge).txt": frozenset({
         "deafeb6f8f4d6be6dc3324f278099155e1863ec45676218ebb4ae95163830d53",
@@ -61,6 +63,8 @@ RETIRED_FILES = {
         # Before the console charter and removal of generated printables.
         "7db317a92a6208833c8e8e8fc238798375bd0fa30d2557f31425ee43a7d962e4",
         "5f74c61040b83f5b3f43243adf5d424ab2c9037a14fa40d7f9232ca4d99fc181",
+        # Before agent-directed quiz delivery settings.
+        "28cab71bec3b8e8005ca7cbf6110d940a8d9437d78915adb00e02c72663fd1f5",
     }),
     "Reference/QF_REF_Stimulus_Formatting.md": frozenset({
         "8a33159cd3565e7b96a10b7196974a00a1d0c55e621d5681d9205835846297bf",
@@ -136,6 +140,8 @@ RETIRED_FILES = {
         # Before the direct write stopped being gated behind a second ask.
         # The teacher asking for the write is the authorization.
         "1da24d0600b3c50fd7ef78dadc22327dfdd4c38a2cca2d2adde2d2a36000d36a",
+        # Before assignment creation required private correction entries.
+        "cadede6afdbe127bc9781385e1fce5d02a48532104c2e782f797397a4009398c",
         # Before CORE named the scoring write path. It had said a teacher
         # could have "scores" written straight to Canvas, which promises
         # generic grade posting; only New Quiz item scores can go.

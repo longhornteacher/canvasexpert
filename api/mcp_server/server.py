@@ -395,9 +395,9 @@ def list_staged_content(kind: str = "") -> str:
 
 
 @mcp.tool(structured_output=False)
-def preview_content_push(course_id: str, kind: str='quiz', label: str='', published: bool | None=None, module_name: str='', assignment_group_name: str='', due_at: str='', unlock_at: str='', lock_at: str='', post_to_sis: bool | None=None, module_id: str='', create_module: bool=False, variants: list | None=None) -> str:
+def preview_content_push(course_id: str, kind: str='quiz', label: str='', published: bool | None=None, module_name: str='', assignment_group_name: str='', due_at: str='', unlock_at: str='', lock_at: str='', post_to_sis: bool | None=None, module_id: str='', create_module: bool=False, variants: list | None=None, quiz_settings: dict | None=None) -> str:
     'Persist a local review of one staged draft or differentiated quiz variants.'
-    return _compact(tools.preview_content_push(course_id=course_id, kind=kind, label=label, published=published, module_name=module_name, assignment_group_name=assignment_group_name, due_at=due_at, unlock_at=unlock_at, lock_at=lock_at, post_to_sis=post_to_sis, module_id=module_id, create_module=create_module, variants=variants))
+    return _compact(tools.preview_content_push(course_id=course_id, kind=kind, label=label, published=published, module_name=module_name, assignment_group_name=assignment_group_name, due_at=due_at, unlock_at=unlock_at, lock_at=lock_at, post_to_sis=post_to_sis, module_id=module_id, create_module=create_module, variants=variants, quiz_settings=quiz_settings))
 
 
 
@@ -445,6 +445,7 @@ def push_content_live(
     module_name: str = "",
     assignment_group_name: str = "",
     post_to_sis: bool | None = None, module_id: str = "", create_module: bool = False,
+    quiz_settings: dict | None = None,
 ) -> str:
     """Stage and create one authored draft in Canvas; dates use the preview pair."""
     return _compact(tools.push_content_live(
@@ -452,7 +453,7 @@ def push_content_live(
         published=published, module_name=module_name,
         assignment_group_name=assignment_group_name,
         post_to_sis=post_to_sis, module_id=module_id,
-        create_module=create_module,
+        create_module=create_module, quiz_settings=quiz_settings,
     ))
 
 

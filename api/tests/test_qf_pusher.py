@@ -89,6 +89,37 @@ def test_new_quiz_preserves_authored_fractional_zero_points_without_rationales(t
     assert plan["quiz_payload"]["quiz"]["points_possible"] == pytest.approx(2.375)
 
 
+def test_new_quiz_plan_exposes_effective_quiz_settings(tmp_path):
+    plan = qf_pusher.build_push_plan(_write(tmp_path, {
+        "version": "3.0-json", "title": "Settings", "items": [_tf("a")],
+    }), {
+        "shuffle_answers": False,
+        "allow_multiple_attempts": True,
+        "allowed_attempts": 2,
+        "has_time_limit": True,
+        "time_limit_minutes": 30,
+        "hide_results": True,
+    })
+
+    settings = plan["quiz_payload"]["quiz"]["quiz_settings"]
+    assert settings["shuffle_answers"] is False
+    assert settings["multiple_attempts"] == {
+        "multiple_attempts_enabled": True,
+        "score_to_keep": "highest",
+        "build_on_last_attempt": False,
+        "attempt_limit": True,
+        "max_attempts": 2,
+    }
+    assert settings["has_time_limit"] is True
+    assert settings["session_time_limit_in_seconds"] == 1800
+    assert settings["result_view_settings"] == {
+        "result_view_restricted": True,
+        "display_points_awarded": False,
+        "display_points_possible": False,
+        "display_items": False,
+    }
+
+
 def test_new_quiz_preserves_optional_partial_authored_feedback(tmp_path):
     authored = "Ask the teacher. " + ("This is incorrect. " * 40)
     payload = {"version": "3.0-json", "title": "Feedback", "items": [{
@@ -156,3 +187,15 @@ def test_classic_plan_maps_push_settings_onto_classic_quiz_fields(tmp_path):
     assert plan["assignment_settings"] == {
         "published": True, "assignment_group_name": "Quizzes", "post_to_sis": False}
     assert plan["module"] == {"module_name": "Unit 1"}
+
+
+@pytest.mark.parametrize("settings, message", [
+    ({"not_a_quiz_setting": True}, "unknown keys"),
+    ({"shuffle_answers": "yes"}, "must be a boolean"),
+    ({"time_limit_minutes": "30"}, "must be an integer"),
+    ({"allowed_attempts": True}, "allowed_attempts"),
+    ([], "must be an object"),
+])
+def test_push_settings_refuse_unknown_keys_and_wrong_types(tmp_path, settings, message):
+    with pytest.raises(ValueError, match=message):
+        qf_pusher.build_push_plan(_write(tmp_path, _classic([_tf("a")])), settings)

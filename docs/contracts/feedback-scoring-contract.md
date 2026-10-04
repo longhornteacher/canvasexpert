@@ -114,6 +114,15 @@ to `post_score` when the session has no selection. A separate
 `apply_staged_scoring_results(scoring_session_id, expected_stage_digest,
 idempotency_key="")` applies only the unchanged private stage after a direct,
 contemporaneous teacher request to post it.
+Immediately before an ordinary score/comment send, Canvas Expert makes one
+read-only batched submission read for every candidate row. A change in score,
+entered score, workflow state, or graded time returns
+`{"ok": false, "status": "needs_teacher_input", "code": "canvas_grade_changed"}`
+with pseudonymized expected/live states and sends nothing. The agent either re-stages
+without those rows or refreshes the Scoring Session and stages again. A failed live
+read returns `canvas_grade_check_unavailable` and also sends nothing. A row Canvas
+Expert already pushed may proceed when its live state equals the recorded verified
+post-push state.
 
 The agent authors the complete `feedback` string. Canvas Expert preserves it
 exactly through staging and `post_score` posting. No headings, examples,

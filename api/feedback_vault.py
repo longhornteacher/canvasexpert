@@ -132,7 +132,7 @@ class IdentityVault:
 
     def _used_pseudonym_tokens(self) -> set:
         """Case-folded tokens of every pseudonym currently held."""
-        return {p.lower() for p in self._by_pseudo}
+        return {p.casefold() for p in self._by_pseudo}
 
     def _select_available_word(self, banned: set, stable_key: str = "") -> str:
         """Select a registry word by deterministic hash-and-probe.
@@ -150,7 +150,7 @@ class IdentityVault:
         start = int.from_bytes(digest[:8], "big") % len(_REGISTRY_WORDS)
         for offset in range(len(_REGISTRY_WORDS)):
             word = _REGISTRY_WORDS[(start + offset) % len(_REGISTRY_WORDS)]
-            if word.lower() not in banned:
+            if word.casefold() not in banned:
                 return word
         raise PseudonymRegistryError(
             "The pseudonym registry is exhausted: every word is already "
@@ -166,7 +166,7 @@ class IdentityVault:
         if entry is None:
             banned = self._used_pseudonym_tokens() | self._vault_identity_tokens()
             if real_name:
-                banned |= {token.lower() for token in str(real_name).split()}
+                banned |= {token.casefold() for token in str(real_name).split()}
             pseudonym = self._select_available_word(banned, cid)
             entry = {
                 "pseudonym": pseudonym,
@@ -199,7 +199,7 @@ class IdentityVault:
                 tokens.update(str(entry.get(field) or "").split())
             for nickname in entry.get("nicknames", []) or []:
                 tokens.update(str(nickname).split())
-        return {token.lower() for token in tokens if token}
+        return {token.casefold() for token in tokens if token}
 
     def remember_identity(self, canvas_id, real_name="", sis_id="") -> None:
         """Record identity metadata before assignment without choosing a word."""

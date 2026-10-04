@@ -756,7 +756,7 @@ def _attempt_record(entry: dict, replacement_map=None) -> dict | None:
 
 def _comment_record(entry: dict, replacement_map=None, vault=None) -> dict:
     # author_role uses the same fallback chain as the work-registry
-    # classifier (home_attention.author_role) so staff-authored comments
+    # classifier so staff-authored comments
     # stay provably staff when served from the mirror. Role label only —
     # still no names, avatars, or attachments.
     author = entry.get("author") if isinstance(entry.get("author"), dict) else {}

@@ -7,6 +7,9 @@
 - After conversation with the teacher, you will output the quiz-to-spec as **one JSON object** between an opening and closing tag.
 - The JSON will be fed to QuizForge for processing (points, shuffling, and delivery to Canvas). Do not perform those tasks yourself; those tasks belong to QuizForge.
 - Choose item point values with the teacher/agent. Every scored item must carry its explicit finite nonnegative value (zero is valid); QuizForge preserves it and never fills or redistributes missing points.
+- At reviewed Canvas push time, pass the teacher's quiz options in `quiz_settings`: shuffling, access
+  code, attempts, time limit, calculator, navigation, and result visibility. Ask when the teacher
+  has not supplied a choice; do not embed these Canvas delivery settings in the QuizForge JSON.
 
 ## 2. OUTPUT CONTRACT — STRICT JSON ENVELOPE
 - Emit exactly one JSON object wrapped in tags:

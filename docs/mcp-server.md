@@ -61,7 +61,7 @@ authoring guidance, call `get_product_guide` with the relevant topic:
 
 ## Tools
 
-Tool schema version 78 (37 tools).
+Tool schema version 79 (37 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -78,11 +78,11 @@ Tool schema version 78 (37 tools).
 | `get_gradebook_snapshot` | Read Current-course assignment grading counts and pseudonymized students. | Yes, pseudonymized where applicable |
 | `get_product_guide` | Read CanvasExpert's product guide; omit topic for the overview. | No |
 | `list_staged_content` | List drafts currently staged in the teacher's local review Inbox. | No |
-| `preview_content_push` | Persist a local review of one staged draft or differentiated quiz variants. | No |
+| `preview_content_push` | Persist a local review of one staged draft or differentiated quiz variants; pass teacher quiz options in `quiz_settings`. | No |
 | `preview_assignment_update` | Freeze a publish/date patch for one existing Canvas assignment by id, refused with no Canvas call if no field is supplied. | No |
 | `stage_content` | Stage one completed Forge envelope in the teacher's review Inbox; no Canvas write. | No |
 | `stage_attachment` | Stage a local Forge attachment. | No |
-| `push_content_live` | Stage and create one authored draft in Canvas; dates use the preview pair. | No |
+| `push_content_live` | Stage and create one authored draft in Canvas; dates use the preview pair and quiz options use `quiz_settings`. | No |
 | `verify_live` | The one cheap Live check an agent makes after a push, by exact id or exact title. | No |
 | `resume_operation` | Resume a teacher-approved operation from its last recorded step; not a new write. | No |
 | `abandon_operation` | Mark one existing, teacher-approved operation abandoned; makes no Canvas call. | No |
@@ -96,7 +96,7 @@ Tool schema version 78 (37 tools).
 | `get_scoring_packet` | Read one SAFE packet page for scoring or existing-comment revision. | Yes, pseudonymized where applicable |
 | `stage_scoring_results` | Freeze scoring results or comment revisions locally; no Canvas write. | Yes, pseudonymized where applicable |
 | `get_scoring_preview` | Read a page of the staged review exactly as Canvas will receive it, with warnings. | Yes, pseudonymized where applicable |
-| `apply_staged_scoring_results` | Post the unchanged private stage to Canvas after direct teacher instruction. | Yes, pseudonymized where applicable |
+| `apply_staged_scoring_results` | Post the unchanged private stage to Canvas after direct teacher instruction; refuses the whole stage if live grades changed. | Yes, pseudonymized where applicable |
 | `reset_scoring_review` | Reopen the current local scoring review. | No |
 | `apply_operation` | Write the exact frozen operation to Canvas through its existing owner. | Yes, pseudonymized where applicable |
 | `get_course_content` | Read local catalog assignments, pages or modules with kind-specific options. | No |

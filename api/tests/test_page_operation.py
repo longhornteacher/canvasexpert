@@ -124,6 +124,44 @@ def test_prepare_with_valid_file(tmp_path, monkeypatch):
     assert len(digest) == 64  # SHA-256 hex
 
 
+def test_prepare_preserves_module_placement_options(tmp_path, monkeypatch):
+    _root(tmp_path, monkeypatch)
+    _mock_active_courses(monkeypatch)
+    path = _write_pageforge(tmp_path)
+
+    adapter = PageAdapter()
+    payload = adapter.build_payload({
+        "path": path,
+        "module_name": "Unit 1",
+        "module_id": "55",
+    })
+
+    assert payload["module_name"] == "Unit 1"
+    assert payload["module_id"] == "55"
+    assert payload["create_module"] is False
+    assert adapter.freeze_review(payload, {"course_id": "101"}, {
+        "existing_page": None,
+    })["module_id"] == "55"
+
+
+@pytest.mark.parametrize(
+    "placement, message",
+    [
+        ({"create_module": True}, "create_module requires module_name"),
+        ({"module_name": "Unit 1", "module_id": "55", "create_module": True},
+         "create_module cannot be combined with module_id"),
+    ],
+)
+def test_prepare_rejects_unhonorable_module_placement_options(
+    tmp_path, monkeypatch, placement, message,
+):
+    _root(tmp_path, monkeypatch)
+    path = _write_pageforge(tmp_path)
+
+    with pytest.raises(ValueError, match=message):
+        PageAdapter().build_payload({"path": path, **placement})
+
+
 def test_page_uses_untiered_color_during_prepare_and_freezes_it(tmp_path, monkeypatch):
     _root(tmp_path, monkeypatch)
     _mock_active_courses(monkeypatch)
@@ -693,6 +731,68 @@ def test_module_attachment_after_page(tmp_path, monkeypatch):
     assert checkpoint_observations[0][0]["returned_object_id"] == "test-page"
     stored = operations.get_operation(op_id)
     assert stored["targets"][0]["steps"][-1]["returned_object_id"] == "77"
+
+
+def test_exact_module_id_is_verified_before_page_attachment(tmp_path, monkeypatch):
+    _root(tmp_path, monkeypatch)
+    path = _write_pageforge(tmp_path)
+    adapter = PageAdapter()
+    payload = adapter.build_payload({"path": path, "module_id": "55"})
+    target = {"course_id": "101", "steps": []}
+
+    class Context:
+        def before_send(self, step_key, digest):
+            return {"step_key": step_key, "state": "pending", "outbound_digest": digest}
+
+        def checkpoint_step(self, step, **updates):
+            return {**step, **updates}
+
+    get_calls = _mockcanvas_get(monkeypatch, [
+        ({"id": 55, "name": "Unit 1"}, None),
+    ])
+    send_calls = _mock_canvas_send(monkeypatch, [
+        ({"url": "test-page", "html_url": "http://canvas/101/pages/test-page"}, None),
+        ({"id": 77}, None),
+    ])
+
+    result = adapter.execute(payload, target, {"existing_page": None}, {}, Context())
+
+    assert result["state"] == "applied"
+    assert get_calls[0]["path"] == "/api/v1/courses/101/modules/55"
+    assert "/modules/55/items" in send_calls[1]["path"]
+
+
+def test_explicit_module_creation_skips_name_lookup(tmp_path, monkeypatch):
+    _root(tmp_path, monkeypatch)
+    path = _write_pageforge(tmp_path)
+    adapter = PageAdapter()
+    payload = adapter.build_payload({
+        "path": path,
+        "module_name": "Unit 1",
+        "create_module": True,
+    })
+    target = {"course_id": "101", "steps": []}
+
+    class Context:
+        def before_send(self, step_key, digest):
+            return {"step_key": step_key, "state": "pending", "outbound_digest": digest}
+
+        def checkpoint_step(self, step, **updates):
+            return {**step, **updates}
+
+    monkeypatch.setattr(canvas_client, "canvas_get_all",
+                        lambda *args, **kwargs: pytest.fail("unexpected module lookup"))
+    send_calls = _mock_canvas_send(monkeypatch, [
+        ({"url": "test-page", "html_url": "http://canvas/101/pages/test-page"}, None),
+        ({"id": 55}, None),
+        ({"id": 77}, None),
+    ])
+
+    result = adapter.execute(payload, target, {"existing_page": None}, {}, Context())
+
+    assert result["state"] == "applied"
+    assert send_calls[1]["path"] == "/api/v1/courses/101/modules"
+    assert "/modules/55/items" in send_calls[2]["path"]
 
 
 def test_retry_resumes_module_attachment(tmp_path, monkeypatch):

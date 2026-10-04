@@ -14,9 +14,9 @@ from api import feedback_vault
 from api.mcp_server import server, tools
 
 
-# v78 removes generated printables from results; input schemas/listing stay unchanged.
+# v79 adds the two quiz_settings inputs.
 INSTRUCTION_BUDGET = 2303
-LISTING_BUDGET = 14658
+LISTING_BUDGET = 14868
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {

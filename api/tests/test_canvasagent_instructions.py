@@ -188,6 +188,20 @@ def test_connected_guidance_describes_differentiated_delivery_ownership(text):
     assert "post_grades" not in text
 
 
+def test_assignment_guidance_requires_private_corrections(text):
+    lowered = text.lower()
+    for phrase in (
+        "private correction",
+        "every item",
+        "exactly two sentences explaining why it is correct",
+        "reviewed pushes carry them",
+        "student-facing assignment html",
+        "green",
+        "exact stable item ids",
+    ):
+        assert phrase in lowered
+
+
 def test_current_bridge_guidance_is_source_in_module_and_bridge_out():
     """Current authority docs must not teach the retired bridge-in-module rule."""
     root = Path(REPO_ROOT)

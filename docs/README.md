@@ -64,8 +64,6 @@ Durable data and behavior contracts.
   families and SIS bridges.
 - [`submission-history-contract.md`](contracts/submission-history-contract.md) - retained
   submission history.
-- [`work-registry-contract.md`](contracts/work-registry-contract.md) - resumable work and its
-  indexes.
 
 ## Reference (`reference/`)
 

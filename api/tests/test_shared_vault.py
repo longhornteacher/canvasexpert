@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 from pathlib import Path
 
@@ -183,3 +185,74 @@ def test_recorded_pseudonym_outside_the_registry_stays_permanent(tmp_path, monke
 
     assert vault.get_or_assign("synthetic-id-1") == retired
     assert vault.get_or_assign("synthetic-id-2") != retired
+
+
+def test_new_pseudonym_skips_a_recorded_real_name_registry_word(tmp_path, monkeypatch):
+    secret = b"s" * 32
+    target_id = "synthetic-id-target"
+    digest = hmac.new(
+        secret, f"{target_id}:0".encode("utf-8"), hashlib.sha256,
+    ).digest()
+    forbidden = feedback_vault._REGISTRY_WORDS[
+        int.from_bytes(digest[:8], "big") % len(feedback_vault._REGISTRY_WORDS)
+    ]
+    existing_pseudonym = next(
+        word for word in feedback_vault._REGISTRY_WORDS if word != forbidden
+    )
+    _write_seed(tmp_path, {
+        "synthetic-id-existing": {
+            "pseudonym": existing_pseudonym,
+            "real_name": forbidden.casefold(),
+            "sis_id": "",
+            "nicknames": [],
+            "first_seen": "2026-01-01T00:00:00Z",
+        },
+    })
+    monkeypatch.setattr(pseudonym_secret, "ensure_primary_secret", lambda: secret)
+
+    vault = _shared_vault(tmp_path, secret=secret)
+
+    assert vault.get_or_assign(target_id) != forbidden
+
+
+def test_new_pseudonym_skips_a_recorded_nickname_registry_word(tmp_path, monkeypatch):
+    secret = b"s" * 32
+    target_id = "synthetic-id-target"
+    digest = hmac.new(
+        secret, f"{target_id}:0".encode("utf-8"), hashlib.sha256,
+    ).digest()
+    forbidden = feedback_vault._REGISTRY_WORDS[
+        int.from_bytes(digest[:8], "big") % len(feedback_vault._REGISTRY_WORDS)
+    ]
+    _write_seed(tmp_path, {
+        "synthetic-id-existing": {
+            "pseudonym": "",
+            "real_name": "Synthetic Student",
+            "sis_id": "",
+            "nicknames": [forbidden.casefold()],
+            "first_seen": "2026-01-01T00:00:00Z",
+        },
+    })
+    monkeypatch.setattr(pseudonym_secret, "ensure_primary_secret", lambda: secret)
+
+    vault = _shared_vault(tmp_path, secret=secret)
+
+    assert vault.get_or_assign(target_id) != forbidden
+
+
+def test_existing_pseudonym_stays_unchanged_when_it_matches_a_real_name(tmp_path, monkeypatch):
+    preserved = feedback_vault._REGISTRY_WORDS[0]
+    _write_seed(tmp_path, {
+        "synthetic-id-existing": {
+            "pseudonym": preserved,
+            "real_name": preserved.casefold(),
+            "sis_id": "",
+            "nicknames": [],
+            "first_seen": "2026-01-01T00:00:00Z",
+        },
+    })
+    monkeypatch.setattr(pseudonym_secret, "ensure_primary_secret", lambda: b"s" * 32)
+
+    vault = _shared_vault(tmp_path)
+
+    assert vault.get_or_assign("synthetic-id-existing") == preserved

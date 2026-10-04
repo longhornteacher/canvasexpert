@@ -176,6 +176,34 @@ def test_differentiated_preview_validates_staged_labels(_workspace, monkeypatch,
     assert adapter.requests == []
 
 
+def test_differentiated_preview_applies_quiz_settings_to_every_variant(
+    _workspace, monkeypatch,
+):
+    _stage("quiz", "one")
+    _stage("quiz", "two")
+    adapter = DifferentiatedAdapter()
+    monkeypatch.setattr(content_push.registry, "get_adapter", lambda _kind: adapter)
+
+    result = content_push.preview_differentiated_quiz_push(
+        "course-x", [{"label": "one"}, {"label": "two"}],
+        quiz_settings={"shuffle_answers": False, "hide_results": True})
+
+    assert result["ok"] is True
+    assert adapter.requests == [{
+        "mode": "differentiated",
+        "variants": [
+            {"label": "one.txt", "path": str(runtime_paths.inbox_folder("quiz") / "one.txt")},
+            {"label": "two.txt", "path": str(runtime_paths.inbox_folder("quiz") / "two.txt")},
+        ],
+        "settings": {
+            "published": False,
+            "post_to_sis": False,
+            "shuffle_answers": False,
+            "hide_results": True,
+        },
+    }]
+
+
 def test_differentiated_preview_refuses_baseline_error_before_persisting(_workspace, monkeypatch):
     _stage("quiz", "one")
     _stage("quiz", "two")
@@ -358,6 +386,69 @@ def test_a_quiz_carries_its_options_as_push_settings(_adapter):
     assert request["settings"] == {
         "published": True, "due_at": "2026-09-11T23:59:00Z",
     }
+
+
+def test_a_quiz_merges_quiz_settings_into_the_push_settings(_adapter):
+    _stage("quiz", "unit-3-check")
+
+    result = content_push.preview_content_push(
+        "course-x", "quiz", "unit-3-check", published=True,
+        quiz_settings={
+            "has_time_limit": True,
+            "time_limit_minutes": 45,
+            "allow_multiple_attempts": True,
+            "allowed_attempts": 2,
+            "access_code": "room-4",
+        })
+
+    assert result["ok"] is True
+    assert _adapter.requests[0]["settings"] == {
+        "published": True,
+        "has_time_limit": True,
+        "time_limit_minutes": 45,
+        "allow_multiple_attempts": True,
+        "allowed_attempts": 2,
+        "access_code": "room-4",
+    }
+
+
+@pytest.mark.parametrize("quiz_settings, expected", [
+    ({"unknown": True}, "unsupported keys"),
+    ({"shuffle_answers": "yes"}, "must be a boolean"),
+    (["not", "an", "object"], "must be an object"),
+])
+def test_quiz_settings_refuse_invalid_values_before_draft_resolution(
+    _adapter, quiz_settings, expected,
+):
+    result = content_push.preview_content_push(
+        "course-x", "quiz", "not-staged", quiz_settings=quiz_settings)
+
+    assert result["ok"] is False
+    assert expected in result["error"]
+    assert _adapter.requests == []
+
+
+def test_quiz_settings_are_inapplicable_to_non_quiz_kinds(_adapter):
+    result = content_push.preview_content_push(
+        "course-x", "page", "not-staged", quiz_settings={"hide_results": True})
+
+    assert result == {
+        "ok": False,
+        "code": "inapplicable_option",
+        "error": "quiz_settings applies only to quiz pushes",
+    }
+    assert _adapter.requests == []
+
+
+def test_live_push_refuses_invalid_quiz_settings_before_staging(_adapter):
+    result = content_push.push_content_live(
+        "course-x", "quiz", "invalid-settings", "<QUIZFORGE_JSON>{}</QUIZFORGE_JSON>",
+        quiz_settings={"time_limit_minutes": "thirty"})
+
+    assert result["ok"] is False
+    assert "must be an integer" in result["error"]
+    assert list(runtime_paths.inbox_folder("quiz").iterdir()) == []
+    assert _adapter.requests == []
 
 
 # --- apply ---------------------------------------------------------------------
@@ -1048,6 +1139,33 @@ def test_live_push_tools_delegate_to_the_shared_use_case(monkeypatch):
     assert seen["stage"][0] == ("page", "l", "body")
     assert seen["live"][0] == ("course-x", "quiz", "l", "body")
     assert seen["live"][1]["published"] is True
+
+
+def test_mcp_content_push_tools_pass_quiz_settings(monkeypatch):
+    seen = {}
+    def _preview(*args, **kwargs):
+        seen["preview"] = (args, kwargs)
+        return {"ok": True}
+
+    def _live(*args, **kwargs):
+        seen["live"] = (args, kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        content_push, "preview_content_push",
+        _preview,
+    )
+    monkeypatch.setattr(
+        content_push, "push_content_live",
+        _live,
+    )
+
+    settings = {"has_time_limit": True, "time_limit_minutes": 20}
+    tools.preview_content_push("course-x", "quiz", "review", quiz_settings=settings)
+    tools.push_content_live("course-x", "quiz", "live", "body", quiz_settings=settings)
+
+    assert seen["preview"][1]["quiz_settings"] == settings
+    assert seen["live"][1]["quiz_settings"] == settings
 
 
 # --- verify_live / resume_operation / abandon_operation (AC1, AC5, AC6) --------

@@ -130,12 +130,16 @@ tier-specific supports are added to them. The support fields are
 `sentence_frames`, `word_bank`, and `html`. Provide at least one non-empty field.
 Canvas Expert renders the support box and its tier-specific summary.
 
-Optional `corrections` are keyed by the exact Scoring Session packet `item_id`.
-Each entry contains exactly one non-empty `shared` correction or `by_tier` map.
-Each correction has non-empty `answer` and `why` strings. Tier keys use canonical
-labels or configured public tags. Corrections apply only below the packet item's
-met/full-credit threshold; they are not complete exemplars and do not apply to
-open-ended CREATE work. Do not author them without the relevant packet.
+For assignments with objectively scorable items, include a private `corrections`
+entry for every item in the reviewed AssignmentForge correction package. Keys are
+the exact stable Scoring Session packet `item_id`; each entry contains exactly one
+non-empty `shared` correction or `by_tier` map. Each correction has a non-empty
+correct `answer` and a `why` explanation of exactly two sentences. Tier keys use
+canonical labels or configured public tags. Corrections apply only below the packet
+item's met/full-credit threshold; they are not complete exemplars and do not apply
+to open-ended CREATE work. The operation package carries them privately through a
+reviewed push; never place them in student-facing HTML. The teacher-facing
+agent-facing correction presentation shows the two-sentence explanation in green text.
 
 ## 6. HTML AND WHAT CANVAS EXPERT RENDERS
 Provide meaningful text and semantic HTML fragments in `overview`, directions,

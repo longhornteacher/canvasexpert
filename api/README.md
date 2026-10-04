@@ -208,7 +208,6 @@ safety remain part of the reviewed family operation. Tier placement is manual an
 | `mirror/` | CanvasMirror storage, freshness envelopes, sync coordinator, and disk-only query services |
 | `operation_ledger/` | High-risk operation checkpoints, claims, receipts, and recovery coordination |
 | `../docs/guides/sis-grade-bridges.md` | SIS grade-bridge operation, recurring update, privacy, verification, and Attention recovery guide |
-| `work_registry/` | Local work items and progress projections |
 | `course_catalog.py` | Student-free local course, module, assignment, and page catalog reads |
 | `webui/` | Local control console: FastAPI app (`server.py`), routes, templates and static assets (see `webui/README.md`) |
 | `qf_materials/qf quiz examples/` | QuizForge fixtures (contract lives at `default_docs/AI Authoring/Author a Quiz (QuizForge).txt`) |

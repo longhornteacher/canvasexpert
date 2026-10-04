@@ -1,8 +1,8 @@
 """Unit tests for the shared atomic-file/quarantine primitives.
 
-course_catalog.py, work_registry/storage.py, and operation_ledger/storage.py
-each used to hand-roll their own corrupt-file quarantine rename (with one
-outlier format). They now all delegate to quarantine_corrupt_file here.
+course_catalog.py and operation_ledger/storage.py each used to hand-roll their
+own corrupt-file quarantine rename (with one outlier format). They now both
+delegate to quarantine_corrupt_file here.
 """
 import re
 

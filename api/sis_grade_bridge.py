@@ -574,7 +574,7 @@ def reconcile_sis_grade_bridges(course_id: str, *, assignments: list[dict] | Non
 
 
 def preview_sis_grade_bridge(
-    course_id: str, family_title: str, *, write_origin: str = "assistant",
+    course_id: str, family_title: str, *,
     discovered_family: dict | None = None,
     relink_missing_bridge: bool = False,
 ) -> dict:
@@ -593,7 +593,6 @@ def preview_sis_grade_bridge(
             "course_id": course_key,
             "family_title": title,
             "registration": registration,
-            "write_origin": write_origin,
             "discovered_family": discovered_family,
         })
         provisional = adapter.verify_targets(
@@ -624,11 +623,7 @@ def preview_sis_grade_bridge(
             operation_id=operation_id,
             kind=KIND,
             source_ref={
-                "type": (
-                    "sis_grade_bridge_routine"
-                    if write_origin == "routine"
-                    else "sis_grade_bridge"
-                )
+                "type": "sis_grade_bridge"
             },
             source_digest=adapter.source_digest(payload),
             normalized_payload=payload,

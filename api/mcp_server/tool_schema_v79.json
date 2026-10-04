@@ -1,5 +1,5 @@
 {
-  "schema_version": 78,
+  "schema_version": 79,
   "tools": [
     {
       "name": "abandon_operation",
@@ -242,6 +242,7 @@
         "module_name": "string",
         "post_to_sis": "boolean",
         "published": "boolean",
+        "quiz_settings": "object",
         "unlock_at": "string",
         "variants": "array"
       }
@@ -304,7 +305,8 @@
         "module_id": "string",
         "module_name": "string",
         "post_to_sis": "boolean",
-        "published": "boolean"
+        "published": "boolean",
+        "quiz_settings": "object"
       }
     },
     {

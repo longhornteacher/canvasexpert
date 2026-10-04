@@ -16,8 +16,7 @@ from .canvas import (
     get_canvas_base, set_canvas_base,
     get_token, set_token, token_is_set,
     save_canvas_account,
-    get_workspace_path, set_workspace_path, ensure_workspace_pinned, get_whisper_model_cache,
-    resolve_env,
+    get_workspace_path, set_workspace_path, ensure_workspace_pinned,
 )
 
 # --- bookmarked courses ---

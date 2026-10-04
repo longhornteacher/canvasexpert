@@ -176,7 +176,6 @@ def _fetch_submissions(course_id, canvas_get_all, *, submitted_since=None,
                 if role:
                     roles[str(user["id"])] = role
     import copy
-    from api.work_registry.providers.home_attention import _author_id
 
     enriched = copy.deepcopy(rows)
     for submission in enriched or []:
@@ -185,7 +184,7 @@ def _fetch_submissions(course_id, canvas_get_all, *, submitted_since=None,
         for comment in submission.get("submission_comments") or []:
             if not isinstance(comment, dict):
                 continue
-            author_id = _author_id(comment)
+            author_id = _comment_author_id(comment)
             role = roles.get(author_id, "") if author_id != str(submission.get("user_id") or "") else ""
             comment["author_role"] = role
             comment.pop("author_type", None)
@@ -193,6 +192,15 @@ def _fetch_submissions(course_id, canvas_get_all, *, submitted_since=None,
                 comment["author"].pop("role", None)
                 comment["author"].pop("type", None)
     return enriched, None
+
+
+def _comment_author_id(comment: dict) -> str:
+    author = comment.get("author") if isinstance(comment.get("author"), dict) else {}
+    direct = str(comment.get("author_id") or "").strip()
+    nested = str(author.get("id") or "").strip()
+    if direct and nested and direct != nested:
+        return ""
+    return direct or nested
 
 
 def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all,
@@ -482,35 +490,6 @@ def _commit_assignment_index(course_id, assignments, *, root, attempted_at) -> t
         "orphans_pruned": pruned,
     }
     return document, diagnostics
-
-
-def apply_assignment_collection_receipt(
-    course_id,
-    receipt,
-    *,
-    root=None,
-    attempted_at=None,
-) -> dict:
-    """Apply an already-acquired receipt to mirror membership only.
-
-    This deliberately does not establish any sync-pass freshness, reconcile
-    submissions, or perform New Quiz work.
-    """
-    rows, error, complete = receipt
-    assignment_error = _assignment_receipt_error(rows, error, complete)
-    if assignment_error:
-        return {"ok": False, "error": assignment_error}
-    document, diagnostics = _commit_assignment_index(
-        course_id,
-        rows,
-        root=root,
-        attempted_at=attempted_at or store.now_iso(),
-    )
-    return {
-        "ok": True,
-        "assignments": len(document["assignments"]),
-        "assignment_changes": diagnostics,
-    }
 
 
 def _skipped_lifecycle_new_quizzes(course_id, *, root=None) -> dict:

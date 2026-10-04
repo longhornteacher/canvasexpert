@@ -6,7 +6,6 @@ Uses lazy module-reference so monkeypatches to config._io propagate correctly.
 from . import _io as _io_code
 
 import keyring
-import os
 from .. import workspace
 
 
@@ -78,25 +77,3 @@ def ensure_workspace_pinned() -> str | None:
         set_workspace_path(root)
         return root
     return None
-
-
-def get_whisper_model_cache() -> str:
-    """Machine-local read-aloud model cache; it is never workspace state."""
-    override = os.environ.get("CANVAS_EXPERT_WHISPER_MODEL_CACHE", "").strip()
-    return override or os.path.join(os.environ.get("LOCALAPPDATA", ""), "CanvasExpert", "speech-models")
-
-
-# --------------------------------------------------------------------------
-# Runtime credential bundle
-# --------------------------------------------------------------------------
-
-def resolve_env(course_id: str) -> dict:
-    """CANVAS_BASE / COURSE_ID / CANVAS_TOKEN dict for subprocess env."""
-    token = get_token()
-    if not token:
-        raise ValueError("No Canvas token saved — go to Settings and paste your token.")
-    return {
-        "CANVAS_BASE": get_canvas_base(),
-        "COURSE_ID":   str(course_id),
-        "CANVAS_TOKEN": token,
-    }

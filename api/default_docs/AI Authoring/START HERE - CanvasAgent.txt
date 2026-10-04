@@ -109,6 +109,15 @@ and creates/verifies the shared bridge and family link. Tier placement is manual
 teacher-owned; Canvas controls access. Bridge creation and family-link repair use the
 same renderer-neutral family tail for AssignmentForge and QuizForge.
 
+For every assignment with objectively scorable items, create a private correction
+entry for every item while authoring it. Each entry must state the correct answer
+and exactly two sentences explaining why it is correct. Keep these corrections in
+the AssignmentForge correction package so reviewed pushes carry them with the
+assignment operation; never put them in student-facing assignment HTML. When the
+agent presents the correction package, show the two-sentence explanation in green
+text. Use the exact stable item IDs that the Scoring Session packet exposes; never
+match corrections by prompt wording or guess an ID.
+
 If one assessment combines objective questions and writing, author the objective
 portion as an auto-graded QuizForge file and each writing portion as its own
 AssignmentForge file with teacher-confirmed points; use paired names such as

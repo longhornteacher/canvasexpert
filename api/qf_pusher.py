@@ -37,6 +37,20 @@ SETTING_KEYS = (
     "module_id", "module_name",
 )
 
+_BOOLEAN_SETTING_KEYS = frozenset((
+    "shuffle_answers", "shuffle_questions", "allow_multiple_attempts",
+    "build_on_last_attempt", "has_time_limit", "one_at_a_time",
+    "allow_backtracking", "hide_results", "post_to_sis", "published",
+))
+_TEXT_SETTING_KEYS = frozenset((
+    "access_code", "score_to_keep", "calculator_type", "due_at", "unlock_at",
+    "lock_at", "assignment_group_id", "assignment_group_name", "module_id",
+    "module_name",
+))
+_INTEGER_SETTING_KEYS = frozenset((
+    "attempt_cooldown", "time_limit_minutes",
+))
+
 
 def distribute_points(items, total=None):
     """Return authored scored-item values without inferring or rescaling them."""
@@ -100,7 +114,27 @@ def prepare_items(data):
 def _normalized_settings(settings):
     if not isinstance(settings, dict):
         raise ValueError("QF push settings must be an object")
-    return {key: settings[key] for key in SETTING_KEYS if key in settings}
+    unknown = sorted(set(settings) - set(SETTING_KEYS))
+    if unknown:
+        raise ValueError(f"QF push settings contain unknown keys: {', '.join(unknown)}")
+    for key, value in settings.items():
+        if key in _BOOLEAN_SETTING_KEYS and not isinstance(value, bool):
+            raise ValueError(f"QF push setting {key} must be a boolean")
+        if key in _TEXT_SETTING_KEYS and not isinstance(value, str):
+            raise ValueError(f"QF push setting {key} must be a string")
+        if key in _INTEGER_SETTING_KEYS and (
+            not isinstance(value, int) or isinstance(value, bool)
+        ):
+            raise ValueError(f"QF push setting {key} must be an integer")
+        if key == "allowed_attempts" and not (
+            isinstance(value, str) or (
+                isinstance(value, int) and not isinstance(value, bool)
+            )
+        ):
+            raise ValueError(
+                "QF push setting allowed_attempts must be an integer, '-1', or 'unlimited'"
+            )
+    return dict(settings)
 
 
 def _effective_quiz_settings(push_settings):
@@ -266,7 +300,7 @@ def _build_classic_plan(path, data, push_settings):
 
 def build_push_plan(path, settings=None):
     """Build the deterministic, JSON-safe no-network QuizForge push plan."""
-    push_settings = _normalized_settings(settings or {})
+    push_settings = _normalized_settings({} if settings is None else settings)
     data = load_qf(path)
     problems = validate_qf.engine_problems(data)
     if problems:

@@ -318,10 +318,9 @@ def wait_for_plan(plan_id: str, *, poll_seconds: float = 0.05,
 
 
 def run_coordinated_heartbeat_tick() -> None:
-    """One daemon tick: workers acquire first, then Home findings observe the result."""
+    """One daemon tick: workers acquire and refresh configured courses."""
     for plan_id in enqueue_heartbeat_refreshes():
         wait_for_plan(plan_id)
-    refresh_work_findings()
 
 
 def _refresh_groups_on_maintenance(course_id: str, *, load_groups, now: str) -> dict:
@@ -399,27 +398,6 @@ def _emit_refresh_outcome(scope: str, result: dict, *, duration_ms: int = 0) -> 
         "unconfigured" if result.get("state") == "unconfigured" else "failed")
     operational_log.emit("mirror.refresh", outcome, scope=scope,
                          duration_ms=duration_ms)
-
-
-def refresh_work_findings() -> None:
-    """Recompute detected work findings from the (freshly synced) mirror and merge
-    them into the local work registry, so Home's Attention/Continue cards stay
-    current on the heartbeat instead of only on a manual Sync now.
-
-    Best-effort background step: gated on the same conditions as a sync pass,
-    reads mirror-first (cheap right after a pass), and never raises into the loop.
-    """
-    if not config.token_is_set() or not config.mirror_enabled():
-        return
-    if workspace.workspace_root() is None:
-        return
-    try:
-        from api.work_registry import discovery
-        result = discovery.scan_active_courses()
-        if result.get("ok"):
-            discovery.merge_into_registry(result)
-    except Exception as exc:
-        operational_log.emit("mirror.work_findings_refresh", "failed", error_class=type(exc))
 
 
 def notify_course_changed(course_id, *, delay_seconds: float = NOTIFY_DELAY_SECONDS):

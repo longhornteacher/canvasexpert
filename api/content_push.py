@@ -20,7 +20,7 @@ import os
 import re
 from pathlib import Path
 
-from api import runtime_paths, validate_qf
+from api import qf_pusher, runtime_paths, validate_qf
 from api.operation_ledger import batches, executor, models, operations, registry
 from api.operation_ledger.adapters import differentiated_bridge, quiz_classic
 from api.operation_ledger.adapters.assignment import KIND as ASSIGNMENT_KIND
@@ -53,6 +53,7 @@ _KIND_OPTIONS = {
 
 _TEXT_OPTIONS = ("module_name", "assignment_group_name", *_SCHEDULE_OPTIONS)
 _FLAG_OPTIONS = ("published", "post_to_sis")
+_QUIZ_SETTINGS_KEYS = frozenset(qf_pusher.SETTING_KEYS) - frozenset(_KIND_OPTIONS["quiz"])
 
 
 def _current_course(course_id: str) -> bool:
@@ -106,8 +107,40 @@ def _resolve_staged_draft(kind: str, label: str) -> tuple[str | None, str | None
     )
 
 
-def _collect_options(kind: str, options: dict) -> tuple[dict, str | None]:
+def _quiz_settings_error(kind: str, quiz_settings: object) -> dict | None:
+    """Validate the quiz-only settings object before resolving or staging a draft."""
+    if quiz_settings is None:
+        return None
+    if kind not in _LEDGER_KINDS:
+        return None
+    if kind != "quiz":
+        return {
+            "code": "inapplicable_option",
+            "error": "quiz_settings applies only to quiz pushes",
+        }
+    if not isinstance(quiz_settings, dict):
+        return {"error": "quiz_settings must be an object"}
+    unknown = sorted(set(quiz_settings) - _QUIZ_SETTINGS_KEYS)
+    if unknown:
+        return {
+            "error": (
+                "quiz_settings contains unsupported keys: "
+                f"{', '.join(unknown)}"
+            )
+        }
+    try:
+        qf_pusher._normalized_settings(quiz_settings)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return None
+
+
+def _collect_options(kind: str, options: dict) -> tuple[dict, dict | None]:
     """Normalize the delivery options, refusing any this kind cannot carry."""
+    quiz_settings = options.get("quiz_settings")
+    quiz_settings_error = _quiz_settings_error(kind, quiz_settings)
+    if quiz_settings_error:
+        return {}, quiz_settings_error
     named = {}
     for key in _FLAG_OPTIONS:
         if options.get(key) is not None:
@@ -122,16 +155,18 @@ def _collect_options(kind: str, options: dict) -> tuple[dict, str | None]:
     allowed = _KIND_OPTIONS[kind]
     unsupported = sorted(key for key in named if key not in allowed)
     if unsupported:
-        return {}, (
+        return {}, {"error": (
             f"a {kind} push does not take {', '.join(unsupported)}; "
             f"it takes {', '.join(allowed)}"
-        )
+        )}
     if named.get("module_id") and named.get("create_module"):
-        return {}, "module_id and create_module cannot be used together"
+        return {}, {"error": "module_id and create_module cannot be used together"}
     if named.get("create_module") and not named.get("module_name"):
-        return {}, "create_module requires a non-empty module_name"
+        return {}, {"error": "create_module requires a non-empty module_name"}
     # published is always meaningful, and always explicit in the payload.
     named["published"] = bool(options.get("published"))
+    if quiz_settings is not None:
+        named.update(quiz_settings)
     return named, None
 
 
@@ -150,9 +185,8 @@ def _sis_requires_due_at(named: dict) -> dict | None:
 def _prepare_request(kind: str, path: str, named: dict) -> dict:
     """Build the adapter's prepare request from one resolved draft and options.
 
-    A quiz carries its options as QuizForge push settings rather than as
-    top-level fields; ``qf_pusher.SETTING_KEYS`` covers every one of them and
-    drops anything it does not recognize.
+    A     quiz carries its options as QuizForge push settings rather than as
+    top-level fields; ``qf_pusher.SETTING_KEYS`` covers every one of them.
     """
     if kind == "quiz":
         return {"mode": "whole", "path": path, "settings": dict(named)}
@@ -173,6 +207,7 @@ def preview_content_push(
     post_to_sis: bool | None = None,
     module_id: str = "",
     create_module: bool = False,
+    quiz_settings: dict | None = None,
 ) -> dict:
     """Freeze one staged draft into a persisted, digest-protected review.
 
@@ -198,9 +233,10 @@ def preview_content_push(
         "unlock_at": unlock_at,
         "lock_at": lock_at,
         "post_to_sis": post_to_sis,
+        "quiz_settings": quiz_settings,
     })
     if option_error:
-        return {"ok": False, "error": option_error}
+        return {"ok": False, **option_error}
     sis_error = _sis_requires_due_at(named)
     if sis_error:
         return sis_error
@@ -292,6 +328,7 @@ def preview_differentiated_quiz_push(
     post_to_sis: bool = False,
     module_id: str = "",
     create_module: bool = False,
+    quiz_settings: dict | None = None,
 ) -> dict:
     """Freeze an unrestricted QuizForge family from staged labels."""
     course_key = str(course_id or "").strip()
@@ -306,9 +343,10 @@ def preview_differentiated_quiz_push(
         "module_id": module_id, "create_module": create_module,
         "assignment_group_name": assignment_group_name, "due_at": due_at,
         "unlock_at": unlock_at, "lock_at": lock_at, "post_to_sis": post_to_sis,
+        "quiz_settings": quiz_settings,
     })
     if option_error:
-        return {"ok": False, "error": option_error}
+        return {"ok": False, **option_error}
     sis_error = _sis_requires_due_at(named)
     if sis_error:
         return sis_error
@@ -550,6 +588,7 @@ def push_content_live(
     post_to_sis: bool | None = None,
     module_id: str = "",
     create_module: bool = False,
+    quiz_settings: dict | None = None,
 ) -> dict:
     """Stage one authored draft and land it in Canvas in a single call.
 
@@ -569,6 +608,10 @@ def push_content_live(
     look before it lands, so scheduling stays on preview_content_push: stage the
     draft, preview it with the dates, then apply.
     """
+    quiz_settings_error = _quiz_settings_error(str(kind or "").strip(), quiz_settings)
+    if quiz_settings_error:
+        return {"ok": False, **quiz_settings_error}
+
     staged = stage_content(kind, label, content)
     if not staged.get("ok"):
         return staged
@@ -579,6 +622,7 @@ def push_content_live(
         module_id=module_id, create_module=create_module,
         assignment_group_name=assignment_group_name,
         post_to_sis=post_to_sis,
+        quiz_settings=quiz_settings,
     )
     if not review.get("ok"):
         return {

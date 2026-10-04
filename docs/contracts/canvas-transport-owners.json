@@ -292,32 +292,6 @@
     },
     {
       "path": "api/operation_ledger/adapters/quiz_steps.py",
-      "symbol": "restrict_assignment",
-      "detector": "attr:_canvas_send",
-      "call_index": 1,
-      "call_form": "canvas_client._canvas_send(\"PUT\", restrict_path, restrict_payload)",
-      "classification": "canvas_mutation",
-      "scopes": [
-        "catalog.assignments"
-      ],
-      "reconciliation": "invalidate",
-      "reason": "The central operation-ledger post-apply hook invalidates applicable catalog scopes after the confirmed operation succeeds."
-    },
-    {
-      "path": "api/operation_ledger/adapters/quiz_steps.py",
-      "symbol": "create_override",
-      "detector": "attr:_canvas_send",
-      "call_index": 1,
-      "call_form": "canvas_client._canvas_send(\"POST\", override_path, override_request)",
-      "classification": "canvas_mutation",
-      "scopes": [
-        "private.assignments"
-      ],
-      "reconciliation": "none",
-      "reason": "Per-student override write. The base override facts are not projected into the mirror at all; the only mirror footprint is the effective due date cached on the affected submission rows (private.submissions cached_due_date), read by the Student Report 'Due date extended to' line. Bounded, low-severity staleness (the report falls back to live Canvas outside the freshness window) — deferred for 1.0beta as a documented bounded limitation, not an open gap. See mutation-reconciliation-map.md family 3."
-    },
-    {
-      "path": "api/operation_ledger/adapters/quiz_steps.py",
       "symbol": "ensure_item",
       "detector": "attr:_canvas_send",
       "call_index": 1,

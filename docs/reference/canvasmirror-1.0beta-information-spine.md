@@ -896,7 +896,6 @@ The senior must reverify symbols on `dev` before writing a handoff. As of this d
 | New Quiz mirror | `api/mirror/new_quizzes.py` |
 | Course Catalog | `api/course_catalog.py`, `docs/contracts/course-catalog-contract.md` |
 | Shared read service | `api/mirror/read_service.py` |
-| Work provider shared helpers | `api/work_registry/providers/__init__.py` |
 | PowerGrader acquisition | `api/powergrader/canvas_fetch.py`, `assignment_refresh.py`, `new_quiz_fetch.py` |
 | New Quiz response acquisition (read-only) | `api/powergrader/new_quiz_fetch.py` |
 | Gradebook | `api/grade_adjustment.py`, `api/operation_ledger/adapters/grade_adjustment.py` |
