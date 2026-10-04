@@ -24,6 +24,15 @@ The teacher may use ChatGPT Desktop, Claude Desktop, another MCP-capable agent,
 or a plain local client. Canvas Expert must not depend on one host's UI,
 rendering behavior, model, or conversation style.
 
+Recurring work belongs to the teacher's agent. If the teacher wants scheduled
+work, the host may schedule a prompt; any Canvas write still requires the
+runtime's normal preparation, teacher approval, and verified action path.
+Canvas Expert runs no scheduler that writes to Canvas.
+
+Canvas Expert does not maintain separate oral-reading capture, writing-history,
+or learning-objective workflows. The agent works with Canvas submissions and
+authors objectives as ordinary assignment or page content.
+
 ## Primary interface
 
 The local stdio MCP server is the primary agent-facing interface. MCP tool

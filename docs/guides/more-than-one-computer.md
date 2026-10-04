@@ -31,8 +31,6 @@ match. The secret itself stays in each computer's Windows Credential Manager.
 2. Set the same pseudonym secret on each computer and confirm the fingerprints match.
 3. Let OneDrive finish syncing `_Shared/` before opening Canvas Expert on the other computer.
 4. Refresh CanvasMirror separately on each computer; its cache is local to that computer.
-5. Keep scheduled routines enabled on the laptop only. Routine settings are per computer and
-   default to off.
 
 If the **Local workspace & privacy** card reports a shared-store conflict, stop student-data
 work and resolve the listed conflict in Canvas Expert before retrying. Do not merge or delete

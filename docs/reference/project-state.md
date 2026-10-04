@@ -59,7 +59,7 @@ slice-specific.
   harness around it. A standalone CanvasAgent reference may still include appendices
   for chat-only or setup use when no runtime connection is available.
 - **Integrity help is part of the job.** Canvas Expert gathers evidence (writing
-  timeline, submission history, writing history, text overlap between submissions). The
+  timeline, submission history, text overlap between submissions). The
   agent may investigate further (web search, reading level, anything useful) and tell the
   teacher plainly what it thinks, in teacher-only agent commentary. The teacher decides
   what happens. Agent commentary never reaches a student or Canvas; that boundary is

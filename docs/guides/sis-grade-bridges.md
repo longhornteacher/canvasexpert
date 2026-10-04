@@ -3,10 +3,9 @@
 This guide explains differentiated family delivery and later grade projection. The
 [SIS Grade Bridge Contract](../contracts/sis-grade-bridge-contract.md) is normative.
 
-The connected agent is the primary working surface for bridge discovery, reconciliation,
-review, and grade projection through the MCP/runtime contract. The retained control
-console may expose local configuration, routine scheduling, and attention/recovery
-controls; it is not a second bridge workflow.
+The connected agent is the working surface for bridge discovery, reconciliation,
+review, and grade projection through the MCP/runtime contract. The control console
+supports setup and operation recovery; it is not a second bridge workflow.
 
 ## 1. Outcome and family model
 
@@ -95,9 +94,6 @@ the Operation Ledger. An ordinary single assignment with no saved link, no confi
 tag, and no bridge candidate is not a discovered family; it is omitted from the matrix and
 counted in `omitted_single_assignments` instead of inviting an agent to build it a bridge.
 
-The retained control console's Routines page also provides **Differentiated bridge grade sync**. It is a built-in Canvas
-write routine, disabled by default, with manual Run and the existing local interval schedule.
-
 ## 6. Which grades move
 
 The teacher may add extra credit directly on the bridge or on a tier source, so the highest
@@ -121,7 +117,7 @@ the held students' pseudonyms only, resolved through CE's existing identity/pseu
 
 ## 7. Update all linked families
 
-One Routine run visits every linked family in Current courses and creates a separate frozen
+The agent can visit linked families in Current courses and create a separate frozen
 mirror-backed review for each. Nothing is pushed while discovery, reconciliation, or preview
 runs. After the teacher approves an unchanged operation, the apply step pushes the reviewed
 grades to Canvas Live, verifies the writes, and requests the targeted local mirror refresh.
@@ -136,9 +132,7 @@ disconnect, or missing returned ID remains `sent_unknown`; never repeat the writ
 Resume from the existing Operation Ledger operation so exact-ID reconciliation can verify applied
 steps and continue only unfinished work.
 
-Routine lines and the aggregate Last run summary distinguish copied scores, missing zeroes,
-cleared prior routine values, already matching rows, held rows, and conflicting rows. A repeated
-run against unchanged Canvas state performs no grade or status mutation.
+A repeated apply against unchanged Canvas state performs no grade or status mutation.
 
 Do not create a replacement bridge for an Attention operation. The family link is written only after
 all family postconditions pass, so its absence is not evidence that no Canvas object exists.

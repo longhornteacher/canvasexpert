@@ -35,17 +35,16 @@ the suite.
 **Covered (targeted):** PowerGrader's two grade-push owners —
 `api/powergrader/session_actions.py push_grades` and
 `api/powergrader/autopush_executor.py run_autopush_for_session` — converge
-through `_notify_write_through` in `api/webui/routes/powergrader.py` (and, for
-the scheduled-autoscore path, an inline `notify_course_changed` in
-`routines_powergrader.py`), which calls `mirror_service.notify_course_changed`
-(a narrow per-course submissions delta refresh).
+through `_notify_write_through` in `api/webui/routes/powergrader.py`, which
+calls `mirror_service.notify_course_changed` (a narrow per-course submissions
+delta refresh).
 
 **Covered (targeted):** existing-grade adjustments are owned by
 `api/operation_ledger/adapters/grade_adjustment.py` (`execute`). It writes only
 `posted_grade`, verifies each readback, and calls
 `mirror_service.notify_course_changed` after successful writes. The built-in
-curve routine is a caller of this reviewed operation and does not own a Canvas
-mutation.
+auto-curve routine has been retired; grade adjustments use this reviewed
+operation.
 
 The former console curve routes, routine writer, curve-event store, and dead
 `gradebook.curve` adapter were retired together. No legacy curve-event data is
@@ -199,8 +198,7 @@ Canvas content. They remain classified `canvas_read_acquisition`, reconciliation
 
 1. **Submissions/comments** (family 1): reviewed existing-grade writes use
    `operation_ledger/adapters/grade_adjustment.py::execute`, which performs the
-   targeted per-course refresh after verified writes. The routine caller uses
-   this operation and therefore introduces no separate mutation owner.
+   targeted per-course refresh after verified writes.
 2. **Catalog structure** (family 2): **covered 2026-07-19** for
    `catalog.assignments` and `catalog.modules` by the central ledger post-apply
    stale-mark hook (ten `none` → `invalidate` contract transitions), and
@@ -216,7 +214,7 @@ Canvas content. They remain classified `canvas_read_acquisition`, reconciliation
 4. **Retired 2026-07-19 — Batch 8 done.** The duplicate ledger adapters
    (`roster_membership.py`, `roster_group_set.py`, `late_policy.py`, and
    `curve.py`) were confirmed dead: no non-test producer emitted their KINDs, and
-   their live direct-route/routine siblings already existed (groups and late policy
+   their live direct-route siblings already existed (groups and late policy
    already reconcile). These were **Batch 8** retirements (Former Program 10), now
    complete.
 
