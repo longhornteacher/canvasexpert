@@ -1,328 +1,66 @@
-# Canvas Expert Control Console — Feature Reference
+# Canvas Expert control console
 
-**Audience:** teachers using the local control console; developers maintaining setup,
-trust, review, recovery, diagnostics, and genuinely local-only surfaces.
-**Implementation:** `api/webui/server.py` (FastAPI), `api/webui/templates/` (Jinja2),
-`api/webui/static/` (`push.js` + `push/*.js`, `course_expert/*.js`,
-`roster.js` + `roster/*.js`,
-`feedback/*.js`, `course_info.js`,
-`settings.js`, `ui/*.css`, and page-owned feature CSS).
+The local console supports setup, readiness, mirror refresh, operation recovery,
+receipts, settings, and private identity tools. The connected desktop agent authors,
+previews, and applies work through MCP; Canvas Live is the record for posted results.
+See `api/README.md` for setup and runtime ownership and
+`docs/contracts/agent-runtime-product-contract.md` for the product boundary.
 
-For backend overview, setup, files table, and confirmed Canvas API facts, see `api/README.md`.
-For the shared layout/template API and presentation ownership, see
-`docs/reference/webui-presentation-system.md`.
+## Pages and browser owners
 
-The primary working surface is a connected desktop agent through the local MCP server.
-The control console is intentionally smaller: it must not grow toward feature parity with
-ChatGPT Desktop, Claude Desktop, or another agent host. Host-rendered previews are backed
-by host-neutral MCP results and runtime state; they are not browser UI requirements.
-
-`api/README.md` owns the backend, CLI, packaging, setup, credentials, workspace, and the
-`api/` files table. This document owns routes, pages, templates, static assets, per-route
-script load order, and the per-page feature behavior described in each page's section below.
-
----
-
-## Rendered verification (read-only)
-
-Use a lifespan-disabled server for read-only browser verification:
-
-```powershell
-cd api
-py -m uvicorn webui.server:app --host 127.0.0.1 --port 8765 --lifespan off
-```
-
-The active execution brief names the affected routes, useful viewports, themes, and
-interactions. Do not expand that matrix by ritual. For each named route, confirm:
-
-- `document.documentElement.scrollWidth === window.innerWidth` unless an explicitly
-  documented data table owns horizontal scrolling.
-- Required page globals exist and scripts occur once in dependency order.
-- Deep links, course focus/targets, keyboard focus, dialogs, and theme initialization work.
-- Browser console has zero new CanvasExpert errors or warnings.
-- No Canvas write, external AI request, or session start occurs during
-  read-only verification.
-
-Source tests never substitute for rendered verification.
-
----
-
-## Page map
-
-| Route | Page | JS |
+| Route | Purpose | Template and page script |
 |---|---|---|
-| `/` | **CanvasAgent** — local MCP, Canvas account, CanvasMirror, and privacy health | `canvasagent.html` + `canvasagent.js` |
-| `/course-expert` | **Create** — quiz, assignment, page, and quick-column tools | `push.js` + `push/*.js`, `course_expert/*.js` |
-| `/roster` | **Rosters** — student-level Canvas-group and local settings console | `roster.js`, `roster/*.js` |
-| Scoring Sessions | MCP only; cross-course discovery followed by teacher-selected assignment-bounded packets. No Canvas Expert scoring page or browser assets; review and edit posted results in Canvas Live. | `docs/reference/powergrader-scoring-map.md` |
-| `/ai-expert` | **AI helper files** — paste-ready LLM skill files | inline |
-| `/course` | Course Info detail page | `course_info.js` |
-| `/settings` | Settings | `settings.js` |
-| `/receipts/{receipt_id}` | Read-only local receipt summary | `receipt.html`; detail remains private JSON |
+| `/` | CanvasAgent: desktop connections, Canvas readiness, mirror status/refresh, privacy, operations needing attention and recent receipts | `canvasagent.html`, `canvasagent.js` |
+| `/welcome` | First-run account setup | `welcome.html` |
+| `/settings` | Account, Current/Previous courses, Forge tags/colors, workspace/privacy, and updates | `settings.html`, `settings.js`, `settings/*.js` |
+| `/names` | Read-only searchable pseudonym, real name and section table; protected names, scrub test, who-is-who export and vault backup | `names.html`, `names.js` |
+| `/receipts/{id}` | Private receipt detail | `receipt.html` |
 
-CanvasAgent's secondary Canvas refresh queues local read-only coordinator work and polls its
-opaque plan status. It does not scan or refresh retired Home work cards.
+Navigation contains CanvasAgent, Names and Settings. These are the only console pages.
 
-### Create module routing
+## Recovery and receipts
 
-Create contains retained browser workflows and artifact controls, but new agent-facing
-work should begin at the MCP/runtime boundary. Do not add a browser preview or dashboard
-only to duplicate a capable agent host; keep browser changes limited to the control-console
-purpose in the product contract.
+CanvasAgent reads `/api/operations` for interrupted, uncertain or failed operations.
+The existing retry route retries eligible unresolved work; each row links to its
+receipt. `/api/receipts` supplies recent receipt links. The console never prepares,
+reviews or applies a new operation. Abandoning work belongs to the agent's
+`abandon_operation` tool. Historical receipt step details remain readable.
 
-Create is split for low-token debugging.
+## Private identity tools
 
-- Page/template owner: `course_expert.html`
-- Shared browser files: `push/core.js`, `push/file_sources.js`, `push/delivery.js`, `push/course_picker.js`, `push.js`
-- Feature files: `push/quiz.js`, `push/assignment.js`, `push/page.js`
-- Work tools page files: `course_expert/tabs.js`, `course_expert/quick_assignment.js`
-- Backend push routes: `routes/push.py`, `routes/push_validation.py`
-- Source-material facade/extractors: `source_materials.py`, `source_material_extractors.py`
+`GET /api/names?course_id=...` supplies one course's identity table without roster
+edit fields. `routes/names.py` owns protected-name settings, scrub tests, private
+identity export, vault backup and shared-store conflict handling. These records
+and files stay on the teacher's machine or private workspace; an agent must never
+read a real-name table or Identity Vault file. MCP roster changes delegate to
+`api/roster_service.py`, using pseudonyms and a reviewed digest.
 
-For the full ownership map and current hotspot snapshot, see `docs/reference/course-expert-module-map.md`.
+## Connections and settings
 
-### CanvasAgent and diagnostics
+The root page checks desktop client configuration, the MCP runtime, Canvas readiness
+and CanvasMirror status. Connect/Disconnect edits only the selected client config,
+preserves other servers and keeps a backup. It installs no software and starts no tunnel.
+Advanced setup supplies the CanvasAgent instructions, Claude package and local stdio
+configuration. `/api/download-contract` serves canonical seeded authoring references.
 
-The root page is the local CanvasAgent health console. It reads Claude Desktop and
-ChatGPT desktop configuration, checks the local MCP runtime, probes Canvas readiness,
-and summarizes the existing CanvasMirror status. Connect, reconnect, update, and
-disconnect actions change only the named desktop app's local config and keep its
-backup. All MCP execution is local stdio; there is no hosted or tunnel connection
-recipe. Support bundles remain available from their existing endpoint. Review SAFE
-material before uploading it to any external assistant; no provider is promised to
-be anonymous or FERPA safe.
+Settings stores the Canvas token in Windows Credential Manager. Current courses define
+normal runtime discovery and pickers; Previous courses remain available when explicitly
+selected. Workspace/privacy controls manage the configured private workspace, pseudonym
+secret and shared-store conflicts. `/api/open-folder` opens that workspace.
+Self-update is teacher-initiated and uses the pinned public repository.
 
-The old in-memory activity feed is not part of the Web UI. Current job state and
-receipts are served by `/api/work`, `/api/receipts`, and `/api/operations`; the
-sanitized local operational log is owned by `api/operational_log.py`.
+## Presentation and verification
 
-### Settings module routing
+Every live page extends `layouts/workspace.html`, `layouts/document.html` or
+`layouts/wizard.html`. Shared CSS loads tokens, foundation, components and layouts in
+that order. The app header owns navigation and readiness; Welcome omits it.
 
-Settings is stable but still browser-heavy.
+Settings loads `settings.js` before account, courses, workspace, identity-vault and
+updates feature scripts, then `ui/rail_nav.js`. Names uses `names.js`.
+Preserve the actual template load order when changing shared browser code.
 
-- Page/template owner: `settings.html`
-- Browser owner: `settings.js`
-- Route owner: `routes/settings.py`
-- Persistence facade: `config/__init__.py` with split modules under `config/`
-
-For the full ownership map, see `docs/reference/settings-module-map.md`.
-
-### Scoring Sessions
-
-Scoring Sessions are available through MCP only. The agent first calls
-`discover_scoring_work` across Current courses, reports the digest, and waits for teacher
-direction. Every selected SAFE pseudonymized packet and result submission remains
-assignment-bounded. Ordinary assignment
-scores and comments use the reviewed write lane; New Quiz writing stops with
-`new_quiz_writing_requires_assignment` and is graded in Canvas. Canvas Live is the only
-review/edit surface. See
-`docs/guides/scoring-sessions.md` and `docs/reference/powergrader-scoring-map.md`.
-
-### Roster module routing
-
-Roster has backend helper splits and browser feature files.
-
-- Route owner: `api/webui/routes/roster.py`
-- Browser bootstrap: `api/webui/static/roster.js`
-- Browser feature files: `api/webui/static/roster/table.js`, `api/webui/static/roster/filters.js`, `api/webui/static/roster/inline_edit.js`, `api/webui/static/roster/group_state.js`, `api/webui/static/roster/bulk.js`, `api/webui/static/roster/groups.js`, `api/webui/static/roster/safety.js`
-- Helper modules: `api/webui/routes/roster_helpers.py`, `api/webui/routes/roster_updates.py`
-
-For the full ownership map and current hotspot snapshot, see `docs/reference/roster-module-map.md`.
-
-### Feedback and scoring engine
-
-The shared feedback/SAFE components are used by the MCP Scoring Session contract;
-there is no HTTP scoring route, compatibility redirect, manual import, or hosted
-model. The agent's preview is the first review; Canvas Live is the record and the place for later edits. See
-`docs/reference/powergrader-scoring-map.md`.
-
----
-
-## Settings page (`/settings`)
-
-### Canvas account
-Paste your Canvas base URL and API token once. The token is stored in the **OS credential
-store** (Windows Credential Manager) via `keyring` — never written to disk in plaintext.
-`api/.env` remains for CLI/scripting use only.  **Test connection** verifies the token.
-
-### Current and Previous courses
-**Current courses** define Canvas Expert's operational scope: Desk scans, normal
-course pickers and desk scans use only this set. Move finished
-courses to **Previous courses** to keep their local history while excluding them from
-current work; moving them back is reversible. **Add courses from Canvas** is the only
-surface that browses every live Canvas course. Nicknames set here are the display
-names used throughout the app. Internally, `active_courses()` is the compatibility-
-named Current-course boundary and the persisted `active` field remains unchanged.
-
-### Download location
-Root folder for submission downloads. Each course gets its own subfolder.
-
----
-
-## CanvasAgent (`/`)
-
-CanvasAgent is the full-width local health console. MCP connections lead, followed by
-Canvas credential readiness, CanvasMirror freshness across Current courses, and local
-workspace/privacy readiness. Canvas readiness is refreshed on page open through
-`POST /api/readiness/probe`; CanvasMirror is a local read through `GET /api/mirror/status`.
-The secondary refresh control appears only when an enabled mirror with Current courses
-can recover stale or missing data; it queues `POST /api/mirror/sync-now` and polls the
-existing plan-status route. It does not scan work cards or perform a Canvas write.
-
-The Advanced disclosure keeps the CanvasAgent instructions, Claude package, and generic
-local stdio config available without competing with health status. The local client
-connect/disconnect routes update only the selected user's desktop config, preserve other
-servers, and keep a backup.
-
-## Create (`/course-expert`)
-
-One page, five tabs: **Quiz · Assignment · Page · Rubric · *Quick***.
-
-**Target courses** are picked from Current courses in a compact **header dropdown** (Gradebook-style, but
-multi-select): checkboxes add courses to the push set; clicking a course **name**
-focuses it. The **focused** course feeds course-specific dropdowns (grading
-categories and modules. The trigger shows the
-focused course + "· N selected". Pushes go to **every checked course** in one shot.
-
-**File sources:** every Forge-file picker offers **Library** (workspace folder
-dropdown) / **Paste JSON** / **Upload…** — pasted or uploaded content is staged via
-`/api/temp-upload` and selected automatically.
-
-**Inline Forge helpers:** each push card has a collapsible *"Don't have one yet?
-Forge one with your LLM →"* — a 3-step recipe (give your AI the content → copy the
-authoring skill so it emits the right `<XFORGE_JSON>` → paste/upload the output).
-The Quiz tab also links the standalone QuizForge app for QTI-ZIP manual import.
-
-### Quiz tab
-**Whole class:** pick a QuizForge file, then **Validate**, **Dry-run preview** (no
-live calls), or **Push live quiz…** (confirmation → streamed log).
-**Differentiated:** a quiz file per Canvas group, delivered through the reviewed
-Operation Ledger family path. Settings supplies public title tags; each exact source
-assignment is attached to the selected module and the server-named `<family> - Bridge`
-remains gradebook-only with no module item.
-Delivery options: due / unlock / lock dates, grading category, add-to-module
-(or create one), shuffle answers/questions, SIS sync, publish, hide results,
-access code, multiple attempts (+ cooldown, score-to-keep, build-on-last), time
-limit, one-at-a-time (+ backtracking), calculator. Results are **shown by
-default** (rationales + correct answers after last attempt — core QF pedagogy);
-see the `result_view_settings` note in `api/README.md`.
-
-**Printable output:** the physical quiz endpoint compiles the same QuizForge file
-into student and answer-key DOCX/PDF files. PDFs are rendered with the installed
-Microsoft Edge through Playwright; DOCX files are rendered through bundled Pandoc.
-
-### Assignment tab
-Pick an `<ASSIGNMENTFORGE_JSON>` file, then **Validate** / **Push assignment…**.
-Delivery: dates, grading category, module, SIS, and publish for ordinary assignments.
-Authored tiers are differentiated-family sources. Each uses an exact named group target,
-override-only and server-owned final-grade/SIS safety, the selected source-only module
-placement, and the shared verified bridge/link path. Rubric association is not part of this
-operation path.
-
-### Page tab
-Pick a `<PAGEFORGE_JSON>` file, then **Validate** / **Push page…**. Module placement
-+ publish. `{{file:…}}` / `{{page:…}}` placeholders resolve per course at push time.
-
-### Assignment evidence refresh
-Downloads student work from the **focused** course. Load assignments, filter by
-type and due-date range (All / Fall / Spring / 30d / 90d presets), select, download
-to a canonical course-first folder tree: `Student Work/Submissions/<Course>/Assignments/<Assignment>/<Student>/Attempt <n>/`,
-`_index.csv` per assignment, `_portfolio.csv` per student. Files are named
-`<Asgn> - <F Last>.html`, `<Asgn> - <F Last> - URL.txt`, or
-`<Asgn> - <F Last> - <original file>`.
-
-### Quick tab (italicized — a different kind of tool)
-**Fast gradebook column**: name, points, submission type (on-paper / none / text
-entry), grading category, due date, publish — created in every checked course.
-No Forge file involved; for authored instructions use the Assignment tab.
-
-## Student reports (`/roster?focus=reports`)
-Student reports are a view inside Rosters. Pick a course → load the roster → pick a student →
-check the sections to include → **Generate**. Runs across **every Current course**
-the student is in, not just the one used to load the roster.
-
-**Packet structure** (in the synced workspace, `<student_reports_root>/<Student>/<Course>/`):
-- `Assignments/` — work samples in their original formats (HTML for text entries,
-  original files for uploads, URL redirects as `.txt`), named as
-  `<Asgn> - <F Last>...`. Student Reports currently do not materialize New Quiz item
-  responses, so only scores appear in the Info DOCX. This is a missing Student Reports
-  integration, not a PAT capability limit.
-- `Info/` — a dated `<Student> - <Course> - <YYYY-MM-DD>.docx` with per-assignment
-  rows for grade, status, and submission date; neutral factual lines for late
-  submissions, extended due dates, and curve adjustments; submission comments.
-
-**Neutral language, no labels:** the whole point of the feature. No IEP/504/SpEd/
-accommodation/modification/disability/intervention anywhere in the output. Late = "Submitted
-2 days late". Extended due date = "Due date extended to Mar 4". Curve = "Score adjusted
-via curve on Mar 5: 62 → 70". Section headings: **Standing**, **Late & extended due
-dates**, **Adjustments**, **Comments**.
-
-**Monitored toggle:** each student has a ☆ Monitor / ★ Monitored button on their row.
-Monitored students form a private cohort. Because the names and notes are student PII,
-they are synced to the OneDrive workspace (`settings.json`, in-tenant/FERPA-conscious), not
-left in machine-local `config.json`. The private note attached to a monitored student is never rendered into any packet. The private note attached to a monitored student is never rendered
-into any packet.
-
-**New Quizzes status:** Enrollment-gated personal access tokens can retrieve constructed
-responses through the Student Analysis JSON report. That path is read-only. Canvas Expert
-does not write New Quiz item scores, per-item feedback, assignment totals, or fallback
-comments. Existing writing is graded in Canvas; future writing portions use separate
-100-point AssignmentForge assignments. Student Reports does not yet consume the response
-path. New Quiz scores still appear in the Submissions API and are reported in the Info document.
-
----
-
-## Scoring Sessions (MCP)
-
-Canvas Expert has no local scoring queue, result-import panel, or hosted grader. The
-connected agent starts with the cross-course `discover_scoring_work` digest, reports it,
-and waits for teacher direction. Each selected assignment then receives its own SAFE
-pseudonymized packet and result submission, bounded to that assignment. The agent's preview is the first
-review; Canvas Live is the record and the place for later edits. See
-`docs/guides/scoring-sessions.md` and `docs/reference/powergrader-scoring-map.md`.
-
----
-
-## AI Helper Files (`/ai-expert`)
-
-Equips the teacher's LLM (MagicSchool, Copilot, …) with paste-ready plain-text
-skill files, served from the Library/AI Authoring folder (`/api/ai-ta/file?name=…`):
-
-- **Start here** — orients any LLM to Canvas Expert.
-- **Authoring skills** — Author a Quiz / Assignment / Page (the Forge
-  contracts as skills). These same files power the Work tools inline
-  "Forge one with your LLM" copy buttons.
-- **MagicSchool Toolkit** — setup recipes for building dedicated MagicSchool tools.
-
-**Rebuild library** regenerates the files from the contracts and removes retired
-scoring skill files.
-
----
-
-## Course Info (`/course`)
-
-Detail page for any Current course: roster + emails, group sets with member names,
-modules, assignments, Canvas quick-links, download folder path.
-
----
-
-## Under the hood
-
-Quiz planning may delegate to the existing CLI helpers as a subprocess. Live writes
-run through the Operation Ledger adapters. Assignment evidence refreshes are focused
-reads used by the private Scoring Session packet builder.
-Assignment / page / quick-assignment creation plus course-info reads are direct
-Canvas REST calls through the split Web UI routes (`/api/course-detail`).
-
-Push routes are split by role: `routes/push.py` keeps the shared router, Canvas
-module/group lookup, and generic content push; `routes/push_validation.py` owns
-file validation, physical render, and dry-run preview endpoints. The legacy
-QuizForge streaming HTTP wrappers were removed in July 2026.
-
-Printable physical outputs use sync render routes. Keep those routes synchronous
-because Playwright's sync API cannot run inside an active asyncio event loop. The
-PDF renderer launches the installed Microsoft Edge and does not require
-a Playwright-managed browser download.
-
-The `.env` file is still the path for direct CLI / scripting use; the UI does not
-read or write it.
+Use `docs/reference/webui-presentation-system.md` for presentation rules and
+`docs/reference/settings-module-map.md` and `docs/reference/roster-module-map.md`
+for focused ownership. Load every affected page in the local app and confirm required
+state, safety controls and zero new console errors. Source-text checks alone do not
+verify browser behavior.

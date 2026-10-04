@@ -323,7 +323,7 @@ teacher-selected object or write workflow. “Deferred” means do not add merel
 | Attached assignment rubric data | Focused when scoring needs it | Assignment/PowerGrader focused evidence | PowerGrader | No separate Create picker or rubric index |
 | Canvas late policy and relevant gradebook course settings | Required | Student-free gradebook-config scope | Gradebook display and operation preparation | Apply/verify remains live |
 | Canvas grading periods | Conditional required | Student-free gradebook-config scope | Gradebook only when course uses them | Distinct from local academic calendars |
-| Students and sections | Required; already present | Private roster projection | Students, Gradebook, reports, Work, MCP | No email/avatar by default |
+| Students and sections | Required; already present | Private roster projection | Names, gradebook services, MCP | No email/avatar by default |
 | Group categories, groups, memberships | Required | Private group projection | Roster, Course Info, Work warnings, differentiated Create pickers | Mutations and final verification live |
 | Current submission row, score, grade, workflow/status | Required; already present | Private per-assignment submissions | Gradebook, Work, reports, PowerGrader text path, MCP | IDs remain normalized consistently |
 | Attempt history and text-entry bodies | Required; already present | Private per-assignment submissions | PowerGrader, revision views | Preserve observed attempts; no invented backfill |
@@ -332,13 +332,13 @@ teacher-selected object or write workflow. “Deferred” means do not add merel
 | New Quiz metadata and item catalog | Required for accessible scopes; already present | Private New Quiz metadata projection | PowerGrader | Restricted courses must not fan out failures |
 | New Quiz student responses | Focused; already present | Private per-assignment/student response snapshots | PowerGrader | Never a write preflight |
 | Attachment names and evidence completeness | Required as metadata | Private submission/evidence records | PowerGrader, reports | Signed URLs never persist |
-| Attachment/file bytes | Focused only | Canonical private evidence owner | PowerGrader, explicit open/download, portfolios | Never background-prefetch all files |
+| Attachment/file bytes | Focused only | Canonical private evidence owner | PowerGrader, explicit evidence acquisition | Never background-prefetch all files |
 | Assignment overrides | Focused/live | Command or focused report owner | Extensions, differentiation, write preflight | Do not globally mirror override trees for 1.0 beta |
 | Page/module item stubs | Required through modules | Student-free catalog | Course structure/navigation | Title/type/content ID only |
 | Page bodies | Required since 2026-08-01 | Student-free catalog `pages` scope | `get_course_content(kind="pages", ...)` MCP course context, retained control-console course-catalog route | Normalized plain text only; every URL rewritten to `[link]` |
 | Classic Quiz questions and detailed responses | Live/focused or Canvas-native | PowerGrader/SpeedGrader boundary | Grading | No broad mirror in 1.0 beta |
 | Teacher/TA/observer directory | Deferred/minimal classification only | None unless a current consumer proves need | Comment authorship edge cases | Do not mirror emails for convenience |
-| Student email and avatars | Live explicit action or remove consumer | No default persistence | Course Info edge case | Privacy cost exceeds routine value |
+| Student email and avatars | No current consumer | No persistence | Future named consumer only | Privacy cost exceeds routine value |
 | Discussions and announcements | Deferred | None | No current essential consumer | Not mirrored for completeness |
 | Calendar events | Deferred | None | No current essential consumer | Local academic calendar remains separate |
 | Course navigation and general course settings | Deferred except named gradebook fields | None / gradebook-config allowlist | Specific future consumer only | Avoid raw course-object storage |
@@ -470,18 +470,14 @@ creating a browser workflow.
 
 | Surface | Local spine | Canvas live / focused | After write |
 |---|---|---|---|
-| Home / Work | course context, assignments, submissions, comments, roster, groups, derived attention/work rows | bounded comment reconcile on focus; explicit retry for a failed scope | actions enter the owning operation/PowerGrader path; no writes from discovery |
-| Create / Course Expert | course context, modules, module items, assignment groups, capability | operation-ledger baseline, collision/drift checks, create/update, file upload, module placement, overrides, verification | refresh exact structure scopes (assignment → both projections; placement → modules) |
-| Course Info | course context, students, sections, groups/memberships, modules, assignments | explicit course-list refresh; any non-persisted field (e.g. email) only if that feature remains | targeted refresh of the touched scope |
+| Agent work discovery | course context, assignments, submissions, comments, roster, groups, derived attention/work rows | bounded comment reconcile on focus; explicit retry for a failed scope | actions enter the owning operation/PowerGrader path; no writes from discovery |
+| Agent content delivery | course context, modules, module items, assignment groups, capability | operation-ledger baseline, collision/drift checks, create/update, file upload, module placement, overrides, verification | refresh exact structure scopes (assignment → both projections; placement → modules) |
 | Grade / PowerGrader | picker data, rubric context, text-entry rows, attempts, comment context, cached NQ metadata/response snapshots | exact assignment state/submissions when the delta cannot satisfy; evidence; Student Analysis report; native NQ evidence; late-catch-up polling; grade/comment/NQ-finalization writes | refresh exact submission/student or NQ response scope, then invalidate grading-debt/attention views; never whole-course `sync_now`; never unrelated NQ metadata |
 | Gradebook Expert | students, assignments, submissions, personalized due facts, assignment groups/weights, late-policy display, grading settings, optional grading periods, derived snapshots | curve baselines feeding a write, sweep final recompute, extensions/overrides, late-policy apply/verify, every grade/status mutation | refresh only affected gradebook-config/assignment/submission/due-fact scopes |
-| Students / Roster | students, sections, group categories, groups, memberships, aliases, tiers, extra-time settings | group creation, membership add/remove, final verification | targeted group/membership refresh; invalidate roster-warning views |
-| Student Reports / portfolios | roster identity, assignments, standing, text bodies, attempts, comments, group names, due facts, derived report facts | attachment bytes and in-memory signed URLs; any field absent from a deliberate projection | emit a private source/freshness manifest; never copy signed URLs into reports |
-| Automations / Routines | detection/count/report-only routines whose scope is fresh enough | final compute/preflight and execute of any mutating routine | targeted refresh of scopes the routine mutated |
+| Names / roster runtime | students, sections, pseudonyms, extra-time settings and read-only group context | bounded live roster fallback; reviewed local setting changes through MCP | local settings remain private; no group mutation |
 | MCP | roster, assignments, submissions, grades/status, allowed derived views (local pseudonymization + source labeling) | bounded, explicitly authorized fallback only when no projection exists; never an accidental all-course first sync | newly mirrored fields need an outbound allowlist + scrub review before entering payloads |
 | Settings / Connections | course context, last-known lifecycle/capability, sync state, sanitized diagnostics | connection test, `/users/self`, course discovery, capability diagnostic | course discovery teaches the course-context scope; status pages read local envelopes |
 | Operation Ledger | course/module/assignment-group pickers | prepare baselines, execute, drift detection, reconcile, verify (live even when local equivalents exist) | each adapter declares the scopes it invalidates/refreshes; no shadow cache |
-| AI Expert | local only — no Canvas read requirement | — | not routed through CanvasMirror for symmetry |
 | Diagnostics / support | sanitized local metrics: scope, state, request counts, durations, bytes, retry/circuit state, stable error code | live health tests are explicit user actions | support bundles exclude student rows, response bodies, tokens, signed URLs, and private paths |
 
 Two durable safety notes survive the table:
@@ -524,8 +520,8 @@ This table states the end-state owner, not permission to change every caller at 
 
 Direct `requests.Session` usage should remain only where the shared core client cannot own
 the protocol: signed/native New Quiz transport, streaming/binary evidence, explicit
-diagnostics, or similarly documented cases. Student Reports and portfolios are not special
-protocols; their routine metadata calls should move behind the read service.
+diagnostics, or similarly documented cases. Routine metadata calls belong behind
+the read service.
 
 ---
 
@@ -791,10 +787,10 @@ source/freshness, and any Canvas rate-limit evidence. Never record private respo
 
 ### 19.6 Accepted limitations and deferred live-run
 
-**Accepted beta limitation (documented, not a defect):** Per-student override staleness
-(Batch 7 unit 03) — the mirror stores no override projection; the only stale surface is
-`submissions.cached_due_date` on the Student Report "Due date extended to" line, with live
-fallback outside the ~6h freshness window. Low severity; no hook repairs it. See
+**Accepted beta limitation:** Per-student override staleness (Batch 7 unit 03).
+The mirror stores no override projection; `submissions.cached_due_date` can lag
+an override-only change. The former report consumer was retired on 2026-10-04.
+Future consumers must reassess this field's freshness. See
 `docs/reference/mutation-reconciliation-map.md` family 3.
 
 **Deferred to the live start-of-year run** (needs a real 1-current/2-concluded profile with
@@ -839,16 +835,11 @@ They are not speculative feature requests.
 
 1. **Duplicate structure acquisition:** Course Catalog and private mirror independently
    acquire assignments.
-2. **Roster/Course Info bypass:** Roster and Course Info still fetch users, sections,
-   groups, memberships, modules, and assignments live; group reads include N+1 patterns.
-3. **Create picker bypass:** module and assignment-group pickers still have direct live
-   routes even though relevant structure is or should be local.
-4. **Gradebook configuration bypass:** late policy and related config display are live; the
-   private submission projection omits report-used personalized due fields.
-5. **Student Report/portfolio bypass:** metadata assembly uses direct HTTP sessions rather
-   than shared projections.
+2. **Retired console bypasses (2026-10-04):** the former roster editors,
+   course-detail views, content pickers and report/portfolio metadata paths were
+   deleted. They no longer seed migration work.
 6. **Comment-only blind spot:** nightly full capture bounds staleness but cannot support a
-   truly current Home conversation view; deleted comments can persist under omit-versus-
+   truly current agent follow-up view; deleted comments can persist under omit-versus-
    empty ambiguity.
 7. **Transport ownership drift:** specialized and accidental direct HTTP calls are not yet
    enforced by an architecture boundary.
@@ -897,15 +888,12 @@ The senior must reverify symbols on `dev` before writing a handoff. As of this d
 | Mirror scheduler/manual sync | `api/webui/mirror_service.py` |
 | New Quiz mirror | `api/mirror/new_quizzes.py` |
 | Course Catalog | `api/course_catalog.py`, `docs/contracts/course-catalog-contract.md` |
-| Existing mirror-first helper | `api/webui/mirror_reads.py` |
+| Shared read service | `api/mirror/read_service.py` |
 | Work provider compatibility shim | `api/work_registry/providers/__init__.py` |
 | PowerGrader acquisition | `api/powergrader/canvas_fetch.py`, `assignment_refresh.py`, `new_quiz_fetch.py` |
 | New Quiz response acquisition (read-only) | `api/powergrader/new_quiz_fetch.py` |
-| Gradebook | `api/grade_adjustment.py`, `api/operation_ledger/adapters/grade_adjustment.py`, `api/webui/routes/gradebook_*.py` |
-| Roster/Course Info | `api/webui/routes/roster*.py`, `api/webui/routes/courses.py` |
-| Create pickers | `api/webui/routes/push.py` |
-| Student Reports/portfolios | `api/webui/routes/reports.py`, `api/student_packet.py`, `api/portfolio_service.py` |
-| Routines | `api/webui/routes/routines_builtin.py`, `api/custom_routines/` |
+| Gradebook | `api/grade_adjustment.py`, `api/operation_ledger/adapters/grade_adjustment.py` |
+| Roster / Names | `api/roster_service.py`, `api/mcp_server/tools.py`, `api/webui/routes/names.py` |
 | Operation writes | `api/operation_ledger/adapters/` |
 | MCP | `api/mcp_server/tools.py` |
 | Current behavior docs | `docs/mirror.md`, module maps under `docs/reference/` |

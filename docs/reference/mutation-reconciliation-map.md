@@ -14,30 +14,19 @@ live `api/` tree: any unlisted mutation-shaped call, any stale listed owner,
 any duplicate key, or any out-of-vocabulary classification/scope/state fails
 the suite.
 
-## Current totals (from the JSON, 2026-09-07)
+## Ownership inventory
 
-- **53 owners total.**
-- By classification: `canvas_mutation` 41, `canvas_read_acquisition` 5,
-  `canvas_upload` 2, `generic_transport_internal` 2, `canvas_mutation_native` 1,
-  `diagnostic_probe` 1, `external` 1.
-- By reconciliation state: `none` 6, `n/a` 20, `targeted` 12, `invalidate` 15.
-- By scope (an owner may touch more than one): `private.submissions` 9,
-  `catalog.assignments` 9, `none` 7, `catalog.modules` 6,
-  `focused_evidence` 6, `new_quiz.metadata` 5, `private.assignments` 5,
-  `private.groups` 5, `catalog.pages` 2, `private.submission_comments` 2,
-  `new_quiz.responses` 1. `catalog.assignment_groups`, `private.roster`, and
-  `unknown` are currently unused (no live mutation touches them).
+`docs/contracts/canvas-transport-owners.json` is the current inventory. Derive
+counts and classifications from it rather than maintaining a second numeric snapshot.
 
 ## Vertical families
 
 ### 1. Grades, comments, and curves (`private.submissions`, `private.submission_comments`)
 
-**Covered (targeted):** PowerGrader's two grade-push owners —
-`api/powergrader/session_actions.py push_grades` and
-`api/powergrader/autopush_executor.py run_autopush_for_session` — converge
-through `_notify_write_through` in `api/webui/routes/powergrader.py`, which
-calls `mirror_service.notify_course_changed` (a narrow per-course submissions
-delta refresh).
+Scoring writes use `api/powergrader/session_actions.py` (`push_grades`), called
+by `api/powergrader/scoring_apply.py`. The former browser callback and autopush
+executor are retired. The transport registry and current scoring contract own
+verification and reconciliation behavior; no route callback is a scoring authority.
 
 **Covered (targeted):** existing-grade adjustments are owned by
 `api/operation_ledger/adapters/grade_adjustment.py` (`execute`). It writes only
@@ -111,51 +100,21 @@ the bridge-only path.
 
 ### 3. Per-student assignment facts (`private.assignments`)
 
-**Deferred (bounded staleness, accepted 2026-07-19) — not an open gap:** tier
-overrides (`assignment_tiered.py`), quiz overrides (`quiz_steps.py
-create_override`), and extension/override adapters (`extension.py`) all create/update Canvas
-assignment overrides with no mirror invalidate call. A senior audit
-(2026-07-19) traced the actual staleness this causes and ruled it a deliberately
-deferred, bounded limitation rather than a reconciliation task, on this evidence:
+**Accepted 2026-07-19; report consumer retired 2026-10-04.** The mirror has no
+assignment-override projection. Its submission `cached_due_date` can lag an
+extension because delta refresh selects submission/grade timestamp changes; an
+override-only change does not advance those timestamps. A full pass refreshes it.
+The former report display that motivated this limitation has been deleted.
 
-- **The mirror stores no assignment-override projection.** `normalize_assignment`
-  (`api/mirror/store.py`) persists only base fields (single class-wide `due_at`,
-  points, name, published, etc.) — no override objects, no `all_dates`, no
-  per-student dates. So the `private.assignments` scope itself has nothing to
-  reconcile. (The scope tag stays `private.assignments` because overrides are
-  inherently per-student, not catalog data — confirmed against the JSON, not
-  `unknown`.)
-- **The only mirror footprint is `cached_due_date` on submission rows**
-  (`normalize_submission`, `store.py`) — Canvas's per-student effective due date.
-  One mirror-backed teacher surface reads it: the Student Report "Due date
-  extended to X" line (`api/student_packet.py` `_info_blocks`). Every other
-  override reader (late-catchup) reads **live**, so it is always correct.
-- **The write-through delta hook cannot repair it, and this is why it is not
-  simply wired like curves/grades.** `refresh_submissions_course_delta`
-  (`api/mirror/sync.py`) refetches only rows `submitted_since`/`graded_since` the
-  watermark; an override changes `cached_due_date` but neither timestamp, so the
-  affected rows are never refetched. Only the periodic `full_pass` picks it up.
-- **Severity is low and the window is bounded.** The report local path is gated on
-  the freshness window (`mirror_serve_max_age_hours`, default 6h) advanced only by
-  `full_pass`; outside it the report falls back to **live** Canvas and is correct.
-  Worst case: a teacher grants an extension and immediately generates a Student
-  Report within the window, which then shows the pre-override due date — a display
-  blemish on one line, not a grade error.
-
-`gradebook.attempts_grant` (`api/operation_ledger/adapters/attempts_grant.py`, one `_send`
-owner) writes student overrides and per-student extensions under the same deferred
-limitation; its whole-class attempts and date patches and its overrides mark
-`catalog.assignments` stale through the central post-apply hook
-(`invalidate`), and it makes no submissions refresh call.
-
-Closing it would need new machinery not reused from any existing hook (a targeted
-per-assignment submissions force-refetch, or a new whole-scope submissions
-stale-mark). Given the low, bounded severity and the live fallback, that machinery
-is deferred for 1.0beta. If reopened, verify these facts against code first.
+`gradebook.attempts_grant` writes student overrides and per-student extensions with
+live verification. Its whole-class attempts/date patches and overrides mark
+`catalog.assignments` stale through the central post-apply hook; it makes no
+submission refresh call. Any future consumer of cached effective due dates must
+reassess freshness against current code before relying on them.
 
 ### 4. Groups and membership (`private.groups`)
 
-Course Info and the agent-facing `get_roster(include=["groups"], ...)` tool retain read-only group-set and
+The agent-facing `get_roster(include=["groups"], ...)` tool retains read-only group-set and
 name display from the private mirror. Canvas Expert no longer creates group sets or
 edits memberships through Roster; the former `roster_canvas.py` and `roster_groups.py`
 write routes were retired in Forge Batch 1 (three tiers, no student-to-tier knowledge).
@@ -208,9 +167,9 @@ Canvas content. They remain classified `canvas_read_acquisition`, reconciliation
 3. **Per-student assignment facts** (family 3): **decided 2026-07-19 — deferred
    as a bounded, documented limitation, not an open gap.** Overrides/extensions
    have no mirror override projection; their only mirror footprint is
-   `submissions.cached_due_date`, read by the Student Report extension line, with
-   live fallback outside the freshness window. Low severity, and no existing hook
-   repairs it (the delta watermark misses override-only changes). See family 3.
+   `submissions.cached_due_date`. The former report consumer was retired on
+   2026-10-04; future consumers must reassess it. The delta watermark misses
+   override-only changes. See family 3.
 4. **Retired 2026-07-19 — Batch 8 done.** The duplicate ledger adapters
    (`roster_membership.py`, `roster_group_set.py`, `late_policy.py`, and
    `curve.py`) were confirmed dead: no non-test producer emitted their KINDs, and

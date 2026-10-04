@@ -60,7 +60,7 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 77 (37 tools).
+Tool schema version 78 (37 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -421,10 +421,8 @@ compact. Client and model token treatment varies:
 - Gradebook assignment columns `has_submission` and `has_grade` count roster records with
   a submission timestamp and graded records with a score, respectively. Manual grades
   without a submission count toward `has_grade` and averages. Their difference is not an
-  ungraded-work count: `total_ungraded` sums the returned students' submitted or pending-review
-  refuses rather than truncating when the compact result exceeds 20,000 serialized
-  characters. It reports the method, cutoffs, group-set label, No Data group, coverage,
-  group counts/membership, and proposal digest. Use the Students UI for review and apply.
+  ungraded-work count: `total_ungraded` sums submitted or pending-review work
+  without a grade across the returned roster rows.
 - The outbound safety scan always runs on the full row payload **before** tabulation and
   truncation happens **before** the scan — the gate inspects exactly the bytes that leave
   the machine.
@@ -506,6 +504,6 @@ outcome (`ok`, `refused`, or `error`) and duration; errors may add only the clas
 existing log envelope includes app version. Arguments, result content, identifiers, names and
 pseudonyms are never logged. No refusal-code field is added to the log allowlist.
 
-Schema v77 wire pins: 37 tools, 14,658 characters for tools/list and 2,303 characters
+Schema v78 wire pins: 37 tools, 14,658 characters for tools/list and 2,303 characters
 for server instructions (down from 21,762 and 2,667). The warn-before-push rule ends
 within the first 2,048 characters. These are wire measurements, not token promises.

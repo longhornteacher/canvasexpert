@@ -138,8 +138,8 @@ Test Student only and deleted afterward.
 
 ## Next batch
 
-**Batch 2: score classic quiz writing.** This is briefed in
-`docs/handoffs/classic-quiz-scoring.md` while that brief is current.
+**Batch 2: score classic quiz writing.** A senior must write a current execution
+brief before implementation. Historical briefs are not implementation authority.
 - Carried decision: a score and a comment per question (teacher-confirmed 2026-09-29).
 
 ## New Quiz draft comments (probe run before 2026-09-29)

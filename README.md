@@ -8,7 +8,7 @@ Canvas Expert is a local, teacher-controlled cooperation layer between Canvas an
 desktop AI agent you already use. ChatGPT Desktop, Claude Desktop, or another MCP-capable
 agent is the primary working surface; Canvas Expert keeps the Canvas token, private data,
 local mirror, approval boundaries, and verified writes on your machine. The browser app is
-a small control console for setup, readiness, review, recovery, and diagnostics.
+a small control console for setup, readiness, recovery, receipts and private identity tools.
 
 ## Getting started
 
@@ -19,12 +19,9 @@ Step 3 - Double-click `Open Canvas Expert.bat`. The first run installs Python an
 ## What it does
 
 **Create** quizzes, assignments, pages, rubrics, and quick gradebook columns with your agent,
-then have Canvas Expert validate, preview, and push them to Canvas. The same Forge contracts
-also produce local printable outputs. The control console remains available for setup and
-review; it is not intended to duplicate the agent's conversation surface.
+then have Canvas Expert validate, preview, and push them to Canvas after your review.
 Set due, unlock, and lock dates, grading category, module placement, shuffle, time limit, attempts, and
-access code on the way out. Classic Quizzes and New Quizzes are both supported. Save a printable PDF and
-Word version of anything you build.
+access code on the way out. Classic Quizzes and New Quizzes are both supported.
 
 **Differentiate** the same work in three tiers (Support, Core, Accelerate), each with a teacher-configured
 public Canvas tag. Canvas Expert has no student-to-tier mapping; the teacher assigns tier assignments to
@@ -41,13 +38,9 @@ or hosted grader.
 **Gradebook tools** for one course at a time: set Canvas's own late policy, honor per-student extra time,
 apply curves, and take snapshots.
 
-**Students** is your class list plus the things Canvas will not hold: accommodations, extra time, small
-groups, monitoring flags, and private notes. Student reports pull it together per kid.
-
-**Assessments** imports Eduphoria exports, matches them to your roster, and turns them into a standards
-profile, coverage reports, longitudinal history, and grouping suggestions.
-
-**Routines** run the recurring chores so you stop remembering them.
+**Names** is a private searchable who-is-who table with protected names, scrub tests,
+identity export and vault backup. Your agent manages local roster settings through
+pseudonymized, reviewed MCP tools.
 
 **CanvasAgent** connects the AI you already use. Download one instruction file and paste it into any chat,
 or connect Claude Desktop or the ChatGPT desktop app so the assistant can read your course data itself,

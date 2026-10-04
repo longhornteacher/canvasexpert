@@ -95,16 +95,10 @@ The enforcement registry is `api/tests/test_presentation_contracts.py`. It is th
 source of truth for route, template, layout, variant, rail count, and migration state.
 This is a retained control-console presentation contract, not a mandate to add browser
 routes or duplicate agent-facing workflows.
-CanvasAgent uses `workspace/full`; Create uses `workspace/three`;
-Students and Settings use `workspace/left-main`; Routines uses `workspace/full`;
-Course Info uses `document/wide`; AI Expert uses `document/standard`; and Welcome uses
-`wizard`. Student reports is a view inside the Students page (`_student_reports_panels.html`
-included by `roster.html`, selected by `?focus=reports`). `/students/reports`,
-`/course-expert?tab=students`, and `/about` are retired without redirects. The document layout required
-no interface adjustment at first use. The receipt landing uses `document/standard`.
-The wizard shell provides the same responsive
-outer-gutter ownership as the other layouts while intentionally omitting the app
-header.
+CanvasAgent uses `workspace/full`; Names and Settings use `workspace/left-main`;
+Welcome uses `wizard`; receipt detail uses `document/standard`. The wizard omits
+the app header. Navigation contains CanvasAgent, Names and Settings. The only
+routes are `/`, `/welcome`, `/settings`, `/names` and `/receipts/{id}`.
 
 All registry rows are migrated. Its source checks are repo-wide: every live template
 is layout-backed and free of static inline styles, all feature CSS consumes shared
@@ -123,6 +117,5 @@ remain for retired pages.
 | Shared panel structure | `ui/_macros.html` or `ui/components.css` |
 | Feature-only layout | page stylesheet |
 
-Partials move with their first consumer. `_readiness_strip.html` moved with the
-migrated header; `_push_common_scripts.html` remains behavior-only and keeps its
-script order.
+Partials move with their first consumer. `_readiness_strip.html` belongs to the
+shared app header. Preserve each retained page's script load order.

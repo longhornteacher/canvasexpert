@@ -3,7 +3,7 @@
 Canvas Expert is the **local runtime behind teacher-agent cooperation**. It holds the
 Canvas API token, keeps private local state, exposes the primary stdio MCP interface to
 desktop agents, and performs bounded Canvas reads and writes. Its browser app is a small
-control console for setup, readiness, mirror status, review, recovery, receipts, and
+control console for setup, readiness, mirror status, recovery, receipts, and
 diagnostics. Agent hosts may render previews in their own conversation surfaces; this
 runtime returns the semantic data and safety boundaries behind them.
 
@@ -12,7 +12,6 @@ The runtime supports:
 - **Push Quizzes** (QuizForge JSON → live New Quizzes, or a Classic Quiz when the file declares `quiz_engine: "classic"`)
 - **Push Assignments** (AssignmentForge JSON → live whole-class assignments)
 - **Push Pages** (PageForge JSON → live pages)
-- **Printable outputs** (QuizForge JSON → local DOCX + PDF files)
 - **Gradebook services** — reviewed grade adjustments, attempt grants, and bounded runtime reads
 - **Scoring Sessions** — MCP-connected agent discovers work across every Current course,
   waits for teacher direction, then prepares one exact assignment at a time using an
@@ -33,7 +32,6 @@ The runtime supports:
   `refresh_mirror(include_comments=true)` deliberately acquires full comment IDs
   and staff proof; the default refresh remains unchanged.
   See `docs/guides/scoring-sessions.md` for prepare/read/stage/apply and blocker recovery.
-- **Download** — submission bundles by assignment or by student
 
 Ledger-backed content, assignment, grade, attempt, and SIS bridge operations use
 `apply_operation` after the teacher reviews the frozen preview. Authoring contracts
@@ -64,15 +62,15 @@ execution remains local stdio; no hosted or tunnel setup is offered.
 | **PageForge** | `default_docs/AI Authoring/Author a Page (PageForge).txt` (v1.0-json) | Page authoring: unit hubs, placeholders |
 
 Each contract is canonical in `default_docs/AI Authoring/` — this backend consumes, never forks.
-Token security: the repo is **private**; a `pre-commit` hook blocks the token pattern;
-Netlify publishes only `web/`, so nothing here is served. Keep the token only in
+Token security: the repository is public; a `pre-commit` hook is only a backstop.
+The token-holding runtime binds only loopback. Keep the token only in
 `api/.env` (CLI) or OS credential store (control console, via `keyring`).
 
 ## Workflow
 
 **Recommended: connect a desktop agent through the local MCP server** (see `docs/mcp-server.md`).
 Use the Web UI as the control console for first-run setup, connection/readiness checks,
-CanvasMirror status, operation review/recovery, receipts, and private workspace management.
+CanvasMirror status, operation recovery, receipts, and private workspace management.
 CLI scripts remain available for bounded automation and legacy/headless workflows.
 
 ### Control console (CanvasAgent and local safety surfaces)
@@ -80,14 +78,10 @@ CLI scripts remain available for bounded automation and legacy/headless workflow
 1. Launch: `py qf_ui.py` (opens http://127.0.0.1:8765)
 2. Configure the Canvas account, workspace, and desktop-agent connection.
 3. Check Canvas readiness, CanvasMirror freshness, privacy readiness, and local MCP status.
-4. Review or recover prepared operations and inspect private receipts when the agent asks
-   for teacher confirmation or an action needs attention.
+4. Retry operations needing attention and inspect private receipts. The agent owns
+   preparation, review and apply of new operations.
 5. Use any remaining local-only control or repair surface named by the relevant feature
    contract.
-
-Printable QuizForge outputs are generated locally from the same Forge contract.
-PDFs use the installed Microsoft Edge through Playwright; editable DOCX files use
-bundled Pandoc through `pypandoc-binary`.
 
 ### CLI (for automation)
 
@@ -112,8 +106,8 @@ py qf_ui.py            # opens http://127.0.0.1:8765
 
 **Token storage:** the control console stores the token in the **OS credential store** via
 `keyring` (Windows Credential Manager) — never on disk. `api/.env` is for CLI use
-only. Non-secret config (base URL, bookmarks, download root)
-lives in `api/webui/config.json` (gitignored).
+only. Machine-local runtime settings and caches live under
+`%LOCALAPPDATA%\CanvasExpert`; shared settings live in the private workspace.
 
 ## Workspace & multi-PC
 
@@ -123,15 +117,14 @@ vault, shared settings, and resumable work use append-only journals under
 A file at a retired vault or settings location also blocks vault and settings
 access until the file is reviewed. Each computer keeps its CanvasMirror and
 Course Catalog cache and runtime settings under `%LOCALAPPDATA%\CanvasExpert`.
-Canvas base and download root are machine-local, and the Canvas token stays in
+Canvas base is machine-local, and the Canvas token stays in
 Credential Manager. `Student Work/` and shared vault/session data are private;
 pseudonymized artifacts are not anonymous and need review before sharing.
 
 See the [multi-computer guide](../docs/guides/more-than-one-computer.md) for
 workspace setup, privacy checks, sync conflicts, and per-computer refreshes.
 
-**Control-console and retained-surface reference** (Settings, readiness, mirror status,
-  operations, receipts, retained Create/Roster/Course Info surfaces):
+**Control-console reference** (CanvasAgent, Welcome, Settings, Names and receipt detail):
   **`api/webui/README.md`**. Agent-facing workflows are defined by the MCP contract and
   the relevant runtime/feature contracts, not by browser page parity.
 
@@ -215,10 +208,8 @@ safety remain part of the reviewed family operation. Tier placement is manual an
 | `codefmt.py` | VSCode-style code highlighting (Pygments → inline styles) |
 | `teks.py` | TEKS coverage report + visible labels |
 | `qf_pusher.py` | No-network QuizForge planner: envelope → normalized quiz/item payloads |
-| `downloader.py` | Submission downloader → canonical `Student Work/Submissions/<course>/Assignments/<assignment>/<student>/Attempt <n>/` tree; no duplicate raw by-student mirror |
 | `validate_qf.py` | QuizForge compliance checker |
 | `qf_ui.py` | Launches the local control console (see "Control console" above) |
-| `../engine/rendering/physical/` | Local printable DOCX/PDF render stack (Edge via Playwright for PDF, Pandoc for DOCX) |
 | `powergrader/` | Legacy-named private scoring engine: mirror-backed assignment preparation, SAFE bundle/session assembly, feedback contract, the narrow ordinary-assignment raw-score write, and read-only New Quiz evidence |
 | `mcp_server/` | Local MCP tool registry, contracts, pseudonymized reads, and teacher-owned write tools |
 | `mirror/` | CanvasMirror storage, freshness envelopes, sync coordinator, and disk-only query services |

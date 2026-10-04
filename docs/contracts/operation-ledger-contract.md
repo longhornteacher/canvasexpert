@@ -56,13 +56,13 @@ Any payload, source, setting, target, or baseline change invalidates review.
 ### Reviewed file slots and ordered uploads
 
 For AssignmentForge and PageForge operations, review freezes attachment names, labels,
-private source paths, SHA-256 hashes, printable availability, tier mapping, and the
+private source paths, SHA-256 hashes, tier mapping, and the
 specific rendered HTML link slots. Local paths and raw Canvas upload responses stay
 private. A source or attachment hash change invalidates review; apply rechecks the
 frozen attachment hashes before upload.
 
 Canvas file IDs do not exist at review. During apply, Canvas Expert may fill only a
-frozen attachment or printable link slot with a URL derived from that slot's exact,
+frozen attachment link slot with a URL derived from that slot's exact,
 checkpointed Canvas file ID. It cannot change the authored wording, labels, ordering,
 or layout. The final content-create request, including derived URLs, has its own
 write-ahead payload digest before that request is sent. This rule is limited to these
@@ -70,8 +70,7 @@ file link slots and does not authorize other post-review payload edits.
 
 Each attachment upload is an ordered step before the first content create; a teacher
 file is uploaded once per course target and its checkpointed ID is shared by the
-assignment's tiers. Each printable upload is an ordered step immediately before its
-corresponding assignment create. Before every upload mutation, call `before_send` and
+assignment's tiers. Before every upload mutation, call `before_send` and
 flush its outbound marker. After confirmed completion, checkpoint the exact Canvas file
 ID before making another Canvas call.
 
@@ -132,27 +131,25 @@ may hydrate only after opening a PRIVATE detail view.
 
 CanvasExpert has no user-authentication layer; documentation must not call it an
 “authenticated UI.” New ledger mutation routes require a process-random CSRF token,
-emitted in the Workbench base markup and sent in a header, plus strict same-origin and
+emitted in the console base markup and sent in a header, plus strict same-origin and
 loopback Host/Origin checks. The token is not persisted. Missing or invalid protection
 returns 403 before reading a private record or performing work.
 
 - `GET /api/operations` — PII-minimized summaries.
-- `POST /api/operations/{kind}/prepare` — typed preparation.
-- `POST /api/operation-batches/review` — frozen batch review.
-- `POST /api/operation-batches/{batch_id}/apply` — digest-gated apply.
+- `GET /api/operations/{operation_id}` — private operation status.
 - `POST /api/operations/{operation_id}/retry` — proven unresolved targets only.
 - `GET /api/receipts` — PII-minimized summaries.
 - `GET /api/receipts/{receipt_id}` — PRIVATE detail from the local UI.
 
-Ignore/snooze/cancel routes introduced by the registry or Desk use the same mutation
-protection. Route additions deliberately update `api/tests/test_route_contract.py`.
+New operation preparation, review and apply are runtime/MCP actions. The console
+exposes recovery and receipts only. Route additions deliberately update
+`api/tests/test_route_contract.py`.
 
 ## Invariants and forbidden behavior
 
-- Cancel receives initial focus in every write review.
+- The agent presents the frozen review before the teacher authorizes an apply.
 - Server state, never browser preview rows, is authoritative.
-- AI suggestions remain drafts until teacher approval except the existing narrow,
-  per-job scheduled-auto-push policy.
+- AI suggestions remain drafts until teacher approval; Canvas Expert has no scheduled write policy.
 - Reversal is offered only when the adapter proves it and preserves an exact snapshot.
 - SAFE means pseudonymized, not anonymous.
 - No generic executor, activity-log receipt, silent ambiguous retry, multi-call atomicity

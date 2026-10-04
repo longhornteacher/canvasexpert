@@ -3,10 +3,9 @@
 Status: implemented durable contract, accepted 2026-07-11. Operation-ledger integration
 is governed by `docs/contracts/operation-ledger-contract.md`.
 
-This contract governs resumable runtime work and its retained local control-console
-projections. It does not make the browser the primary teacher-agent surface. Connected
+This contract governs resumable runtime work and its privacy-minimized indexes. It does not make the browser the primary teacher-agent surface. Connected
 agents own conversation, host-rendered previews, and Scoring Session interaction; the
-control console owns setup, readiness, review, recovery, receipts, diagnostics, and
+control console owns setup, readiness, recovery, receipts, diagnostics, and
 genuinely local-only operations.
 
 ## Purpose
@@ -15,13 +14,9 @@ The Work Registry gives CanvasExpert one durable, cross-course index of work wit
 making that index the source of truth for Canvas objects, student records, or authored
 Forge files. Scoring Sessions are not Home/Work jobs.
 
-The retained control console has three operating states for local runtime work:
-
-- **Desk** answers: Start, Continue, Attention, Prepared, and Receipts.
-- **Workbench** opens one resumable job with a persistent Work rail and explicit scope.
-- **Instrument** expands the same job for compact local detail, comparison, or recovery.
-  It is not a scoring queue, authoring workspace, or duplicate of a host agent's
-  conversation and preview surface. Instrument never clones or creates a second job/form.
+The agent discovers and resumes work through the runtime. The console presents
+operation recovery and receipt links on CanvasAgent; it has no Work rail or
+separate job-opening surface.
 
 ## Persistence boundary
 
@@ -92,32 +87,6 @@ Unknown versions, origins, statuses, source types, absolute URLs, absolute files
 paths, and non-string Canvas IDs are rejected. `focused_course_id` is empty or a member
 of `course_ids`.
 
-## Transient Desk presentation sidecar
-
-The exact job shape above remains generic and is the only job shape written to registry,
-discovery, suppression, session, or general work storage. It is not a Scoring Session
-queue. For the loopback-only Desk control console,
-`GET /api/work` may return a separate top-level `presentations` mapping keyed by opaque
-`job_id`. Control-console initial data receives the same mapping. Each value has exactly four
-string fields:
-
-```json
-{
-  "course_label": "configured Current-course nickname or empty",
-  "title": "local semantic title",
-  "summary": "aggregate-only progress sentence",
-  "action_label": "specific local action label"
-}
-```
-
-This sidecar is computed on demand from Current-course configuration and the already-public
-job counts. It is never
-merged into a job or persisted. It may include a teacher-authored assignment title and
-aggregate student/submission counts, but never student names or IDs, grades, comments,
-submission content, feedback, roster notes, or per-student state. Missing local authorities
-fail closed to generic presentation text without opening a full private session or reading
-Canvas.
-
 ## Authority and adapters
 
 The registry never copies authoritative subsystem payloads:
@@ -127,13 +96,9 @@ The registry never copies authoritative subsystem payloads:
 - Canvas assignment/submission truth remains in Canvas and bounded discovery caches.
 - Prepared operations and receipts use the Operation Ledger Contract.
 
-Adapters project summaries into jobs and hydrate details only after the job opens. The
-transient Desk presentation sidecar is a display projection, not hydration and not an
-authority.
-
-Home and Work contain no scoring-session resume cards or scheduled scoring jobs. Teachers
-resume by invoking the Scoring Session flow in their connected agent; Canvas Live remains
-the review/edit surface.
+Adapters project summaries into jobs. Private details remain with their owning
+runtime service. Teachers resume scoring by invoking the Scoring Session flow in
+their connected agent; Canvas Live remains the review/edit surface.
 
 ## Detected findings
 
@@ -141,15 +106,9 @@ Discovery is an explicit asynchronous read-only request; `GET /` must not synchr
 scan Canvas. A scan is bounded to active bookmarked courses, cached with per-course
 freshness/error metadata, and may run in parallel with a maximum documented concurrency.
 
-Initial providers, in order:
-
-1. Failed or partial operation receipts.
-2. Cross-course grading debt: assignments with submitted work lacking teacher score,
-   comment, or CanvasExpert session evidence.
-3. Aggregate late-work findings using school-day and extra-time math.
-4. Aggregate roster warning categories.
-5. Aggregate Home attention: evidence-backed student-response follow-up and uncertain staff
-   response checks.
+Runtime discovery providers reduce grading debt, roster warnings and
+student-response follow-up to aggregates. Operation recovery and recent receipts
+are listed directly by their owning services on CanvasAgent.
 
 Discovery persists counts and stable object IDs only. Student identities and submission
 text are retained only when a job opens in a PRIVATE workspace. An explicit discovery
@@ -195,17 +154,8 @@ Focused course and write targets are distinct:
 - Deep links override only fields they explicitly supply.
 - Context never broadens a previously single-course action silently.
 
-CourseExpert's existing picker may explicitly add a newly focused course to its checked
-target set before publishing both changes; that is picker behavior, not a global context
-invariant. Read-only/single-course pages may change focus without authorizing a write.
-
-The control-console browser contract is `window.CE_CONTEXT` with `snapshot`, `setFocus`, `setTargets`,
-`reconcile(availableCourses, {source, authoritative})`, and `subscribe`, plus the
-`ce:contextchange` event. Reconciliation prunes stale focus/targets only after a successful
-authoritative all-course response. Bookmark-only hydration and failed Canvas fetches are
-non-destructive. The existing
-`canvasExpert.push.coursePicker.v1` state is migrated once and read as a compatibility
-fallback for one release.
+The console has no shared write-target picker or browser context API. The agent's
+explicit operation scope and the runtime's frozen review define write targets.
 
 ## Forbidden behavior
 
@@ -214,4 +164,3 @@ fallback for one release.
   registry/discovery/suppression documents.
 - Do not call activity events jobs or receipts.
 - Do not infer Canvas connectivity solely from saved credentials.
-- Do not let Instrument create a cloned form or duplicate DOM IDs.

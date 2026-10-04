@@ -117,23 +117,28 @@ review boundary, or reuse a stale or superseded session.
 
 ### Control console
 
-`api/webui/` is a small local control console around the runtime. Its durable
-jobs are setup, readiness, mirror status/refresh, operation review/recovery,
-receipts, diagnostics, and private workspace management.
+`api/webui/` has exactly five page routes:
 
-The control console is not the default home for new agent-facing workflows.
-Do not add a robust local preview, scoring queue, dashboard, or duplicate
-authoring flow merely because the runtime has a browser route. Add a UI only
-when it is required for trust, setup, recovery, or a genuinely local-only
-operation that the agent cannot safely own.
+- `/` — CanvasAgent setup/readiness, mirror status/refresh, privacy, operations
+  needing attention with Retry and receipt links, and recent receipts.
+- `/welcome` — first-run setup.
+- `/settings` — account, courses, Forge preferences, workspace/privacy and updates.
+- `/names` — private searchable who-is-who table, protected names, scrub test,
+  who-is-who export and vault backup. The table has no edit controls.
+- `/receipts/{id}` — private receipt detail, including historical operation steps.
+
+Navigation contains CanvasAgent, Names and Settings. The console does not prepare,
+review or apply new operations; the agent does. Roster setting changes also belong
+to the MCP/runtime path. The teacher reviews posted results in Canvas Live.
 
 Routes and browser scripts consume shared application services. Business logic
-must not be made canonical by hiding it inside a route, template, or browser
-global.
+must not become canonical inside a route, template or browser global. Add a
+console surface only for an agreed setup, trust, recovery or private local need.
 
 ### Offline artifact engine
 
-`engine/` remains the offline parse/validate/render/package library. It has no
+`engine/` holds offline Forge HTML rendering, palettes, author-HTML validation,
+authored points and text utilities. It has no
 Canvas token, network, student data, or agent-host assumptions. Forge contracts
 remain canonical in `api/default_docs/AI Authoring/`.
 

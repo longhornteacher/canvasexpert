@@ -13,13 +13,11 @@ results.
 
 - `api/operation_ledger/adapters/assignment.py` — `AssignmentAdapter` payload build,
   digest, target verification, baseline/drift, review shaping, retry/reversal, and
-  compatibility seams for `_autoscore_queue`, `_validate_printable_pdf`,
-  `_upload_course_file`, `_allowed_printable_roots`, and
-  `requests`.
-- Assignment preparation freezes generated printable hashes and teacher attachment
+  transport seams for `_upload_course_file` and `requests`.
+- Assignment preparation freezes teacher attachment
   names, labels, private paths, and hashes. Attachment files are resolved only under
   the configured workspace `To Review/Attachments/` root. The adapter's rendered
-  Canvas HTML contains specific attachment/printable link slots; after review, apply
+  Canvas HTML contains specific attachment link slots; after review, apply
   may fill only those slots from checkpointed Canvas file IDs. The final outbound
   content request is write-ahead recorded after URL binding.
 - `api/operation_ledger/adapters/quiz.py` — `QuizAdapter` payload build, digest,
@@ -34,10 +32,10 @@ results.
 ## Execution Owners
 
 - `api/operation_ledger/adapters/assignment_whole.py` — whole-class assignment create,
-  printable and attachment upload steps, module attachment, autoscore scheduling, and
+  attachment upload steps, module attachment and
   whole reconcile.
 - `api/operation_ledger/adapters/assignment_tiered.py` — differentiated family source
-  assignment-draft creation, shared attachment uploads, each tier's printable upload,
+  assignment-draft creation, shared attachment uploads,
   and exact-ID tiered reconcile. It performs no roster/group, override, module, or
   family-tail work.
 - `api/operation_ledger/adapters/assignment_hub.py` — sequences the tier pages and
@@ -89,7 +87,7 @@ results.
   module find/create/attach behavior for Assignment and Quiz flows only.
 - `api/operation_ledger/adapters/differentiated_bridge.py` — one shared owner for
   public-tag normalization, source/bridge shape verification, end-of-day bridge due
-  time, runtime Dashboard instructions, bridge create/activate, source-only module
+  time, runtime review instructions, bridge create/activate, source-only module
   placement, final family verification, and student-free family-link save.
 
 ## Safety Boundaries
@@ -97,7 +95,7 @@ results.
 - Do not change step keys, checkpoint timing, `before_send` ordering, request digests,
   failure classification, or returned result keys without updating the durable contract
   and the high-risk adapter tests together.
-- Attachment and printable upload steps stop in Attention on uncertain outcomes or
+- Attachment upload steps stop in Attention on uncertain outcomes or
   missing exact file IDs. Resume may reuse an applied upload only after exact-ID Canvas
   verification; filename or approximate match never proves completion, and uploads are
   not automatically deleted.
@@ -123,7 +121,6 @@ results.
 
 - `api/tests/test_assignment_operation.py`
 - `api/tests/test_assignment_tier_operation.py`
-- `api/tests/test_printable_attach.py`
 - `api/tests/test_quiz_operation.py`
 - `api/tests/test_quiz_tier_operation.py`
 - `api/tests/operation_ledger/adapters/test_quiz_classic.py`

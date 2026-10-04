@@ -35,8 +35,8 @@ dex order, minus the omissions below.
   `Phanpy`, `Donphan`, `Miltank`, `Makuhita`, `Hariyama`, `Gulpin`, `Swalot`, `Wailmer`,
   `Wailord`, `Purugly`, `Munchlax`, `Hippopotas`, `Hippowdon`, `Lickilicky`, `Mamoswine`,
   `Tepig`, `Pignite`, `Emboar`, `Guzzlord`, `Greedent`, `Cufant`, `Copperajah`, `Lechonk`,
-  `Oinkologne`, `Cetoddle`, and `Cetitan`. `api/tests/test_feedback_vault.py` pins this
-  set so it cannot drift back in; add to it rather than removing from it. Names that
+  `Oinkologne`, `Cetoddle`, and `Cetitan`. Preserve this exclusion set; add to it
+  rather than removing from it. Names that
   directly imply poor intelligence or uselessness are also excluded: `Slowpoke`,
   `Slowbro`, `Slowking`, `Numel`, `Magikarp`, and `Wobbuffet`.
 - The registry is an allowlist. Code must never fall back to a word outside it.
@@ -78,8 +78,8 @@ This is a pre-launch clean break:
 
 ## Consumer rules
 
-- Students displays and edits the exact one-word value. Its Web UI, route payload, and MCP
-  patch shape use `pseudonym: string`.
+- Names displays the exact one-word value in the private console table. MCP roster
+  patches use `pseudonym: string` through the reviewed runtime path.
 - Scrubbing maps the full real name, every real-name token, and each nickname to the same
   full one-word pseudonym. IDs continue to map to the neutral ID placeholder.
 - SAFE artifacts, PowerGrader, CanvasMirror projections, and MCP

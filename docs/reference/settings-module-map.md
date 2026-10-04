@@ -19,7 +19,6 @@ changes again.
 - Feature files: `api/webui/static/settings/*.js`
 - Settings route owner: `api/webui/routes/settings.py`
 - Forge tier tags and color routes: `api/webui/routes/settings.py`
-- AI Authoring file/rebuild routes: `api/webui/ai_ta.py` and `api/webui/routes/library.py`
 - Persistence facade: `api/platform_services/config/__init__.py`
 - Persistence modules: `api/platform_services/config/*.py`
 - Self-update download/verify/stage: `api/webui/self_update.py`
@@ -37,7 +36,7 @@ reports; this map intentionally does not maintain line-count snapshots.
 - Canvas base/token reveal, save, and connection test flow
 - Forge public tier tags and fixed swatch colors, saved in synced settings; color choices apply to future pushes only
 - Canvas course browser plus Current/Previous and removal actions
-- download root, workspace folder open, and AI Authoring folder/rebuild actions
+- workspace folder open and private workspace/identity settings
 - checking for, downloading, and applying an in-app update (teacher-initiated
   only; no automatic check, ever)
 
@@ -46,7 +45,8 @@ Current split:
 - `settings.js` - shared status/helpers bootstrap
 - `settings/account.js` - Canvas token/base URL and connection testing
 - `settings/courses.js` - Canvas course browser and Current/Previous actions
-- `settings/workspace.js` - download root, workspace, AI Authoring file actions
+- `settings/workspace.js` - workspace folder and privacy controls
+- `settings/identity-vault.js` - shared-store conflict controls
 - `settings/updates.js` - update check/download/apply/cancel UX
 
 ## Backend Routing
@@ -57,7 +57,6 @@ Current split:
 - `/settings/courses/bookmark`
 - `/settings/courses/{course_id}/remove`
 - `/settings/courses/{course_id}/set-active`
-- `/settings/download-root`
 - `/settings/test-connection`
 
 ## First Places To Look By Symptom
@@ -65,8 +64,8 @@ Current split:
 - token/base URL problems: `settings/account.js`, `settings.js`, `routes/settings.py`, `config/canvas.py`
 - Current/Previous course problems: `settings/courses.js`, `settings.js`, `routes/settings.py`,
   `config/courses.py`
-- workspace/AI Authoring folder issues: `settings.html`, `settings/workspace.js`, `settings.js`,
-  `api/platform_services/workspace.py`, `api/webui/ai_ta.py`
+- workspace/privacy issues: `settings.html`, `settings/workspace.js`, `settings/identity-vault.js`,
+  `api/platform_services/workspace.py`
 
 ## Guardrails
 
@@ -78,7 +77,7 @@ Current split:
 - Preserve the `config.*` facade and storage keys unless a migration is explicitly
   planned and tested.
 - `config.active_courses()` is the compatibility-named Current-course boundary for
-  normal pickers, Desk discovery, and automatic work. `saved_courses()` includes both
+  normal pickers and agent discovery. `saved_courses()` includes both
   Current and Previous courses.
 - The self-update downloader only ever talks to the pinned public GitHub repo (or a
   loopback feed for local testing); never add a teacher-configurable update source.

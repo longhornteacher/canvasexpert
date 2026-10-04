@@ -139,11 +139,7 @@ student and section reads. Roster also uses its separate private `groups.v1.json
 when it is exactly `current` and under 24 hours old; it stores category/group IDs and
 names plus membership `{id,user_id}` pairs, never student names or raw Canvas fields.
 Missing, corrupt, stale, or unavailable group snapshots follow the existing live group
-loader and a successful normalized live read replaces the snapshot. Roster membership and
-group/group-set writes always validate and execute live, then invalidate the snapshot.
-Create's differentiated-group endpoint and Home roster warnings reuse that same fresh
-snapshot; either retains its existing live fallback when it is unavailable. Local group
-data remains display/derived-warning input only and never authorizes a mutation.
+loader and a successful normalized live read replaces the snapshot. Local group data remains display context only and never authorizes a mutation.
 
 Watermarks advance only on success, to pass-start minus a 10-minute overlap;
 store merges are idempotent so overlap duplicates are harmless. Failures
@@ -169,21 +165,9 @@ independently-durable coordination the manual Catalog-refresh route already
 uses, extended to the passes that previously re-fetched assignments without
 ever updating Catalog.
 
-Create's module picker reads the Course Catalog only when its modules scope is exactly
-`current`; missing or non-current catalog state falls back to the existing live Canvas
-lookup. This display-only read never authorizes module placement or another write.
-
-Create's assignment-group picker likewise reads only an exactly-current Catalog v2
-assignment-group scope (`id`, name, position, and weight are the stored allowlist) and
-otherwise uses its existing live Canvas lookup. Catalog v1 remains a read-only
-assignments/modules compatibility fallback and deliberately reports assignment groups
-unavailable. Local picker data never authorizes a group mutation: operation preparation and
-execution resolve the selected group live and retain their existing drift/preflight checks.
-
-Course Info's assignments, students, and group sets each read their local projection
-(Course Catalog, `roster.v1.json`, `groups.v1.json`) only when that scope is exactly
-current/fresh, independently falling back to its own existing live Canvas call otherwise —
-email stays a removed, live-only-if-ever-added field; modules stay live.
+Names reads the course's current private roster projection and otherwise falls back
+to a bounded live roster read. Runtime operation preparation and execution keep
+live drift/preflight checks; local projection data never authorizes a write.
 
 **Attempt history is append-only** within a living submission: students who
 resubmit accumulate `attempts` keyed by attempt number, which survive full-

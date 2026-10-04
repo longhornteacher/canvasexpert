@@ -4,7 +4,7 @@ Status: **locked 2026-09-25** by the teacher. The execution plan for these decis
 `docs/reference/forge-presentation-plan.md`.
 
 This contract covers how AssignmentForge assignments and PageForge pages look to students
-in Canvas and on paper, and the differentiation tier model behind that look. It sits beside
+in Canvas, and the differentiation tier model behind that look. It sits beside
 the authoring contracts in `api/default_docs/AI Authoring/`. Those files describe what an
 agent writes; this file describes what Canvas Expert renders from it. If the two disagree,
 this file wins, and the authoring contract is the one that gets fixed.
@@ -14,18 +14,15 @@ this file wins, and the authoring contract is the one that gets fixed.
 1. **Agents write content. Canvas Expert owns the look.** An agent authors plain,
    semantic HTML fragments and structured fields. It never chooses colors, widths, boxes,
    or inline styles. Canvas Expert renders every student-facing wrapper (banner, header
-   line, boxes, printable link, unit info) at push time from one renderer and one palette.
+   line, boxes, attachment links, unit info) at push time from one renderer and one palette.
    Every agent on every platform therefore produces the same look.
-2. **Paper uses the PDF.** Every eligible assignment gets a generated, standalone
-   "Printable" PDF, uploaded to Canvas and linked in the assignment. The Canvas page itself
-   does not need to print well.
-3. **White and quiet, with color for meaning.** White backgrounds, very light tints, and
+2. **White and quiet, with color for meaning.** White backgrounds, very light tints, and
    one accent color. The teacher chooses each tier's color, and the untiered default,
    from a fixed set of swatches in synced Settings (§2). Colors never go beyond those
    swatches.
-4. **Width follows the container.** Nothing rendered or authored has a fixed width. Only
+3. **Width follows the container.** Nothing rendered or authored has a fixed width. Only
    `width:100%` and `max-width:100%` are allowed.
-5. **Non-essential help is collapsed.** The rubric, supports, extra help, and unit info
+4. **Non-essential help is collapsed.** The rubric, supports, extra help, and unit info
    render as `<details>` boxes that start closed. The teacher has confirmed these work in
    Canvas. Canvas mobile support is not a requirement.
 
@@ -51,7 +48,7 @@ this file wins, and the authoring contract is the one that gets fixed.
     changing a color does not change its tag.
   - **Layout is not a preference:** section order, collapsed boxes, and widths are
     product-owned.
-- **The label stays private.** Student-visible text (Canvas HTML and the printable) shows
+- **The label stays private.** Student-visible Canvas HTML shows
   the public tag, never the canonical label. A Support student sees "Silver", never
   "Support".
 - **Canvas Expert knows tiers, not students.** It has no student-to-tier mapping: no roster
@@ -112,9 +109,7 @@ renders in this fixed order:
    word bank, and HTML.
 8. **Extras** (collapsed, zero or more). Authored non-essential help, each with its own
    summary line.
-9. **Printable link.** A tint-shaded line: **Printable:** `<Title> - Printable (PDF)`.
-   It is followed, when the payload has attachments, by an **Attachments** line listing
-   each attachment's label as a link (§6.1).
+9. **Attachments.** When present, a line listing each attachment's label as a link (§6).
 10. **Unit info** (collapsed). Unit, TEKS codes, subject, and grade, as a small two-column
     table.
 
@@ -134,8 +129,8 @@ A hub tier page is a Canvas Page rendered from one tier's supports only:
 2. The supports, expanded, not collapsed, under an `<h3>` reading "Supports" ("Go
    further" on the Accelerate tier): sentence frames, word bank, and HTML, in that order.
 
-Laws 1–3 and 5 (§7) apply to tier pages. A tier page has no header line, rubric,
-printable link, or unit info.
+Laws 1–4 (§7) apply to tier pages. A tier page has no header line, rubric,
+attachments line, or unit info.
 
 ### Submission wording (header line)
 
@@ -161,7 +156,7 @@ A page's default look mirrors an assignment's.
   2. Overview.
   3. Sections. A section may have `kind: "collapsed"` to render as a `<details>` box.
   4. Extras.
-  5. Attachments line, when present (§6.1).
+  5. Attachments line, when present (§6).
   6. Unit info (collapsed).
 
   A page has no header line and no rubric.
@@ -169,37 +164,7 @@ A page's default look mirrors an assignment's.
   allowed, but the width law (§7) and the palette law still hold, and the renderer still
   appends the Unit info box. `banner: false` suppresses the banner.
 
-## 6. Printable PDF
-
-- **One per assignment**, and one per tier for a tiered assignment. It is generated when
-  the push is prepared, uploaded to the course's `Canvas Expert Printables` folder, and
-  linked in section 9 of that tier's description. The filename is
-  `<Title> - Printable.pdf` or `<Title> - <Public tag> - Printable.pdf`.
-- **Standalone and designed for paper.** It opens with a Name / Date / Period line.
-  Then comes the same banner content (title and public tag), with the header line's
-  submission wording replaced by "Hand in on paper". After that: overview, directions,
-  sections, **the full rubric**, **the full supports**, and the extras, all laid out open.
-  Unit info closes it as a small footer.
-- **Answer space.** Each direction step has a `response` value:
-
-  | `response` | On paper |
-  |---|---|
-  | `none` | Instruction only. |
-  | `short` | Ruled writing lines, 4 by default, or `lines` from 1 to 12. |
-  | `long` | A boxed note: "Answer on notebook paper." |
-
-- **Tracked writing assignments** (a Word upload with revision history) get a
-  **directions-only** printable. It uses the same layout, but every step renders as
-  `none`, and the submission line reads "Write and submit in the Word document provided".
-  This keeps the handwritten copy from replacing the tracked document.
-- **`external_tool` assignments get no printable.**
-- **Printing:** US Letter, 0.75in margins, tints printed, and the tier tag shown as text
-  so a grayscale copy still identifies the tier. PDFs come from installed Microsoft Edge
-  through Playwright, and nothing is downloaded.
-- **Failure is visible, not fatal.** If Edge is unavailable or generation fails, the
-  preview says so and the assignment pushes without a printable.
-
-### 6.1 Attachments
+## 6. Attachments
 
 The teacher never manages files by hand. The agent and Canvas Expert handle them. An
 assignment or page payload may list `attachments`, and each entry has **exactly one**
@@ -246,26 +211,21 @@ Allowed types for both are `pdf`, `docx`, `pptx`, `xlsx`, `png`, `jpg`, and `jpe
     tool argument.
   - **Before upload,** the preview shows each staged file's name and size.
 - **Missing files block the push.** A missing, disallowed, or duplicate attachment
-  blocks the preview with its name. This is unlike a printable, whose failure only warns,
-  because a missing attachment means authored content is broken.
+  blocks the preview with its name because a missing attachment means authored content is broken.
 - **Upload.** Staged files upload at apply time to the course folder `Canvas Expert
   Attachments`, once per course. Every tier of a family links the same file.
-- **On paper.** The printable lists the attachment labels under a "Materials" line, as
-  text, so the paper copy still says what else the student needs.
 - **Placeholders are retired.** `{{file:…}}` is replaced by `canvas_file` and is
   permanently refused. `{{page:…}}` stays refused until page links are designed.
 
 ## 7. Laws (tested directly, once each)
 
-1. **Width.** Rendered Canvas HTML and printable HTML contain no `width`, `min-width`, or
+1. **Width.** Rendered Canvas HTML contains no `width`, `min-width`, or
    `max-width` declaration other than `100%`, and no `width` or `height` attribute. Author
    HTML carrying any of these is refused.
 2. **Palette.** Every color in rendered output is a §3 value.
 3. **Label privacy.** When a public tag differs from its canonical label, the label never
-   appears in student-visible rendered text (Canvas HTML or printable).
-4. **Standalone printable.** Every visible text node in a tier's rendered model appears in
-   that tier's printable HTML.
-5. **Author allowlist.** Author HTML outside the allowlist in §8 is refused with a specific
+   appears in student-visible rendered Canvas text.
+4. **Author allowlist.** Author HTML outside the allowlist in §8 is refused with a specific
    message. It is never silently stripped.
 
 ## 8. Author HTML allowlist
@@ -288,7 +248,6 @@ bodies.
 
 ## 9. Non-goals
 
-- Printing directly from the Canvas page.
 - Canvas mobile app fidelity.
 - Free hex colors, or visual preferences other than swatch choice (layout stays
   product-owned).

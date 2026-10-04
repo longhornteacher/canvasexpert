@@ -8,7 +8,7 @@
 
 ## Existing live path
 
-Course Expert and quizzes use the typed `content.quiz` Operation Ledger prepare/review/apply
+Agent quiz delivery uses the typed `content.quiz` Operation Ledger prepare/review/apply
 path. `qf_pusher.py` is the local plan builder consumed by the adapter; it has no Canvas
 transport or standalone push entrypoint. Differentiated delivery cannot bypass the reviewed
 family operation.
