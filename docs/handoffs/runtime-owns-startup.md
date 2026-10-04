@@ -194,4 +194,18 @@ changes for you, unless the console ever fails to open. Your agent keeps working
 
 ## Execution result
 
-(Lead fills this in.)
+Traffic light: GREEN.
+
+Commits:
+
+- W1 `883b79c` — moved console-filed services to runtime-owned modules; `6fad06f` removes the retired console copies.
+- W2 `80afaa3` — added `api/runtime.py` and `api/runtime_host.py`, moved startup/shutdown ownership, guarded optional-console hosting, bind-failure fallback, and lifecycle tests.
+- W3 `e7f745e` — documented the one-process/attach model and runtime boundary.
+
+The boundary-law AST test passes. Runtime startup is ordered and idempotent, recovery completes before the heartbeat and host serve, the optional console can fail without disabling stdio MCP, occupied port 8765 leaves stdio working without publishing `runtime.json`, and shutdown releases leases, the process lock, and owner metadata once. The self-update callback reaches the mounted console app and preserves exit code 7.
+
+Focused gate: 583 passed, 1 warning. Full gate: `py -m pytest api/tests engine/tests -p no:randomly -q` — 2,122 passed, 1 skipped, 6 warnings in 81.30 seconds. Baseline at `c6d0460`: 2,116 passed, 1 skipped, 5 warnings in 94.15 seconds. The additional six tests are the new runtime and boundary coverage. The warnings are existing invalid-escape warnings from source-text scans.
+
+Rendered gate: synthetic console-first `/`, `/welcome`, `/settings`, `/names`, and `/receipts/receipt-browser` returned 200 with required state/globals and zero browser or page errors. Live local-only checks passed for agent-first, console-first, second-agent attach, `qf_ui.py --no-browser` non-owner behavior, occupied-port fallback, forced console-import failure, recovery ordering, and lock/metadata cleanup.
+
+Deviations: none. The three carried-forward teacher decisions remain open in `docs/reference/project-state.md` (time zone, free-text names, and test house style/pytest-randomly).
