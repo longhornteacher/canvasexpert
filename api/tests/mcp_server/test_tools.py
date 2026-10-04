@@ -599,6 +599,7 @@ _GUIDE_TOPIC_SUMMARIES = {
     "full": "Complete CanvasAgent guide, Appendices A through F.",
     "writing_timeline": "Tracked-assignment timeline behavior and coverage.",
     "tools": "All MCP tools grouped by teacher-facing job.",
+    "canvasmirror": "Durable evidence store and its safe direct-read locations.",
 }
 
 
@@ -628,7 +629,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     expected_groups = {
         "Course discovery and catalog", "Shared work items", "Create and Forge",
         "Push verification and recovery", "Scoring Sessions", "Gradebook",
-        "SIS Grade Bridges", "Writing Timeline", "Students",
+        "SIS Grade Bridges", "Writing Timeline", "Assignment evidence", "Students",
     }
 
     assert result["ok"] is True
@@ -636,7 +637,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 37
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 38
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -1642,7 +1643,7 @@ def test_server_registers_the_expected_tool_set():
     from api.mcp_server.server import mcp
     tool_names = set(mcp._tool_manager._tools)
     assert tool_names == {name for group in tools._TOOL_GROUPS.values() for name in group}
-    assert len(tool_names) == 37
+    assert len(tool_names) == 38
 
 
 def test_server_wrappers_return_compact_json(monkeypatch):
@@ -1711,5 +1712,81 @@ def test_get_scoring_packet_ignores_unsupported_historical_session(_on_disk_scor
 
     assert result["ok"] is False
     assert result["code"] == "session_not_found"
+
+
+# --- get_assignment_evidence ------------------------------------------------
+
+def test_get_assignment_evidence_rejects_unknown_view(_set_active_courses):
+    _set_active_courses(["111"])
+    result = tools.get_assignment_evidence("111", "700010", view="made_up")
+    assert result["ok"] is False
+    assert "unknown view" in result["error"]
+
+
+def test_get_assignment_evidence_rejects_bad_paging(_set_active_courses):
+    _set_active_courses(["111"])
+    assert tools.get_assignment_evidence("111", "700010", limit=0)["ok"] is False
+    assert tools.get_assignment_evidence("111", "700010", offset=-1)["ok"] is False
+
+
+def test_get_assignment_evidence_rejects_non_current_course(_set_previous_course):
+    _set_previous_course("111")
+    result = tools.get_assignment_evidence("111", "700010")
+    assert result["ok"] is False
+    assert "not a Current course" in result["error"]
+
+
+def test_get_assignment_evidence_refuses_missing_store(_mount_mirror, _set_active_courses):
+    _mount_mirror()
+    _set_active_courses(["111"])
+    result = tools.get_assignment_evidence("111", "700010")
+    assert result["ok"] is False
+
+
+def test_get_assignment_evidence_reads_published_notes(
+    monkeypatch, tmp_path, _mount_mirror, _set_active_courses,
+):
+    from api.mirror.evidence_notes import build_revision, publish_note
+    from api.mirror.evidence_paths import local_source_root, source_key_for_origin
+    from api.mirror.evidence_publish import EvidencePublisher
+    from api.mirror.evidence_index import EvidenceIndex
+    from api.feedback_vault import Vault
+
+    _mount_mirror()
+    _set_active_courses(["111"])
+    monkeypatch.setattr(tools.config, "get_canvas_base", lambda: "https://canvas.example.edu")
+    root = str(tmp_path)
+    source_key = source_key_for_origin("https://canvas.example.edu")
+    vault = Vault(str(tmp_path / "vault.json"))
+    with vault.transaction():
+        vault.get_or_assign("991001", real_name="Learner One")
+    publisher = EvidencePublisher(workspace_root=root, source_key=source_key,
+                                  course_id="111", vault=vault)
+    revision = build_revision(note_id="n1", category="summary",
+                              text="A concise summary.", revision=1)
+    publish_note(publisher=publisher, assignment_id="700010", revision=revision,
+                 writer_key="writer-a", run_id="run-a")
+    index_path = local_source_root(source_key, root) / "query.sqlite3"
+    EvidenceIndex(index_path).ingest(publisher.store.scan(), selected_courses=["111"])
+
+    result = tools.get_assignment_evidence("111", "700010", view="notes")
+    assert result["ok"] is True
+    assert result["view"] == "notes"
+    assert any(record["payload"]["text"] == "A concise summary."
+               for record in result["records"])
+
+
+def test_canvasmirror_guide_names_safe_locations_only(monkeypatch, tmp_path):
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
+    monkeypatch.setattr(tools.config, "get_canvas_base", lambda: "https://canvas.example.edu")
+    result = tools.get_product_guide("canvasmirror")
+    assert result["ok"] is True
+    guide = result["guide"]
+    assert "CanvasMirror" in guide
+    assert "query.sqlite3" in guide
+    assert "reader.v1.json" in guide
+    # Never expose vault, original, or control paths.
+    for forbidden in ("vault", "CanvasMirror Originals", "CanvasMirror Control"):
+        assert forbidden not in guide
 
 

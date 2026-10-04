@@ -19,7 +19,7 @@ def test_live_mcp_surface_shape():
     from api.mcp_server import server
 
     live = contract.live_contract(server.mcp)
-    assert len(live["tools"]) == 37
+    assert len(live["tools"]) == 38
     assert "confirm_sis_grade_bridge_passback" not in {
         tool["name"] for tool in live["tools"]
     }

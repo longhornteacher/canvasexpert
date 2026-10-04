@@ -1117,6 +1117,7 @@ _TOOL_GROUPS = {
     "Gradebook": ("get_gradebook_snapshot", "preview_grade_adjustment", "preview_attempts_grant"),
     "SIS Grade Bridges": ("reconcile_sis_grade_bridges", "preview_sis_grade_bridge"),
     "Writing Timeline": ("get_submissions",),
+    "Assignment evidence": ("get_assignment_evidence",),
     "Students": ("get_roster", "preview_roster_student_change", "apply_roster_student_change"),
 }
 
@@ -1151,6 +1152,58 @@ def _build_tool_inventory() -> str:
     return "\n".join(lines)
 
 
+def _build_canvasmirror_guide() -> str:
+    """Describe the durable evidence store and its safe direct-read locations.
+
+    This is the one narrow exception that names the safe mirror root and query
+    index for direct agent access; it never exposes vault, original, or control
+    paths, and it does not browse the workspace.
+    """
+    from api.mirror.evidence_paths import local_source_root, source_key_for_origin
+    from api.mirror.evidence_queries import SQL_EXAMPLE, reader_contract
+    root = workspace.workspace_root()
+    lines = [
+        "CanvasMirror durable evidence store",
+        "",
+        "CanvasMirror is the teacher's durable, cloud-synchronized evidence store for",
+        "agent-led scoring. It holds pseudonymized, scrubbed facts and commits; the",
+        "private originals, identity mappings, and control state live elsewhere and are",
+        "never part of this read surface.",
+        "",
+        "## Safe read locations",
+        "",
+        "- Safe evidence root: `<workspace>/CanvasMirror/` (synchronized, agent-readable).",
+        "- Reader contract: `<workspace>/CanvasMirror/reader.v1.json`.",
+        "- Safe query index: `<LOCALAPPDATA>/CanvasExpert/cache/CanvasMirror/<workspace_key>/<source_key>/query.sqlite3`.",
+        "",
+        "Open the index read-only with SQLite URI `mode=ro` and `PRAGMA query_only=ON`;",
+        "do not use `immutable=1` for a database the runtime can update. Direct reads",
+        "need no identity store, no Canvas, and no FastAPI.",
+        "",
+        "## Named views",
+        "",
+        ", ".join(sorted(reader_contract()["views"])),
+        "",
+        "## Example",
+        "",
+        "```sql",
+        SQL_EXAMPLE,
+        "```",
+        "",
+        "The equivalent MCP read is `get_assignment_evidence(course_id, assignment_id,",
+        "view)` with view `attachments`, `comparisons`, or `notes`.",
+    ]
+    if root is not None:
+        try:
+            source_key = source_key_for_origin(config.get_canvas_base())
+            index_path = local_source_root(source_key, root) / "query.sqlite3"
+            lines.extend(("", "## This machine", "",
+                          f"- Query index present: {'yes' if index_path.exists() else 'no'}."))
+        except Exception:
+            pass
+    return "\n".join(lines)
+
+
 # Each topic declares exactly one source: a canonical file or a generated
 # result. Summaries form the compact annotated table of contents returned with
 # every guide response; declaration order is the public topic order.
@@ -1173,6 +1226,8 @@ _GUIDE_FILES = {
                          "summary": "Tracked-assignment timeline behavior and coverage."},
     "tools": {"generated": _build_tool_inventory,
               "summary": "All MCP tools grouped by teacher-facing job."},
+    "canvasmirror": {"generated": _build_canvasmirror_guide,
+                     "summary": "Durable evidence store and its safe direct-read locations."},
 }
 _DEFAULT_GUIDE_TOPIC = "overview"
 _CANVAS_AGENT_APPENDIXES = {
@@ -1583,6 +1638,50 @@ def get_roster(course_id: str, pseudonym: str | None = None, include: list[str] 
         if attention:
             result["attention"] = attention
     return result
+
+
+def get_assignment_evidence(course_id: str, assignment_id: str, view: str = "attachments",
+                            offset: int = 0, limit: int = 50) -> dict:
+    """Read one assignment's durable evidence from the local CanvasMirror store.
+
+    ``view`` is one of ``attachments`` (captured originals and their extracted
+    blocks), ``comparisons`` (assignment-scoped comparison evidence), or
+    ``notes`` (contained agent notes). Served ONLY from the local pseudonymized
+    evidence store — never live Canvas, never the vault, never the private
+    originals. A missing store is refused; a stale one serves with its freshness
+    labeled. Gated by the outbound safety scan."""
+    if view not in ("attachments", "comparisons", "notes"):
+        return {"ok": False, "error": f"unknown view '{view}'; expected attachments, comparisons, or notes."}
+    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
+        return {"ok": False, "error": "offset must be >= 0 and limit between 1 and 100."}
+    identity_error = _saved_course_gate_check(course_id)
+    if identity_error:
+        return {"ok": False, "error": identity_error}
+    err = _course_gate_check(course_id)
+    if err:
+        return {"ok": False, "error": err}
+    try:
+        from api.mirror.evidence_paths import local_source_root, source_key_for_origin
+        from api.mirror.evidence_queries import EvidenceQueryService
+        root = workspace.workspace_root()
+        if root is None:
+            return {"ok": False, "error": "The workspace is not configured."}
+        source_key = source_key_for_origin(config.get_canvas_base())
+        index_path = local_source_root(source_key, root) / "query.sqlite3"
+        if not index_path.exists():
+            return {"ok": False, "error": _MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR}
+        service = EvidenceQueryService(index_path)
+        result = service.read_assignment_evidence(
+            view, source_key=source_key, course_id=str(course_id),
+            assignment_id=str(assignment_id), limit=limit, offset=offset)
+    except Exception:
+        return {"ok": False, "error": _MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR}
+    payload = {"ok": True, "view": view, "assignment_id": str(assignment_id),
+               "revision": result["revision"], "records": result["records"],
+               "next_offset": result["next_offset"], "freshness": result["freshness"],
+               "membership": result["membership"], "evidence": result["evidence"],
+               "synchronization": result["synchronization"]}
+    return final_response_gate(payload)
 
 
 def get_submissions(course_id: str, assignment_id: str,

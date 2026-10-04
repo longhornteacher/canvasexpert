@@ -358,6 +358,12 @@ def get_submissions(course_id: str, assignment_id: str, include_text: bool=True,
     return _compact(tools.get_submissions(course_id=course_id, assignment_id=assignment_id, include_text=include_text, pseudonyms=pseudonyms, max_text_chars=max_text_chars, history=history, offset=offset, limit=limit))
 
 
+@mcp.tool(structured_output=False)
+def get_assignment_evidence(course_id: str, assignment_id: str, view: str='attachments', offset: int=0, limit: int=50) -> str:
+    'Read one assignment\'s durable attachments, comparisons, or notes from the local evidence store.'
+    return _compact(tools.get_assignment_evidence(course_id=course_id, assignment_id=assignment_id, view=view, offset=offset, limit=limit))
+
+
 
 
 

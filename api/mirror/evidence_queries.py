@@ -64,6 +64,38 @@ class EvidenceQueryService:
     def __init__(self, index_path: Path):
         self.index = EvidenceIndex(index_path)
 
+    # Assignment-evidence views map a public view name to its index view.
+    ASSIGNMENT_VIEWS = {
+        "attachments": ("attachment_associations", "attachment_extractions"),
+        "comparisons": ("comparison_evidence",),
+        "notes": ("agent_notes",),
+    }
+
+    def read_assignment_evidence(self, view: str, *, source_key: str, course_id: str,
+                                 assignment_id: str, limit: int = 50,
+                                 offset: int = 0, revision: str | None = None) -> dict:
+        """Read one assignment-evidence view; validate the view, never ignore it."""
+        if view not in self.ASSIGNMENT_VIEWS:
+            raise IndexReadError("unknown_view")
+        index_views = self.ASSIGNMENT_VIEWS[view]
+        pages = []
+        for index_view in index_views:
+            pages.append(self.read(index_view, source_key=source_key, course_id=course_id,
+                                   assignment_id=assignment_id, limit=limit, offset=offset,
+                                   revision=revision))
+        records = [record for page in pages for record in page["records"]]
+        return {
+            "view": view, "revision": pages[0]["revision"] if pages else None,
+            "records": records,
+            "next_offset": next((page["next_offset"] for page in pages
+                                 if page["next_offset"] is not None), None),
+            "freshness": pages[0]["freshness"] if pages else {},
+            "membership": pages[0]["membership"] if pages else {},
+            "evidence": pages[0]["evidence"] if pages else {},
+            "synchronization": pages[0]["synchronization"] if pages else {},
+            "acquisition": pages[0]["acquisition"] if pages else {},
+        }
+
     def read(self, view: str, *, source_key: str, course_id: str,
              assignment_id: str | None = None, limit: int = 50,
              offset: int = 0, revision: str | None = None) -> dict:
@@ -78,6 +110,12 @@ class EvidenceQueryService:
                     row["payload"] = json.loads(row["payload"])
             if view in {"current_submissions", "attempt_history"} and assignment_id:
                 scope = ("assignment.submissions", assignment_id)
+            elif view == "attachment_associations" and assignment_id:
+                scope = ("assignment.attachments", assignment_id)
+            elif view == "attachment_extractions" and assignment_id:
+                scope = ("assignment.extractions", assignment_id)
+            elif view == "agent_notes" and assignment_id:
+                scope = ("assignment.notes", assignment_id)
             elif view == "courses":
                 scope = ("course.context", course_id)
             else:

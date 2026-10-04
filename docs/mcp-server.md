@@ -58,7 +58,7 @@ authoring guidance, call `get_product_guide` with the relevant topic:
 
 ## Tools
 
-Tool schema version 80 (37 tools).
+Tool schema version 81 (38 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -71,6 +71,7 @@ Tool schema version 80 (37 tools).
 | `preview_roster_student_change` | Preview a validated pseudonym-first roster settings change without writing. | Yes, pseudonymized where applicable |
 | `apply_roster_student_change` | Apply an unchanged preview of a local roster settings change. | Yes, pseudonymized where applicable |
 | `get_submissions` | Read pseudonymized submissions or paginated retained history from local stores. | Yes, pseudonymized where applicable |
+| `get_assignment_evidence` | Read one assignment's durable attachments, comparisons, or notes from the local evidence store. | Yes, pseudonymized where applicable |
 | `get_score_ledger` | Read bounded pseudonymized score evidence from the private local archive. | Yes, pseudonymized where applicable |
 | `get_gradebook_snapshot` | Read Current-course assignment grading counts and pseudonymized students. | Yes, pseudonymized where applicable |
 | `get_product_guide` | Read CanvasExpert's product guide; omit topic for the overview. | No |

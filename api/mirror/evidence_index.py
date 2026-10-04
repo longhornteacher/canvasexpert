@@ -28,7 +28,7 @@ VIEW_COLUMNS = {
     "attachment_blocks": ("source_key", "course_id", "assignment_id", "fact_ref", "payload"),
     "scope_status": ("source_key", "course_id", "scope", "scope_id", "status", "membership_complete", "heads", "pending_commits", "ambiguous_entities", "last_success_at"),
     "comparison_evidence": ("source_key", "course_id", "assignment_id", "fact_ref", "payload"),
-    "agent_notes": ("source_key", "course_id", "assignment_id", "fact_ref", "payload"),
+    "agent_notes": ("source_key", "course_id", "assignment_id", "note_id", "revision", "fact_ref", "payload"),
 }
 
 
@@ -130,8 +130,9 @@ class EvidenceIndex:
         """)
         for kind in ("group", "module", "page", "assignment_group"):
             db.execute(f"CREATE VIEW IF NOT EXISTS {kind}_context AS SELECT DISTINCT f.source_key,f.course_id,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='{kind}'")
-        for name in ("attachment_blocks", "comparison_evidence", "agent_notes"):
+        for name in ("attachment_blocks", "comparison_evidence"):
             db.execute(f"CREATE VIEW IF NOT EXISTS {name} AS SELECT source_key,course_id,assignment_id,fact_ref,payload FROM safe_facts WHERE 0")
+        db.execute("CREATE VIEW IF NOT EXISTS agent_notes AS SELECT DISTINCT f.source_key,f.course_id,f.assignment_id,json_extract(f.payload,'$.note_id') note_id,json_extract(f.payload,'$.revision') revision,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='note'")
         db.execute("INSERT OR IGNORE INTO index_metadata VALUES ('schema_version',?)", (str(INDEX_SCHEMA_VERSION),))
         db.commit()
 

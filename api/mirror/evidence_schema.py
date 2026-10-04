@@ -26,6 +26,7 @@ PAYLOAD_FIELDS = {
     "override": frozenset({"assignment_id", "override_id", "student_pseudonyms", "section_id", "group_id", "due_at", "unlock_at", "lock_at"}),
     "attachment": frozenset({"assignment_id", "pseudonym", "attempt", "attachment_key", "original_digest", "media_type", "size", "status", "revision"}),
     "attachment_extraction": frozenset({"assignment_id", "pseudonym", "attempt", "attachment_key", "original_digest", "extractor_version", "extraction_schema_version", "privacy_policy_revision", "availability", "method", "blocks", "partial_reasons", "processed_units", "total_units"}),
+    "note": frozenset({"assignment_id", "note_id", "category", "status", "text", "revision", "parent_revision", "superseded_ref", "evidence_revisions", "stale"}),
 }
 FACT_KINDS = frozenset(PAYLOAD_FIELDS)
 # Attachment capture status is a bounded, value-free lifecycle label. ``pending``
@@ -48,6 +49,8 @@ EXTRACTION_PARTIAL_REASONS = frozenset({
     "visual_content_unprocessed", "recognition_gap", "page_failed",
     "uncached_formula", "external_relation_skipped",
 })
+NOTE_CATEGORIES = frozenset({"summary", "comparison", "feedback_draft", "teacher_directive"})
+NOTE_STATUSES = frozenset({"provisional", "teacher_confirmed"})
 SCOPE_KINDS = {
     "course.context": frozenset({"course"}),
     "course.roster": frozenset({"student"}),
@@ -61,6 +64,7 @@ SCOPE_KINDS = {
     "assignment.overrides": frozenset({"override"}),
     "assignment.attachments": frozenset({"attachment"}),
     "assignment.extractions": frozenset({"attachment_extraction"}),
+    "assignment.notes": frozenset({"note"}),
 }
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -191,6 +195,7 @@ def validate_fact(record: dict) -> dict:
         "override": {"assignment_id", "override_id"},
         "attachment": {"assignment_id", "pseudonym", "attachment_key", "status"},
         "attachment_extraction": {"assignment_id", "pseudonym", "attachment_key", "original_digest", "availability", "method", "blocks"},
+        "note": {"assignment_id", "note_id", "category", "status", "text", "revision"},
         "group": {"group_id", "title", "student_pseudonyms"},
         "module": {"module_id", "title", "position", "items"},
         "page": {"page_id", "title"},
@@ -224,7 +229,10 @@ def validate_fact(record: dict) -> dict:
             if value is not None:
                 validate_digest(value)
         elif key == "status":
-            if value not in ATTACHMENT_STATUSES:
+            if kind == "note":
+                if value not in NOTE_STATUSES:
+                    _fail("invalid_note_status")
+            elif value not in ATTACHMENT_STATUSES:
                 _fail("invalid_attachment_status")
         elif key == "size":
             if type(value) is not int or value < 0:
@@ -343,6 +351,26 @@ def validate_fact(record: dict) -> dict:
         elif key in {"processed_units", "total_units"}:
             if type(value) is not int or value < 0:
                 _fail("invalid_counts")
+        elif key == "note_id":
+            if not isinstance(value, str) or not value or len(value) > 64:
+                _fail("invalid_note_id")
+        elif key == "category":
+            if value not in NOTE_CATEGORIES:
+                _fail("invalid_note_category")
+        elif key == "status":
+            if value not in NOTE_STATUSES:
+                _fail("invalid_note_status")
+        elif key == "parent_revision":
+            if value is not None and (type(value) is not int or value < 1):
+                _fail("invalid_note_revision")
+        elif key == "superseded_ref":
+            if value is not None and (not isinstance(value, str) or len(value) > 128):
+                _fail("invalid_note_ref")
+        elif key == "evidence_revisions":
+            _strings(value, validator=lambda entry: None if isinstance(entry, str) and len(entry) <= 128 else _fail("invalid_note_ref"))
+        elif key == "stale":
+            if type(value) is not bool:
+                _fail("invalid_stale")
         elif value is not None and not isinstance(value, str):
             _fail()
     return deepcopy(record)
