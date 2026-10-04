@@ -104,40 +104,9 @@ def _receipt_jobs() -> list[dict]:
     return output
 
 
-def _routine_jobs() -> list[dict]:
-    try:
-        from api import routine_runtime
-        definitions = routine_runtime.ROUTINE_DEFS
-    except Exception:
-        return []
-    output = []
-    for routine_id in sorted(definitions):
-        try:
-            state = routine_runtime.routine_state(routine_id)
-            due = routine_runtime.routine_due(state)
-        except Exception:
-            continue
-        if not state.get("enabled") or not due:
-            continue
-        safe_routine_id = _safe_token(routine_id)
-        if not safe_routine_id:
-            continue
-        output.append(_project(
-            kind="routine_state", origin="system", source_type="routine_state",
-            source_value=safe_routine_id, course_ids=[], assignment_id="",
-            resume_url="/routines", status="attention",
-            counts={"total": 0, "pending": 0, "affected": 0},
-            attention_reason="Enabled routine is due",
-        ))
-    return output
-
-
 def collect_local_jobs() -> list[dict]:
     """Collect only local summary projections; never perform a Canvas read."""
-    jobs = []
-    for provider in (_receipt_jobs, _routine_jobs):
-        jobs.extend(provider())
-    return jobs
+    return _receipt_jobs()
 
 
 def collect_start_sources() -> list[dict]:

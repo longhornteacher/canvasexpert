@@ -34,7 +34,7 @@ from api.platform_services.canvas_client import canvas_headers, canvas_get, canv
 from .deps import (
     WEBUI_DIR, API_DIR, REPO_ROOT,
     templates,
-    _CUSTOM_DIR, list_quiz_files, list_assignment_files, list_page_files,
+    list_quiz_files, list_assignment_files, list_page_files,
     list_ai_ta_files,
 )
 
@@ -47,7 +47,6 @@ from .routes.onboarding import router as _onboarding_router
 from .routes.pages import router as _pages_router
 from .routes.push import router as _push_router
 from .routes.reports import router as _reports_router
-from .routes.routines import router as _routines_router, _load_custom_routines, _routines_heartbeat
 from .routes.roster import router as _roster_router
 from .routes.settings import router as _settings_router
 from .routes.readiness import router as _readiness_router
@@ -95,13 +94,11 @@ async def _lifespan(app):
         print(f"AI Authoring library build failed: {e}")
     try:
         # Reconcile any operation-ledger targets left claimed/sent_unknown by a
-        # crash mid-write, before the routines heartbeat can claim the same
-        # targets for new work. Usually a no-op (empty scan).
+        # crash mid-write, before new work can claim the same targets. Usually
+        # a no-op (empty scan).
         _operation_ledger_recovery.recover_pending_operations()
     except Exception as e:
         print(f"Operation-ledger recovery note: {e}")
-    _load_custom_routines()
-    threading.Thread(target=_routines_heartbeat, daemon=True).start()
     threading.Thread(target=_mirror_heartbeat, daemon=True).start()
     # FastMCP's mounted Streamable HTTP endpoint is hosted by this same
     # process. The stdio entry point proxies here when another CE process
@@ -178,7 +175,6 @@ app.include_router(_library_router)
 app.include_router(_pages_router)
 app.include_router(_push_router)
 app.include_router(_reports_router)
-app.include_router(_routines_router)
 app.include_router(_roster_router)
 app.include_router(_settings_router)
 app.include_router(_readiness_router)

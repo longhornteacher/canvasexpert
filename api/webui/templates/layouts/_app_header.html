@@ -7,7 +7,6 @@
       <summary class="{% if nav_section in ['manage', 'automate'] %}ce-app-nav--active{% endif %}">More <span class="ce-nav-more__caret">▾</span></summary>
       <div class="ce-nav-more__pop">
         <a href="/roster"{% if nav_section == 'manage' %} aria-current="page"{% endif %}>Students</a>
-        <a href="/routines"{% if nav_section == 'automate' %} aria-current="page"{% endif %}>Routines</a>
       </div>
     </details>
     <a class="{% if nav_section == 'settings' %}ce-app-nav--active{% endif %}" href="/settings"{% if nav_section == 'settings' %} aria-current="page"{% endif %}>Settings</a>

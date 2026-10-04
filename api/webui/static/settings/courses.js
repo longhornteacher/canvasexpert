@@ -80,7 +80,7 @@
       if (current && !confirm(
         "Move this course to Previous?\n\n" +
         "Local sessions, receipts, downloads, and settings will be retained. " +
-        "Desk scans and scheduled routines will pause for this course until you make it Current again."
+        "Desk scans will pause for this course until you make it Current again."
       )) return;
       btn.disabled = true;
       var r = await fetch("/settings/courses/" + encodeURIComponent(id) + "/set-active", {

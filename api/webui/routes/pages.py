@@ -3,7 +3,7 @@
 One APIRouter for retained page routes and the /api/open-path utility POST.
 Imported by server.py via app.include_router(router).
 
-Routes: GET /ai-expert, /course, /course-expert, /roster, /routines, /settings
+Routes: GET /ai-expert, /course, /course-expert, /roster, /settings
         POST /api/open-path
 """
 import glob
@@ -21,7 +21,7 @@ from .. import deps
 from api import operational_log, runtime_paths
 from ..local_request_guard import csrf_token
 from ..deps import (
-    API_DIR, REPO_ROOT, _CUSTOM_DIR, templates,
+    API_DIR, REPO_ROOT, templates,
     list_ai_ta_files, list_assignment_files,
     list_page_files, list_quiz_files,
 )
@@ -32,26 +32,6 @@ router = APIRouter(tags=["pages"])
 # --------------------------------------------------------------------------
 # Page routes
 # --------------------------------------------------------------------------
-
-def _routines_template_context() -> dict:
-    """Template values shared by the standalone route."""
-    def _entry(name):
-        return {"name": name, "path": os.path.normpath(os.path.join(_CUSTOM_DIR, name))}
-
-    custom_active, custom_templates = [], []
-    if os.path.isdir(_CUSTOM_DIR):
-        for path in sorted(glob.glob(os.path.join(_CUSTOM_DIR, "*.py"))):
-            name = os.path.basename(path)
-            (custom_templates if name.startswith("_") else custom_active).append(_entry(name))
-
-    return {
-        "custom_dir":       os.path.normpath(_CUSTOM_DIR),
-        "authoring_path":   os.path.normpath(os.path.join(_CUSTOM_DIR, "AUTHORING.md")),
-        "custom_active":    custom_active,
-        "custom_templates": custom_templates,
-        "active_count":     len(config.active_courses()),
-    }
-
 
 @router.get("/course-expert", response_class=HTMLResponse)
 def course_expert_page(request: Request):
@@ -130,19 +110,6 @@ def course_page(request: Request, course_id: str = ""):
         "saved_courses":  config.active_courses(),
         "selected_id":    course_id,
         "history":        recent_pushes(),
-    })
-
-
-@router.get("/routines", response_class=HTMLResponse)
-def routines_page(request: Request):
-    """Routines — local automations (built-in + custom) and how to add your own.
-
-    Scans the custom_routines folder so the page can show the real path and the
-    files it found (active vs. _-prefixed templates)."""
-    return templates.TemplateResponse(request, "routines.html", {
-        "nav_section":      "automate",
-        "token_is_set":     config.token_is_set(),
-        **_routines_template_context(),
     })
 
 
@@ -252,7 +219,7 @@ def _open_in_os(path):
 
 def _allowed_open_roots():
     """Real paths the open-path endpoint may reveal — app-known roots only."""
-    candidates = [_CUSTOM_DIR, config.get_download_root(),
+    candidates = [config.get_download_root(),
                   config.get_student_reports_root(), workspace.workspace_root(),
                   os.path.join(REPO_ROOT, "Finished_Exports")]
     roots = []

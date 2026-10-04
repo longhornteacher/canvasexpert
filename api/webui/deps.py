@@ -70,12 +70,6 @@ templates.env.globals["app_version"] = __version__
 
 
 # --------------------------------------------------------------------------
-# Path constant — custom routines directory (used by pages and routines API)
-# --------------------------------------------------------------------------
-_CUSTOM_DIR = os.path.join(WEBUI_DIR, "..", "custom_routines")
-
-
-# --------------------------------------------------------------------------
 # File-listing helpers (pure; resolve workspace folders at call time)
 # --------------------------------------------------------------------------
 

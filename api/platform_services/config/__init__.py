@@ -57,11 +57,6 @@ from .protected_names import (
     active_protected_names,
 )
 
-# --- routines state ---
-from .routines import (
-    get_routine_states, set_routine_state,
-)
-
 # --- student reports ---
 from .reports import (
     STUDENT_REPORTS_DEFAULT,

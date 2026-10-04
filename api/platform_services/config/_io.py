@@ -25,13 +25,9 @@ CONFIG_PATH = str(runtime_paths.local_app_dir() / "config.json")
 SYNCED_KEYS = ("saved_courses", "extra_time",
                "tier_tags", "tier_colors",
                "roster_student_settings",
-               # Retired tier/group schemes remain registered as inert stored state.
-               "roster_tier_schemes", "roster_group_schemes",
                "roster_score_matrices", "roster_relationships",
                "monitored_students", "roster_baselines",
                "sis_grade_bridges",
-               # Retired feedback personas remain registered as inert stored state.
-               "ai_ta_persona", "custom_personas",
                "protected_packs_enabled", "protected_names_custom")
 
 
@@ -91,13 +87,6 @@ def _modify_machine(mutator) -> dict:
             raise TypeError("machine mutator must return a dict or None")
         atomic_write_json(Path(CONFIG_PATH), updated)
         return deepcopy(updated)
-
-
-def _modify_workspace(mutator) -> dict | None:
-    """Compatibility wrapper that now records changes as journal events."""
-    if not _retired_settings_path():
-        return None
-    return _modify_synced(mutator)
 
 
 def _modify_synced(mutator) -> dict:
