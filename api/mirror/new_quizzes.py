@@ -656,23 +656,6 @@ def read_fresh_snapshot(course_id, assignment_id, *, root=None, max_age_hours=6.
     }, None
 
 
-def invalidate_responses(course_id, assignment_id, *, root=None, attempted_at=None):
-    """Mark an assignment's New Quiz response snapshot stale after a verified
-    write-back, so the next read falls back through the existing live native
-    fetch chain instead of serving pre-write item scores.
-
-    Mirrors ``store.invalidate_groups``: a missing or never-fetched snapshot is
-    a no-op (nothing to falsely age), and this never writes a ``current``
-    state. It adds no transport — only flips the local freshness flag.
-    """
-    envelope = _response_envelope(course_id, assignment_id, root=root)
-    if not envelope or not envelope.get("last_success_at"):
-        return None
-    return _record_sync(course_id, kind="responses", assignment_id=str(assignment_id),
-                        state="stale", error_code="invalidated", attempted_at=attempted_at,
-                        root=root)
-
-
 def write_fetch_snapshot(course_id, assignment_id, *, assignment, items,
                          normalized_attempts, latest=None, root=None,
                          attempted_at=None):

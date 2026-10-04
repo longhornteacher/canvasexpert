@@ -23,17 +23,6 @@ def _serve_max_age_hours() -> float:
         return 6.0
 
 
-def data_freshness(course_id, *, root=None, max_age_hours=None, now=None) -> str:
-    """``synced_at`` of the newest successful data pass (full or delta) when
-    within the serve threshold, else ''. ISO-Z strings compare lexically."""
-    result = read_service.private_submissions(
-        course_id, root=root,
-        max_age_hours=max_age_hours if max_age_hours is not None else _serve_max_age_hours(),
-        now=now,
-    )
-    return result["last_success_at"] if result["state"] == "current" else ""
-
-
 # --- the gradebook_queries interface, mirror-backed ---------------------------
 
 def course_students(course_id, *, root=None):

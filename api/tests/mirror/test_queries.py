@@ -85,13 +85,6 @@ def test_queries_report_unavailable_for_unknown_course(tmp_path):
     assert data is None and err == queries.MIRROR_UNAVAILABLE
 
 
-def test_freshness_gates_on_serve_max_age(tmp_path):
-    _populate(str(tmp_path), fresh=False)
-    assert queries.data_freshness(COURSE, root=str(tmp_path)) == ""
-    _populate(str(tmp_path), fresh=True)
-    assert queries.data_freshness(COURSE, root=str(tmp_path)) != ""
-
-
 def test_course_students_does_not_serve_a_stale_roster(tmp_path):
     """course_students must gate on the serve-freshness threshold this
     module's own docstring promises (design law #4): a readable but old

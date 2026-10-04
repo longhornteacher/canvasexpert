@@ -26,7 +26,6 @@ from .adapter_support import (
     prepend_step as _step,
     replace_step as _replace_local_step,
 )
-from .module_placement import attach_assignment_type_module_item
 from api.platform_services import canvas_client, config
 from api import qf_pusher
 
@@ -622,23 +621,6 @@ class QuizAdapter:
 
 
 # ── Module-level helpers ─────────────────────────────────────────────────
-
-
-def _attach_quiz_to_module(
-    course_id: str, quiz_id: str, title: str,
-    module_name: str, steps: list[dict], context,
-) -> dict:
-    return attach_assignment_type_module_item(
-        course_id=course_id,
-        content_id=quiz_id,
-        title=title,
-        module_name=module_name,
-        steps=steps,
-        context=context,
-        attach_step_key="attach_module:0",
-        returned_object_id=quiz_id,
-        deterministic_failure_state="failed",
-    )
 
 
 # ── Step ordering helpers ────────────────────────────────────────────────

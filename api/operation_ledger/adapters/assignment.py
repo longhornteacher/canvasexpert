@@ -755,26 +755,6 @@ def _prepare_tier_printable(*, tier, tier_index, payload, course_id, steps, cont
     ), None
 
 
-def _attach_to_module(
-    course_id: str, assignment_id: str, name: str,
-    module_name: str = "", steps: list[dict] = None, context=None,
-    module_id: str | None = None, create_module: bool = False,
-    *, attach_step_key: str = "attach_module",
-) -> dict:
-    return attach_assignment_type_module_item(
-        course_id=course_id,
-        content_id=assignment_id,
-        title=name,
-        module_name=module_name, module_id=module_id,
-        create_module=create_module,
-        steps=steps,
-        context=context,
-        attach_step_key=attach_step_key,
-        returned_object_id=assignment_id,
-        deterministic_failure_state="failed",
-    )
-
-
 def _ordered_steps(target: dict) -> list[dict]:
     existing = {
         step.get("step_key"): step

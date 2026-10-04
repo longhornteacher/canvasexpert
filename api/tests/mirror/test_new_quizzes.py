@@ -82,35 +82,6 @@ def test_snapshot_retains_attempts_identity_and_relative_evidence(tmp_path, monk
     assert snapshot["students"][0]["new_quiz_attempt"] == 2
 
 
-def test_invalidate_responses_marks_snapshot_stale_for_live_refetch(tmp_path):
-    latest = _attempt(1, "answer", result_id="result-1")
-    new_quizzes.write_response_snapshot(
-        COURSE, ASSIGNMENT, assignment=_assignment(), items=_items(),
-        normalized_attempts=[latest], latest=[latest], root=str(tmp_path),
-        attempted_at=NOW,
-    )
-    snapshot, error = new_quizzes.read_fresh_snapshot(
-        COURSE, ASSIGNMENT, root=str(tmp_path), max_age_hours=6, now=NOW)
-    assert error is None and snapshot is not None
-
-    result = new_quizzes.invalidate_responses(
-        COURSE, ASSIGNMENT, root=str(tmp_path), attempted_at="2026-07-16T12:05:00Z")
-    assert result is not None
-    # Stale now -> the next read falls back through the existing live native
-    # chain rather than serving pre-write item scores.
-    snapshot, error = new_quizzes.read_fresh_snapshot(
-        COURSE, ASSIGNMENT, root=str(tmp_path), max_age_hours=6, now=NOW)
-    assert snapshot is None and error == "stale"
-    assert new_quizzes.response_freshness(
-        COURSE, ASSIGNMENT, root=str(tmp_path), max_age_hours=6, now=NOW) == ""
-
-
-def test_invalidate_responses_is_a_no_op_without_a_snapshot(tmp_path):
-    assert new_quizzes.invalidate_responses(COURSE, ASSIGNMENT, root=str(tmp_path)) is None
-    # No responses envelope is fabricated for an assignment never fetched.
-    assert new_quizzes.read_sync(COURSE, root=str(tmp_path))["responses"] == {}
-
-
 def test_attempts_are_append_preserving_across_snapshots(tmp_path):
     # First snapshot captures attempts 1 and 2.
     new_quizzes.write_response_snapshot(

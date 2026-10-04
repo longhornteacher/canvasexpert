@@ -4,7 +4,6 @@ import copy
 import json
 import os
 import threading
-from contextlib import contextmanager
 from pathlib import Path
 
 from . import paths
@@ -18,13 +17,6 @@ from api.storage_support import (
 
 VERSION = 1
 _LOCK = threading.RLock()
-
-
-@contextmanager
-def storage_lock():
-    """Hold the process-wide lock used by all operation-ledger storage."""
-    with _LOCK:
-        yield
 
 
 class ReceiptConflictError(ValueError):

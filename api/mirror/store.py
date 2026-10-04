@@ -1242,64 +1242,6 @@ def invalidate_groups(course_id, *, root=None, attempted_at: str | None = None) 
         return _write_document(groups_path(course_id, root), validate_groups(document, course_id))
 
 
-def merge_group_category(course_id, category: dict, *, root=None,
-                         attempted_at: str | None = None) -> dict | None:
-    """Merge one live-refetched category into an existing group snapshot.
-
-    Targeted reconciliation after a single group/membership write: replaces
-    only the one category that actually changed, leaving every other
-    category byte-identical, instead of the whole-document
-    ``invalidate_groups`` staling. Reconciliation only ever runs against a
-    previously written document — a lone category is never treated as the
-    course's complete membership (vision doc S10.1: "a complete collection
-    defines membership") — so this returns ``None`` (no write, no-op) when
-    no prior document exists; the caller falls back to the existing
-    whole-document ``invalidate_groups`` path.
-
-    When ``category["category_name"]`` is falsy, the previous entry's name
-    is kept: only a genuinely new category (created moments ago, with a
-    Canvas-confirmed name) should ever supply a real name here — every other
-    caller only knows the category's id, not its current display name, and
-    must not invent one.
-    """
-    _require_dir(course_id, root)
-    attempted_at = attempted_at or now_iso()
-    with course_lock(course_id):
-        document = read_groups(course_id, root=root)
-        if document is None:
-            return None
-        category_id = str(category.get("category_id") or "")
-        existing = document.get("categories") or []
-        previous = next((c for c in existing if c.get("category_id") == category_id), None)
-        category_name = (category.get("category_name")
-                         or (previous or {}).get("category_name") or "")
-        with _vault_transaction(root) as vault:
-            normalized = normalize_group_categories([{
-                "category_id": category_id,
-                "category_name": category_name,
-                "groups": category.get("groups") or [],
-            }], vault)[0]
-        merged = []
-        replaced = False
-        for existing_category in existing:
-            if existing_category.get("category_id") == category_id:
-                merged.append(normalized)
-                replaced = True
-            else:
-                merged.append(existing_category)
-        if not replaced:
-            merged.append(normalized)
-        updated_document = {
-            "schema_version": MIRROR_VERSION,
-            "course_id": str(course_id),
-            **_envelope("current", attempted_at),
-            "categories": merged,
-        }
-        written = _write_document(groups_path(course_id, root),
-                                  validate_groups(updated_document, course_id))
-        return _rehydrate_groups(written, root)
-
-
 def mark_groups_stale(course_id, *, root=None, attempted_at: str | None = None) -> dict | None:
     """Retain a last-good group snapshot but make a failed refresh honest."""
     _require_dir(course_id, root)

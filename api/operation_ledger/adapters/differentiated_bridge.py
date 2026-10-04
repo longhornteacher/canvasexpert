@@ -19,11 +19,6 @@ from .module_placement import attach_assignment_type_module_item
 
 CANONICAL_TIERS = ("Support", "Core", "Accelerate")
 SUPPORTED_RENDERERS = ("assignment", "quiz")
-BRIDGE_SHAPE_FIELDS = (
-    "name", "description", "points_possible", "assignment_group_id", "due_at",
-    "grading_type", "submission_types", "published", "only_visible_to_overrides",
-    "omit_from_final_grade", "post_to_sis", "overrides",
-)
 RECONCILIATION_FIELDS = ("name", "description", "due_at")
 
 _FAMILY_KEYS = ("family_id", "differentiation_family_id", "canonical_family_id")
@@ -394,23 +389,6 @@ def structural_digest(state: dict) -> str:
 
 def bridge_matches(assignment: dict, family: dict, *, active: bool) -> bool:
     return _fields_match(assignment, expected_bridge(family, active=active))
-
-
-def bridge_mismatch_fields(
-    assignment: dict, family: dict, *, active: bool, overrides: list[dict] | None = None,
-) -> list[str]:
-    """Return only allowlisted bridge fields whose safe shapes differ."""
-    expected = expected_bridge(family, active=active)
-    actual = assignment_shape(assignment, overrides)
-    mismatches = []
-    for field in BRIDGE_SHAPE_FIELDS:
-        if field == "overrides":
-            if (overrides or []) != []:
-                mismatches.append(field)
-            continue
-        if not _fields_match({field: actual.get(field)}, {field: expected.get(field)}):
-            mismatches.append(field)
-    return sorted(set(mismatches))
 
 
 def execute_family_tail(

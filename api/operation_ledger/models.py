@@ -26,18 +26,6 @@ STEP_STATES = TARGET_STATES  # same vocabulary
 
 CLAIM_STATES = ("claimed", "released", "expired")
 
-# Valid forward-only target transitions (plus attention→applying via retry).
-TARGET_TRANSITIONS = {
-    "pending":     {"claimed"},
-    "claimed":     {"sent_unknown", "applied", "partial", "failed", "blocked", "skipped"},
-    "sent_unknown": {"applied", "failed", "pending"},  # recovery may resolve
-    "applied":     set(),   # terminal
-    "partial":     {"pending"},  # retry may re-queue unfinished work
-    "failed":      {"pending"},  # retry may re-queue
-    "blocked":     {"pending"},  # retry after human review
-    "skipped":     set(),   # terminal
-}
-
 OPERATION_TRANSITIONS = {
     "working":   {"prepared", "abandoned"},
     "prepared":  {"reviewed", "abandoned"},
@@ -191,14 +179,6 @@ def new_claim(*, claim_id: str, target_key: str, operation_id: str,
 
 def validate_operation_status_transition(old: str, new: str) -> bool:
     return new in OPERATION_TRANSITIONS.get(old, set())
-
-
-def validate_target_state_transition(old: str, new: str) -> bool:
-    return new in TARGET_TRANSITIONS.get(old, set())
-
-
-def is_terminal_target_state(state: str) -> bool:
-    return state in ("applied", "skipped")
 
 
 def is_unresolved_target_state(state: str) -> bool:

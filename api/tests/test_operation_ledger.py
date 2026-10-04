@@ -142,23 +142,9 @@ def test_list_operations_pii_minimized(tmp_path, monkeypatch):
     assert "targets" not in text
 
 
-# ── Target state transitions ────────────────────────────────────────────
+# ── Target retry/status helpers ─────────────────────────────────────────
 
-def test_valid_target_state_transitions():
-    assert models.validate_target_state_transition("pending", "claimed")
-    assert models.validate_target_state_transition("claimed", "applied")
-    assert models.validate_target_state_transition("claimed", "sent_unknown")
-    assert models.validate_target_state_transition("claimed", "failed")
-    assert models.validate_target_state_transition("claimed", "partial")
-    assert models.validate_target_state_transition("sent_unknown", "applied")
-    assert models.validate_target_state_transition("sent_unknown", "pending")
-
-
-def test_invalid_target_state_transitions():
-    assert not models.validate_target_state_transition("pending", "applied")
-    assert not models.validate_target_state_transition("applied", "pending")
-    assert not models.validate_target_state_transition("skipped", "pending")
-    assert not models.validate_target_state_transition("applied", "failed")
+def test_unresolved_target_state_and_operation_status():
     assert models.is_unresolved_target_state("partial")
     assert models.compute_operation_status([{"state": "partial"}]) == "partial"
 
