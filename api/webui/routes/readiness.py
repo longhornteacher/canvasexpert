@@ -8,9 +8,6 @@ from .. import readiness
 router = APIRouter(tags=["readiness"])
 
 
-@router.get("/api/readiness")
-def get_readiness():
-    return readiness.snapshot()
 
 
 @router.post("/api/readiness/probe")

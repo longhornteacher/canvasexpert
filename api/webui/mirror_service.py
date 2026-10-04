@@ -74,26 +74,10 @@ _PASS_RUNNERS = {"full": sync.full_pass, "delta": sync.delta_pass,
                  "roster": sync.roster_pass}
 
 
-def _course_name(course_id: str) -> str:
-    return next((str(course.get("name") or "") for course in config.active_courses()
-                 if str(course.get("id")) == str(course_id)), "")
-
-
 def _telemetry(scope: str):
     context = coordinator.current_worker_context()
     return canvas_get_telemetry(scope, context.get("priority", "manual"),
                                 queue_wait_ms=context.get("queue_wait_ms", 0))
-
-
-def _scoped_client(scope: str, client):
-    """Carry worker priority and telemetry into catalog's helper threads."""
-    context = coordinator.current_worker_context()
-    bound = coordinator.bind_current_worker(client)
-    def call(*args, **kwargs):
-        with canvas_get_telemetry(scope, context.get("priority", "manual"),
-                                  queue_wait_ms=context.get("queue_wait_ms", 0)):
-            return bound(*args, **kwargs)
-    return call
 
 
 def _run_course_context(course_id: str):
@@ -406,63 +390,6 @@ def _run_heartbeat_course(course: dict, *, canvas_get=None, canvas_get_all=None,
         )
         summaries.append({"course_id": course_id, "pass": pass_name, **result})
     return {"ok": all(item.get("ok") for item in summaries), "results": summaries}
-
-
-def run_heartbeat_pass(*, canvas_get=None, canvas_get_all=None,
-                       canvas_get_all_complete=None, load_groups=None,
-                       now=None) -> list[dict]:
-    """Compatibility test seam for one tick's per-course cadence."""
-    if not config.token_is_set() or not config.mirror_enabled() or workspace.workspace_root() is None:
-        return []
-    summaries = []
-    for course in config.active_courses():
-        outcome = _run_heartbeat_course(
-            course, canvas_get=canvas_get, canvas_get_all=canvas_get_all,
-            canvas_get_all_complete=canvas_get_all_complete, load_groups=load_groups, now=now)
-        summaries.extend(outcome["results"])
-    return summaries
-
-
-def sync_now(course_id: str | None = None, *, canvas_get=None, canvas_get_all=None,
-             canvas_get_all_complete=None, now=None) -> list[dict]:
-    """Manual 'Sync now': a delta per requested course (falls back to a full
-    pass automatically when the course has never been backfilled).
-
-    This is the manual-diagnostic override (vision doc Sec 9.3): it bypasses
-    any New Quiz metadata capability cooldown and always runs a full probe.
-    The 15-minute heartbeat (``run_heartbeat_pass``) never does."""
-    if not config.token_is_set():
-        return [{"ok": False, "error": "No Canvas token saved — go to Settings."}]
-    canvas_get = canvas_get or globals()["canvas_get"]
-    canvas_get_all = canvas_get_all or globals()["canvas_get_all"]
-    canvas_get_all_complete = canvas_get_all_complete or globals()["canvas_get_all_complete"]
-    courses = [c for c in config.saved_courses()
-               if not course_id or str(c.get("id")) == str(course_id)]
-    if not courses:
-        return [{"ok": False, "error": "Not a saved course."}]
-    summaries = []
-    for course in courses:
-        cid = str(course.get("id") or "")
-        # Manual sync is deliberately not cadence-limited.  Context is helpful
-        # status evidence, but its refresh failure must never suppress the
-        # existing full/delta fallback or the New Quiz cooldown override.
-        try:
-            course_context.refresh_course_context(
-                cid, canvas_get=canvas_get, canvas_get_all=canvas_get_all, now=now)
-        except Exception as exc:
-            operational_log.emit("mirror.course_refresh", "failed", error_class=type(exc))
-        started = time.monotonic()
-        result = sync.delta_pass(cid, canvas_get_all=canvas_get_all,
-                                 canvas_get_all_complete=canvas_get_all_complete, now=now,
-                                 bypass_new_quiz_cooldown=True,
-                                 stream_get=canvas_stream_get,
-                                 canvas_origin=config.get_canvas_base(),
-                                 course_name=course.get("name"))
-        _emit_refresh_outcome(
-            "delta", result, duration_ms=max(0, int(round((time.monotonic() - started) * 1000)))
-        )
-        summaries.append({"course_id": cid, "pass": "delta", **result})
-    return summaries
 
 
 def _emit_refresh_outcome(scope: str, result: dict, *, duration_ms: int = 0) -> None:

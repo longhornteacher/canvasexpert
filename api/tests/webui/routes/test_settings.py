@@ -38,10 +38,6 @@ def test_tier_color_setting_routes_validate_preserve_and_default_without_writes(
     assert config.get_tier_colors() == DEFAULT_TIER_COLORS
     assert writes == []
 
-    getter = client.get("/api/tier-colors")
-    assert getter.status_code == 200
-    assert getter.json()["tier_colors"]["Support"] == "silver"
-
     for key in PALETTES:
         result = client.post("/api/tier-colors", data={"colors": json.dumps({
             "Support": "silver", "Core": "red", "Accelerate": "blue", "untiered": key,

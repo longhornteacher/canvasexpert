@@ -479,9 +479,10 @@ def powergrader_root(root=None):
     return system_folder("PowerGrader", root)
 
 
-def powergrader_sessions_dir(root=None):
+def powergrader_preparation_dir(root=None):
+    """Return the new preparation-state folder path without creating it."""
     base = powergrader_root(root)
-    return os.path.join(base, "Sessions") if base else None
+    return os.path.join(base, "Preparation") if base else None
 
 
 def powergrader_jobs_dir(root=None):
@@ -794,6 +795,12 @@ def ensure_workspace():
     root = workspace_root()
     if not root:
         return None
+    # The marker survives normal cleanup of workspace contents. A picker can
+    # pre-create the root itself; that empty directory still counts as new.
+    initialized_marker = os.path.join(root, ".canvasexpert-workspace-initialized")
+    new_workspace = not os.path.isdir(root) or (
+        not os.path.exists(initialized_marker) and not os.listdir(root)
+    )
     os.makedirs(root, exist_ok=True)
 
     os.makedirs(os.path.join(root, LIBRARY_NAME), exist_ok=True)
@@ -803,8 +810,14 @@ def ensure_workspace():
         # Feedback Contracts are seeded by their marker-gated config owner.
         # The generic copy-on-every-ensure path would resurrect a teacher's
         # deliberate deletion after the one-time starter seed.
-        if subfolder != FEEDBACK_CONTRACTS_SUBFOLDER:
+        if subfolder not in {FEEDBACK_CONTRACTS_SUBFOLDER, "Calendars"}:
             _seed_folder_if_missing(os.path.join(DEFAULT_DOCS_DIR, subfolder), target_dir)
+    # The holiday calendar is a one-time starter for a brand-new workspace.
+    # Never repopulate a teacher's deliberate deletion from an existing workspace.
+    holiday_default = os.path.join(DEFAULT_DOCS_DIR, "Calendars", "Default 2026-27.csv")
+    holiday_target = os.path.join(root, LIBRARY_NAME, "Calendars", "Holidays.csv")
+    if new_workspace and os.path.isfile(holiday_default) and not os.path.exists(holiday_target):
+        shutil.copy2(holiday_default, holiday_target)
     os.makedirs(shared_assignments_root(root), exist_ok=True)
     os.makedirs(assignments_root(root), exist_ok=True)
     os.makedirs(os.path.join(root, TO_REVIEW_NAME), exist_ok=True)
@@ -820,10 +833,11 @@ def ensure_workspace():
 
     for sub in SYSTEM_SUBFOLDERS:
         os.makedirs(os.path.join(root, SYSTEM_NAME, sub), exist_ok=True)
-    os.makedirs(os.path.join(root, SYSTEM_NAME, "PowerGrader", "Sessions"), exist_ok=True)
     os.makedirs(os.path.join(root, SYSTEM_NAME, "PowerGrader", "Jobs"), exist_ok=True)
 
     _seed_workspace_readme(root)
+    with open(initialized_marker, "a", encoding="utf-8"):
+        pass
     return root
 
 

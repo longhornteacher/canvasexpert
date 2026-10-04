@@ -28,9 +28,6 @@ router = APIRouter(tags=["library"])
 _INBOX_KINDS = ("quiz", "assignment", "page")
 
 
-@router.get("/api/files")
-def api_files():
-    return JSONResponse({"files": list_quiz_files()})
 
 
 def _validate_inbox_entry(kind: str, path: str):
@@ -170,19 +167,3 @@ _CONTRACT_FILE_MAP = {
     "CanvasAgent": "START HERE - CanvasAgent.txt",
     "WritingTimeline": "Writing Timeline (tracked assignments).txt",
 }
-
-
-@router.get("/api/download-contract")
-def api_download_contract(name: str):
-    """Download a Forge contract file (e.g. AssignmentForge_Base, PageForge_Base).
-
-    ``name`` is a stable identifier kept for URL compatibility; it maps to the
-    one canonical file under ``api/default_docs/AI Authoring/`` that get_authoring_contract
-    (the MCP tool) also reads, so both readers return the same bytes."""
-    filename = _CONTRACT_FILE_MAP.get(name)
-    if filename is None:
-        return JSONResponse({"error": "unknown contract"}, status_code=400)
-    path = os.path.join(REPO_ROOT, "api", "default_docs", "AI Authoring", filename)
-    if not os.path.isfile(path):
-        return JSONResponse({"error": "file not found"}, status_code=404)
-    return FileResponse(path, media_type="text/plain", filename=filename)

@@ -41,14 +41,6 @@ _TRACKING_BOOLEAN_KEYS = (
     "tracking_protection_enforced",
     "tracking_lock_present",
 )
-_AGGREGATE_KEYS = (
-    "available",
-    "valid",
-    "block_count",
-    "insertion_count",
-    "deletion_count",
-    *_TRACKING_BOOLEAN_KEYS,
-)
 _PROPERTY_NUMBER_KEYS = ("total_time_minutes", "revision")
 _PROPERTY_AUTHOR_KEYS = ("creator_category", "last_modified_by_category")
 
@@ -535,67 +527,3 @@ def safe_projection(report: dict | None) -> dict | None:
         and int(item.get("character_count") or 0) > 0
     ][:3]
     return projection
-
-
-def aggregate_summary(projection: dict | None) -> dict | None:
-    """Return the aggregate-only portion of a SAFE timeline projection."""
-    if not isinstance(projection, dict):
-        return None
-    summary = {}
-    for key in _AGGREGATE_KEYS:
-        value = projection.get(key)
-        if key in _TRACKING_BOOLEAN_KEYS or key in {"available", "valid"}:
-            if isinstance(value, bool):
-                summary[key] = value
-        elif isinstance(value, int) and value >= 0:
-            summary[key] = value
-    if "available" not in summary:
-        return None
-    safe_properties = _safe_properties(projection.get("properties"))
-    if safe_properties:
-        summary["properties"] = safe_properties
-    return summary
-
-
-_SUMMARY_FIELD_LABELS = (
-    ("available", "Available"),
-    ("valid", "Valid"),
-    ("block_count", "Block count"),
-    ("insertion_count", "Insertion count"),
-    ("deletion_count", "Deletion count"),
-    ("trail_present", "Revision trail present"),
-    ("track_revisions_present", "Track revisions present"),
-    ("tracking_protection_present", "Tracking protection present"),
-    ("tracking_protection_enforced", "Tracking protection enforced"),
-    ("tracking_lock_present", "Tracking lock present"),
-)
-_SUMMARY_PROPERTY_LABELS = (
-    ("total_time_minutes", "Total time minutes"),
-    ("revision", "Revision"),
-    ("creator_category", "Creator category"),
-    ("last_modified_by_category", "Last modified by category"),
-)
-
-
-def aggregate_summary_lines(
-    projection: dict | None,
-    *,
-    title: str = "Writing Timeline Summary",
-) -> list[str]:
-    """Render a readable, aggregate-only summary for a teacher-facing packet."""
-    summary = aggregate_summary(projection)
-    if not summary or not summary.get("available"):
-        return []
-    lines = [f"### {title}"]
-    for key, label in _SUMMARY_FIELD_LABELS:
-        if key not in summary:
-            continue
-        value = summary[key]
-        if isinstance(value, bool):
-            value = "yes" if value else "no"
-        lines.append(f"{label}: {value}")
-    properties = summary.get("properties") or {}
-    for key, label in _SUMMARY_PROPERTY_LABELS:
-        if key in properties:
-            lines.append(f"{label}: {properties[key]}")
-    return lines

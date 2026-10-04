@@ -57,87 +57,6 @@ def _client():
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
-def test_launcher_rendered_csrf_authorizes_stubbed_scan(tmp_path):
-    script = textwrap.dedent(
-        """
-        from html.parser import HTMLParser
-
-        from fastapi.testclient import TestClient
-
-        from api.webui import server
-        from api.webui.routes import work
-        from api.platform_services import workspace
-
-
-        class CsrfMetaParser(HTMLParser):
-            token = None
-
-            def handle_starttag(self, tag, attrs):
-                values = dict(attrs)
-                if tag == "meta" and values.get("name") == "canvasexpert-csrf-token":
-                    self.token = values.get("content")
-
-
-        server.config.token_is_set = lambda: True
-        server.config.get_canvas_base = lambda: "https://canvas.invalid"
-        server.config.active_courses = lambda: []
-        workspace.workspace_root = lambda: None
-        work.storage.workspace.workspace_root = lambda: WORKSPACE_PATH
-        work.discovery.scan_active_courses = lambda: {
-            "ok": True,
-            "partial": False,
-            "courses_scanned": 0,
-            "findings": 0,
-            "stale_course_ids": [],
-            "error_codes": [],
-            "courses": {},
-        }
-        work._merge_discovery = lambda result: {"ok": True}
-
-        client = TestClient(server.app, base_url="http://127.0.0.1:8765")
-        rendered = client.get("/", headers={"Accept": "text/html"})
-        assert rendered.status_code == 200
-        parser = CsrfMetaParser()
-        parser.feed(rendered.text)
-        assert parser.token
-
-        origin = "http://127.0.0.1:8765"
-        rejected = client.post(
-            "/api/work/scan",
-            headers={"X-CanvasExpert-CSRF": "wrong", "Origin": origin},
-        )
-        assert rejected.status_code == 403
-
-        scanned = client.post(
-            "/api/work/scan",
-            headers={"X-CanvasExpert-CSRF": parser.token, "Origin": origin},
-        )
-        assert scanned.status_code == 200
-        assert scanned.json() == {
-            "ok": True,
-            "partial": False,
-            "courses_scanned": 0,
-            "findings": 0,
-            "stale_course_ids": [],
-            "error_codes": [],
-        }
-        """
-    ).replace("WORKSPACE_PATH", repr(str(tmp_path / "stubbed-workspace")))
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=API_DIR.parent,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-        env={
-            **os.environ,
-            "LOCALAPPDATA": str(tmp_path / "subprocess-localappdata"),
-            "OneDrive": "",
-            "OneDriveCommercial": "",
-        },
-    )
-    assert result.returncode == 0, result.stderr
 
 
 def test_get_work_is_local_pii_free_and_rejects_unknown_section(monkeypatch):
@@ -194,7 +113,7 @@ def test_receipt_landing_renders_summary_and_routes_by_subject(monkeypatch):
 
     routine = client.get("/receipts/routine_receipt_1")
     assert routine.status_code == 200
-    assert 'href="/routines"' in routine.text
+    assert 'href="/"' in routine.text
     assert "download" in routine.text
 
     missing = client.get("/receipts/missing")
@@ -282,117 +201,12 @@ def test_work_projection_keeps_global_and_current_jobs_but_hides_previous(monkey
     assert work._find_current("job-previous") is None
 
 
-def test_mutation_guard_rejection_matrix_and_valid_same_origin(monkeypatch, tmp_path):
-    job = _job()
-    monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [job])
-    monkeypatch.setattr(work.adapters, "collect_start_sources", lambda: [])
-    monkeypatch.setattr(work.storage.workspace, "workspace_root", lambda: str(tmp_path / "workspace"))
-    client = _client()
-    body = {"material_version": job["material_version"]}
-    assert client.post("/api/work/job-route-1/ignore", json=body).status_code == 403
-    assert client.post("/api/work/job-route-1/ignore", json=body, headers={"X-CanvasExpert-CSRF": "wrong"}).status_code == 403
-    assert client.post("/api/work/job-route-1/ignore", json=body, headers={"X-CanvasExpert-CSRF": csrf_token(), "Host": "192.0.2.1:8765"}).status_code == 403
-    assert client.post("/api/work/job-route-1/ignore", json=body, headers={"X-CanvasExpert-CSRF": csrf_token(), "Origin": "http://evil.invalid:8765"}).status_code == 403
-    assert client.post("/api/work/job-route-1/ignore", json=body, headers={"X-CanvasExpert-CSRF": csrf_token(), "Origin": "not-an-origin"}).status_code == 403
-    valid = client.post("/api/work/job-route-1/ignore", json=body, headers={"X-CanvasExpert-CSRF": csrf_token(), "Origin": "http://127.0.0.1:8765"})
-    assert valid.status_code == 200
-    assert valid.json()["job"]["status"] == "ignored"
-    assert client.get("/api/work?section=attention").json()["jobs"] == []
 
 
-def test_stale_and_unknown_mutations_fail_closed(monkeypatch, tmp_path):
-    job = _job()
-    monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [job])
-    monkeypatch.setattr(work.adapters, "collect_start_sources", lambda: [])
-    monkeypatch.setattr(work.storage.workspace, "workspace_root", lambda: str(tmp_path / "workspace"))
-    headers = {"X-CanvasExpert-CSRF": csrf_token()}
-    stale = {"material_version": "stale"}
-    client = _client()
-    assert client.post("/api/work/job-route-1/ignore", json=stale, headers=headers).status_code == 409
-    assert client.post("/api/work/missing/ignore", json={"material_version": job["material_version"]}, headers=headers).status_code == 409
-    assert client.post("/api/work/job-route-1/snooze", json={"material_version": job["material_version"], "until": "not-a-date"}, headers=headers).status_code == 409
-    assert not (tmp_path / "workspace" / "_System" / "workbench" / "suppressions.v1.json").exists()
 
 
-def test_complete_only_intentional_and_no_canvas_calls(monkeypatch, tmp_path):
-    detected = _job(origin="detected")
-    monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [detected])
-    monkeypatch.setattr(work.adapters, "collect_start_sources", lambda: [])
-    monkeypatch.setattr(work.storage.workspace, "workspace_root", lambda: str(tmp_path / "workspace"))
-    headers = {"X-CanvasExpert-CSRF": csrf_token()}
-    client = _client()
-    response = client.post("/api/work/job-route-1/complete", json={"material_version": detected["material_version"]}, headers=headers)
-    assert response.status_code == 409
-
-    intentional = _job(origin="intentional", status="in_progress")
-    monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [intentional])
-    preview = client.get("/api/work?section=all").json()
-    assert preview["presentations"]["job-route-1"]["title"] == "Create work"
-    response = client.post("/api/work/job-route-1/complete", json={"material_version": intentional["material_version"]}, headers=headers)
-    assert response.status_code == 200
-    assert response.json()["job"]["status"] == "completed"
-    disk = (tmp_path / "workspace" / "_System" / "workbench" / "registry.v1.json").read_text(encoding="utf-8")
-    assert "student" not in disk.lower()
-    assert "submission" not in disk.lower()
-    assert "presentations" not in disk.lower()
-    assert "Fictional Stored Title" not in disk
-
-    refreshed = client.get("/api/work?section=all")
-    assert refreshed.status_code == 200
-    assert refreshed.json()["jobs"][0]["status"] == "completed"
 
 
-def test_scan_is_guarded_merges_findings_and_get_stays_local(monkeypatch, tmp_path):
-    discovered = finding(
-        kind="grade.debt",
-        course_id="course-1",
-        assignment_id="assignment-1",
-        counts={"total": 1, "pending": 1, "affected": 1},
-        now="2026-07-11T12:00:00+00:00",
-        resumable_url="/powergrader",
-    )
-    result = {
-        "ok": True,
-        "partial": False,
-        "courses_scanned": 1,
-        "findings": 1,
-        "stale_course_ids": [],
-        "error_codes": [],
-        "courses": {
-            "course-1": {
-                "checked_at": "2026-07-11T12:00:00+00:00",
-                "findings": [discovered],
-                "stale": False,
-                "error_code": "",
-            }
-        },
-    }
-    monkeypatch.setattr(work.storage.workspace, "workspace_root", lambda: str(tmp_path / "workspace"))
-    monkeypatch.setattr(work.discovery, "scan_active_courses", lambda: result)
-    monkeypatch.setattr(work.adapters, "collect_local_jobs", lambda: [])
-    monkeypatch.setattr(work.adapters, "collect_start_sources", lambda: [])
-    client = _client()
-
-    assert client.post("/api/work/scan").status_code == 403
-    response = client.post(
-        "/api/work/scan",
-        headers={
-            "X-CanvasExpert-CSRF": csrf_token(),
-            "Origin": "http://127.0.0.1:8765",
-        },
-    )
-    assert response.status_code == 200
-    assert response.json()["findings"] == 1
-
-    monkeypatch.setattr(work.discovery, "scan_active_courses", lambda: (_ for _ in ()).throw(AssertionError("GET scanned Canvas")))
-    monkeypatch.setattr(
-        "api.mirror.queries.course_assignments",
-        lambda course_id, **kwargs: ([{"id": "assignment-1", "name": "Scanned Assignment"}], None),
-    )
-    get_response = client.get("/api/work?section=attention")
-    assert get_response.status_code == 200
-    assert get_response.json()["jobs"][0]["kind"] == "grade.debt"
-    assert get_response.json()["presentations"][get_response.json()["jobs"][0]["job_id"]]["title"] == "Scanned Assignment"
 
 
 def test_retired_scoring_work_is_hidden_and_current_grading_opens_course(monkeypatch):

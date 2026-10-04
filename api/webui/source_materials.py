@@ -16,36 +16,14 @@ from pathlib import Path
 from api.platform_services import workspace
 from .source_material_extractors import (
     MAX_EXTRACTED_CHARS,
-    SUPPORTED_EXTS,
-    UNSUPPORTED_LEGACY_EXTS,
     collapse_ws,
     _truncate,
     extract_text_from_bytes,
 )
 
 
-SOURCE_FOLDER_NAME = "Source Materials"
-
-RESPONSE_PRESETS = {
-    "scr": {
-        "label": "SCR - single paragraph",
-        "response_words": 130,
-        "output_tokens_per_student": 350,
-    },
-    "ecr": {
-        "label": "ECR - 4-5 paragraphs",
-        "response_words": 650,
-        "output_tokens_per_student": 600,
-    },
-}
-
-
-def source_folder() -> str | None:
-    return workspace.library_folder(SOURCE_FOLDER_NAME)
-
-
 def ensure_source_folder() -> str | None:
-    folder = source_folder()
+    folder = workspace.library_folder("Source Materials")
     if folder:
         os.makedirs(folder, exist_ok=True)
     return folder
@@ -57,35 +35,6 @@ def _estimate_tokens_for_text(text: str) -> int:
 
 def estimate_text_tokens(text: str) -> int:
     return _estimate_tokens_for_text(text)
-
-
-def list_source_files() -> list[dict]:
-    folder = ensure_source_folder()
-    if not folder or not os.path.isdir(workspace.extended_path(folder)):
-        return []
-    out: list[dict] = []
-    # os.walk over an extended root: teacher subfolders can nest past Windows'
-    # 260-char limit, where Path.rglob silently skips files. Relative paths are
-    # computed against the extended root (the \\?\ prefix cancels out), then the
-    # public "path" is rebuilt plain so callers/UI stay prefix-free.
-    plain_root = os.path.abspath(folder)
-    ext_root = workspace.extended_path(plain_root)
-    for dirpath, _dirnames, filenames in os.walk(ext_root):
-        for name in filenames:
-            suffix = os.path.splitext(name)[1].lower()
-            if suffix not in SUPPORTED_EXTS | UNSUPPORTED_LEGACY_EXTS:
-                continue
-            ext_full = os.path.join(dirpath, name)
-            rel = os.path.relpath(ext_full, ext_root)
-            out.append({
-                "name": name,
-                "relpath": rel,
-                "path": os.path.join(plain_root, rel),
-                "size": os.path.getsize(ext_full),
-                "supported": suffix in SUPPORTED_EXTS,
-            })
-    out.sort(key=lambda item: item["relpath"])
-    return out
 
 
 def _resolve_folder_file(relpath: str) -> str:
@@ -211,33 +160,3 @@ def build_source_context(
         "tokens_est": total_tokens,
         "chars": len(total_text),
     }
-
-
-def context_warnings(context: dict) -> list[str]:
-    warnings = list((context or {}).get("warnings") or [])
-    tokens = int((context or {}).get("tokens_est") or 0)
-    if tokens >= 100_000:
-        warnings.append(
-            "This looks book-sized. Whole books can get expensive quickly, especially "
-            "if you retry or compare multiple models. Use excerpts when possible."
-        )
-    elif tokens >= 50_000:
-        warnings.append(
-            "This is a very large source context. Use an excerpt unless the whole text "
-            "is truly needed for scoring."
-        )
-    elif tokens >= 10_000:
-        warnings.append(
-            "This is a long source context. Cost is still estimated as fresh input; "
-            "provider caching is not guaranteed."
-        )
-    return warnings
-
-
-def response_preset(kind: str) -> dict:
-    return RESPONSE_PRESETS.get((kind or "scr").lower(), RESPONSE_PRESETS["scr"])
-
-
-def synthetic_student_response(kind: str) -> str:
-    preset = response_preset(kind)
-    return ("student response " * int(preset["response_words"])).strip()

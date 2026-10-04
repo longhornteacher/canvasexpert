@@ -21,27 +21,6 @@ from engine.rendering.physical.styles.default_styles import (
 )
 
 
-class PhysicalHandler:
-    """Generate printable physical quiz files."""
-
-    def package(self, quiz: Quiz, output_base: str) -> Dict[str, str]:
-        """Create student quiz, answer key, rationale sheet, and render log."""
-        try:
-            return generate_physical_outputs(quiz, output_base)
-        except Exception as e:
-            error_log_path = Path(output_base) / "physical_error.log"
-            error_log_path.write_text(f"Physical generation failed: {e}", encoding="utf-8")
-            return {
-                "quiz_path": "",
-                "quiz_pdf_path": "",
-                "key_path": "",
-                "key_pdf_path": "",
-                "rationale_path": "",
-                "log_path": "",
-                "error_log": str(error_log_path),
-            }
-
-
 def generate_physical_outputs(quiz: Quiz, output_folder: str) -> Dict[str, str]:
     """Generate live physical outputs via the shared HTML render substrate.
 

@@ -39,8 +39,6 @@ from .deps import (
 )
 
 from .routes.courses import router as _courses_router
-from .routes.course_catalog import router as _course_catalog_router
-from .routes.dailywriting import router as _dailywriting_router
 from .routes.names import names_router as _names_router
 from .routes.library import router as _library_router
 from .routes.onboarding import router as _onboarding_router
@@ -168,8 +166,6 @@ async def _api_errors_return_json(request: Request, exc: Exception):
 
 app.include_router(_onboarding_router)
 app.include_router(_courses_router)
-app.include_router(_course_catalog_router)
-app.include_router(_dailywriting_router)
 app.include_router(_names_router)
 app.include_router(_library_router)
 app.include_router(_pages_router)

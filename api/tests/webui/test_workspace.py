@@ -66,6 +66,71 @@ def test_ensure_workspace_creates_and_seeds_authoring_library(tmp_path, monkeypa
     assert (root / "Library" / "AI Authoring" / "Author an Assignment (AssignmentForge).txt").read_text(encoding="utf-8") == "later default"
 
 
+def test_existing_workspace_missing_calendar_is_not_reseeded(tmp_path, monkeypatch):
+    root = tmp_path / "CanvasExpert"
+    (root / "Library" / "Calendars").mkdir(parents=True)
+    (root / ".canvasexpert-workspace-initialized").write_text("", encoding="utf-8")
+    default = tmp_path / "defaults" / "Calendars"
+    default.mkdir(parents=True)
+    (default / "Default 2026-27.csv").write_text("date,description\n", encoding="utf-8")
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(workspace, "DEFAULT_DOCS_DIR", str(tmp_path / "defaults"))
+
+    workspace.ensure_workspace()
+
+    assert not (root / "Library" / "Calendars" / "Holidays.csv").exists()
+
+
+def test_empty_precreated_workspace_gets_only_renamed_default_calendar(tmp_path, monkeypatch):
+    root = tmp_path / "CanvasExpert"
+    root.mkdir()
+    default = tmp_path / "defaults" / "Calendars"
+    default.mkdir(parents=True)
+    (default / "Default 2026-27.csv").write_text("date,description\n2026-09-01,Holiday\n", encoding="utf-8")
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(workspace, "DEFAULT_DOCS_DIR", str(tmp_path / "defaults"))
+
+    workspace.ensure_workspace()
+
+    calendars = root / "Library" / "Calendars"
+    assert [path.name for path in calendars.iterdir()] == ["Holidays.csv"]
+    assert (calendars / "Holidays.csv").read_text(encoding="utf-8") == "date,description\n2026-09-01,Holiday\n"
+    (calendars / "Holidays.csv").unlink()
+    workspace.ensure_workspace()
+    assert not (calendars / "Holidays.csv").exists()
+
+
+def test_nonempty_unmarked_workspace_does_not_seed_calendar(tmp_path, monkeypatch):
+    root = tmp_path / "CanvasExpert"
+    root.mkdir()
+    (root / "teacher-file.txt").write_text("existing", encoding="utf-8")
+    default = tmp_path / "defaults" / "Calendars"
+    default.mkdir(parents=True)
+    (default / "Default 2026-27.csv").write_text("date,description\n", encoding="utf-8")
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(workspace, "DEFAULT_DOCS_DIR", str(tmp_path / "defaults"))
+
+    workspace.ensure_workspace()
+
+    assert not (root / "Library" / "Calendars" / "Holidays.csv").exists()
+
+
+def test_existing_calendar_is_never_overwritten(tmp_path, monkeypatch):
+    root = tmp_path / "CanvasExpert"
+    calendar = root / "Library" / "Calendars" / "Holidays.csv"
+    calendar.parent.mkdir(parents=True)
+    calendar.write_text("teacher calendar", encoding="utf-8")
+    default = tmp_path / "defaults" / "Calendars"
+    default.mkdir(parents=True)
+    (default / "Default 2026-27.csv").write_text("default calendar", encoding="utf-8")
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(workspace, "DEFAULT_DOCS_DIR", str(tmp_path / "defaults"))
+
+    workspace.ensure_workspace()
+
+    assert calendar.read_text(encoding="utf-8") == "teacher calendar"
+
+
 def test_config_split_writes_workspace_settings_when_available(tmp_path, monkeypatch):
     machine_config = tmp_path / "config.json"
     workspace_root = tmp_path / "OneDrive" / "CanvasExpert"

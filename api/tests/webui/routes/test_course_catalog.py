@@ -4,12 +4,9 @@ import time
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from api import course_catalog
 from api.platform_services import workspace
-from api.webui.routes import course_catalog as course_catalog_routes
-from api.webui.server import app
 
 
 STAMP_1 = "2026-07-14T12:00:00+00:00"
@@ -787,60 +784,6 @@ def test_onedrive_conflict_warns_but_is_never_modified_or_deleted(tmp_path):
     assert conflict.read_text(encoding="utf-8") == '{"leave": "untouched"}'
 
 
-def test_routes_gate_current_courses_and_get_is_disk_only(monkeypatch):
-    client = TestClient(app, base_url="http://127.0.0.1:8765")
-    calls = []
-    refresh_calls = []
-    mirror_calls = []
-    assignment_calls = []
-    receipt = ([{"id": "101"}], None, True)
-    monkeypatch.setattr(course_catalog_routes.config, "active_courses", lambda: [{"id": "course-1", "name": "Fictional Course"}])
-
-    def fake_read(course_id):
-        calls.append(course_id)
-        return {"catalog": None, "source": "none", "warnings": []}
-
-    monkeypatch.setattr(course_catalog_routes.course_catalog, "read_catalog", fake_read)
-    monkeypatch.setattr(
-        course_catalog_routes, "canvas_get_all",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("GET contacted Canvas")),
-    )
-    def complete_assignments(path, params):
-        assignment_calls.append((path, params))
-        return receipt
-
-    monkeypatch.setattr(course_catalog_routes, "canvas_get_all_complete", complete_assignments)
-
-    def fake_refresh(course_id, course_name, *, canvas_get_all, canvas_get_all_complete,
-                     assignment_receipt):
-        refresh_calls.append((course_id, course_name, canvas_get_all, canvas_get_all_complete,
-                              assignment_receipt))
-        return {"catalog": None, "source": "none", "warnings": []}
-
-    monkeypatch.setattr(course_catalog_routes.course_catalog, "refresh_catalog", fake_refresh)
-    monkeypatch.setattr(
-        course_catalog_routes.mirror_sync,
-        "apply_assignment_collection_receipt",
-        lambda course_id, received_receipt: mirror_calls.append((course_id, received_receipt)) or {"ok": True},
-    )
-
-    allowed = client.get("/api/course-catalog", params={"course_id": "course-1"}).json()
-    refreshed = client.post("/api/course-catalog/refresh", data={"course_id": "course-1"}).json()
-    blocked_get = client.get("/api/course-catalog", params={"course_id": "previous-course"}).json()
-    blocked_post = client.post("/api/course-catalog/refresh", data={"course_id": "previous-course"}).json()
-
-    assert allowed["ok"] is True and allowed["available"] is False
-    assert refreshed["ok"] is True and refreshed["available"] is False
-    assert calls == ["course-1"]
-    assert len(refresh_calls) == 1
-    assert refresh_calls[0][0:2] == ("course-1", "Fictional Course")
-    assert refresh_calls[0][2] is course_catalog_routes.canvas_get_all
-    assert refresh_calls[0][3] is course_catalog_routes.canvas_get_all_complete
-    assert refresh_calls[0][4] is receipt
-    assert assignment_calls == [("/api/v1/courses/course-1/assignments", {"per_page": 100})]
-    assert mirror_calls == [("course-1", receipt)]
-    assert blocked_get == {"ok": False, "error": "Select a saved current course first."}
-    assert blocked_post == blocked_get
 
 
 # --- refresh_catalog_assignments_only (1.0beta 02c: heartbeat/full/delta coordination) -----

@@ -25,30 +25,6 @@ WEBUI_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR   = os.path.dirname(WEBUI_DIR)
 REPO_ROOT = os.path.dirname(API_DIR)
 
-# Calendar CSVs live in the OneDrive workspace (seeded from api/default_docs/Calendars/
-# on first run via workspace.ensure_workspace). Resolved lazily so this module stays
-# importable even before the workspace is set up.
-def _calendars_dir():
-    from api.platform_services import workspace as _ws
-    return _ws.library_folder("Calendars")
-
-
-def _calendar_label(filename: str) -> str:
-    """'Summer_Session_Sample.csv' → 'Summer Session Sample' (district-agnostic)."""
-    stem = os.path.splitext(filename)[0]
-    return stem.replace("_", " ").replace("-", " ").strip()
-
-
-def _calendars_dir(root=None):
-    """Resolve Calendars folder in the workspace Library."""
-    from api.platform_services import workspace as _ws
-    if root is None:
-        return _ws.library_folder("Calendars")
-    return _ws.library_folder("Calendars", root)
-
-
-
-
 def _workspace_folder(name: str):
     return runtime_paths.workspace_folder(name)
 

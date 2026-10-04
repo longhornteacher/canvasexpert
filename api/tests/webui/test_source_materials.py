@@ -54,11 +54,3 @@ def test_build_source_context_from_paste_and_folder_file(tmp_path, monkeypatch):
     assert len(ctx["materials"]) == 2
     assert ctx["tokens_est"] > 0
     assert "The river changed overnight." in ctx["materials"][1]["text"]
-
-
-def test_context_warnings_call_out_book_sized_text():
-    ctx = {"tokens_est": 110_000, "warnings": []}
-
-    warnings = source_materials.context_warnings(ctx)
-
-    assert any("book-sized" in w for w in warnings)

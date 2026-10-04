@@ -127,9 +127,6 @@ def test_connection(base_url: str = Form(...), token: str = Form("")):
                          "display_name": d.get("name", d.get("short_name", "Unknown"))})
 
 
-@router.get("/api/tier-tags")
-def get_tier_tags_route():
-    return JSONResponse({"ok": True, "tier_tags": config.get_tier_tags()})
 
 
 @router.post("/api/tier-tags")
@@ -141,9 +138,6 @@ def save_tier_tags(tags: str = Form(...)):
     return JSONResponse({"ok": True, "tier_tags": config.get_tier_tags()})
 
 
-@router.get("/api/tier-colors")
-def get_tier_colors_route():
-    return JSONResponse({"ok": True, "tier_colors": config.get_tier_colors()})
 
 
 @router.post("/api/tier-colors")

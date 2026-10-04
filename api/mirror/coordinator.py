@@ -182,19 +182,6 @@ class MirrorCoordinator:
             return {"scope": job.scope, "priority": job.priority,
                     "queue_wait_ms": job.queue_wait_ms}
 
-    def bind_current_worker(self, callback):
-        """Bind the active worker marker into helper threads owned by a runner."""
-        job_id = _WORKER.get()
-        if not job_id:
-            return callback
-        def bound(*args, **kwargs):
-            token = _WORKER.set(job_id)
-            try:
-                return callback(*args, **kwargs)
-            finally:
-                _WORKER.reset(token)
-        return bound
-
     def status(self, plan_id: str | None = None) -> dict:
         with self._lock:
             plans = [self._plans[plan_id]] if plan_id in self._plans else ([] if plan_id else list(self._plans.values()))
@@ -321,7 +308,3 @@ def before_physical_get() -> tuple[int, bool]:
 
 def current_worker_context() -> dict:
     return default().current_worker_context() if _DEFAULT is not None else {}
-
-
-def bind_current_worker(callback):
-    return default().bind_current_worker(callback) if _DEFAULT is not None else callback

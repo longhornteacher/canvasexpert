@@ -36,7 +36,7 @@
 }
 </QUIZFORGE_JSON>
 ```
-- `version`: `"3.0-json"` (new strict JSON spec). Use `"2.0"` only when a teacher explicitly requests legacy schema.
+- `version`: `"3.0-json"` (the only supported schema).
 - `quiz_engine` (optional): `"new"` (Canvas New Quizzes, the default when the key is absent) or `"classic"` (a Canvas Classic Quiz). Any other value is refused. **Ask the teacher before choosing `classic`.** The only reasons to choose it are writing inside the quiz (`ESSAY`, `FILEUPLOAD`) or Hub supports on the quiz; otherwise stay on New Quizzes. Canvas Expert cannot score classic quiz writing yet: the teacher grades it in SpeedGrader.
 - `differentiation` and `tiers` (classic only): Hub supports for one whole-class quiz. Use `"differentiation": "hub"` and `"tiers": [{ "label": "Support", "supports": { ... } }]` with one or more unique canonical labels (`Support`, `Core`, `Accelerate`). A tier holds only `label` and non-empty `supports`; the support fields are the ones in AssignmentForge Section 5 (`sentence_frames`, `word_bank`, `html`). Questions and instructions stay on the one shared quiz; each supplied tier becomes a restricted page linked from the quiz description, and the teacher handles any page whose Canvas tag Canvas Expert cannot match. `"differentiation": "bridge"` is refused for QuizForge, and a classic Hub file needs no `metadata.variant`. Both keys are refused unless `quiz_engine` is `"classic"`.
 - `total_points` (optional): Teacher/agent supplied consistency check; when present it must equal the sum of scored item points and does not change them.

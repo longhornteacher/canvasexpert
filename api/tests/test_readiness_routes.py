@@ -1,18 +1,7 @@
 """Contract tests for process-local readiness probes and redacted results."""
 
-import json
-
 from api.webui import readiness
-from api.webui.routes.readiness import get_readiness, post_readiness_probe
-
-
-def test_unknown_snapshot_is_redacted_and_process_local(monkeypatch):
-    readiness._reset_for_tests()
-    first = get_readiness()
-    assert first["status"] == "unknown"
-    assert first["components"]["canvas"]["status"] == "unknown"
-    assert "path" not in json.dumps(first).lower()
-    assert "token" not in json.dumps(first).lower()
+from api.webui.routes.readiness import post_readiness_probe
 
 
 def test_probe_runs_once_until_forced(monkeypatch):

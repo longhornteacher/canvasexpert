@@ -1,4 +1,4 @@
-"""Importer abstraction for swapping between legacy text spec and JSON 3.0 spec."""
+"""Importer for the canonical QuizForge JSON 3.0 spec."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ import os
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+import math
 from typing import List, Optional, Protocol
 
-from engine.config import SPEC_MODE
 from engine.core.answers import NumericalAnswer
 from engine.core.questions import (
     CategorizationQuestion,
@@ -32,7 +32,6 @@ from engine.core.questions import (
     TFQuestion,
 )
 from engine.core.quiz import Quiz
-from engine.parsing.text_parser import TextOutlineParser
 from engine.spec_engine import packager as news_packager
 from engine.spec_engine import parser as news_parser
 from engine.spec_engine import parser as spec_parser
@@ -69,17 +68,6 @@ class JsonImportError(Exception):
         self.column = column
         self.char = char
         self.lint_errors = lint_errors or []
-
-
-class TextImporter:
-    """Importer for the legacy text spec."""
-
-    def __init__(self) -> None:
-        self.parser = TextOutlineParser()
-
-    def import_quiz(self, raw_spec: str) -> ImportedQuiz:
-        quiz = self.parser.parse_text(raw_spec)
-        return ImportedQuiz(quiz=quiz, raw=raw_spec)
 
 
 class JsonImporter:
@@ -152,11 +140,8 @@ class JsonImporter:
 
 
 def import_quiz_from_llm(raw_output: str) -> ImportedQuiz:
-    """Dispatch to the correct importer based on SPEC_MODE."""
-    if SPEC_MODE == "json":
-        logger.info("QUIZFORGE_SPEC_MODE=json: attempting JSON 3.0 import")
-        return JsonImporter().import_quiz(raw_output)
-    return TextImporter().import_quiz(raw_output)
+    """Import the canonical QuizForge JSON 3.0 format."""
+    return JsonImporter().import_quiz(raw_output)
 
 
 def _packaged_to_domain(packaged) -> Quiz:
@@ -408,7 +393,7 @@ def _convert_numerical(item: dict, pts: float, pts_set: bool, parent_stimulus: O
 def _bounds_for_numerical(answer, mode, margin, range_min, range_max, precision):
     """Reuse text parser logic to keep bounds consistent."""
     try:
-        lower, upper, strict_lower = TextOutlineParser._resolve_numerical_bounds(  # type: ignore[attr-defined]
+        lower, upper, strict_lower = _resolve_numerical_bounds(
             answer=answer,
             mode=mode,
             margin=margin,
@@ -422,6 +407,44 @@ def _bounds_for_numerical(answer, mode, margin, range_min, range_max, precision)
         if answer is None:
             answer = Decimal("0")
         return answer, answer, False
+
+
+def _resolve_numerical_bounds(*, answer, mode, margin, range_min, range_max, precision):
+    """Compute Canvas's accepted numerical bounds from a QuizForge item."""
+    if mode == "exact":
+        if answer is None:
+            raise ValueError("Numerical question requires an Answer value.")
+        return answer, answer, False
+    if mode == "percent_margin":
+        if answer is None or margin is None:
+            raise ValueError("Percent margin requires Answer and Tolerance.")
+        offset = answer.copy_abs() * (abs(margin) / Decimal("100"))
+        return answer - offset, answer + offset, False
+    if mode == "absolute_margin":
+        if answer is None or margin is None:
+            raise ValueError("Absolute margin requires Answer and Tolerance.")
+        offset = abs(margin)
+        return answer - offset, answer + offset, False
+    if mode == "range":
+        if range_min is None or range_max is None:
+            raise ValueError("Range requires minimum and maximum.")
+        return range_min, range_max, False
+    if mode in {"significant_digits", "decimal_places"}:
+        if answer is None or precision is None:
+            raise ValueError("Precision mode requires Answer and Precision.")
+        if precision < 0:
+            raise ValueError("Precision must be non-negative.")
+        if mode == "significant_digits":
+            numeric = float(answer)
+            exponent = math.floor(math.log10(abs(numeric))) if numeric else 0
+            offset = (
+                Decimal("0.5") * Decimal(10) ** (exponent - precision + 1)
+                if numeric else Decimal("0.5")
+            )
+        else:
+            offset = Decimal("0.5") * Decimal(10) ** (-precision)
+        return answer - offset, answer + offset, True
+    raise ValueError(f"Unsupported tolerance mode '{mode}'.")
 
 
 def _safe_decimal(value) -> Optional[Decimal]:

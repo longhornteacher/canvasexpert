@@ -23,9 +23,6 @@ router = APIRouter(prefix="/api", tags=["reports"])
 # Download settings + submission downloads
 # --------------------------------------------------------------------------
 
-@router.get("/download-root")
-def get_download_root():
-    return JSONResponse({"root": config.get_download_root()})
 
 
 @router.get("/course-folder")
@@ -80,11 +77,6 @@ def api_students_monitor(user_id: str = Form(...), name: str = Form(...),
     return JSONResponse({"ok": True})
 
 
-@router.get("/students/monitored")
-def api_students_monitored():
-    mon = config.get_monitored_students()
-    return JSONResponse({"ok": True, "students":
-        [{"user_id": uid, "name": v["name"]} for uid, v in mon.items()]})
 
 
 @router.get("/student-packet/stream")
@@ -234,18 +226,6 @@ def open_folder(path: str = Form(...)):
         return JSONResponse({"ok": False, "error": str(e)})
 
 
-@router.post("/open-file")
-def open_file(path: str = Form(...)):
-    """Open a local file with its default app (local server only) — used by the
-    Feedback tools manual lane to open a pseudonymized bundle for MagicSchool/Copilot."""
-    path = os.path.normpath(path)
-    if not os.path.isfile(path):
-        return JSONResponse({"ok": False, "error": "File not found."})
-    try:
-        os.startfile(path)  # noqa: Windows-only; this app is local Windows-only
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)})
 
 
 @router.post("/pick-download-folder")
