@@ -1,17 +1,23 @@
 import json
-import multiprocessing
 import os
 import threading
 from pathlib import Path
 
 
-def _vault_writer(path: str, barrier, canvas_id: str):
-    from api.feedback_vault import Vault
+def _vault_writer(root: str, barrier, canvas_id: str, errors: list):
+    from api.shared_vault import SharedVault
 
-    barrier.wait()
-    vault = Vault(path)
-    with vault.transaction():
-        vault.get_or_assign(canvas_id, f"Synthetic {canvas_id}", canvas_id)
+    try:
+        vault = SharedVault(
+            Path(root) / "_Shared" / "vault",
+            workspace_root=root,
+            secret_provider=lambda: b"s" * 32,
+        )
+        barrier.wait()
+        with vault.transaction():
+            vault.get_or_assign(canvas_id, f"Synthetic {canvas_id}", canvas_id)
+    except Exception as exc:  # surface worker failures in the owning test
+        errors.append(exc)
 
 
 def _settings_writer(barrier, index: int):
@@ -26,28 +32,42 @@ def _settings_writer(barrier, index: int):
     canvas.set_download_root(f"download-{index}")
 
 
-def test_spawned_vault_writers_preserve_both_students(tmp_path):
-    path = str(tmp_path / "vault.json")
-    ctx = multiprocessing.get_context("spawn")
-    barrier = ctx.Barrier(2)
-    processes = [
-        ctx.Process(target=_vault_writer, args=(path, barrier, "student-a")),
-        ctx.Process(target=_vault_writer, args=(path, barrier, "student-b")),
+def test_concurrent_shared_vault_writers_append_without_rewriting_seed(tmp_path):
+    from api.shared_vault import SharedVault
+
+    root = str(tmp_path)
+    directory = tmp_path / "_Shared" / "vault"
+    initial = SharedVault(
+        directory, workspace_root=root, secret_provider=lambda: b"s" * 32,
+    )
+    assert initial.conflicts() == []
+    seed = directory / "seed.v1.json"
+    original_seed = seed.read_bytes()
+
+    barrier = threading.Barrier(2)
+    errors = []
+    threads = [
+        threading.Thread(target=_vault_writer, args=(root, barrier, "synthetic-a", errors)),
+        threading.Thread(target=_vault_writer, args=(root, barrier, "synthetic-b", errors)),
     ]
-    for process in processes:
-        process.start()
-    for process in processes:
-        process.join(30)
-    assert all(process.exitcode == 0 for process in processes)
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
 
-    document = json.loads(Path(path).read_text(encoding="utf-8"))
-    assert set(document["by_canvas_id"]) == {"student-a", "student-b"}
-    pseudonyms = {entry["pseudonym"] for entry in document["by_canvas_id"].values()}
-    assert len(pseudonyms) == 2
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+    assert seed.read_bytes() == original_seed
+    journal = next(directory.glob("journal.*.jsonl"))
+    events = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    assert {event["canvas_user_id"] for event in events} == {"synthetic-a", "synthetic-b"}
+    assert all(event["op"] in {"assign", "identity"} for event in events)
 
-    from api.feedback_vault import Vault
-
-    fresh = Vault(path)
+    fresh = SharedVault(
+        directory, workspace_root=root, secret_provider=lambda: b"s" * 32,
+    )
+    pseudonyms = [fresh.get_or_assign(cid) for cid in ("synthetic-a", "synthetic-b")]
+    assert len(set(pseudonyms)) == 2
     assert all(fresh.reverse(pseudonym) for pseudonym in pseudonyms)
 
 

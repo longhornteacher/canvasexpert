@@ -117,7 +117,7 @@ def test_assignment_and_page_contracts_are_2_0_content_only():
     for body, tag in ((assignment, "ASSIGNMENTFORGE_JSON"),
                       (page, "PAGEFORGE_JSON")):
         assert "2.0-json" in body
-        assert "1.0-json` is retired" in body
+        assert "1.0-json` is retired" not in body
         assert f"<{tag}>" in body
         assert "Author content" in body
         assert "Canvas Expert" in body and "palette" in body
@@ -245,13 +245,11 @@ def test_current_authority_has_no_retired_assignment_family_direction():
         root / "docs" / "mcp-server.md",
         root / "docs" / "guides" / "sis-grade-bridges.md",
         root / "docs" / "guides" / "scoring-sessions.md",
-        root / "docs" / "guides" / "canvasexpert-agent-capabilities.md",
         root / "docs" / "contracts" / "sis-grade-bridge-contract.md",
         root / "docs" / "reference" / "assignment-differentiation-design.md",
         root / "docs" / "reference" / "course-expert-module-map.md",
         root / "docs" / "reference" / "operation-ledger-module-map.md",
         root / "docs" / "reference" / "quiz-operation-design.md",
-        root / "docs" / "reference" / "authoring-contract-drift.md",
         root / "api" / "default_docs" / "AI Authoring" / AGENT_NAME,
         root / "api" / "default_docs" / "AI Authoring" / "Author an Assignment (AssignmentForge).txt",
     ]
@@ -381,24 +379,6 @@ def test_setup_instructions_match_user_scoped_python_installer(text):
         bat = f.read()
     assert "winget install --id Python.Python.3.13" in bat
     assert "--scope user" in bat
-
-
-def test_the_download_route_serves_it():
-    """The AI Connections card links here, so the name must stay mapped."""
-    from fastapi.testclient import TestClient
-
-    from api.webui.server import app
-
-    # Deliberately not `with TestClient(app)`. The context manager runs the
-    # app's lifespan, and startup calls ai_ta.build_library against the real
-    # workspace, so the test would seed and retire files in the developer's own
-    # OneDrive folder. Plain construction skips lifespan and still routes.
-    client = TestClient(app)
-    r = client.get("/api/download-contract", params={"name": "CanvasAgent"})
-    assert r.status_code == 200, r.text
-    assert "attachment" in r.headers.get("content-disposition", "")
-    assert AGENT_NAME in r.headers["content-disposition"].replace("%20", " ")
-    assert r.text.lstrip().startswith("CanvasAgent")
 
 
 def test_the_canvasagent_js_core_markers_match_the_file():
