@@ -68,3 +68,8 @@ def local_source_root(source_key: str, root: str | Path | None = None) -> Path:
         raise ValueError("workspace_unconfigured")
     return (runtime_paths.local_cache_dir() / "CanvasMirror" /
             workspace_key(selected) / _validated_source(source_key))
+
+
+def control_store_path(source_key: str, root: str | Path | None = None) -> Path:
+    """Machine-local private job/checkpoint database; never cloud-synced."""
+    return local_source_root(source_key, root) / "control.sqlite3"

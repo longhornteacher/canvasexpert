@@ -1295,7 +1295,7 @@ independently maintained current-state store after cutover.
 
 ## 12. Execution result (lead updates in place)
 
-**Execution result:** S00–S02 are implemented and accepted on synthetic/local
+**Execution result:** S00–S04 are implemented and accepted on synthetic/local
 evidence. No teacher workspace migration, live Canvas call, production read
 activation, or public push was performed. The isolated OCR environment's full
 suite passes; the global `py` environment still lacks the S00 OCR wheels.
@@ -1305,15 +1305,15 @@ suite passes; the global `py` environment still lacks the S00 OCR wheels.
 | S00 local OCR capability | GREEN | `ca29eea` | 3.13 isolated: 28 focused/readiness passed; 3.14 isolated: 28 passed; fresh subprocess JPG/scanned-PDF proof 21/21 on each runtime; isolated full gate 2218 passed, 1 skipped | Default global `py` has no OCR wheels, so its OCR-focused run reports 17 passed/4 typed dependency failures; the launcher provisions the tested private environments. Native stack: RapidOCR 3.9.2, ONNX Runtime 1.29.0, pypdfium2 5.1.0, Windows x64 Python 3.13/3.14. |
 | S01 text evidence store | GREEN | `3a5ff41` | 74 focused tests passed; isolated full gate 2218 passed, 1 skipped | Includes immutable facts/commits, causal reducer, conflict diagnostics, rebuildable SQLite index, direct query envelope, generated reader contract, and safe text publisher. No live migration. |
 | S02 additive importer | GREEN | `7f9882e` | 81 focused tests passed, 1 skipped; privacy scan passed with staged files; isolated full gate 2271 passed, 2 skipped | Bounded legacy inventory, additive historical import and private mappings, deterministic private ZIP originals, preserved conflicts and two-machine union, fresh migration-private index comparison. One focused skip requires Windows symlink privilege. No live migration or activation. |
-| S03 acquisition/ownership | GREEN | Pending commit | 341 focused tests passed; selected-course ownership, receipts, structure, lifecycle, request coalescing, Previous-course refusal, and runtime release covered | Full repository gate: 2354 passed, 2 skipped; 6 unrelated environment/baseline failures (OCR wheels unavailable, existing QF golden mismatch, readiness probe isolation). No live Canvas or teacher workspace activation. |
-| S04 originals/jobs | Not started | — | — | — |
+| S03 acquisition/ownership | GREEN | `56e0082` | 341 focused tests passed; selected-course ownership, receipts, structure, lifecycle, request coalescing, Previous-course refusal, and runtime release covered | Full repository gate: 2354 passed, 2 skipped; 6 unrelated environment/baseline failures (OCR wheels unavailable, existing QF golden mismatch, readiness probe isolation). No live Canvas or teacher workspace activation. |
+| S04 originals/jobs | GREEN | pending commit | 124 focused tests passed (18 new job tests + 106 existing); full repository gate 2372 passed, 2 skipped | New `assignment.attachments` scope publishes opaque association facts (key/media-type/size/status, never filename/URL); `evidence_jobs.py` owns a machine-local private `control.sqlite3` queue with deterministic job ids, 20-download/200-MiB resumable chunks, retry backoff, terminal statuses, and fact-based reconstruction; `service.run_attachment_capture_chunk` drains through the coordinated transport and reacquires fresh URLs from the stable file id. Same 6 unrelated baseline failures (OCR wheels, QF golden, readiness probe). No live Canvas or teacher workspace activation. |
 | S05 required extraction | Not started | — | — | — |
 | S06 reads/comparisons/notes | Not started | — | — | — |
 | S07 scoring consumption | Not started | — | — | — |
 | S08 activation/recovery | Not started | — | — | Two-machine field acceptance outstanding |
 
-**Current traffic light:** YELLOW. S00–S03 are accepted against their
-synthetic/local gates. S04 originals/jobs is the next pointer.
+**Current traffic light:** YELLOW. S00–S04 are accepted against their
+synthetic/local gates. S05 required extraction is the next pointer.
 The private pilot import and production activation remain reserved for S08's
 announced acceptance run; required attachment formats, MCP integration,
 scoring consumption, and two-computer field acceptance remain outstanding.

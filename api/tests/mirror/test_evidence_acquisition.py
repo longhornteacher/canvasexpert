@@ -216,11 +216,20 @@ def test_ancillary_evidence_gaps_do_not_invalidate_submission_enumeration(tmp_pa
     publisher, result = publish(tmp_path, [ScopeReceipt("assignment.submissions", "10", (
         submission(attachments=[{"id": 3, "filename": "private"}], submission_comments=[{"id": 4}]),), True,
         watermarks={"updated_since": "2026-01-03T00:00:00Z"})])
-    assert set(result.gaps) == {"attachments_pending", "comments_scope_required"}
-    assert result.successful_scopes == (("assignment.submissions", "10"),)
+    # Attachment associations are now published facts under their own scope, so
+    # they no longer appear as a submission-scope gap. Comments still do.
+    assert set(result.gaps) == {"comments_scope_required"}
+    assert result.successful_scopes == (("assignment.submissions", "10"),
+                                        ("assignment.attachments", "10"))
     assert state(publisher).membership_complete
     commit = publisher.store.scan().commits[result.commit_refs[0]]
     assert commit["watermarks"] and commit["gaps"] == []
+    attachments = [f for f in publisher.store.scan().facts.values()
+                   if f["kind"] == "attachment"]
+    assert len(attachments) == 1
+    assert attachments[0]["payload"]["status"] == "pending"
+    assert "filename" not in attachments[0]["payload"]
+    assert state(publisher, "assignment.attachments", "10").membership_complete
 
 
 def test_import_mode_and_wrong_scope_are_refused_before_scope_publication(tmp_path):

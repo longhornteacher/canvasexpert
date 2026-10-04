@@ -24,8 +24,14 @@ PAYLOAD_FIELDS = {
     "attempt_observation": SUBMISSION_FIELDS,
     "comment": frozenset({"assignment_id", "pseudonym", "attempt", "comment_id", "author_pseudonym", "author_role", "text", "created_at"}),
     "override": frozenset({"assignment_id", "override_id", "student_pseudonyms", "section_id", "group_id", "due_at", "unlock_at", "lock_at"}),
+    "attachment": frozenset({"assignment_id", "pseudonym", "attempt", "attachment_key", "original_digest", "media_type", "size", "status", "revision"}),
 }
 FACT_KINDS = frozenset(PAYLOAD_FIELDS)
+# Attachment capture status is a bounded, value-free lifecycle label. ``pending``
+# means the association is known but the original bytes are not yet archived;
+# ``captured`` means a verified private ZIP exists for ``original_digest``.
+ATTACHMENT_STATUSES = frozenset({"pending", "captured", "failed", "too_large",
+                                 "unavailable", "foreign_origin"})
 SCOPE_KINDS = {
     "course.context": frozenset({"course"}),
     "course.roster": frozenset({"student"}),
@@ -37,10 +43,14 @@ SCOPE_KINDS = {
     "assignment.submissions": frozenset({"submission", "attempt_observation"}),
     "assignment.comments": frozenset({"comment"}),
     "assignment.overrides": frozenset({"override"}),
+    "assignment.attachments": frozenset({"attachment"}),
 }
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _ENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
+# Opaque attachment identity: a hash of the Canvas file id (or stable metadata),
+# never the raw id, filename, or download URL.
+_ATTACHMENT_KEY = re.compile(r"^[0-9a-f]{16,64}$")
 _TIMESTAMPS = frozenset({"submitted_at", "updated_at", "created_at", "due_at", "unlock_at", "lock_at", "effective_due_at", "start_at", "end_at", "conclude_at", "term_end_at"})
 _IDS = frozenset({"assignment_id", "comment_id", "override_id", "section_id", "group_id", "module_id", "page_id", "assignment_group_id", "item_id", "content_id"})
 _STRUCTURE_IDS = frozenset({"module_id", "page_id", "assignment_group_id", "item_id", "content_id"})
@@ -162,6 +172,7 @@ def validate_fact(record: dict) -> dict:
         "attempt_observation": {"assignment_id", "pseudonym", "attempt", "submitted_at"},
         "comment": {"assignment_id", "pseudonym", "comment_id", "text"},
         "override": {"assignment_id", "override_id"},
+        "attachment": {"assignment_id", "pseudonym", "attachment_key", "status"},
         "group": {"group_id", "title", "student_pseudonyms"},
         "module": {"module_id", "title", "position", "items"},
         "page": {"page_id", "title"},
@@ -188,6 +199,25 @@ def validate_fact(record: dict) -> dict:
         elif key == "attempt":
             if value is not None and (type(value) is not int or value < 1):
                 _fail("invalid_attempt")
+        elif key == "attachment_key":
+            if not isinstance(value, str) or not _ATTACHMENT_KEY.fullmatch(value):
+                _fail("invalid_attachment_key")
+        elif key == "original_digest":
+            if value is not None:
+                validate_digest(value)
+        elif key == "status":
+            if value not in ATTACHMENT_STATUSES:
+                _fail("invalid_attachment_status")
+        elif key == "size":
+            if type(value) is not int or value < 0:
+                _fail("invalid_size")
+        elif key == "revision":
+            if type(value) is not int or value < 1:
+                _fail("invalid_revision")
+        elif key == "media_type":
+            if (not isinstance(value, str) or len(value) > 160
+                    or any(ord(char) < 32 for char in value)):
+                _fail("invalid_media_type")
         elif key in {"score", "points_possible", "group_weight"}:
             if key == "group_weight" and value is None:
                 _fail()

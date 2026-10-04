@@ -149,6 +149,56 @@ def release_acquisition_owner():
             _OWNER_BINDING = None
 
 
+def run_attachment_capture_chunk(*, limit=None, max_bytes=None) -> dict:
+    """Drain one bounded chunk of the private attachment queue.
+
+    Uses the coordinated Canvas transport (``canvas_stream_get``) and reacquires
+    each fresh URL through CE from the stable file id. One failure never stops
+    sibling jobs; remaining work persists in the machine-local control store.
+    """
+    from api import local_runtime
+    from api.mirror.evidence_jobs import (
+        AttachmentJobStore, MAX_BYTES_PER_CHUNK, MAX_DOWNLOADS_PER_CHUNK,
+        make_original_sink, resolve_canvas_file_url, run_attachment_chunk,
+    )
+    from api.mirror.evidence_paths import control_store_path, local_source_root, source_key_for_origin
+    from api.mirror.evidence_publish import EvidencePublisher
+    root = workspace.workspace_root()
+    if root is None:
+        raise ValueError("workspace_unconfigured")
+    source_key = source_key_for_origin(config.get_canvas_base())
+    jobs = AttachmentJobStore(control_store_path(source_key, root))
+    writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
+    run_id = uuid.uuid4().hex
+    staging = local_source_root(source_key, root) / "staging" / "attachments"
+    with store._vault_transaction(root) as vault:
+        def store_original(job, digest, temp_path):
+            publisher = EvidencePublisher(workspace_root=root, source_key=source_key,
+                                          course_id=job.course_id, vault=vault)
+            make_original_sink(workspace_root=root, publisher=publisher,
+                               writer_key=writer, run_id=run_id)(job, digest, temp_path)
+
+        return run_attachment_chunk(
+            jobs,
+            resolve_url=lambda job: resolve_canvas_file_url(job, canvas_get=canvas_get),
+            stream_get=canvas_stream_get,
+            canvas_origin=config.get_canvas_base(),
+            original_exists=lambda digest: _original_exists(root, digest),
+            store_original=store_original,
+            staging_dir=staging,
+            limit=limit or MAX_DOWNLOADS_PER_CHUNK,
+            max_bytes=max_bytes or MAX_BYTES_PER_CHUNK,
+        )
+
+
+def _original_exists(root, digest) -> bool:
+    from api.mirror.original_archive import blob_path
+    try:
+        return blob_path(root, digest).exists()
+    except Exception:
+        return False
+
+
 def acquisition_owner_worker(stop_event):
     """Heartbeat independently of acquisition duration and the 900s cadence."""
     from api.mirror.acquisition_owner import HEARTBEAT_INTERVAL, STALE_AFTER
@@ -175,18 +225,28 @@ def _publish_acquisition(receipt):
     """Publish the same private rows acquired for temporary legacy projections."""
     from api import local_runtime
     from api.mirror.evidence_acquisition import publish_course_receipt
-    from api.mirror.evidence_paths import source_key_for_origin
+    from api.mirror.evidence_jobs import AttachmentJobStore, enqueue_from_receipt
+    from api.mirror.evidence_paths import control_store_path, source_key_for_origin
     from api.mirror.evidence_publish import EvidencePublisher
     root = workspace.workspace_root()
     if root is None:
         raise ValueError("workspace_unconfigured")
     writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
+    source_key = source_key_for_origin(config.get_canvas_base())
     with store._vault_transaction(root) as vault:
         publisher = EvidencePublisher(workspace_root=root,
-            source_key=source_key_for_origin(config.get_canvas_base()),
-            course_id=receipt.course_id, vault=vault)
-        return publish_course_receipt(publisher=publisher, receipt=receipt,
-                                      writer_key=writer, run_id=uuid.uuid4().hex)
+            source_key=source_key, course_id=receipt.course_id, vault=vault)
+        result = publish_course_receipt(publisher=publisher, receipt=receipt,
+                                        writer_key=writer, run_id=uuid.uuid4().hex)
+        # Queue durable attachment capture from the same receipt; the private
+        # job store is machine-local and never a synchronized authority.
+        try:
+            jobs = AttachmentJobStore(control_store_path(source_key, root))
+            enqueue_from_receipt(jobs, receipt, source_key=source_key,
+                                 pseudonym_for=lambda raw: vault.get_or_assign(str(raw)))
+        except Exception:
+            operational_log.emit("mirror.attachment_enqueue", "failed")
+        return result
 
 
 def due_passes(state: dict, now_iso: str, *,

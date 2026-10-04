@@ -13,8 +13,10 @@ collection's complete flag must include every nested membership/detail fetch.
 Scope ids are the course id or exact assignment id respectively. Comments must
 have their own pagination receipt: embedded submission_comments do not prove
 comment membership. A filtered acquisition uses mode='delta', never 'snapshot'.
-Unsupported lifecycle fields and attachment bytes remain explicit gaps. No raw
-receipt is persisted here.
+Attachment bytes are not acquired here: each observed attachment publishes an
+opaque ``assignment.attachments`` association fact (key, media type, size,
+status) that the private job queue later republishes with a verified digest.
+Unsupported lifecycle fields remain explicit gaps. No raw receipt is persisted here.
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ from datetime import datetime
 import hashlib
 
 from api import feedback_scrub
-from api.mirror.evidence_publish import EvidencePublisher, PublicationRefused, _utc_stamp
+from api.mirror.evidence_publish import EvidencePublisher, PublicationRefused, _utc_now, _utc_stamp
 from api.mirror.evidence_queries import publish_reader_contract
 from api.mirror.evidence_schema import (
     EvidenceValidationError, SCOPE_KINDS, canonical_bytes, validate_component,
@@ -82,6 +84,66 @@ def _submission(publisher, row, assignment_id, pseudo):
     if "cached_due_date" in row or "effective_due_at" in row:
         payload["effective_due_at"] = _utc_stamp(row.get("effective_due_at", row.get("cached_due_date")))
     return payload
+
+
+def _attachment_descriptor(item):
+    """Extract only the fields needed for an opaque association; never a URL."""
+    if not isinstance(item, dict):
+        return None
+    file_id = str(item.get("id") or item.get("file_id") or "")
+    filename = str(item.get("filename") or item.get("display_name") or "")
+    try:
+        size = max(0, int(item.get("size") or 0))
+    except (TypeError, ValueError):
+        size = 0
+    media_type = str(item.get("content-type") or item.get("content_type") or "")[:160]
+    if not file_id and not filename:
+        return None
+    return {"file_id": file_id, "filename": filename, "size": size,
+            "media_type": media_type}
+
+
+def _attachment_key(descriptor):
+    """Opaque, stable identity: a hash of the Canvas file id or stable metadata."""
+    if descriptor["file_id"]:
+        return hashlib.sha256(f"file:{descriptor['file_id']}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(canonical_bytes({
+        "filename": descriptor["filename"], "size": descriptor["size"],
+        "media_type": descriptor["media_type"]})).hexdigest()
+
+
+def iter_attachment_descriptors(observation):
+    """Yield ``(attempt, key, media_type, size, filename, file_id)`` per attachment.
+
+    Shared by safe association publication and the private job queue so both
+    derive the same opaque key. The filename and raw file id are private and
+    never published; the file id lets the resolver reacquire a fresh URL.
+    """
+    if not isinstance(observation, dict):
+        return
+    for item in observation.get("attachments") or []:
+        descriptor = _attachment_descriptor(item)
+        if descriptor is None:
+            continue
+        yield (observation.get("attempt"), _attachment_key(descriptor),
+               descriptor["media_type"] or "application/octet-stream",
+               descriptor["size"], descriptor["filename"], descriptor["file_id"])
+
+
+def _attachment_facts(publisher, assignment_id, pseudo, observation, gaps):
+    """Yield one safe association fact per attachment; never a filename or URL.
+
+    The original bytes are captured later by the private job queue, which
+    republishes the same entity key with ``status='captured'`` and a digest.
+    """
+    for attempt, key, media_type, size, _filename, _file_id in iter_attachment_descriptors(observation):
+        payload = {
+            "assignment_id": assignment_id, "pseudonym": pseudo,
+            "attempt": attempt,
+            "attachment_key": key, "original_digest": None,
+            "media_type": media_type, "size": size, "status": "pending", "revision": 1,
+        }
+        yield "attachment", f"attachment:{assignment_id}:{pseudo}:{attempt}:{key}", payload, frozenset()
 
 
 def _rows(publisher, scope, row, gaps):
@@ -226,9 +288,12 @@ def _rows(publisher, scope, row, gaps):
                 yield "attempt_observation", key, payload, observed_html
             except (PublicationRefused, EvidenceValidationError):
                 gaps.append("invalid_attempt")
-        if row.get("attachments") or any(isinstance(h, dict) and h.get("attachments")
-                                          for h in row.get("submission_history") or []):
-            gaps.append("attachments_pending")
+            # Attachment associations publish under their own scope so a missing
+            # original never blocks submission membership. The private job queue
+            # later republishes the same key with a captured digest.
+            for kind, key, payload, html_fields in _attachment_facts(
+                    publisher, sid, pseudo, observation, gaps):
+                yield kind, key, payload, html_fields
         if row.get("submission_comments"):
             gaps.append("comments_scope_required")
     elif name == "assignment.comments":
@@ -264,6 +329,43 @@ def _rows(publisher, scope, row, gaps):
         yield "override", f"override:{sid}:{oid}", payload, frozenset()
 
 
+def publish_captured_attachment(*, publisher: EvidencePublisher, job,
+                                digest: str, writer_key: str, run_id: str) -> str:
+    """Republish one attachment association with its verified original digest.
+
+    The private job queue calls this after archiving the exact bytes. The safe
+    fact carries only the opaque key, digest, media type, size, and status; the
+    filename and any URL stay in the private association record.
+    """
+    payload = {
+        "assignment_id": job.assignment_id, "pseudonym": job.pseudonym,
+        "attempt": job.attempt, "attachment_key": job.attachment_key,
+        "original_digest": digest, "media_type": job.media_type,
+        "size": job.size, "status": "captured", "revision": 1,
+    }
+    key = f"attachment:{job.assignment_id}:{job.pseudonym}:{job.attempt}:{job.attachment_key}"
+    _, digest = publisher._fact("attachment", key, payload)
+    snapshot = publisher.store.scan()
+    scope_key = (publisher.source_key, publisher.course_id, "assignment.attachments",
+                 job.assignment_id)
+    state = snapshot.scopes.get(scope_key)
+    # Replace only this entity's prior (pending) ref; keep sibling attachments.
+    refs = sorted({ref for ref in (state.current_refs if state else ())
+                   if snapshot.facts.get(ref, {}).get("entity_key") != key} | {digest})
+    members = sorted(set(state.member_keys if state else ()) | {key})
+    record = {
+        "schema_version": 1, "source_key": publisher.source_key,
+        "course_id": publisher.course_id, "scope": "assignment.attachments",
+        "scope_id": job.assignment_id, "writer_key": writer_key, "run_id": run_id,
+        "parents": list(state.heads if state else ()),
+        "acquisition_started_at": _utc_now(),
+        "acquisition_finished_at": _utc_now(),
+        "mode": "snapshot", "membership_complete": bool(state and state.membership_complete),
+        "record_refs": refs, "member_keys": members, "gaps": [], "watermarks": {},
+    }
+    return publisher.store.publish_commit(record)
+
+
 def publish_course_receipt(*, publisher: EvidencePublisher,
                            receipt: CourseAcquisitionReceipt,
                            writer_key: str, run_id: str) -> AcquisitionPublication:
@@ -296,6 +398,11 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
     publish_reader_contract(workspace.canvas_mirror_evidence_root(publisher.workspace_root))
     heads = {key: list(state.heads) for key, state in publisher.store.scan().scopes.items()}
     all_facts, commits, all_gaps, success = set(), [], [], []
+    # Attachment associations live in their own scope so a missing original never
+    # blocks submission membership; they are published after the scope loop.
+    attachment_refs: dict[str, list[str]] = {}
+    attachment_members: dict[str, list[str]] = {}
+    attachment_complete: dict[str, bool] = {}
     for scope in receipt.scopes:
         gaps, refs, members, current, student_payloads = [], [], [], {}, {}
         if scope.scope not in SCOPE_KINDS:
@@ -336,6 +443,11 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
                         gaps.append(exc.code)
                         continue
                     all_facts.add(digest)
+                    if kind == "attachment":
+                        attachment_refs.setdefault(sid, []).append(digest)
+                        attachment_members.setdefault(sid, []).append(key)
+                        attachment_complete[sid] = attachment_complete.get(sid, True) and scope.complete
+                        continue
                     if kind == "student":
                         if key in current:
                             refs[:] = [ref for ref in refs if ref != current[key]]
@@ -382,5 +494,30 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
         if proven:
             success.append((scope.scope, sid))
         all_gaps.extend(gaps)
+    # Publish one attachment scope per assignment that observed attachments.
+    for aid in sorted(attachment_refs):
+        record = {
+            "schema_version": 1, "source_key": publisher.source_key,
+            "course_id": publisher.course_id, "scope": "assignment.attachments",
+            "scope_id": aid, "writer_key": writer_key, "run_id": run_id,
+            "parents": heads.get((publisher.source_key, publisher.course_id,
+                                  "assignment.attachments", aid), []),
+            "acquisition_started_at": started, "acquisition_finished_at": finished,
+            "mode": "snapshot",
+            "membership_complete": bool(attachment_complete.get(aid)),
+            "record_refs": sorted(set(attachment_refs[aid])),
+            "member_keys": sorted(set(attachment_members[aid])),
+            "gaps": [], "watermarks": {},
+        }
+        try:
+            validate_commit(record)
+            digest = publisher.store.publish_commit(record)
+        except (EvidenceValidationError, PublicationRefused, AttributeError, TypeError):
+            all_gaps.append("commit_refused")
+            continue
+        commits.append(digest)
+        heads[(publisher.source_key, publisher.course_id, "assignment.attachments", aid)] = [digest]
+        if attachment_complete.get(aid):
+            success.append(("assignment.attachments", aid))
     return AcquisitionPublication(tuple(sorted(all_facts)), tuple(commits),
                                   tuple(sorted(set(all_gaps))), tuple(success))
