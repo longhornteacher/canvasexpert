@@ -24,6 +24,7 @@ VIEW_COLUMNS = {
     "current_submissions": ("source_key", "course_id", "assignment_id", "pseudonym", "attempt", "entity_key", "fact_ref", "payload"),
     "attempt_history": ("source_key", "course_id", "assignment_id", "pseudonym", "attempt", "submitted_at", "established_submitted_at", "entity_key", "fact_ref", "payload"),
     "attachment_associations": ("source_key", "course_id", "assignment_id", "pseudonym", "attempt", "attachment_key", "entity_key", "fact_ref", "payload"),
+    "attachment_extractions": ("source_key", "course_id", "assignment_id", "pseudonym", "attempt", "attachment_key", "original_digest", "entity_key", "fact_ref", "payload"),
     "attachment_blocks": ("source_key", "course_id", "assignment_id", "fact_ref", "payload"),
     "scope_status": ("source_key", "course_id", "scope", "scope_id", "status", "membership_complete", "heads", "pending_commits", "ambiguous_entities", "last_success_at"),
     "comparison_evidence": ("source_key", "course_id", "assignment_id", "fact_ref", "payload"),
@@ -124,6 +125,7 @@ class EvidenceIndex:
         CREATE VIEW IF NOT EXISTS current_submissions AS SELECT DISTINCT f.source_key,f.course_id,f.assignment_id,f.pseudonym,f.attempt,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='submission';
         CREATE VIEW IF NOT EXISTS attempt_history AS SELECT f.source_key,f.course_id,f.assignment_id,f.pseudonym,f.attempt,f.submitted_at,r.established_submitted_at,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN history_refs r USING(fact_ref) WHERE f.kind='attempt_observation';
         CREATE VIEW IF NOT EXISTS attachment_associations AS SELECT DISTINCT f.source_key,f.course_id,f.assignment_id,f.pseudonym,f.attempt,json_extract(f.payload,'$.attachment_key') attachment_key,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='attachment';
+        CREATE VIEW IF NOT EXISTS attachment_extractions AS SELECT DISTINCT f.source_key,f.course_id,f.assignment_id,f.pseudonym,f.attempt,json_extract(f.payload,'$.attachment_key') attachment_key,json_extract(f.payload,'$.original_digest') original_digest,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='attachment_extraction';
         CREATE VIEW IF NOT EXISTS scope_status AS SELECT * FROM scope_coverage;
         """)
         for kind in ("group", "module", "page", "assignment_group"):

@@ -25,6 +25,7 @@ PAYLOAD_FIELDS = {
     "comment": frozenset({"assignment_id", "pseudonym", "attempt", "comment_id", "author_pseudonym", "author_role", "text", "created_at"}),
     "override": frozenset({"assignment_id", "override_id", "student_pseudonyms", "section_id", "group_id", "due_at", "unlock_at", "lock_at"}),
     "attachment": frozenset({"assignment_id", "pseudonym", "attempt", "attachment_key", "original_digest", "media_type", "size", "status", "revision"}),
+    "attachment_extraction": frozenset({"assignment_id", "pseudonym", "attempt", "attachment_key", "original_digest", "extractor_version", "extraction_schema_version", "privacy_policy_revision", "availability", "method", "blocks", "partial_reasons", "processed_units", "total_units"}),
 }
 FACT_KINDS = frozenset(PAYLOAD_FIELDS)
 # Attachment capture status is a bounded, value-free lifecycle label. ``pending``
@@ -32,6 +33,21 @@ FACT_KINDS = frozenset(PAYLOAD_FIELDS)
 # ``captured`` means a verified private ZIP exists for ``original_digest``.
 ATTACHMENT_STATUSES = frozenset({"pending", "captured", "failed", "too_large",
                                  "unavailable", "foreign_origin"})
+# Extraction result vocabulary, mirrored from api.mirror.extraction.schema so the
+# strict safe-record validator stays a dependency-free leaf.
+EXTRACTION_BLOCK_KINDS = frozenset({
+    "paragraph", "heading", "list_item", "table_cell", "table_row",
+    "slide_text", "slide_notes", "sheet_cell", "formula", "cached_value",
+    "pdf_page", "image_text", "text_line", "code", "comment",
+})
+EXTRACTION_AVAILABILITY = frozenset({"complete", "partial", "empty", "unavailable"})
+EXTRACTION_METHODS = frozenset({"native", "ocr", "mixed", "none"})
+EXTRACTION_PARTIAL_REASONS = frozenset({
+    "no_extractable_text", "corruption", "encryption", "unsupported_type",
+    "missing_dependency", "timeout", "truncated", "resource_limit",
+    "visual_content_unprocessed", "recognition_gap", "page_failed",
+    "uncached_formula", "external_relation_skipped",
+})
 SCOPE_KINDS = {
     "course.context": frozenset({"course"}),
     "course.roster": frozenset({"student"}),
@@ -44,6 +60,7 @@ SCOPE_KINDS = {
     "assignment.comments": frozenset({"comment"}),
     "assignment.overrides": frozenset({"override"}),
     "assignment.attachments": frozenset({"attachment"}),
+    "assignment.extractions": frozenset({"attachment_extraction"}),
 }
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -173,6 +190,7 @@ def validate_fact(record: dict) -> dict:
         "comment": {"assignment_id", "pseudonym", "comment_id", "text"},
         "override": {"assignment_id", "override_id"},
         "attachment": {"assignment_id", "pseudonym", "attachment_key", "status"},
+        "attachment_extraction": {"assignment_id", "pseudonym", "attachment_key", "original_digest", "availability", "method", "blocks"},
         "group": {"group_id", "title", "student_pseudonyms"},
         "module": {"module_id", "title", "position", "items"},
         "page": {"page_id", "title"},
@@ -278,6 +296,53 @@ def validate_fact(record: dict) -> dict:
                         _fail()
         elif key == "title" and not isinstance(value, str):
             _fail()
+        elif key == "blocks":
+            if not isinstance(value, list):
+                _fail()
+            block_ids = []
+            for block in value:
+                _object(block, {"block_id", "kind", "text", "locator", "confidence", "method", "formatting"},
+                        {"block_id", "kind", "text"})
+                if not isinstance(block["block_id"], str) or not block["block_id"]:
+                    _fail("invalid_block_id")
+                block_ids.append(block["block_id"])
+                if not isinstance(block["kind"], str) or block["kind"] not in EXTRACTION_BLOCK_KINDS:
+                    _fail("invalid_block_kind")
+                if not isinstance(block["text"], str):
+                    _fail("invalid_block_text")
+                if block.get("method") is not None and block["method"] not in EXTRACTION_METHODS:
+                    _fail("invalid_method")
+                if block.get("confidence") is not None:
+                    confidence = block["confidence"]
+                    if (type(confidence) not in {int, float} or not math.isfinite(confidence)
+                            or not 0.0 <= confidence <= 1.0):
+                        _fail("invalid_confidence")
+                if block.get("locator") is not None:
+                    _object(block["locator"], set(block["locator"]), ())
+                    for locator_value in block["locator"].values():
+                        if isinstance(locator_value, bool) or not isinstance(locator_value, (str, int, float, type(None))):
+                            _fail("invalid_locator")
+                if block.get("formatting") is not None:
+                    _object(block["formatting"], set(block["formatting"]), ())
+                    for formatting_value in block["formatting"].values():
+                        if isinstance(formatting_value, bool) or not isinstance(formatting_value, (str, int, float, type(None))):
+                            _fail("invalid_formatting")
+            if len(set(block_ids)) != len(block_ids):
+                _fail("duplicate_block_id")
+        elif key == "partial_reasons":
+            _strings(value, validator=lambda entry: None if entry in EXTRACTION_PARTIAL_REASONS else _fail("invalid_partial_reason"))
+        elif key == "availability":
+            if value not in EXTRACTION_AVAILABILITY:
+                _fail("invalid_availability")
+        elif key == "method":
+            if value not in EXTRACTION_METHODS:
+                _fail("invalid_method")
+        elif key in {"extraction_schema_version", "privacy_policy_revision"}:
+            if type(value) is not int or value < 1:
+                _fail("invalid_revision")
+        elif key in {"processed_units", "total_units"}:
+            if type(value) is not int or value < 0:
+                _fail("invalid_counts")
         elif value is not None and not isinstance(value, str):
             _fail()
     return deepcopy(record)

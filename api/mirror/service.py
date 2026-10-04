@@ -199,6 +199,57 @@ def _original_exists(root, digest) -> bool:
         return False
 
 
+def run_extraction_chunk(*, limit: int = 20) -> dict:
+    """Extract captured originals lacking a current extraction, one bounded chunk.
+
+    Runs each adapter in a supervised worker process; a missing dependency or
+    timeout marks that file's gap and continues siblings. Results are scrubbed
+    and published through the same privacy boundary as other safe evidence.
+    """
+    from api import local_runtime
+    from api.mirror.evidence_extraction import ExtractionCache, extract_captured_attachments
+    from api.mirror.evidence_jobs import AttachmentJobStore
+    from api.mirror.evidence_paths import control_store_path, local_source_root, source_key_for_origin
+    from api.mirror.evidence_publish import EvidencePublisher
+    from api.mirror.extraction.supervisor import run_adapter
+    from api.mirror.original_archive import recover_original
+    root = workspace.workspace_root()
+    if root is None:
+        raise ValueError("workspace_unconfigured")
+    source_key = source_key_for_origin(config.get_canvas_base())
+    jobs = AttachmentJobStore(control_store_path(source_key, root))
+    cache = ExtractionCache(local_source_root(source_key, root) / "extraction.sqlite3")
+    writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
+    run_id = uuid.uuid4().hex
+    with store._vault_transaction(root) as vault:
+        def publisher_for(course_id):
+            return EvidencePublisher(workspace_root=root, source_key=source_key,
+                                     course_id=course_id, vault=vault)
+
+        def adapter_runner(adapter_name, data, filename):
+            # Stage the recovered bytes so the supervised worker reads a path.
+            staging = local_source_root(source_key, root) / "staging" / "extraction"
+            staging.mkdir(parents=True, exist_ok=True)
+            import tempfile
+            from pathlib import Path
+            with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix or ".bin",
+                                             delete=False, dir=str(staging)) as handle:
+                handle.write(data)
+                path = Path(handle.name)
+            try:
+                return run_adapter(adapter_name, path)
+            finally:
+                path.unlink(missing_ok=True)
+
+        outcome = extract_captured_attachments(
+            publisher_for=publisher_for, jobs=jobs, cache=cache,
+            recover_original=lambda digest: recover_original(root, digest),
+            run_adapter=adapter_runner, writer_key=writer, run_id=run_id, limit=limit)
+        return {"processed": outcome.processed, "published": outcome.published,
+                "cached": outcome.cached, "failed": outcome.failed,
+                "gaps": list(outcome.gaps)}
+
+
 def acquisition_owner_worker(stop_event):
     """Heartbeat independently of acquisition duration and the 900s cadence."""
     from api.mirror.acquisition_owner import HEARTBEAT_INTERVAL, STALE_AFTER

@@ -280,6 +280,17 @@ class AttachmentJobStore:
                 "pending": counts.get("pending", 0) + counts.get("failed", 0),
                 "captured": counts.get("captured", 0)}
 
+    def captured_jobs(self, *, limit: int = 20) -> tuple[AttachmentJob, ...]:
+        """Return captured jobs with a verified digest, oldest first."""
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise JobError("invalid_limit")
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM attachment_jobs WHERE status='captured' "
+                "AND digest IS NOT NULL ORDER BY created_at, job_id LIMIT ?",
+                (limit,)).fetchall()
+        return tuple(_row_to_job(row) for row in rows)
+
 
 def _origin_matches(url: str, origin: str) -> bool:
     from urllib.parse import urlsplit
