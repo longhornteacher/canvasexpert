@@ -19,7 +19,7 @@ def test_live_mcp_surface_shape():
     from api.mcp_server import server
 
     live = contract.live_contract(server.mcp)
-    assert len(live["tools"]) == 67
+    assert len(live["tools"]) == 62
     assert "confirm_sis_grade_bridge_passback" not in {
         tool["name"] for tool in live["tools"]
     }
@@ -31,9 +31,9 @@ def test_mcp_server_doc_matches_the_live_registry():
 
     It read a stale tool count above a mismatched table while the
     registry held more tools than the document: every number in that sentence was wrong, they
-    disagreed with each other, and two shipped tools (`get_writing_history`,
-    `list_theme_art`) had no row at all. Nothing failed, because no test read the
-    doc. Pin the stated version, the stated count, and the table itself to the
+    disagreed with each other, and a shipped tool (`list_theme_art`) had no row
+    at all. Nothing failed, because no test read the doc. Pin the stated version,
+    the stated count, and the table itself to the
     live registry, so adding a tool stays red until the doc gains its row.
     """
     from api.mcp_server import server

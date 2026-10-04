@@ -34,15 +34,8 @@ EXPECTED = [
     ('/api/connections/chatgpt/disconnect', ('POST',)),
     ('/api/connections/health', ('GET',)),
     ('/api/course-detail', ('GET',)),
-    ('/api/course-catalog', ('GET',)),
-    ('/api/course-catalog/refresh', ('POST',)),
     ('/api/course-folder', ('GET',)),
     ('/api/courses', ('GET',)),
-    ('/api/dailywriting/ingest-canvas', ('POST',)),
-    ('/api/download-contract', ('GET',)),
-    ('/api/download-root', ('GET',)),
-    ('/api/files', ('GET',)),
-    ('/api/groups', ('GET',)),
     ('/api/inbox-files', ('GET',)),
     ('/api/modules', ('GET',)),
     ('/api/operations', ('GET',)),
@@ -62,18 +55,12 @@ EXPECTED = [
     ('/api/portfolio/from-nq-csv', ('POST',)),
     ('/api/portfolio/merged', ('POST',)),
     ('/api/push/preview', ('POST',)),
-    ('/api/routines', ('GET',)),
-    ('/api/routines/run', ('POST',)),
-    ('/api/routines/save', ('POST',)),
     ('/api/student-packet/stream', ('GET',)),
     ('/api/students', ('GET',)),
     ('/api/students/monitor', ('POST',)),
-    ('/api/students/monitored', ('GET',)),
     ('/api/support-bundle', ('POST',)),
     ('/api/temp-upload', ('POST',)),
-    ('/api/tier-tags', ('GET',)),
     ('/api/tier-tags', ('POST',)),
-    ('/api/tier-colors', ('GET',)),
     ('/api/tier-colors', ('POST',)),
     ('/api/update/apply', ('POST',)),
     ('/api/update/cancel', ('POST',)),
@@ -86,7 +73,6 @@ EXPECTED = [
     ('/docs/oauth2-redirect', ('GET',)),
     ('/openapi.json', ('GET',)),
     ('/redoc', ('GET',)),
-    ('/routines', ('GET',)),
     ('/settings', ('GET',)),
     ('/receipts/{receipt_id}', ('GET',)),
     ('/settings/canvas', ('POST',)),
@@ -108,7 +94,6 @@ EXPECTED = [
     ('/api/names/vault-conflict/compare', ('POST',)),
     ('/api/names/vault-conflict/quarantine', ('POST',)),
     ('/api/names/who-is-who', ('POST',)),
-    ('/api/open-file', ('POST',)),
     ('/api/roster', ('GET',)),
     ('/api/roster/bulk', ('POST',)),
     ('/api/roster/changes/acknowledge', ('POST',)),
@@ -117,15 +102,10 @@ EXPECTED = [
     ('/api/roster/score-matrix', ('POST',)),
     ('/api/roster/student', ('POST',)),
     ('/roster', ('GET',)),
-    ('/api/readiness', ('GET',)),
     ('/api/readiness/probe', ('POST',)),
     ('/api/receipts', ('GET',)),
     ('/api/receipts/{receipt_id}', ('GET',)),
     ('/api/work', ('GET',)),
-    ('/api/work/scan', ('POST',)),
-    ('/api/work/{job_id}/complete', ('POST',)),
-    ('/api/work/{job_id}/ignore', ('POST',)),
-    ('/api/work/{job_id}/snooze', ('POST',)),
 ]
 
 
@@ -141,7 +121,11 @@ def _current_routes():
 
 def test_route_contract():
     """The full (path, methods) surface must match the frozen baseline."""
-    assert _current_routes() == sorted(EXPECTED)
+    actual = _current_routes()
+    assert actual == sorted(EXPECTED), (
+        f"missing from current app: {sorted(set(EXPECTED) - set(actual))}; "
+        f"unexpected in current app: {sorted(set(actual) - set(EXPECTED))}"
+    )
 
 
 @pytest.mark.parametrize("path", ["/powergrader", "/feedback-expert", "/api/powergrader/session/x"])

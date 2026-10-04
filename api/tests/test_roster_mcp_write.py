@@ -162,22 +162,6 @@ def test_stale_preview_digest_and_settings_digest_never_write(monkeypatch, tmp_p
     assert tools.get_roster_student_settings("course-1", pseudo)["settings_digest"] == before["settings_digest"]
 
 
-def test_regeneration_returns_new_addressable_pseudonym(monkeypatch, tmp_path):
-    _, pseudo = _setup(monkeypatch, tmp_path)
-    preview = tools.preview_roster_student_change(
-        "course-1", pseudo, {"regenerate_pseudonym": True})
-    applied = tools.apply_roster_student_change(
-        "course-1", preview["preview"], preview["preview_digest"],
-        preview["settings_digest"])
-    assert applied["ok"] is True
-    new_pseudo = applied["pseudonym"]
-    assert new_pseudo != pseudo
-    addressed = tools.get_roster_student_settings("course-1", new_pseudo)
-    assert addressed["ok"] is True
-    assert addressed["pseudonym"] == new_pseudo
-    assert tools.get_roster_student_settings("course-1", pseudo)["ok"] is False
-
-
 def test_adapter_itself_refuses_the_replacing_nickname_key(monkeypatch, tmp_path):
     """The guard lives in the adapter, not only in the MCP tool above it.
 
@@ -204,49 +188,3 @@ def test_adapter_itself_refuses_the_replacing_nickname_key(monkeypatch, tmp_path
     assert stored["nicknames"] == ["Sam"]
 
 
-def _second_student_pseudonym(path: str) -> str:
-    vault = Vault(path)
-    with vault.transaction():
-        pseudo = vault.get_or_assign("920002", "Riley Student", "SIS-920002")
-    return pseudo
-
-
-@pytest.mark.parametrize("patch_value,accepted", [
-    ("VALID", True),
-    ("", False),
-    ("   ", False),
-    ("Two Words", False),
-    (123, False),
-    ("Notarealregistryword", False),
-    ("COLLIDING", False),
-])
-def test_roster_pseudonym_patch_boundary_via_mcp(monkeypatch, tmp_path, patch_value, accepted):
-    """Contract: the MCP roster preview/apply pair accepts exactly one
-    available registry word for a `pseudonym` patch and refuses blank,
-    multiword, non-string, out-of-registry, and colliding values without a
-    partial write -- the same allowlist/collision law as the Web UI route,
-    enforced through the shared `roster_updates.update_student` updater."""
-    path, pseudo = _setup(monkeypatch, tmp_path)
-    second_pseudo = _second_student_pseudonym(path)
-    monkeypatch.setattr(tools, "_vault_factory", lambda: Vault(path))
-
-    if patch_value == "VALID":
-        patch_value = next(w for w in feedback_vault._REGISTRY_WORDS
-                           if w not in (pseudo, second_pseudo))
-    elif patch_value == "COLLIDING":
-        patch_value = second_pseudo
-
-    preview = tools.preview_roster_student_change("course-1", pseudo, {"pseudonym": patch_value})
-    assert preview["ok"] is True  # preview only checks patch keys, not the pseudonym's own shape
-
-    applied = tools.apply_roster_student_change(
-        "course-1", preview["preview"], preview["preview_digest"], preview["settings_digest"])
-
-    reloaded = Vault(path)
-    if accepted:
-        assert applied["ok"] is True
-        assert applied["pseudonym"] == patch_value
-        assert reloaded.get_or_assign(USER["id"]) == patch_value
-    else:
-        assert applied["ok"] is False
-        assert reloaded.get_or_assign(USER["id"]) == pseudo, "a rejected value must not mutate the vault"

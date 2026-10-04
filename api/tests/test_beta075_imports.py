@@ -136,7 +136,7 @@ for filename, names in owners.items():
 
     route_paths = {route.path for route in app.routes}
     assert "/api/activity" not in route_paths
-    assert "/api/routines" in route_paths
+    assert "/api/routines" not in route_paths
     assert "/api/work" in route_paths
     assert "/api/receipts" in route_paths
     assert "/api/operations" in route_paths

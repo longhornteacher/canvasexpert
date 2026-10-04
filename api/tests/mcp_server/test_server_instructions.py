@@ -9,7 +9,6 @@ because the tail is what gets cut.
 """
 import asyncio
 import json
-from contextlib import nullcontext
 
 from api import feedback_vault
 from api.mcp_server import server, tools
@@ -70,8 +69,9 @@ INSTRUCTION_BUDGET = 2700
 # Raised by 986 measured characters for the three durable score-rule/ledger
 # tools added in schema v73; the descriptions and result summaries remain short.
 # Raised to the measured 24,279 for get_scoring_preview (schema v74, +331).
-# Schema v75 retires two missing-sweep tools; measured wire size is 23,700.
-LISTING_BUDGET = 23700
+# Schema v76 retires writing-history and learning-objective tools; the live
+# v76 listing measures 21,762 characters.
+LISTING_BUDGET = 21762
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
@@ -81,7 +81,6 @@ RESULT_NEXT_TOOLS = {
     "refresh_scoring_session",
     "preview_sis_grade_bridge",
     "preview_sis_grade_bridge_reconciliation",
-    "preview_learning_objective",
     "preview_roster_student_change",
     "preview_content_push",
     "preview_differentiated_quiz_push",
@@ -258,10 +257,7 @@ def test_first_lines_disclose_preview_and_canvas_write_boundaries():
         for name, description in descriptions.items()
     }
 
-    for name in (
-        "preview_learning_objective",
-        "preview_roster_student_change",
-    ):
+    for name in ("preview_roster_student_change",):
         assert "without writing" in first_lines[name]
     for name in ("preview_sis_grade_bridge", "preview_content_push"):
         assert "persist" in first_lines[name].casefold()
@@ -291,7 +287,7 @@ def test_the_schemas_themselves_survive_the_strip():
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 67
+    assert len(listed) == 62
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -343,6 +339,7 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
         "assignment_name": "Quiz",
         "assignment_id": "assignment-1",
         "created": "2026-01-01T08:00:00",
+        "storage_model": "shared_work.v1",
         "scoring_basis": {"source": "canvas_rubric", "label": "Test Rubric"},
         "scoring_rubric_text": "Award credit for a correct explanation.",
         "students": [{"user_id": "900001", "status": "pending"}],
@@ -363,15 +360,14 @@ def test_scoring_packet_rubric_label_passes_final_gate_and_identity_name_fails(
         }],
     }), encoding="utf-8")
     from api.powergrader import session_store
-    sessions = {session["session_id"]: session}
-    monkeypatch.setattr(session_store, "load_session", lambda session_id: sessions.get(session_id))
-    monkeypatch.setattr(session_store, "save_session",
-                        lambda item: sessions.__setitem__(item["session_id"], item))
-    monkeypatch.setattr(session_store, "session_lock", lambda _sid: nullcontext())
+    from api.shared_work import SharedWorkStore
+    monkeypatch.setattr(session_store, "SharedWorkStore",
+                        lambda: SharedWorkStore(root=str(tmp_path / "workspace")))
+    session_store.activate_scoring_session(session)
     wire = server._compact(tools.get_scoring_packet("session-1"))
     result = json.loads(wire)
 
-    assert result["ok"] is True
+    assert result["ok"] is True, result
     assert result["rubric"] == {"label": "Test Rubric", "included": True}
     assert "Award credit for a correct explanation." in result["contract"]
     assert result["included_context"] is True
@@ -395,9 +391,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 67
-    assert len(_synthetic_mcp["calls"]) == 67
-    assert len(_synthetic_mcp["gated"]) == 67
+    assert len(results) == 62
+    assert len(_synthetic_mcp["calls"]) == 62
+    assert len(_synthetic_mcp["gated"]) == 62
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

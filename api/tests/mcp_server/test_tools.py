@@ -500,7 +500,6 @@ def test_get_modules_never_cataloged_detail(monkeypatch, _set_active_courses, _m
     document["modules"]["last_success_at"] = ""
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    monkeypatch.setattr(tools.mirror_queries, "_serve_max_age_hours", lambda: 10**9)
 
     result = tools.get_modules("111")
     assert result["ok"] is True
@@ -516,7 +515,6 @@ def test_get_modules_empty_but_cataloged_detail(monkeypatch, _set_active_courses
     document = _module_catalog_document([])  # state="current" with last_success_at
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    monkeypatch.setattr(tools.mirror_queries, "_serve_max_age_hours", lambda: 10**9)
 
     result = tools.get_modules("111")
     assert result["ok"] is True
@@ -587,7 +585,7 @@ def test_get_authoring_contract_unknown_kind_returns_structured_error():
     assert result == {
         "ok": False,
         "error": ("unknown kind 'essay'; expected one of: "
-                  "quiz, assignment, page, learning_objective"),
+                  "quiz, assignment, page"),
     }
 
 
@@ -615,23 +613,6 @@ def test_get_authoring_contract_matches_the_one_canonical_repo_file():
             assert result["contract"].startswith(canonical_text)
 
 
-def test_download_contract_route_returns_the_same_bytes_as_the_mcp_tool():
-    from api.webui.routes import library
-
-    kind_by_download_name = {
-        "QuizForge_Base": "quiz",
-        "AssignmentForge_Base": "assignment",
-        "PageForge_Base": "page",
-    }
-    for download_name, kind in kind_by_download_name.items():
-        response = library.api_download_contract(download_name)
-        with open(response.path, encoding="utf-8") as f:
-            downloaded_text = f.read()
-        mcp_result = tools.get_authoring_contract(kind)
-        assert mcp_result["ok"] is True
-        assert mcp_result["contract"].startswith(downloaded_text)
-
-
 # --- get_product_guide (no course_id, no student data -> no gates) ----------
 
 _GUIDE_TOPIC_SUMMARIES = {
@@ -643,7 +624,6 @@ _GUIDE_TOPIC_SUMMARIES = {
     "troubleshooting": "Connection and workflow troubleshooting (Appendix F).",
     "full": "Complete CanvasAgent guide, Appendices A through F.",
     "writing_timeline": "Tracked-assignment timeline behavior and coverage.",
-    "writing_record": "Longitudinal writing evidence and current limits.",
     "tools": "All MCP tools grouped by teacher-facing job.",
 }
 
@@ -674,8 +654,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     expected_groups = {
         "Course discovery and catalog", "Shared work items", "Create and Forge",
         "Push verification and recovery", "Scoring Sessions", "Gradebook",
-        "SIS Grade Bridges", "Learning Objectives",
-            "Writing Timeline", "Writing Record", "Students",
+        "SIS Grade Bridges", "Writing Timeline", "Students",
     }
 
     assert result["ok"] is True
@@ -683,7 +662,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 67
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 62
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -740,30 +719,6 @@ def test_get_product_guide_unknown_topic_returns_structured_error():
         "error": ("unknown topic 'seating'; expected one of: "
                   f"{', '.join(tools._GUIDE_FILES)} (or omit for overview)"),
     }
-
-
-def test_get_product_guide_writing_record_states_the_tool_and_the_gap():
-    """The whole point of this guide: an assistant must learn get_writing_history
-    exists and what it does not yet cover, so it never invents a feedback
-    section or a rubric that is not there (brief Batch 1, section 8a)."""
-    result = tools.get_product_guide("writing_record")
-    assert result["ok"] is True
-    assert result["topic"] == "writing_record"
-    guide = result["guide"]
-    assert "get_writing_history" in guide
-    assert "not yet" in guide
-
-
-def test_get_product_guide_writing_record_matches_served_file_bytes():
-    """AC7: the topic's text is the same bytes as the served contract file."""
-    path = os.path.join(
-        tools.REPO_ROOT, "api", "default_docs", "AI Authoring",
-        tools._GUIDE_FILES["writing_record"]["file"])
-    with open(path, encoding="utf-8") as handle:
-        expected = handle.read()
-    result = tools.get_product_guide("writing_record")
-    assert result["ok"] is True
-    assert result["guide"] == expected
 
 
 def test_canvasagent_appendix_topics_are_exact_slices_of_one_canonical_source():
@@ -833,21 +788,6 @@ def test_every_guide_stays_pastable_plain_text():
         offenders = sorted({ch for ch in guide if ord(ch) > 127})
         assert not offenders, (
             f"{topic} guide is not ASCII: {[hex(ord(c)) for c in offenders]}")
-
-
-def test_download_contract_route_serves_the_same_guides_as_the_mcp_tool():
-    """One canonical file per guide: the paste-into-a-chat download and the
-    connected assistant's tool must never drift apart."""
-    from api.webui.routes import library
-
-    for download_name, topic in (("CanvasAgent", "full"),
-                                 ("WritingTimeline", "writing_timeline")):
-        response = library.api_download_contract(download_name)
-        with open(response.path, encoding="utf-8") as f:
-            downloaded_text = f.read()
-        mcp_result = tools.get_product_guide(topic)
-        assert mcp_result["ok"] is True
-        assert mcp_result["guide"] == downloaded_text
 
 
 # --- list_staged_content (no course_id, no student data -> no gates) -------
@@ -1099,166 +1039,6 @@ def test_get_submissions_rejects_non_current_course(
     assert "not a Current course" in result["error"]
 
 
-# --- get_writing_history (private per-student store, no course_id) ---------
-#
-# The daily-writing store (api/dailywriting) has no course concept, so these
-# tests bypass the mirror entirely and point tools._dailywriting_repository_factory
-# at a real Repository built from the package's own fixtures
-# (api/dailywriting/fixtures), exercised through the real ingest pipeline --
-# same construction as api/tests/dailywriting/test_dw_store_and_cli.py's
-# `repository` fixture. Fixture submission dates (fall 2026) are all in the
-# future relative to this test's actual clock, so every test passes an
-# explicit since/until rather than relying on the tool's "today" default.
-
-
-class _DailyWritingFixtureVault:
-    """Same minimal surface as
-    api/tests/dailywriting/test_dw_outbound_gate.py's ``_FixtureVault``: only
-    what ``feedback_safety.scan_payload`` and ``_vault_conflict_check`` read.
-    Duplicated rather than imported -- api/tests has no package __init__.py,
-    so cross-file imports between test modules are not how this suite works."""
-
-    def __init__(self, section: str = "section_2a"):
-        from api.dailywriting.fixtures import loader as dw_loader
-        self._entries = dw_loader.vault_entries(section)
-
-    def entries(self):
-        return list(self._entries)
-
-    def all_real_identifiers(self):
-        names, ids = set(), set()
-        for entry in self._entries:
-            names.add(entry["real_name"])
-            names.update(entry["real_name"].split())
-            names.update(entry.get("nicknames", []))
-            ids.add(str(entry["canvas_id"]))
-            ids.add(str(entry["sis_id"]))
-        return names, ids
-
-
-def _use_dailywriting_vault(monkeypatch):
-    monkeypatch.setattr(tools, "_vault_factory", _DailyWritingFixtureVault)
-
-
-def _build_dailywriting_repo(tmp_path, fixture_numbers):
-    """Store fixture evidence through the one retained ingest path."""
-    from api.dailywriting.core import ingest as ingest_module
-    from api.dailywriting.fixtures import loader as dw_loader
-    from api.dailywriting.store.repo import Repository as DWRepository
-
-    repo = DWRepository(tmp_path / "dw-store", resolver=dw_loader.resolver(), vault=None)
-    for number in fixture_numbers:
-        raw = dw_loader.single(number)
-        context = dw_loader.rep(raw["rep_id"])
-        submission = ingest_module.ingest(
-            submission_id=raw["submission_id"], rep_id=raw["rep_id"],
-            pseudonym_id=dw_loader.pseudonym_for(raw["canvas_id"]),
-            submitted_at=dw_loader.submitted_at(raw), text=raw["text"],
-            context=context, roster_map=dw_loader.roster_map(),
-        )
-        repo.put_rep(context)
-        repo.append_submission(submission)
-    return repo
-
-
-def _use_dailywriting_repo(monkeypatch, repo):
-    monkeypatch.setattr(tools, "_dailywriting_repository_factory", lambda: repo)
-
-
-def test_get_writing_history_projects_evidence_without_identity_or_assessment(monkeypatch, tmp_path):
-    from api.dailywriting.fixtures import loader as dw_loader
-
-    repo = _build_dailywriting_repo(tmp_path, [1, 2])
-    _use_dailywriting_repo(monkeypatch, repo)
-    _use_dailywriting_vault(monkeypatch)
-    pseudonym = dw_loader.pseudonym_for("990001")
-
-    result = tools.get_writing_history(pseudonym, since="2026-01-01", until="2026-12-31")
-    assert result["ok"] is True
-    row = result["submissions"][0]
-    assert {"submission_id", "rep_id", "submitted_at", "student_word_count", "assignment_date", "prompt_text", "segments", "flags"} <= set(row)
-    dumped = json.dumps(result)
-    for forbidden in ("canvas_id", "Marcus Bell", "total", "possible", "tier", "directives", "profile", "observations"):
-        assert forbidden not in dumped
-
-
-def test_get_writing_history_include_text_gates_student_prose(monkeypatch, tmp_path):
-    from api.dailywriting.fixtures import loader as dw_loader
-
-    repo = _build_dailywriting_repo(tmp_path, [7])
-    _use_dailywriting_repo(monkeypatch, repo)
-    _use_dailywriting_vault(monkeypatch)
-    pseudonym = dw_loader.pseudonym_for("990004")
-    hidden = tools.get_writing_history(pseudonym, since="2026-01-01", until="2026-12-31")
-    shown = tools.get_writing_history(pseudonym, since="2026-01-01", until="2026-12-31", include_text=True, max_text_chars=40)
-    assert "raw_text" not in json.dumps(hidden)
-    assert "raw_text" in shown["submissions"][0]
-    assert len(shown["submissions"][0]["raw_text"]) <= 70
-
-
-def test_get_writing_history_unknown_pseudonym_is_a_structured_refusal(monkeypatch, tmp_path):
-    repo = _build_dailywriting_repo(tmp_path, [])
-    _use_dailywriting_repo(monkeypatch, repo)
-    _use_dailywriting_vault(monkeypatch)
-    result = tools.get_writing_history("Not A Real Pseudonym")
-    assert result["ok"] is False
-    assert "roster" in result["error"].lower()
-
-
-def test_get_writing_history_scan_payload_can_actually_go_red():
-    verdict = feedback_safety.scan_payload({"submissions": [{"canvas_id": "990001"}]}, _DailyWritingFixtureVault())
-    assert verdict["green"] is False
-
-
-def test_get_writing_history_bad_date_and_inverted_window_are_structured_refusals(monkeypatch, tmp_path):
-    _use_dailywriting_vault(monkeypatch)
-    _use_dailywriting_repo(monkeypatch, _build_dailywriting_repo(tmp_path, []))
-    assert tools.get_writing_history("Whoever", since="not-a-date")["ok"] is False
-    assert tools.get_writing_history("Whoever", since="2026-12-31", until="2026-01-01")["ok"] is False
-
-
-def _write_history_raw_submission(repo, *, text):
-    from datetime import datetime
-
-    path = repo.root / "submissions" / "2026-09.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"schema": 1, "submissions": [{
-        "submission_id": "raw-history", "rep_id": "rep_t1_phones",
-        "canvas_id": "990001", "submitted_at": "2026-09-14T09:12:00-05:00",
-        "raw_text": text, "student_word_count": len(text.split()),
-        "segments": [], "flags": [], "scrub_findings": [],
-    }]}), encoding="utf-8")
-
-
-def test_get_writing_history_truncates_before_the_gate(monkeypatch, tmp_path):
-    from api.dailywriting.fixtures import loader as dw_loader
-
-    repo = _build_dailywriting_repo(tmp_path, [])
-    repo.put_rep(dw_loader.rep("rep_t1_phones"))
-    _use_dailywriting_repo(monkeypatch, repo)
-    _use_dailywriting_vault(monkeypatch)
-    pseudonym = dw_loader.pseudonym_for("990001")
-
-    _write_history_raw_submission(repo, text=("filler " * 20) + "990001")
-    far = tools.get_writing_history(pseudonym, since="2026-01-01", until="2026-12-31", include_text=True, max_text_chars=50)
-    assert far["ok"] is True
-    assert "990001" not in json.dumps(far)
-
-    _write_history_raw_submission(repo, text="990001 " + ("filler " * 20))
-    near = tools.get_writing_history(pseudonym, since="2026-01-01", until="2026-12-31", include_text=True, max_text_chars=50)
-    assert near["ok"] is False
-    assert near["violations"]
-
-
-def test_get_writing_history_refuses_on_vault_conflict(monkeypatch, tmp_path):
-    repo = _build_dailywriting_repo(tmp_path, [1])
-    _use_dailywriting_repo(monkeypatch, repo)
-    monkeypatch.setattr(tools, "_vault_factory", type("ConflictVault", (), {"conflicts": lambda self: ["copy"]}))
-    result = tools.get_writing_history("Pikachu")
-    assert result["ok"] is False
-    assert set(result) == {"ok", "error"}
-    assert "conflict" in result["error"].lower()
-
 # --- typed mirror-first reads (1.0beta-05) ------------------------------------
 #
 # roster/assignment/submission acquisition now goes through the typed local
@@ -1299,7 +1079,8 @@ def _populate_mirror(root, *, roster_at=None, assignments_at=None, submissions_a
     mirror_store.merge_submissions(MIRROR_COURSE, "700010", MIRROR_SUBMISSIONS,
                                    root=root, attempted_at=submissions_at, replace=True)
     mirror_store.record_pass(MIRROR_COURSE, "full", ok=True,
-                             attempted_at=submissions_at, root=root)
+                             attempted_at=min(roster_at, assignments_at, submissions_at),
+                             root=root)
 
 
 def _explode_live(*_args, **_kwargs):
@@ -1364,11 +1145,12 @@ def test_get_submissions_refuses_when_roster_stale(monkeypatch, tmp_path, _use_v
     monkeypatch.setattr(gradebook_queries, "assignment_submissions", _explode_live)
     monkeypatch.setattr(roster_service, "fetch_students", _explode_live)
 
-    assert tools._mirror_submission_bundle(MIRROR_COURSE, "700010") == (None, None)
+    bundle, error = tools._mirror_submission_bundle(MIRROR_COURSE, "700010")
+    assert bundle is not None and error is None
     result = tools.get_submissions(MIRROR_COURSE, "700010")
     assert result["ok"] is False
-    assert result["error"] == tools._MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR
-    assert result["freshness"]["state"] == "unavailable"
+    assert result["freshness"]["state"] == "stale"
+    assert "outside the configured freshness window" in result["error"]
 
 
 def test_get_submissions_refuses_when_assignments_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
@@ -1379,11 +1161,13 @@ def test_get_submissions_refuses_when_assignments_stale(monkeypatch, tmp_path, _
     monkeypatch.setattr(gradebook_queries, "assignment_submissions", _explode_live)
     monkeypatch.setattr(roster_service, "fetch_students", _explode_live)
 
-    assert tools._mirror_submission_bundle(MIRROR_COURSE, "700010") == (None, None)
+    bundle, error = tools._mirror_submission_bundle(MIRROR_COURSE, "700010")
+    assert bundle is not None and error is None
     result = tools.get_submissions(MIRROR_COURSE, "700010")
     assert result["ok"] is False
-    assert result["error"] == tools._MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR
-    assert result["freshness"]["state"] == "unavailable"
+    assert result["ok"] is False
+    assert result["freshness"]["state"] == "stale"
+    assert "outside the configured freshness window" in result["error"]
 
 
 def test_get_submissions_refuses_when_submissions_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
@@ -1394,11 +1178,12 @@ def test_get_submissions_refuses_when_submissions_stale(monkeypatch, tmp_path, _
     monkeypatch.setattr(gradebook_queries, "assignment_submissions", _explode_live)
     monkeypatch.setattr(roster_service, "fetch_students", _explode_live)
 
-    assert tools._mirror_submission_bundle(MIRROR_COURSE, "700010") == (None, None)
+    bundle, error = tools._mirror_submission_bundle(MIRROR_COURSE, "700010")
+    assert bundle is not None and error is None
     result = tools.get_submissions(MIRROR_COURSE, "700010")
     assert result["ok"] is False
-    assert result["error"] == tools._MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR
-    assert result["freshness"]["state"] == "unavailable"
+    assert result["freshness"]["state"] == "stale"
+    assert "outside the configured freshness window" in result["error"]
 
 
 # --- get_gradebook_snapshot ---------------------------------------------------
@@ -1764,7 +1549,7 @@ def test_server_registers_the_expected_tool_set():
     assert tool_names == {
         "list_courses", "list_sections", "list_groups", "get_course_assignments", "get_modules",
             "get_roster", "get_submissions", "get_submission_history", "refresh_course_structure",
-        "get_writing_history", "get_gradebook_snapshot", "refresh_mirror",
+        "get_gradebook_snapshot", "refresh_mirror",
             "get_authoring_contract", "get_product_guide",
             "list_staged_content", "preview_content_push", "preview_differentiated_quiz_push", "apply_content_push",
             "stage_content", "stage_attachment", "push_content_live",
@@ -1777,8 +1562,7 @@ def test_server_registers_the_expected_tool_set():
         "apply_sis_grade_bridge",
         "preview_workspace_reset", "apply_workspace_reset",
         "verify_live", "resume_operation", "abandon_operation",
-        "get_course_pages", "list_learning_objectives", "preview_learning_objective",
-            "apply_learning_objective", "delete_learning_objective",
+        "get_course_pages",
             "get_roster_student_settings", "preview_roster_student_change",
                     "apply_roster_student_change", "clear_roster_student_field",
                     "list_feedback_contracts", "prepare_scoring_session", "refresh_scoring_session",
