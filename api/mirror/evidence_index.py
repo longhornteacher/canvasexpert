@@ -17,6 +17,10 @@ MAX_PAGE_SIZE = 100
 VIEW_COLUMNS = {
     "courses": ("source_key", "course_id", "title", "selection_status"),
     "assignment_context": ("source_key", "course_id", "assignment_id", "entity_key", "fact_ref", "payload"),
+    "group_context": ("source_key", "course_id", "entity_key", "fact_ref", "payload"),
+    "module_context": ("source_key", "course_id", "entity_key", "fact_ref", "payload"),
+    "page_context": ("source_key", "course_id", "entity_key", "fact_ref", "payload"),
+    "assignment_group_context": ("source_key", "course_id", "entity_key", "fact_ref", "payload"),
     "current_submissions": ("source_key", "course_id", "assignment_id", "pseudonym", "attempt", "entity_key", "fact_ref", "payload"),
     "attempt_history": ("source_key", "course_id", "assignment_id", "pseudonym", "attempt", "submitted_at", "established_submitted_at", "entity_key", "fact_ref", "payload"),
     "attachment_blocks": ("source_key", "course_id", "assignment_id", "fact_ref", "payload"),
@@ -120,6 +124,8 @@ class EvidenceIndex:
         CREATE VIEW IF NOT EXISTS attempt_history AS SELECT f.source_key,f.course_id,f.assignment_id,f.pseudonym,f.attempt,f.submitted_at,r.established_submitted_at,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN history_refs r USING(fact_ref) WHERE f.kind='attempt_observation';
         CREATE VIEW IF NOT EXISTS scope_status AS SELECT * FROM scope_coverage;
         """)
+        for kind in ("group", "module", "page", "assignment_group"):
+            db.execute(f"CREATE VIEW IF NOT EXISTS {kind}_context AS SELECT DISTINCT f.source_key,f.course_id,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='{kind}'")
         for name in ("attachment_blocks", "comparison_evidence", "agent_notes"):
             db.execute(f"CREATE VIEW IF NOT EXISTS {name} AS SELECT source_key,course_id,assignment_id,fact_ref,payload FROM safe_facts WHERE 0")
         db.execute("INSERT OR IGNORE INTO index_metadata VALUES ('schema_version',?)", (str(INDEX_SCHEMA_VERSION),))

@@ -194,3 +194,14 @@ def test_navigation_identifier_cannot_carry_known_real_name(tmp_path):
     with pytest.raises(ValueError, match="privacy_refused"):
         publisher.store.publish_fact(record)
     assert not (root / "CanvasMirror").exists()
+
+
+@pytest.mark.parametrize("field", ["module_id", "page_id", "assignment_group_id",
+                                   "item_id", "content_id"])
+def test_structure_navigation_identifiers_are_ascii_decimal(tmp_path, field):
+    publisher, _ = _publisher(tmp_path)
+    record = {"schema_version": 1, "kind": "module", "source_key": "a" * 64,
+              "course_id": "1", "entity_key": "module:10",
+              "payload": {field: "١٠"}}
+    with pytest.raises(ValueError, match="invalid_navigation_id"):
+        publisher.verify_safe(record)

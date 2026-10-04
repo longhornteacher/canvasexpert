@@ -11,10 +11,14 @@ from datetime import datetime
 SCHEMA_VERSION = 1
 FACT_FIELDS = frozenset({"schema_version", "kind", "source_key", "course_id", "entity_key", "payload"})
 COMMIT_FIELDS = frozenset({"schema_version", "source_key", "course_id", "scope", "scope_id", "writer_key", "run_id", "parents", "acquisition_started_at", "acquisition_finished_at", "mode", "membership_complete", "record_refs", "member_keys", "gaps", "watermarks"})
-SUBMISSION_FIELDS = frozenset({"assignment_id", "pseudonym", "attempt", "submitted_at", "body", "score", "grade", "late", "missing", "workflow_state", "updated_at"})
+SUBMISSION_FIELDS = frozenset({"assignment_id", "pseudonym", "attempt", "submitted_at", "body", "score", "grade", "late", "missing", "workflow_state", "updated_at", "effective_due_at"})
 PAYLOAD_FIELDS = {
-    "course": frozenset({"title", "workflow_state"}),
-    "assignment": frozenset({"assignment_id", "title", "description", "points_possible", "due_at", "updated_at", "rubric"}),
+    "course": frozenset({"title", "workflow_state", "start_at", "end_at", "conclude_at", "term_end_at", "course_concluded", "enrollment_states", "restrict_enrollments_to_course_dates"}),
+    "assignment": frozenset({"assignment_id", "title", "description", "points_possible", "due_at", "unlock_at", "lock_at", "all_dates", "updated_at", "rubric", "assignment_group_id", "published", "submission_types"}),
+    "group": frozenset({"group_id", "title", "student_pseudonyms"}),
+    "module": frozenset({"module_id", "title", "position", "published", "items"}),
+    "page": frozenset({"page_id", "title", "body", "published", "front_page", "updated_at"}),
+    "assignment_group": frozenset({"assignment_group_id", "title", "position", "group_weight"}),
     "student": frozenset({"pseudonym", "section_ids"}),
     "submission": SUBMISSION_FIELDS,
     "attempt_observation": SUBMISSION_FIELDS,
@@ -26,6 +30,10 @@ SCOPE_KINDS = {
     "course.context": frozenset({"course"}),
     "course.roster": frozenset({"student"}),
     "course.assignments": frozenset({"assignment"}),
+    "course.groups": frozenset({"group"}),
+    "course.modules": frozenset({"module"}),
+    "course.pages": frozenset({"page"}),
+    "course.assignment_groups": frozenset({"assignment_group"}),
     "assignment.submissions": frozenset({"submission", "attempt_observation"}),
     "assignment.comments": frozenset({"comment"}),
     "assignment.overrides": frozenset({"override"}),
@@ -33,8 +41,10 @@ SCOPE_KINDS = {
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _ENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
-_TIMESTAMPS = frozenset({"submitted_at", "updated_at", "created_at", "due_at", "unlock_at", "lock_at"})
-_IDS = frozenset({"assignment_id", "comment_id", "override_id", "section_id", "group_id"})
+_TIMESTAMPS = frozenset({"submitted_at", "updated_at", "created_at", "due_at", "unlock_at", "lock_at", "effective_due_at", "start_at", "end_at", "conclude_at", "term_end_at"})
+_IDS = frozenset({"assignment_id", "comment_id", "override_id", "section_id", "group_id", "module_id", "page_id", "assignment_group_id", "item_id", "content_id"})
+_STRUCTURE_IDS = frozenset({"module_id", "page_id", "assignment_group_id", "item_id", "content_id"})
+MODULE_ITEM_TYPES = frozenset({"File", "Page", "Discussion", "Assignment", "Quiz", "SubHeader", "ExternalUrl", "ExternalTool"})
 
 
 class EvidenceValidationError(ValueError):
@@ -66,6 +76,12 @@ def validate_digest(value: str) -> str:
 def _entity(value):
     if not isinstance(value, str) or not _ENTITY.fullmatch(value):
         _fail("invalid_entity")
+
+
+def _structure_id(value):
+    validate_component(value)
+    if not value.isascii() or not value.isdecimal():
+        _fail("invalid_navigation_id")
 
 
 def _timestamp(value, *, nullable=True):
@@ -146,6 +162,10 @@ def validate_fact(record: dict) -> dict:
         "attempt_observation": {"assignment_id", "pseudonym", "attempt", "submitted_at"},
         "comment": {"assignment_id", "pseudonym", "comment_id", "text"},
         "override": {"assignment_id", "override_id"},
+        "group": {"group_id", "title", "student_pseudonyms"},
+        "module": {"module_id", "title", "position", "items"},
+        "page": {"page_id", "title"},
+        "assignment_group": {"assignment_group_id", "title", "position", "group_weight"},
     }[kind]
     _object(payload, PAYLOAD_FIELDS[kind], required)
     for key, value in payload.items():
@@ -155,23 +175,61 @@ def validate_fact(record: dict) -> dict:
             if key in required and value is None:
                 _fail()
             if value is not None:
-                validate_component(value)
+                (_structure_id if key in _STRUCTURE_IDS else validate_component)(value)
         elif key in {"pseudonym", "author_pseudonym"}:
             if key in required and value is None:
                 _fail()
             if value is not None:
                 _entity(value)
-        elif key in {"section_ids", "student_pseudonyms"}:
+        elif key in {"section_ids", "student_pseudonyms", "submission_types", "enrollment_states"}:
             _strings(value)
+            if key == "enrollment_states" and not set(value) <= {"active", "invited", "completed", "inactive"}:
+                _fail()
         elif key == "attempt":
             if value is not None and (type(value) is not int or value < 1):
                 _fail("invalid_attempt")
-        elif key in {"score", "points_possible"}:
+        elif key in {"score", "points_possible", "group_weight"}:
+            if key == "group_weight" and value is None:
+                _fail()
             if value is not None and type(value) not in {int, float}:
                 _fail()
-        elif key in {"late", "missing"}:
+        elif key in {"late", "missing", "published", "front_page", "course_concluded", "restrict_enrollments_to_course_dates"}:
             if type(value) is not bool:
                 _fail()
+        elif key == "position":
+            if type(value) is not int or value < 0:
+                _fail()
+        elif key == "items":
+            if not isinstance(value, list):
+                _fail()
+            item_ids = []
+            for item in value:
+                _object(item, {"item_id", "title", "type", "position", "content_id", "page_id"}, {"item_id", "title", "type", "position"})
+                _structure_id(item["item_id"])
+                item_ids.append(item["item_id"])
+                if not all(isinstance(item[field], str) for field in ("title", "type")) or type(item["position"]) is not int or item["position"] < 0:
+                    _fail()
+                if item["type"] not in MODULE_ITEM_TYPES:
+                    _fail("unsupported_module_item_type")
+                for field in ("content_id", "page_id"):
+                    if item.get(field) is not None:
+                        _structure_id(item[field])
+            if len(set(item_ids)) != len(item_ids):
+                _fail("duplicate_reference")
+        elif key == "all_dates":
+            if not isinstance(value, list):
+                _fail()
+            for dates in value:
+                _object(dates, {"due_at", "unlock_at", "lock_at", "base", "override_id", "title"}, {"base"})
+                if type(dates["base"]) is not bool:
+                    _fail()
+                for field in ("due_at", "unlock_at", "lock_at"):
+                    if field in dates:
+                        _timestamp(dates[field])
+                if dates.get("override_id") is not None:
+                    validate_component(dates["override_id"])
+                if dates.get("title") is not None and not isinstance(dates["title"], str):
+                    _fail()
         elif key == "rubric":
             if not isinstance(value, list):
                 _fail()
@@ -188,6 +246,8 @@ def validate_fact(record: dict) -> dict:
                     _entity(rating["rating_id"])
                     if not isinstance(rating["description"], str) or type(rating["points"]) not in {int, float}:
                         _fail()
+        elif key == "title" and not isinstance(value, str):
+            _fail()
         elif value is not None and not isinstance(value, str):
             _fail()
     return deepcopy(record)

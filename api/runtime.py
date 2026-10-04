@@ -12,6 +12,8 @@ _started = False
 _stopped = False
 _heartbeat_stop: threading.Event | None = None
 _heartbeat_thread: threading.Thread | None = None
+_owner_stop: threading.Event | None = None
+_owner_thread: threading.Thread | None = None
 
 
 def _note(step: str, exc: Exception) -> None:
@@ -22,7 +24,7 @@ def _note(step: str, exc: Exception) -> None:
 
 def start() -> None:
     """Run process startup steps once, in safety order."""
-    global _started, _stopped, _heartbeat_stop, _heartbeat_thread
+    global _started, _stopped, _heartbeat_stop, _heartbeat_thread, _owner_stop, _owner_thread
     with _lock:
         if _started:
             return
@@ -54,7 +56,12 @@ def start() -> None:
             _note("operation_recovery", exc)
 
         try:
-            from api.mirror.service import mirror_heartbeat_worker
+            from api.mirror.service import mirror_heartbeat_worker, acquisition_owner_worker
+
+            _owner_stop = threading.Event()
+            _owner_thread = threading.Thread(target=acquisition_owner_worker,
+                args=(_owner_stop,), name="ce-acquisition-owner", daemon=True)
+            _owner_thread.start()
 
             _heartbeat_stop = threading.Event()
             _heartbeat_thread = threading.Thread(
@@ -74,15 +81,22 @@ def start() -> None:
 
 def stop() -> None:
     """Stop background work and release process-wide work leases once."""
-    global _stopped, _heartbeat_stop, _heartbeat_thread
+    global _stopped, _heartbeat_stop, _heartbeat_thread, _owner_stop, _owner_thread
     with _lock:
         if _stopped:
             return
         _stopped = True
+        owner_stop, owner_thread = _owner_stop, _owner_thread
+        _owner_stop = None
+        _owner_thread = None
         stop_event, thread = _heartbeat_stop, _heartbeat_thread
         _heartbeat_stop = None
         _heartbeat_thread = None
     try:
+        if owner_stop is not None:
+            owner_stop.set()
+        if owner_thread is not None and owner_thread is not threading.current_thread():
+            owner_thread.join(timeout=5.0)
         if stop_event is not None:
             stop_event.set()
         if thread is not None and thread is not threading.current_thread():
@@ -90,6 +104,11 @@ def stop() -> None:
     except Exception as exc:
         _note("mirror_heartbeat_stop", exc)
     finally:
+        try:
+            from api.mirror.service import release_acquisition_owner
+            release_acquisition_owner()
+        except Exception as exc:
+            _note("acquisition_owner_release", exc)
         try:
             from api.shared_work import heartbeat_service
 

@@ -118,3 +118,30 @@ def test_forged_issue_metadata_is_refused_before_index_creation(tmp_path, eviden
     with pytest.raises(ValueError):
         EvidenceIndex(path).ingest(snapshot)
     assert not path.exists()
+
+
+@pytest.mark.parametrize("kind,payload", [
+    ("group", {"group_id": "20", "title": "Workshop", "student_pseudonyms": ["Pikachu"]}),
+    ("module", {"module_id": "30", "title": "Unit", "position": 1, "items": []}),
+    ("page", {"page_id": "40", "title": "Directions", "body": "Read carefully"}),
+    ("assignment_group", {"assignment_group_id": "50", "title": "Writing", "position": 1, "group_weight": 30}),
+])
+def test_structure_views_rebuild_and_tombstone_current_only(tmp_path, evidence_factory, kind, payload):
+    scope = {"group": "course.groups", "module": "course.modules", "page": "course.pages", "assignment_group": "course.assignment_groups"}[kind]
+    entity = f"{kind}:10"
+    store = evidence_factory["store"](tmp_path / "safe")
+    ref = store.publish_fact(evidence_factory["fact"](kind, entity, payload))
+    parent = store.publish_commit(evidence_factory["commit"](scope=scope, scope_id="course", refs=[ref], members=[entity]))
+    index = EvidenceIndex(tmp_path / "query.sqlite3")
+    revision = index.ingest(store.scan())
+    assert index.ingest(store.scan()) == revision
+    result = index.query_page(f"{kind}_context", course_id="1")
+    assert result["records"][0]["fact_ref"] == ref
+    rebuilt = EvidenceIndex(tmp_path / "rebuilt.sqlite3")
+    rebuilt.ingest(store.scan())
+    assert rebuilt.query_page(f"{kind}_context") == result
+    store.publish_commit(evidence_factory["commit"](scope=scope, scope_id="course", parents=[parent]))
+    index.ingest(store.scan())
+    assert index.query_page(f"{kind}_context")["records"] == []
+    with index.read_connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM safe_facts WHERE fact_ref=?", (ref,)).fetchone()[0] == 1

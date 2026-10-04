@@ -43,6 +43,128 @@ from . import submission_history
 from .submission_history import CaptureBudget
 
 
+class _AcquisitionCollector:
+    """Capture pagination proof once while legacy projections use the same rows."""
+
+    def __init__(self, course_id, started, sink, legacy, complete):
+        self.course_id = str(course_id)
+        self.started = started
+        self.sink = sink
+        self.legacy = legacy
+        self.complete_client = complete
+        self.scopes = []
+        self.assignment_ids = set()
+        self.submission_reads = []
+        self._published_ok = None
+
+    def _record(self, path, params, rows, error, complete):
+        from .evidence_acquisition import ScopeReceipt
+        values = tuple(rows) if isinstance(rows, list) else ()
+        proven = complete is True and not error and isinstance(rows, list)
+        code = error_code(error) if error else None
+        if path.endswith("/assignments"):
+            self.assignment_ids.update(str(row.get("id")) for row in values if isinstance(row, dict))
+            self.scopes.append(ScopeReceipt("course.assignments", self.course_id,
+                                           values, proven, code))
+        elif path.endswith("/users") and (params or {}).get("enrollment_type[]") == ["student"]:
+            self.scopes.append(ScopeReceipt("course.roster", self.course_id,
+                                           values, proven, code))
+        elif path.endswith("/submissions"):
+            parts = path.split("/")
+            focused = parts[parts.index("assignments") + 1] if "assignments" in parts else None
+            delta = bool((params or {}).get("submitted_since") or (params or {}).get("graded_since"))
+            self.submission_reads.append((values, proven, code, focused, delta))
+
+    def complete(self, path, params=None, **kwargs):
+        rows, error, complete = self.complete_client(path, params, **kwargs)
+        self._record(path, params, rows, error, complete)
+        return rows, error, complete
+
+    def get(self, path, params=None, **kwargs):
+        if path.endswith("/submissions") and self.complete_client is not None:
+            rows, error, complete = self.complete(path, params, **kwargs)
+            # Legacy consumers cannot replace membership after a partial page.
+            return rows, error or (None if complete is True else "pagination_incomplete")
+        rows, error = self.legacy(path, params, **kwargs)
+        self._record(path, params, rows, error, False)
+        return rows, error
+
+    def publish(self):
+        if self._published_ok is not None:
+            return self._published_ok
+        from .evidence_acquisition import CourseAcquisitionReceipt, ScopeReceipt
+        groups = {}
+        proofs = {}
+        for rows, complete, error, focused, delta in self.submission_reads:
+            ids = {focused} if focused else ({str(row.get("assignment_id")) for row in rows
+                                            if isinstance(row, dict)} | self.assignment_ids)
+            for aid in ids:
+                if not aid or not aid.isdecimal():
+                    continue
+                proofs.setdefault(aid, []).append((complete, error, delta))
+                by_user = groups.setdefault(aid, {})
+                for row in rows:
+                    if not isinstance(row, dict) or str(row.get("assignment_id", focused)) != aid:
+                        continue
+                    uid = str(row.get("user_id"))
+                    previous = by_user.get(uid)
+                    if previous is None:
+                        by_user[uid] = dict(row)
+                    else:
+                        # Preserve each observed row; a sparse later response must
+                        # not acquire fields from an earlier observation.
+                        merged = dict(row)
+                        history = list(previous.get("submission_history") or [])
+                        prior_observation = {key: value for key, value in previous.items()
+                                             if key != "submission_history"}
+                        if prior_observation not in history:
+                            history.append(prior_observation)
+                        for observation in row.get("submission_history") or []:
+                            if observation not in history:
+                                history.append(observation)
+                        if history:
+                            merged["submission_history"] = history
+                        by_user[uid] = merged
+        for aid, proof in proofs.items():
+            complete = all(item[0] for item in proof)
+            error = next((item[1] for item in proof if item[1]), None)
+            mode = "delta" if any(item[2] for item in proof) else "snapshot"
+            watermarks = ({"submitted_since": _overlapped(self.started),
+                           "graded_since": _overlapped(self.started)} if complete else None)
+            self.scopes.append(ScopeReceipt("assignment.submissions", aid,
+                tuple(groups[aid].values()), complete, error, mode, watermarks))
+        receipt = CourseAcquisitionReceipt(self.course_id, self.started,
+                                           store.now_iso(), tuple(self.scopes))
+        # Deterministic injected clocks may be newer than the real clock.
+        if receipt.acquisition_finished_at < self.started:
+            receipt = CourseAcquisitionReceipt(self.course_id, self.started,
+                                               self.started, tuple(self.scopes))
+        result = self.sink(receipt)
+        expected = {(scope.scope, scope.scope_id) for scope in self.scopes}
+        acknowledgements = getattr(result, "successful_scopes", None)
+        self._published_ok = (result is not False and
+            (expected.issubset(set(acknowledgements)) if acknowledgements is not None
+             else not getattr(result, "gaps", ())))
+        return self._published_ok
+
+
+def _acquisition_clients(course_id, started, receipt_sink, legacy, complete):
+    if receipt_sink is None:
+        return legacy, complete, None
+    collector = _AcquisitionCollector(course_id, started, receipt_sink, legacy, complete)
+    return collector.get, collector.complete if complete else None, collector
+
+
+def _publication_ok(collector):
+    if collector is None:
+        return True
+    try:
+        return collector.publish()
+    except Exception as exc:
+        operational_log.emit("mirror.acquisition_publication", "failed", error_class=type(exc))
+        return False
+
+
 def _merge_capture_totals(totals, course_id, assignment_id, *, root=None):
     summary = submission_history.capture_summary(course_id, assignment_id, root=root)
     for key, value in summary.items():
@@ -203,9 +325,9 @@ def _comment_author_id(comment: dict) -> str:
     return direct or nested
 
 
-def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all,
+def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all, canvas_get_all_complete=None,
                                 root=None, now=None, stream_get=None,
-                                canvas_origin="") -> dict:
+                                canvas_origin="", receipt_sink=None) -> dict:
     """Refresh one assignment without claiming course-delta coverage.
 
     This focused-current acquisition deliberately leaves course pass envelopes
@@ -217,6 +339,8 @@ def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all,
     if blocked:
         return blocked
     started = now or store.now_iso()
+    canvas_get_all, canvas_get_all_complete, collector = _acquisition_clients(
+        course_id, started, receipt_sink, canvas_get_all, canvas_get_all_complete)
     score_summary = {}
     try:
         rows, error = canvas_get_all(
@@ -227,7 +351,10 @@ def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all,
         error = str(exc)
         rows = None
     if error:
+        _publication_ok(collector)
         return {"ok": False, "error": error, "error_code": error_code(error)}
+    if not _publication_ok(collector):
+        return {"ok": False, "error": "publication_incomplete", "error_code": "publication_incomplete"}
     document = store.merge_submissions(
         course_id, assignment_id, rows or [], root=root, attempted_at=started,
         stream_get=stream_get, canvas_origin=canvas_origin,
@@ -240,9 +367,9 @@ def sync_assignment_submissions(course_id, assignment_id, *, canvas_get_all,
             "canvas_external_count": int(score_summary.get("canvas_external_count") or 0)}
 
 
-def refresh_submissions_course_delta(course_id, *, canvas_get_all, root=None,
+def refresh_submissions_course_delta(course_id, *, canvas_get_all, canvas_get_all_complete=None, root=None,
                                      now=None, stream_get=None,
-                                     canvas_origin="") -> dict:
+                                     canvas_origin="", receipt_sink=None) -> dict:
     """Refresh the named ``submissions.course_delta`` scope only.
 
     This deliberately reuses the last successful course-delta window without
@@ -274,6 +401,8 @@ def refresh_submissions_course_delta(course_id, *, canvas_get_all, root=None,
         return _result(False, logical_requests=0, reason="requires_full")
 
     started = now or store.now_iso()
+    canvas_get_all, canvas_get_all_complete, collector = _acquisition_clients(
+        course_id, started, receipt_sink, canvas_get_all, canvas_get_all_complete)
     try:
         submitted, error = _fetch_submissions(
             course_id, canvas_get_all,
@@ -292,6 +421,8 @@ def refresh_submissions_course_delta(course_id, *, canvas_get_all, root=None,
     if error:
         return _result(False, logical_requests=2, error_code=error_code(error))
 
+    if not _publication_ok(collector):
+        return {"ok": False, "error": "publication_incomplete", "error_code": "publication_incomplete"}
     grouped = _group_by_assignment(list(submitted or []) + list(graded or []))
     budget = CaptureBudget()
     external_count = 0
@@ -347,7 +478,7 @@ def refresh_status(course_id, *, root=None) -> dict:
 def refresh(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
             now=None, operation_id=None, force=False, full=False,
             with_comments=True, course_name=None, stream_get=None,
-            canvas_origin="") -> dict:
+            canvas_origin="", receipt_sink=None) -> dict:
     """Run one durable, coalesced read-only refresh.
 
     The per-course lock covers acquisition and projection commit.  A caller
@@ -376,7 +507,7 @@ def refresh(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
                     canvas_get_all_complete=canvas_get_all_complete, root=root,
                     now=now, bypass_new_quiz_cooldown=True,
                     course_name=course_name, with_comments=with_comments,
-                    stream_get=stream_get, canvas_origin=canvas_origin,
+                    stream_get=stream_get, canvas_origin=canvas_origin, receipt_sink=receipt_sink,
                 )
             else:
                 result = delta_pass(
@@ -384,7 +515,7 @@ def refresh(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
                     canvas_get_all_complete=canvas_get_all_complete, root=root,
                     now=now, bypass_new_quiz_cooldown=True,
                     course_name=course_name,
-                    stream_get=stream_get, canvas_origin=canvas_origin,
+                    stream_get=stream_get, canvas_origin=canvas_origin, receipt_sink=receipt_sink,
                 )
             lifecycle = store.finish_refresh(
                 course_id, operation_id=operation_id, ok=bool(result.get("ok")),
@@ -506,7 +637,7 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
               skip_new_quiz_metadata: bool = False,
               course_name: str | None = None,
               with_comments: bool = True, stream_get=None,
-              canvas_origin="") -> dict:
+              canvas_origin="", receipt_sink=None) -> dict:
     """Backfill / nightly reconcile: fetch everything first, then rewrite.
 
     ``bypass_new_quiz_cooldown`` plumbs the manual ``sync_now`` override down
@@ -520,6 +651,8 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
     if blocked:
         return blocked
     started = now or store.now_iso()
+    canvas_get_all, canvas_get_all_complete, collector = _acquisition_clients(
+        course_id, started, receipt_sink, canvas_get_all, canvas_get_all_complete)
 
     assignments, error, complete = _fetch_assignments(course_id, canvas_get_all_complete)
     assignment_error = _assignment_receipt_error(assignments, error, complete)
@@ -533,18 +666,21 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
     if assignment_error:
         store.record_pass(course_id, "full", ok=False,
                           error_code=assignment_error, attempted_at=started, root=root)
+        _publication_ok(collector)
         return {"ok": False, "error": error or assignment_error}
     students, error, complete = _fetch_students(course_id, canvas_get_all_complete)
     roster_error = _roster_receipt_error(students, error, complete)
     if roster_error:
         store.record_pass(course_id, "full", ok=False,
                           error_code=roster_error, attempted_at=started, root=root)
+        _publication_ok(collector)
         return {"ok": False, "error": error or roster_error}
     previous_roster = store.read_roster(course_id, root=root)
     previous_student_count = len((previous_roster or {}).get("students") or {})
     if _is_suspicious_roster_wipe(previous_student_count, len(students or [])):
         store.record_pass(course_id, "full", ok=False,
                           error_code="roster_wipe_refused", attempted_at=started, root=root)
+        _publication_ok(collector)
         return {"ok": False, "error": "roster_wipe_refused"}
     sections, sections_error = _fetch_sections(course_id, canvas_get_all)
     if sections_error:
@@ -561,8 +697,11 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
                 attempted_at=started, root=root)
         store.record_pass(course_id, "full", ok=False,
                           error_code=error_code(error), attempted_at=started, root=root)
+        _publication_ok(collector)
         return {"ok": False, "error": error}
 
+    if not _publication_ok(collector):
+        return {"ok": False, "error": "publication_incomplete", "error_code": "publication_incomplete"}
     document, diagnostics = _commit_assignment_index(
         course_id, assignments, root=root, attempted_at=started)
     store.write_roster(course_id, students, sections, root=root, attempted_at=started)
@@ -609,7 +748,7 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
                bypass_new_quiz_cooldown: bool = False,
                skip_new_quiz_metadata: bool = False,
                course_name: str | None = None, stream_get=None,
-               canvas_origin="") -> dict:
+               canvas_origin="", receipt_sink=None) -> dict:
     """Incremental pass. Falls back to a full pass when no watermark exists
     yet (first run, or a rebuilt mirror). ``bypass_new_quiz_cooldown`` — see
     ``full_pass``. ``course_name`` — see ``full_pass``; also forwarded to the
@@ -624,8 +763,10 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
                          bypass_new_quiz_cooldown=bypass_new_quiz_cooldown,
                          skip_new_quiz_metadata=skip_new_quiz_metadata,
                          course_name=course_name, stream_get=stream_get,
-                         canvas_origin=canvas_origin)
+                         canvas_origin=canvas_origin, receipt_sink=receipt_sink)
     started = now or store.now_iso()
+    canvas_get_all, canvas_get_all_complete, collector = _acquisition_clients(
+        course_id, started, receipt_sink, canvas_get_all, canvas_get_all_complete)
 
     assignments, error, complete = _fetch_assignments(course_id, canvas_get_all_complete)
     assignment_error = _assignment_receipt_error(assignments, error, complete)
@@ -639,6 +780,7 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
     if assignment_error:
         store.record_pass(course_id, "delta", ok=False,
                           error_code=assignment_error, attempted_at=started, root=root)
+        _publication_ok(collector)
         return {"ok": False, "error": error or assignment_error}
     submitted, error = _fetch_submissions(
         course_id, canvas_get_all,
@@ -646,6 +788,7 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
     if error:
         store.record_pass(course_id, "delta", ok=False,
                           error_code=error_code(error), attempted_at=started, root=root)
+        _publication_ok(collector)
         return {"ok": False, "error": error}
     graded, error = _fetch_submissions(
         course_id, canvas_get_all,
@@ -653,8 +796,11 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
     if error:
         store.record_pass(course_id, "delta", ok=False,
                           error_code=error_code(error), attempted_at=started, root=root)
+        _publication_ok(collector)
         return {"ok": False, "error": error}
 
+    if not _publication_ok(collector):
+        return {"ok": False, "error": "publication_incomplete", "error_code": "publication_incomplete"}
     _document, diagnostics = _commit_assignment_index(
         course_id, assignments, root=root, attempted_at=started)
     grouped = _group_by_assignment(list(submitted or []) + list(graded or []))
@@ -691,7 +837,7 @@ def delta_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
 
 
 def roster_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
-                now=None) -> dict:
+                now=None, receipt_sink=None) -> dict:
     """Students + sections (cheap; rosters rarely change).
 
     The student fetch must prove completeness (``canvas_get_all_complete``)
@@ -706,23 +852,29 @@ def roster_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None
     if blocked:
         return blocked
     started = now or store.now_iso()
+    canvas_get_all, canvas_get_all_complete, collector = _acquisition_clients(
+        course_id, started, receipt_sink, canvas_get_all, canvas_get_all_complete)
     students, error, complete = _fetch_students(course_id, canvas_get_all_complete)
     roster_error = _roster_receipt_error(students, error, complete)
     if roster_error:
         store.record_pass(course_id, "roster", ok=False,
                           error_code=roster_error, attempted_at=started, root=root)
+        _publication_ok(collector)
         return {"ok": False, "error": error or roster_error}
     previous_roster = store.read_roster(course_id, root=root)
     previous_student_count = len((previous_roster or {}).get("students") or {})
     if _is_suspicious_roster_wipe(previous_student_count, len(students or [])):
         store.record_pass(course_id, "roster", ok=False,
                           error_code="roster_wipe_refused", attempted_at=started, root=root)
+        _publication_ok(collector)
         return {"ok": False, "error": "roster_wipe_refused"}
     sections, sections_error = _fetch_sections(course_id, canvas_get_all)
     if sections_error:
         # A failed sections fetch must not blank section names Canvas never
         # actually reported as gone; fall back to the last-good map.
         sections = (previous_roster or {}).get("sections") or {}
+    if not _publication_ok(collector):
+        return {"ok": False, "error": "publication_incomplete", "error_code": "publication_incomplete"}
     store.write_roster(course_id, students, sections, root=root, attempted_at=started)
     store.record_pass(course_id, "roster", ok=True, attempted_at=started, root=root)
     return {"ok": True, "students": len(students or [])}

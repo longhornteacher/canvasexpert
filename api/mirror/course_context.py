@@ -73,7 +73,8 @@ def sanitized_error_code(error) -> str:
 
 
 def refresh_course_context(course_id, *, canvas_get, canvas_get_all, root=None,
-                           now=None) -> dict:
+                           now=None, canvas_get_all_complete=None,
+                           receipt_sink=None) -> dict:
     """Fetch and persist one course's caller-only lifecycle proof.
 
     Failures retain the last-good lifecycle fields by delegating envelope
@@ -90,18 +91,37 @@ def refresh_course_context(course_id, *, canvas_get, canvas_get_all, root=None,
                 error_code=sanitized_error_code(error), root=root)
         course_fields = normalize_course(course)
 
-        enrollments, error = canvas_get_all(
-            f"/api/v1/courses/{course_id}/enrollments",
-            {"user_id": "self", "per_page": 100, "state[]": list(ENROLLMENT_STATES)})
+        enrollment_path = f"/api/v1/courses/{course_id}/enrollments"
+        enrollment_params = {"user_id": "self", "per_page": 100,
+                             "state[]": list(ENROLLMENT_STATES)}
+        if canvas_get_all_complete is None:
+            enrollments, error = canvas_get_all(enrollment_path, enrollment_params)
+            enrollment_complete = False
+        else:
+            enrollments, error, enrollment_complete = canvas_get_all_complete(
+                enrollment_path, enrollment_params)
         if error:
             return store.record_course_context(
                 course_id, ok=False, attempted_at=attempted_at,
                 error_code=sanitized_error_code(error), root=root)
         enrollment_states = normalize_enrollment_states(enrollments)
-        return store.record_course_context(
+        result = store.record_course_context(
             course_id, ok=True, attempted_at=attempted_at,
             lifecycle=classify_lifecycle(enrollment_states),
             enrollment_states=enrollment_states, root=root, **course_fields)
+        if receipt_sink is not None:
+            from api.mirror.evidence_acquisition import CourseAcquisitionReceipt, ScopeReceipt
+            receipt_sink(CourseAcquisitionReceipt(
+                course_id=str(course_id), acquisition_started_at=attempted_at,
+                acquisition_finished_at=attempted_at,
+                scopes=(ScopeReceipt(
+                    scope="course.context", scope_id=str(course_id),
+                    rows=({**course, "enrollment_states": enrollment_states},),
+                    complete=bool(enrollment_complete),
+                    error_code=None if enrollment_complete else "pagination_incomplete",
+                ),),
+            ))
+        return result
     except Exception as error:
         # The lifecycle scope is advisory scheduling context.  A malformed or
         # unavailable read must not escape into or interrupt core mirror work.
@@ -111,7 +131,8 @@ def refresh_course_context(course_id, *, canvas_get, canvas_get_all, root=None,
 
 
 def ensure_course_context(course_id, *, canvas_get, canvas_get_all, root=None,
-                          now=None, max_age_hours: float = 24.0) -> dict:
+                          now=None, max_age_hours: float = 24.0,
+                          canvas_get_all_complete=None, receipt_sink=None) -> dict:
     """Refresh on first use and no more often than the lifecycle daily cadence."""
     now_iso = now or store.now_iso()
     existing = store.read_course_context(course_id, root=root)
@@ -120,4 +141,6 @@ def ensure_course_context(course_id, *, canvas_get, canvas_get_all, root=None,
         return existing
     return refresh_course_context(course_id, canvas_get=canvas_get,
                                   canvas_get_all=canvas_get_all, root=root,
-                                  now=now_iso)
+                                  now=now_iso,
+                                  canvas_get_all_complete=canvas_get_all_complete,
+                                  receipt_sink=receipt_sink)

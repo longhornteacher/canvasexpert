@@ -658,6 +658,31 @@ def test_course_context_strict_allowlist_and_conservative_classification(tmp_pat
     assert course_context.classify_lifecycle([]) == "unknown"
 
 
+def test_course_context_reuses_complete_reads_for_evidence_receipt(tmp_path):
+    receipts = []
+    calls = []
+
+    def course_get(path, params):
+        calls.append(path)
+        return {"id": 111, "name": "Fictional Course", "concluded": False,
+                "term": {"end_at": "2026-08-01T00:00:00Z"}}, None
+
+    def complete_get(path, params):
+        calls.append(path)
+        return [{"enrollment_state": "active"}], None, True
+
+    result = course_context.refresh_course_context(
+        COURSE, canvas_get=course_get,
+        canvas_get_all=lambda *args: (_ for _ in ()).throw(AssertionError("duplicate GET")),
+        canvas_get_all_complete=complete_get, receipt_sink=receipts.append,
+        root=str(tmp_path), now="2026-07-16T12:00:00Z")
+    assert result["state"] == "current"
+    assert len(calls) == 2
+    scope = receipts[0].scopes[0]
+    assert scope.complete is True
+    assert scope.rows[0]["enrollment_states"] == ["active"]
+
+
 def test_course_context_invalid_file_is_absent_and_failure_preserves_last_good_only(tmp_path):
     path = store.course_context_path(COURSE, str(tmp_path))
     os.makedirs(os.path.dirname(path), exist_ok=True)

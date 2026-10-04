@@ -1109,3 +1109,58 @@ def test_focused_assignment_refresh_failure_preserves_last_good_without_pass_mut
     assert result["error_code"]
     assert store.read_submissions(COURSE, "700010", root=str(tmp_path)) == before_document
     assert store.read_sync(COURSE, root=str(tmp_path)) == before_state
+
+
+@pytest.mark.parametrize("partial,publication_partial", [(False, False), (True, False), (False, True)])
+def test_receipt_reuses_submission_fetch_and_partial_never_advances_watermark(
+    tmp_path, partial, publication_partial
+):
+    from types import SimpleNamespace
+    canvas = FakeCanvas(submissions=[_sub(700010)])
+    receipts = []
+    def complete(path, params=None, **kwargs):
+        rows, error = canvas(path, params, **kwargs)
+        return rows, error, not (partial and path.endswith("/submissions"))
+    def publish(receipt):
+        receipts.append(receipt)
+        successful = [(scope.scope, scope.scope_id) for scope in receipt.scopes
+                      if scope.complete and not (publication_partial and scope.scope == "assignment.submissions")]
+        return SimpleNamespace(successful_scopes=tuple(successful), gaps=("attachments_pending",))
+    result = sync.full_pass(COURSE, canvas_get_all=canvas,
+        canvas_get_all_complete=complete, root=str(tmp_path), now=NOW,
+        with_comments=False, receipt_sink=publish)
+    assert result["ok"] is (not partial and not publication_partial)
+    assert len([path for path, _ in canvas.calls if path.endswith("/submissions")]) == 1
+    assert len(receipts) == 1
+    submissions = [scope for scope in receipts[0].scopes if scope.scope == "assignment.submissions"]
+    assert {scope.scope_id for scope in submissions} == {"700010", "700020"}
+    assert all(scope.complete is (not partial) for scope in submissions)
+    marks = store.read_sync(COURSE, root=str(tmp_path))["watermarks"]
+    assert bool(marks["submitted_since"]) is (not partial and not publication_partial)
+
+
+def test_empty_delta_publishes_delta_scopes_without_claiming_snapshot(tmp_path):
+    canvas = FakeCanvas(submissions=[_sub(700010)])
+    sync.full_pass(COURSE, canvas_get_all=canvas, canvas_get_all_complete=canvas.complete,
+                   root=str(tmp_path), now=NOW, with_comments=False)
+    receipts = []
+    result = sync.delta_pass(COURSE, canvas_get_all=canvas,
+        canvas_get_all_complete=canvas.complete, root=str(tmp_path), now=NOW,
+        receipt_sink=lambda receipt: receipts.append(receipt))
+    assert result["ok"]
+    scopes = [scope for scope in receipts[0].scopes if scope.scope == "assignment.submissions"]
+    assert {scope.scope_id for scope in scopes} == {"700010", "700020"}
+    assert all(scope.mode == "delta" and scope.complete and not scope.rows for scope in scopes)
+
+
+def test_failed_roster_still_publishes_acquired_assignment_sibling(tmp_path):
+    canvas = FakeCanvas(errors={"users": "403"})
+    receipts = []
+    result = sync.full_pass(COURSE, canvas_get_all=canvas,
+        canvas_get_all_complete=canvas.complete, root=str(tmp_path), now=NOW,
+        receipt_sink=lambda receipt: receipts.append(receipt))
+    assert not result["ok"]
+    assert len(receipts) == 1
+    assert receipts[0].scopes[0].scope == "course.assignments"
+    assert receipts[0].scopes[0].complete
+    assert not receipts[0].scopes[1].complete

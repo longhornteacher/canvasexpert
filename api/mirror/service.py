@@ -14,6 +14,8 @@ reconcile), otherwise a delta every tick plus a daily roster refresh.
 from __future__ import annotations
 
 import os
+import hashlib
+import uuid
 import threading
 import time
 import requests
@@ -42,6 +44,149 @@ TICK_SECONDS = 900                # delta cadence while the app runs
 FULL_MAX_AGE_HOURS = 24.0         # backfill + nightly reconcile
 ROSTER_MAX_AGE_HOURS = 24.0
 NOTIFY_DELAY_SECONDS = 15.0       # write-through settle delay
+
+
+_OWNER_LOCK = threading.RLock()
+_OWNER = None
+_OWNER_BINDING = None
+_OWNER_ERROR = None
+_FOCUSED_PLANS = {}
+_REQUEST_QUEUE = None
+_REQUEST_BINDING = None
+FOCUSED_OWNER_WAIT_SECONDS = 2.0
+
+
+def acquisition_owner_status(*, tick=False):
+    """Observe advisory acquisition ownership without touching work leases."""
+    global _OWNER, _OWNER_BINDING, _OWNER_ERROR
+    from api import local_runtime
+    from api.mirror.acquisition_owner import AcquisitionOwner, OwnerStatus
+    from api.mirror.evidence_paths import source_key_for_origin
+    with _OWNER_LOCK:
+        try:
+            root = workspace.workspace_root()
+            if root is None or not config.mirror_enabled() or not config.token_is_set():
+                return None
+            binding = (str(root), source_key_for_origin(config.get_canvas_base()))
+            if binding != _OWNER_BINDING:
+                if _OWNER is not None:
+                    _OWNER.release()
+                writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
+                _OWNER = AcquisitionOwner(root, binding[1], writer)
+                _OWNER_BINDING = binding
+            _OWNER_ERROR = None
+            return _OWNER.tick() if tick else _OWNER.observe()
+        except Exception:
+            _OWNER_ERROR = "repair_required"
+            return OwnerStatus(None, None, None, False, "repair_required", issues=("owner_unavailable",))
+
+
+def _focused_requests():
+    global _REQUEST_QUEUE, _REQUEST_BINDING
+    from api.mirror.acquisition_requests import AcquisitionRequests
+    from api.mirror.evidence_paths import source_key_for_origin
+    root = workspace.workspace_root()
+    if root is None:
+        raise ValueError("workspace_unconfigured")
+    binding = (str(root), source_key_for_origin(config.get_canvas_base()))
+    with _OWNER_LOCK:
+        if binding != _REQUEST_BINDING:
+            _FOCUSED_PLANS.clear()
+            _REQUEST_QUEUE = AcquisitionRequests(*binding)
+            _REQUEST_BINDING = binding
+        return _REQUEST_QUEUE
+
+
+def _service_focused_requests(owner):
+    """Poll progress without blocking the ownership heartbeat behind Canvas I/O."""
+    if owner is None or not owner.is_owner:
+        return
+    requests = _focused_requests()
+    instance = coordinator_instance()
+    for key, (plan_id, request_ids) in list(_FOCUSED_PLANS.items()):
+        plans = instance.status(plan_id).get("plans", [])
+        if not plans or plans[0]["state"] in {"succeeded", "failed", "cancelled"}:
+            if plans and plans[0]["state"] == "succeeded":
+                requests.acknowledge(request_ids, owner_writer_key=owner.owner_writer_key)
+            _FOCUSED_PLANS.pop(key, None)
+    for request in requests.pending(limit=32):
+        key = (request.course_id, request.scope)
+        if key in _FOCUSED_PLANS or _selected_course(request.course_id) is None:
+            continue
+        plan_id = instance.submit([request.course_id], [request.scope], priority="background")
+        _FOCUSED_PLANS[key] = (plan_id, request.request_ids)
+
+
+def _request_owner_first(course_id, scope):
+    """Healthy non-owners give the owner a bounded opportunity before duplicate GETs."""
+    owner = acquisition_owner_status()
+    if owner is None or owner.is_owner:
+        return False
+    if owner.state == "repair_required":
+        raise ValueError("acquisition_owner_repair_required")
+    from api import local_runtime
+    requests = _focused_requests()
+    writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
+    request_id = requests.submit(writer_key=writer, course_id=course_id, scope=scope)
+    deadline = time.monotonic() + FOCUSED_OWNER_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        if requests.is_acknowledged(request_id):
+            # Publication may precede cloud delivery of evidence dependencies.
+            # Local legacy projections still need their own bounded refresh until S08.
+            return True
+        time.sleep(0.05)
+    return True
+
+
+def release_acquisition_owner():
+    global _OWNER, _OWNER_BINDING
+    with _OWNER_LOCK:
+        try:
+            if _OWNER is not None:
+                _OWNER.release()
+        finally:
+            _OWNER = None
+            _OWNER_BINDING = None
+
+
+def acquisition_owner_worker(stop_event):
+    """Heartbeat independently of acquisition duration and the 900s cadence."""
+    from api.mirror.acquisition_owner import HEARTBEAT_INTERVAL, STALE_AFTER
+    previous = time.monotonic()
+    try:
+        while not stop_event.is_set():
+            current = time.monotonic()
+            with _OWNER_LOCK:
+                if _OWNER is not None and current - previous >= STALE_AFTER:
+                    _OWNER.reobserve()
+            owner = acquisition_owner_status(tick=True)
+            try:
+                _service_focused_requests(owner)
+            except Exception as exc:
+                operational_log.emit("mirror.focused_requests", "failed", error_class=type(exc))
+            previous = current
+            if stop_event.wait(HEARTBEAT_INTERVAL):
+                break
+    finally:
+        release_acquisition_owner()
+
+
+def _publish_acquisition(receipt):
+    """Publish the same private rows acquired for temporary legacy projections."""
+    from api import local_runtime
+    from api.mirror.evidence_acquisition import publish_course_receipt
+    from api.mirror.evidence_paths import source_key_for_origin
+    from api.mirror.evidence_publish import EvidencePublisher
+    root = workspace.workspace_root()
+    if root is None:
+        raise ValueError("workspace_unconfigured")
+    writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
+    with store._vault_transaction(root) as vault:
+        publisher = EvidencePublisher(workspace_root=root,
+            source_key=source_key_for_origin(config.get_canvas_base()),
+            course_id=receipt.course_id, vault=vault)
+        return publish_course_receipt(publisher=publisher, receipt=receipt,
+                                      writer_key=writer, run_id=uuid.uuid4().hex)
 
 
 def due_passes(state: dict, now_iso: str, *,
@@ -74,6 +219,33 @@ _PASS_RUNNERS = {"full": sync.full_pass, "delta": sync.delta_pass,
                  "roster": sync.roster_pass}
 
 
+def _selected_course(course_id: str) -> dict | None:
+    return next((course for course in config.active_courses()
+                 if str(course.get("id")) == str(course_id)), None)
+
+
+def _selected_runner(runner, scope=None):
+    """Recheck at execution; a queued job cannot refresh a Previous course."""
+    def run(course_id):
+        if _selected_course(course_id) is None:
+            return {"ok": False, "error_class": "course_not_selected"}
+        if coordinator.current_worker_context().get("priority") in {"background", "concluded"}:
+            owner = acquisition_owner_status()
+            if owner is None or not owner.is_owner:
+                return {"ok": False, "error_class": "acquisition_owner_waiting" if owner is None else owner.state}
+        duplicate = False
+        if scope and coordinator.current_worker_context().get("priority") in {"manual", "post_write"}:
+            try:
+                duplicate = _request_owner_first(str(course_id), scope)
+            except ValueError:
+                return {"ok": False, "error_class": "acquisition_owner_repair_required"}
+        result = runner(course_id)
+        if duplicate and isinstance(result, dict):
+            result = {**result, "acquisition_mode": "bounded_duplicate", "owner_requested": True}
+        return result
+    return run
+
+
 def _telemetry(scope: str):
     context = coordinator.current_worker_context()
     return canvas_get_telemetry(scope, context.get("priority", "manual"),
@@ -83,19 +255,20 @@ def _telemetry(scope: str):
 def _run_course_context(course_id: str):
     with _telemetry("course_context"):
         result = course_context.refresh_course_context(
-            course_id, canvas_get=canvas_get, canvas_get_all=canvas_get_all)
+            course_id, canvas_get=canvas_get, canvas_get_all=canvas_get_all,
+            canvas_get_all_complete=canvas_get_all_complete, receipt_sink=_publish_acquisition)
         return {"ok": result.get("state") == "current", "state": result.get("state", "failed")}
 
 
 def _run_roster(course_id: str):
     with _telemetry("roster"):
         return sync.roster_pass(course_id, canvas_get_all=canvas_get_all,
-                                canvas_get_all_complete=canvas_get_all_complete)
+                                canvas_get_all_complete=canvas_get_all_complete, receipt_sink=_publish_acquisition)
 
 
 def _run_groups(course_id: str):
     with _telemetry("groups"):
-        result = _refresh_groups_on_maintenance(course_id, load_groups=load_group_categories,
+        result = _refresh_groups_on_maintenance(course_id, load_groups=lambda cid: load_group_categories(cid, complete_client=canvas_get_all_complete),
                                                 now=store.now_iso())
         return {"ok": result.get("state") == "current", "state": result.get("state", "failed")}
 
@@ -104,7 +277,8 @@ def _run_submission_delta(course_id: str):
     with _telemetry("submissions.course_delta"):
         return sync.refresh_submissions_course_delta(
             course_id, canvas_get_all=canvas_get_all,
-            stream_get=canvas_stream_get, canvas_origin=config.get_canvas_base())
+            stream_get=canvas_stream_get, canvas_origin=config.get_canvas_base(),
+            canvas_get_all_complete=canvas_get_all_complete, receipt_sink=_publish_acquisition)
 
 
 def _run_new_quiz_metadata(course_id: str):
@@ -129,12 +303,11 @@ def _run_course_refresh(course_id: str):
                 course, stream_get=canvas_stream_get,
                 canvas_origin=config.get_canvas_base()) if course else
                 {"ok": False, "error_class": "course_unavailable"})
-        course = next((item for item in config.saved_courses()
-                       if str(item.get("id")) == str(course_id)), None)
+        course = _selected_course(course_id)
         if not course:
             return {"ok": False, "error_class": "course_unavailable"}
         return sync.refresh(
-            course_id,
+            course_id, receipt_sink=_publish_acquisition,
             canvas_get_all=canvas_get_all,
             canvas_get_all_complete=canvas_get_all_complete,
             course_name=course.get("name"),
@@ -144,18 +317,9 @@ def _run_course_refresh(course_id: str):
 
 
 def _run_structure_refresh(course_id: str):
-    """Refresh the student-free v3 Course Catalog, including full modules.
-
-    Any saved course (Current or Previous): the catalog is student-free and
-    read-only, and the catalog reads accept saved courses, so the repair they
-    name must work for the same set.
-    """
+    """Refresh selected-course structure, including full modules."""
     with _telemetry("course.structure_refresh"):
-        course = next((item for item in config.active_courses()
-                       if str(item.get("id")) == str(course_id)), None)
-        if not course:
-            course = next((item for item in config.saved_courses()
-                           if str(item.get("id")) == str(course_id)), None)
+        course = _selected_course(course_id)
         if not course:
             return {"ok": False, "error_class": "course_unavailable"}
         result = course_catalog.refresh_catalog(
@@ -163,9 +327,10 @@ def _run_structure_refresh(course_id: str):
             course.get("name") or course_id,
             canvas_get_all=canvas_get_all,
             canvas_get_all_complete=canvas_get_all_complete,
+            receipt_sink=_publish_acquisition,
         )
         return {
-            "ok": True,
+            "ok": not bool(getattr(result.get("evidence"), "gaps", ())),
             "state": result.get("result", "partial"),
             "source": result.get("source"),
             "sections": result.get("sections", {}),
@@ -184,12 +349,11 @@ def _run_scoring_course_refresh(course_id: str):
     preparation does not read them and they are an independent mirror concern.
     """
     with _telemetry("course.scoring_refresh"):
-        course = next((item for item in config.saved_courses()
-                       if str(item.get("id")) == str(course_id)), None)
+        course = _selected_course(course_id)
         if not course:
             return {"ok": False, "error_class": "course_unavailable"}
         return sync.refresh(
-            course_id,
+            course_id, receipt_sink=_publish_acquisition,
             canvas_get_all=canvas_get_all,
             canvas_get_all_complete=canvas_get_all_complete,
             course_name=course.get("name"),
@@ -201,12 +365,11 @@ def _run_scoring_course_refresh(course_id: str):
 def _run_feedback_course_refresh(course_id: str):
     """Acquire complete comment identities/staff proof only on teacher opt-in."""
     with _telemetry("course.feedback_refresh"):
-        course = next((item for item in config.saved_courses()
-                       if str(item.get("id")) == str(course_id)), None)
+        course = _selected_course(course_id)
         if not course:
             return {"ok": False, "error_class": "course_unavailable"}
         return sync.refresh(
-            course_id, canvas_get_all=canvas_get_all,
+            course_id, receipt_sink=_publish_acquisition, canvas_get_all=canvas_get_all,
             canvas_get_all_complete=canvas_get_all_complete,
             course_name=course.get("name"), force=True, full=True, with_comments=True)
 
@@ -219,12 +382,11 @@ def _run_scoring_discovery_refresh(course_id: str):
     needed, while assignment preparation keeps its stricter separate scope.
     """
     with _telemetry("course.scoring_discovery_refresh"):
-        course = next((item for item in config.saved_courses()
-                       if str(item.get("id")) == str(course_id)), None)
+        course = _selected_course(course_id)
         if not course:
             return {"ok": False, "error_class": "course_unavailable"}
         return sync.refresh(
-            course_id,
+            course_id, receipt_sink=_publish_acquisition,
             canvas_get_all=canvas_get_all,
             canvas_get_all_complete=canvas_get_all_complete,
             course_name=course.get("name"),
@@ -235,7 +397,7 @@ def _run_scoring_discovery_refresh(course_id: str):
 
 def coordinator_instance() -> coordinator.MirrorCoordinator:
     """The sole production registry.  Every runner above is read-only."""
-    return coordinator.configure_default({
+    runners = {
         "course.refresh": _run_course_refresh,
         "course_context": _run_course_context,
         "roster": _run_roster,
@@ -246,16 +408,18 @@ def coordinator_instance() -> coordinator.MirrorCoordinator:
         "submissions.course_delta": _run_submission_delta,
         "new_quizzes.metadata": _run_new_quiz_metadata,
         "course.structure_refresh": _run_structure_refresh,
-    })
+    }
+    return coordinator.configure_default({scope: _selected_runner(runner, scope)
+                                          for scope, runner in runners.items()})
 
 
 def enqueue_sync(course_id: str | None = None, scopes: list[str] | None = None,
                  *, reuse_completed_within_seconds: float = 0) -> str:
     """Queue manual read-only work; HTTP callers receive the opaque plan ID."""
-    courses = [course for course in config.saved_courses()
+    courses = [course for course in config.active_courses()
                if not course_id or str(course.get("id")) == str(course_id)]
     if not courses:
-        raise ValueError("Not a saved course.")
+        raise ValueError("Course is not Current.")
     kwargs = {"priority": "manual"}
     if reuse_completed_within_seconds:
         kwargs["reuse_completed_within_seconds"] = reuse_completed_within_seconds
@@ -265,15 +429,9 @@ def enqueue_sync(course_id: str | None = None, scopes: list[str] | None = None,
 
 
 def refresh_course_structure(course_id: str, *, timeout_seconds: float = 30.0) -> dict:
-    """Refresh only through the coordinator and expose no Canvas rows.
-
-    Accepts any saved course (Current or Previous) so the catalog reads'
-    ``refresh_mirror(structure_only=true)`` repair is executable for exactly
-    the set of courses those reads accept.
-    """
-    if not any(str(course.get("id")) == str(course_id)
-               for course in config.saved_courses()):
-        raise ValueError("Not a saved course.")
+    """Refresh a Current course through the coordinator without exposing rows."""
+    if _selected_course(course_id) is None:
+        raise ValueError("Course is not Current.")
     plan_id = coordinator_instance().submit(
         [str(course_id)], ["course.structure_refresh"], priority="manual",
     )
@@ -298,6 +456,9 @@ def refresh_course_structure(course_id: str, *, timeout_seconds: float = 30.0) -
 def enqueue_heartbeat_refreshes() -> list[str]:
     """Queue one compatibility refresh job per configured course, never direct GET work."""
     if not config.token_is_set() or not config.mirror_enabled() or workspace.workspace_root() is None:
+        return []
+    owner = acquisition_owner_status()
+    if owner is None or not owner.is_owner:
         return []
     instance = coordinator_instance()
     plans = []
@@ -345,7 +506,20 @@ def _refresh_groups_on_maintenance(course_id: str, *, load_groups, now: str) -> 
             return {"state": document["state"] if document else "unavailable",
                     "error_code": "refresh_failed"}
         store.write_groups(course_id, categories, attempted_at=now)
-        return {"state": "current", "error_code": ""}
+        from api.mirror.evidence_acquisition import CourseAcquisitionReceipt, ScopeReceipt
+        rows = []
+        for category in categories or []:
+            for group in category.get("groups") or []:
+                rows.append({**group, "group_category_id": category.get("category_id"),
+                             "user_ids": group.get("student_ids", [])})
+        # Only the complete-client lane proves group and membership pagination.
+        # Legacy injected loaders still publish useful, explicitly partial facts.
+        publication = _publish_acquisition(CourseAcquisitionReceipt(str(course_id), now,
+            max(now, store.now_iso()), (ScopeReceipt("course.groups", str(course_id),
+            tuple(rows), complete=bool(getattr(categories, "membership_complete", False)),
+            error_code=None if getattr(categories, "membership_complete", False) else "pagination_incomplete"),)))
+        return {"state": "current", "error_code": "",
+                "evidence_gaps": list(publication.gaps)}
     except Exception:
         try:
             document = store.mark_groups_stale(course_id, attempted_at=now)
@@ -362,14 +536,17 @@ def _run_heartbeat_course(course: dict, *, canvas_get=None, canvas_get_all=None,
     canvas_get = canvas_get or globals()["canvas_get"]
     canvas_get_all = canvas_get_all or globals()["canvas_get_all"]
     canvas_get_all_complete = canvas_get_all_complete or globals()["canvas_get_all_complete"]
-    load_groups = load_groups or load_group_categories
+    load_groups = load_groups or (lambda cid: load_group_categories(cid, complete_client=canvas_get_all_complete))
     now_iso = now or store.now_iso()
     course_id = str((course or {}).get("id") or "")
     if not course_id:
         return {"ok": False, "error_class": "course_unavailable", "results": []}
+    if _selected_course(course_id) is None:
+        return {"ok": False, "error_class": "course_not_selected", "results": []}
     try:
         context = course_context.ensure_course_context(
-            course_id, canvas_get=canvas_get, canvas_get_all=canvas_get_all, now=now_iso)
+            course_id, canvas_get=canvas_get, canvas_get_all=canvas_get_all, now=now_iso,
+            canvas_get_all_complete=canvas_get_all_complete, receipt_sink=_publish_acquisition)
     except Exception:
         context = store.read_course_context(course_id)
     state = store.read_sync(course_id)
@@ -379,9 +556,12 @@ def _run_heartbeat_course(course: dict, *, canvas_get=None, canvas_get_all=None,
         return {"ok": True, "results": []}
     summaries = []
     for pass_name in pass_names:
+        if _selected_course(course_id) is None:
+            return {"ok": False, "error_class": "course_not_selected", "results": summaries}
         pass_started = time.monotonic()
         try:
-            kwargs = {"canvas_get_all": canvas_get_all, "now": now_iso}
+            kwargs = {"canvas_get_all": canvas_get_all, "now": now_iso,
+                      "receipt_sink": _publish_acquisition}
             if pass_name in {"full", "delta", "roster"}:
                 kwargs["canvas_get_all_complete"] = canvas_get_all_complete
             if pass_name in {"full", "delta"}:
@@ -393,6 +573,9 @@ def _run_heartbeat_course(course: dict, *, canvas_get=None, canvas_get_all=None,
             result = _PASS_RUNNERS[pass_name](course_id, **kwargs)
         except Exception as error:
             result = {"ok": False, "error_class": type(error).__name__}
+        if result.get("ok") and pass_name == "full":
+            # Catalog consumes its acquired receipt; sync has no module/page GETs.
+            result = {**result, "structure": _run_structure_refresh(course_id)}
         if result.get("ok") and pass_name in {"full", "roster"}:
             result = {**result, "groups": _refresh_groups_on_maintenance(
                 course_id, load_groups=load_groups, now=now_iso)}
@@ -424,7 +607,7 @@ def notify_course_changed(course_id, *, delay_seconds: float = NOTIFY_DELAY_SECO
         try:
             if not config.token_is_set() or not config.mirror_enabled():
                 return
-            if workspace.workspace_root() is None:
+            if workspace.workspace_root() is None or _selected_course(course_id) is None:
                 return
             plan_id = coordinator_instance().submit(
                 [str(course_id)], ["submissions.course_delta"], priority="post_write")
@@ -452,7 +635,11 @@ def status(plan_id: str | None = None) -> dict:
             "watermarks": state["watermarks"],
             "context": store.read_course_context(course_id),
         })
+    owner = acquisition_owner_status()
     payload = {
+        "acquisition_owner": {"state": owner.state if owner else "disabled",
+                              "is_owner": bool(owner and owner.is_owner),
+                              "issues": list(owner.issues) if owner else []},
         "ok": True,
         "enabled": config.mirror_enabled(),
         "workspace_configured": workspace.workspace_root() is not None,
@@ -492,7 +679,7 @@ def mirror_heartbeat_worker(stop_event):
             return
 
 
-def fetch_group_category_groups(course_id: str, category_id: str) -> tuple[list[dict] | None, str | None]:
+def fetch_group_category_groups(course_id: str, category_id: str, *, complete_client=None) -> tuple[list[dict] | None, str | None]:
     """Fetch one group category's groups + memberships live from Canvas.
 
     Factored out of ``load_group_categories``'s whole-course loop so both the
@@ -505,7 +692,13 @@ def fetch_group_category_groups(course_id: str, category_id: str) -> tuple[list[
     if not hdrs:
         return None, "No token saved."
 
+    completeness = []
     def get(path, params=None):
+        if complete_client is not None:
+            rows, error, complete = complete_client(path, params or {})
+            completeness.append(complete is True and not error)
+            return (200 if not error else 0, rows)
+        completeness.append(False)
         try:
             r = requests.get(f"{base}{path}", headers=hdrs,
                              params=params or {}, timeout=20)
@@ -532,10 +725,18 @@ def fetch_group_category_groups(course_id: str, category_id: str) -> tuple[list[
             "student_ids": [m["user_id"] for m in mems],
             "memberships": mems,
         })
+    if complete_client is not None and not all(completeness):
+        return groups_out, "pagination_incomplete"
     return groups_out, None
 
 
-def load_group_categories(course_id: str) -> tuple[list[dict], str | None, str]:
+class _GroupCategories(list):
+    def __init__(self, values, complete=False):
+        super().__init__(values)
+        self.membership_complete = complete
+
+
+def load_group_categories(course_id: str, *, complete_client=None) -> tuple[list[dict], str | None, str]:
     """Return (categories, error, message) for a course's group sets.
 
     Canvas note (confirmed live 2026-06): teacher PATs may get 403 on every
@@ -550,7 +751,13 @@ def load_group_categories(course_id: str) -> tuple[list[dict], str | None, str]:
     if not hdrs:
         return [], "No token saved.", ""
 
+    completeness = []
     def get(path, params=None):
+        if complete_client is not None:
+            rows, error, complete = complete_client(path, params or {})
+            completeness.append(complete is True and not error)
+            return (200 if not error else 0, rows)
+        completeness.append(False)
         try:
             r = requests.get(f"{base}{path}", headers=hdrs,
                              params=params or {}, timeout=20)
@@ -572,11 +779,12 @@ def load_group_categories(course_id: str) -> tuple[list[dict], str | None, str]:
             # behavior): a per-category fetch failure degrades to an empty
             # groups list for that one category rather than failing the
             # whole-course load.
-            groups_out, _err = fetch_group_category_groups(course_id, cat["id"])
+            groups_out, _err = fetch_group_category_groups(course_id, cat["id"], **({"complete_client": complete_client} if complete_client else {}))
+            completeness.append(complete_client is not None and not _err)
             result.append({"category_id":   str(cat["id"]),
                            "category_name": cat["name"],
                            "groups":        groups_out or []})
-        return result, None, ""
+        return _GroupCategories(result, bool(complete_client) and all(completeness)), None, ""
 
     # Fallback: course groups bucketed by category id (category names 403-gated).
     st2, groups_raw = get(f"/api/v1/courses/{course_id}/groups", {"per_page": 100})
@@ -585,21 +793,23 @@ def load_group_categories(course_id: str) -> tuple[list[dict], str | None, str]:
                     f"(group_categories: {st}; groups: {st2})."), ""
 
     if not groups_raw:
-        return [], None, "No group sets found in this course."
+        return _GroupCategories([], bool(complete_client) and completeness[-1]), None, "No group sets found in this course."
 
+    completeness = completeness[-1:]
     buckets = {}
     for grp in groups_raw:
         buckets.setdefault(str(grp.get("group_category_id") or "0"), []).append(grp)
     result = []
     for i, (cat_id, grps) in enumerate(sorted(buckets.items()), start=1):
+        normalized = []
+        for grp in grps:
+            members = memberships(grp["id"])
+            normalized.append({"id": str(grp["id"]), "name": grp["name"],
+                               "student_ids": [m["user_id"] for m in members],
+                               "memberships": members})
         result.append({
             "category_id":   cat_id,
             "category_name": "Group set" if len(buckets) == 1 else f"Group set {i}",
-            "groups": [{
-                "id":          str(grp["id"]),
-                "name":        grp["name"],
-                "student_ids": [m["user_id"] for m in (memberships(grp["id"]) or [])],
-                "memberships": memberships(grp["id"]),
-            } for grp in grps],
+            "groups": normalized,
         })
-    return result, None, ""
+    return _GroupCategories(result, bool(complete_client) and all(completeness)), None, ""

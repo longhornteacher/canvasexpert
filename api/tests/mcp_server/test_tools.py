@@ -1360,18 +1360,13 @@ def test_gate_hard_blocks_unscrubbed_id_in_text_field_and_sanitizes_violation(tm
 
 # --- refresh_mirror -------------------------------------------------------------
 
-def test_refresh_mirror_accepts_previous_course(monkeypatch, _set_previous_course):
+def test_refresh_mirror_rejects_previous_course(monkeypatch, _set_previous_course):
     _set_previous_course()
     monkeypatch.setattr(tools, "_enqueue_sync", lambda course_id, scopes=None: "plan-1")
     monkeypatch.setattr(tools, "_wait_for_plan",
                         lambda plan_id, **kwargs: {"state": "succeeded"})
     result = tools.refresh_mirror("111")
-    assert result == {
-        "ok": True,
-        "status": "synced",
-        "message": "Mirror refreshed (roster, groups, assignments, and submissions status only). Re-read the refused tool now. 0 scores changed outside CE.",
-        "canvas_external_count": 0,
-    }
+    assert result == {"ok": False, "error": "Course is not Current; select it as Current before refreshing."}
 
 
 def test_list_groups_projects_names_without_private_ids_or_student_selection(monkeypatch, _set_active_courses):
@@ -1495,7 +1490,8 @@ def test_refresh_mirror_enqueues_roster_pass(monkeypatch, _set_active_courses):
 
 
 @pytest.mark.parametrize("include_comments,scope", [(False, "course.refresh"), (True, "course.feedback_refresh")])
-def test_refresh_mirror_comment_acquisition_is_explicit_and_status_only(monkeypatch, include_comments, scope):
+def test_refresh_mirror_comment_acquisition_is_explicit_and_status_only(monkeypatch, _set_active_courses, include_comments, scope):
+    _set_active_courses(["111"])
     calls = []
     monkeypatch.setattr(tools, "_enqueue_sync", lambda cid, scopes: calls.append((cid, scopes)) or "plan")
     monkeypatch.setattr(tools, "_wait_for_plan", lambda *a, **kw: {"state": "succeeded"})
@@ -1598,10 +1594,8 @@ def test_refresh_mirror_loop_escalation_at_third_call_within_window(monkeypatch,
         tools._refresh_loop_calls.clear()
 
 
-def test_refresh_course_structure_succeeds_on_saved_previous_course(monkeypatch, _set_previous_course):
-    """LAW (brief decision #2): refresh_course_structure accepts saved courses
-    (Current or Previous), so the catalog read's structure_only repair is
-    executable for all saved courses."""
+def test_refresh_course_structure_rejects_previous_course(monkeypatch, _set_previous_course):
+    """The current handoff's teacher decision stops every Previous-course refresh."""
     from api.mirror import service as mirror_service
 
     _set_previous_course("111")
@@ -1622,8 +1616,7 @@ def test_refresh_course_structure_succeeds_on_saved_previous_course(monkeypatch,
     )
 
     result = tools.refresh_mirror("111", structure_only=True)
-    assert result["ok"] is True
-    assert result["status"] == "synced"
+    assert result == {"ok": False, "error": "Course is not Current; select it as Current before refreshing."}
 
 
 def test_refresh_course_structure_raises_for_unsaved_course(monkeypatch, _set_active_courses):
@@ -1640,7 +1633,7 @@ def test_refresh_course_structure_raises_for_unsaved_course(monkeypatch, _set_ac
 
     result = tools.refresh_mirror("999", structure_only=True)
     assert result["ok"] is False
-    assert "Not a saved course" in result["error"]
+    assert "not Current" in result["error"]
 
 
 # --- server wiring -------------------------------------------------------------

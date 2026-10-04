@@ -1132,6 +1132,7 @@ def refresh_catalog(
     canvas_get_all_complete: CanvasGetAllComplete,
     attempted_at: str | None = None,
     assignment_receipt: AssignmentCollectionReceipt | None = None,
+    receipt_sink=None,
 ) -> dict:
     """Refresh all v3 scopes, optionally using one already-acquired assignment receipt."""
     course_id = str(course_id or "").strip()
@@ -1183,6 +1184,30 @@ def refresh_catalog(
         _confirm_pending_writes(course_id, written["catalog"])
         warnings = sorted(set(previous_read.get("warnings", []) + written.get("warnings", [])))
         summary = catalog_status_summary(written["catalog"])
+        evidence_result = None
+        if receipt_sink is not None:
+            # Reuse the three collections acquired above. A stale Catalog scope
+            # can contain previous records, so it must never prove membership.
+            from api.mirror.evidence_acquisition import CourseAcquisitionReceipt, ScopeReceipt
+
+            scope_names = (("modules", "course.modules"),
+                           ("assignment_groups", "course.assignment_groups"),
+                           ("pages", "course.pages"))
+            evidence_scopes = []
+            for catalog_name, evidence_name in scope_names:
+                scope = written["catalog"][catalog_name]
+                current = scope.get("state") == "current"
+                records = scope.get("records") if current else ()
+                evidence_scopes.append(ScopeReceipt(
+                    scope=evidence_name, scope_id=course_id,
+                    rows=tuple(records.values() if isinstance(records, dict) else records or ()),
+                    complete=current,
+                    error_code=None if current else str(scope.get("error_code") or "incomplete"),
+                ))
+            evidence_result = receipt_sink(CourseAcquisitionReceipt(
+                course_id=course_id, acquisition_started_at=timestamp,
+                acquisition_finished_at=timestamp, scopes=tuple(evidence_scopes),
+            ))
         previous_scopes = previous if isinstance(previous, dict) else {}
         section_receipts = {}
         for name in ("assignments", "modules", "assignment_groups", "pages"):
@@ -1207,6 +1232,7 @@ def refresh_catalog(
         return {
             "catalog": written["catalog"], "source": "canonical", "warnings": warnings,
             **summary, "sections": section_receipts,
+            **({"evidence": evidence_result} if receipt_sink is not None else {}),
         }
 
 

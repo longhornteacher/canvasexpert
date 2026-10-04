@@ -30,9 +30,11 @@ _URL = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 _PRIVATE_PATH = re.compile(r"(?<![\w])(?:[A-Za-z]:[\\/]|\\\\|/(?:Users|home)/)[^\s<>]+")
 _NAVIGATION_KEYS = frozenset({
     "source_key", "course_id", "assignment_id", "section_id", "group_id",
+    "module_id", "page_id", "assignment_group_id", "item_id", "content_id",
     "comment_id", "override_id", "schema_version", "acquisition_started_at",
     "acquisition_finished_at", "submitted_at", "updated_at", "created_at",
-    "due_at", "unlock_at", "lock_at", "record_refs", "parents", "watermarks",
+    "due_at", "unlock_at", "lock_at", "start_at", "end_at", "conclude_at",
+    "effective_due_at", "term_end_at", "enrollment_states", "record_refs", "parents", "watermarks",
 })
 
 
@@ -194,7 +196,8 @@ class EvidencePublisher:
                     check(child, key)
             elif isinstance(value, str):
                 if key in {"course_id", "assignment_id", "section_id", "group_id",
-                           "comment_id", "override_id"} and not value.isdecimal():
+                           "module_id", "page_id", "assignment_group_id", "item_id",
+                           "content_id", "comment_id", "override_id"} and not re.fullmatch(r"[0-9]+", value):
                     raise PublicationRefused("invalid_navigation_id")
                 if key in {"pseudonym", "author_pseudonym", "student_pseudonyms"}:
                     if value not in stable_pseudonyms:

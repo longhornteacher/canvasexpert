@@ -74,10 +74,12 @@ def test_full_refresh_drops_only_pending_objects_seen_by_canvas(tmp_path):
         raise AssertionError(f"unexpected catalog endpoint: {path}")
 
     receipt = lambda: (list(assignment_rows), None, True)
+    evidence_receipts = []
     refreshed = course_catalog.refresh_catalog(
         course_id, "Fictional Course", canvas_get_all=get_all,
         canvas_get_all_complete=get_all_complete,
         assignment_receipt=receipt(),
+        receipt_sink=evidence_receipts.append,
 
         attempted_at="2026-01-03T04:00:00Z",
     )
@@ -86,6 +88,12 @@ def test_full_refresh_drops_only_pending_objects_seen_by_canvas(tmp_path):
     assert refreshed["result"] == "complete"
     assert refreshed["sections"]["assignments"]["added_ids"] == ["assignment-1"]
     assert refreshed["sections"]["pages"]["added_ids"] == ["page-one"]
+    assert [(scope.scope, scope.complete, len(scope.rows))
+            for scope in evidence_receipts[0].scopes] == [
+                ("course.modules", True, 0),
+                ("course.assignment_groups", True, 0),
+                ("course.pages", True, 1),
+            ]
     pending = course_catalog._read_pending_writes(course_id)["records"]
     assert [(row["kind"], row["id"]) for row in pending] == [
         ("assignment", "assignment-missing"),

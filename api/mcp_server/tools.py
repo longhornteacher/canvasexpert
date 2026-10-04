@@ -2191,12 +2191,15 @@ def refresh_mirror(course_id: str, include_comments: bool = False, structure_onl
     or when a served result carries a refresh hint, then re-call that same
     tool; this tool never returns course,
     roster, or submission data itself, so it needs no identity vault and no
-    outbound safety scan. It accepts any saved course (Current or Previous).
+    outbound safety scan. Only a Current course can be refreshed.
     Escalates to the teacher only when the sync fails (blocked) or repeats
     without settling (looping)."""
 
     if structure_only and include_comments:
         return _inapplicable("include_comments cannot be used with structure_only.")
+    if not any(str(course.get("id")) == str(course_id)
+               for course in config.active_courses()):
+        return {"ok": False, "error": "Course is not Current; select it as Current before refreshing."}
     # Counted before dispatch so structure-only refreshes join the same
     # per-course loop window as ordinary syncs.
     loop_attention = _refresh_loop_attention(course_id)
