@@ -1295,7 +1295,7 @@ independently maintained current-state store after cutover.
 
 ## 12. Execution result (lead updates in place)
 
-**Execution result:** S00–S04 are implemented and accepted on synthetic/local
+**Execution result:** S00–S05 are implemented and accepted on synthetic/local
 evidence. No teacher workspace migration, live Canvas call, production read
 activation, or public push was performed. The isolated OCR environment's full
 suite passes; the global `py` environment still lacks the S00 OCR wheels.
@@ -1307,16 +1307,16 @@ suite passes; the global `py` environment still lacks the S00 OCR wheels.
 | S02 additive importer | GREEN | `7f9882e` | 81 focused tests passed, 1 skipped; privacy scan passed with staged files; isolated full gate 2271 passed, 2 skipped | Bounded legacy inventory, additive historical import and private mappings, deterministic private ZIP originals, preserved conflicts and two-machine union, fresh migration-private index comparison. One focused skip requires Windows symlink privilege. No live migration or activation. |
 | S03 acquisition/ownership | GREEN | `56e0082` | 341 focused tests passed; selected-course ownership, receipts, structure, lifecycle, request coalescing, Previous-course refusal, and runtime release covered | Full repository gate: 2354 passed, 2 skipped; 6 unrelated environment/baseline failures (OCR wheels unavailable, existing QF golden mismatch, readiness probe isolation). No live Canvas or teacher workspace activation. |
 | S04 originals/jobs | GREEN | `00633ee` | 124 focused tests passed (18 new job tests + 106 existing); full repository gate 2372 passed, 2 skipped | New `assignment.attachments` scope publishes opaque association facts (key/media-type/size/status, never filename/URL); `evidence_jobs.py` owns a machine-local private `control.sqlite3` queue with deterministic job ids, 20-download/200-MiB resumable chunks, retry backoff, terminal statuses, and fact-based reconstruction; `service.run_attachment_capture_chunk` drains through the coordinated transport and reacquires fresh URLs from the stable file id. Same 6 unrelated baseline failures (OCR wheels, QF golden, readiness probe). No live Canvas or teacher workspace activation. |
-| S05 required extraction | Not started | — | — | — |
+| S05 required extraction | GREEN | `e753fdc` | 162 focused tests passed in the isolated OCR env; isolated full gate 2408 passed, 2 skipped, 0 failed | New `extraction/` package: strict result schema, format registry, supervised worker, and DOCX/PPTX/XLSX/PDF/JPG-PNG/text adapters. DOCX preserves order/formatting/tracked changes; PPTX follows relationship slide order + notes; XLSX keeps formulas vs cached values; PDF does native-then-OCR per page; images OCR with located blocks. `evidence_extraction.py` publishes scrubbed `assignment.extractions` facts with content/version-addressed caching. Global `py` shows the same 6 baseline failures plus the new real-OCR adapter test (same OCR-wheel category as S00's own tests). No live Canvas or teacher workspace activation. |
 | S06 reads/comparisons/notes | Not started | — | — | — |
 | S07 scoring consumption | Not started | — | — | — |
 | S08 activation/recovery | Not started | — | — | Two-machine field acceptance outstanding |
 
-**Current traffic light:** YELLOW. S00–S04 are accepted against their
-synthetic/local gates. S05 required extraction is the next pointer.
+**Current traffic light:** YELLOW. S00–S05 are accepted against their
+synthetic/local gates. S06 reads/comparisons/notes is the next pointer.
 The private pilot import and production activation remain reserved for S08's
-announced acceptance run; required attachment formats, MCP integration,
-scoring consumption, and two-computer field acceptance remain outstanding.
+announced acceptance run; MCP integration, scoring consumption, and two-computer
+field acceptance remain outstanding.
 
 For each completed slice record actual SHA, owned files, exact commands/counts,
 traffic light, deviations, baseline exception and remaining field evidence. Keep a
