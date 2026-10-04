@@ -17,8 +17,9 @@ the course gate and the outbound safety gate.
 
 Mirror reads, by design: get_roster, get_submissions, and
 get_gradebook_snapshot serve from the local CanvasMirror (fast, consistent, and
-through the pseudonym gate) and report an error rather than fall back to a live
-Canvas fetch when it isn't fresh enough. The agent then calls refresh_mirror
+through the pseudonym gate) and never fall back to a live Canvas fetch: a
+missing mirror reports an error, and a stale one serves with its age labeled.
+The agent then calls refresh_mirror
 itself and reads again; assignment-scoped scoring preparation invokes the same
 Canvas Expert sync engine privately before reading its mirror data. The
 preparation path returns no Canvas data directly, so Canvas Expert stays the only thing that talks to Canvas."""
@@ -30,6 +31,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -202,14 +204,18 @@ def _freshness_attention(envelope: dict) -> dict | None:
     # A failed recent refresh may label its last-good projection stale. R3 is
     # age based: use it silently inside policy, and point at a refresh when the
     # timestamp has aged out or the projection is unavailable/malformed.
+    # The action names the repair the agent runs itself; it never asks the
+    # teacher. Escalation to the teacher happens only in refresh_mirror when a
+    # sync fails (blocked) or repeats without settling (looping).
     if (envelope.get("state") in {"current", "stale"}
             and envelope.get("within_policy")):
         return None
+    repair = ("refresh_mirror(structure_only=true)"
+              if envelope.get("source") == "catalog" else "refresh_mirror")
     return {
-        "action": "ask_teacher_confirmation",
+        "action": "refresh_mirror",
         "reason": ("This local Canvas snapshot is outside the configured freshness window. "
-                   "Refresh it yourself (refresh_mirror for roster, submission and "
-                   "gradebook data, refresh_mirror(structure_only=true) for catalog data), then read again."),
+                   f"Refresh it yourself ({repair}), then read again."),
     }
 
 
@@ -811,13 +817,15 @@ def _roster_groups(course_id: str) -> dict:
         )
     except Exception:
         scope = {"state": "malformed", "records": None}
-    if (scope.get("state") not in {"current", "stale"}
-            or (scope.get("state") == "stale"
-                and not str(scope.get("last_success_at") or "").strip())):
+    # Group names are not PII (memberships and Canvas ids are consumed above
+    # and never projected), so freshness never blocks discovery: serve any
+    # current-or-stale scope with its age labeled, exactly as _roster_sections
+    # does on the same roster. Only a genuinely absent scope refuses.
+    if scope.get("state") not in {"current", "stale"}:
         state = scope.get("state") or "unavailable"
         return {
             "ok": False,
-            "error": "A fresh local Canvas group mirror is required for group discovery.",
+            "error": "A local Canvas group mirror is required for group discovery.",
             "state": state,
             "freshness": _freshness("mirror", "groups", state,
                                      str(scope.get("last_success_at") or "")),
@@ -842,10 +850,6 @@ def _roster_groups(course_id: str) -> dict:
     freshness = _freshness("mirror", "groups", scope.get("state", "unavailable"),
                            str(scope.get("last_success_at") or ""))
     attention = _freshness_attention(freshness)
-    if attention:
-        return {"ok": False, "error": attention["reason"],
-                "state": freshness["state"], "freshness": freshness,
-                "attention": attention}
     group_sets = []
     for category in records:
         if not isinstance(category, dict):
@@ -881,6 +885,8 @@ def _roster_groups(course_id: str) -> dict:
         group_sets.append({"name": category_name, "groups": safe_groups})
     result = {"ok": True, "course_id": str(course_id), "group_sets": group_sets,
               "freshness": freshness}
+    if attention:
+        result["attention"] = attention
     return result
 
 
@@ -1521,9 +1527,10 @@ _MIRROR_UNAVAILABLE_SNAPSHOT_ERROR = (
 def get_roster(course_id: str, pseudonym: str | None = None, include: list[str] | None = None) -> dict:
     """Current roster as a {columns, rows} table of (pseudonym,
     section_names), sorted by pseudonym. Served ONLY from the local
-    CanvasMirror — never live Canvas; a stale or missing mirror is refused
-    (call refresh_mirror first). Pseudonymized through the identity vault;
-    gated by the outbound safety scan before tabulation."""
+    CanvasMirror — never live Canvas; a missing mirror is refused, and a stale
+    one serves with its freshness labeled (refresh_mirror to update it).
+    Pseudonymized through the identity vault; gated by the outbound safety
+    scan before tabulation."""
     if include is not None and (not isinstance(include, list) or any(item not in ("sections", "groups") for item in include)):
         return {"ok": False, "code": "invalid_roster_include", "error": "include accepts sections and/or groups."}
     if pseudonym is not None:
@@ -1558,10 +1565,10 @@ def get_roster(course_id: str, pseudonym: str | None = None, include: list[str] 
 
     freshness = _freshness("mirror", "roster", mirror_doc.get("state", "unavailable"),
                            mirror_doc.get("last_success_at", ""))
+    # Age is metadata, not a gate: the projection loaded and is structurally
+    # sound, so it serves with its freshness labeled. The attention hint stays
+    # attached but never blocks (brief decision #4).
     attention = _freshness_attention(freshness)
-    if attention:
-        return {"ok": False, "error": attention["reason"],
-                "freshness": freshness, "attention": attention}
 
     with _vault_transaction(vault):
         users = mirror_doc["students"]
@@ -1573,6 +1580,8 @@ def get_roster(course_id: str, pseudonym: str | None = None, include: list[str] 
              "freshness": freshness}, vault)
     if result.get("ok"):
         result["roster"] = _tabulate(result["roster"], _ROSTER_COLUMNS)
+        if attention:
+            result["attention"] = attention
     return result
 
 
@@ -1582,8 +1591,9 @@ def get_submissions(course_id: str, assignment_id: str,
                     offset: int | None = None, limit: int | None = None) -> dict:
     """One assignment's submissions, pseudonymized and scrubbed, as
     ``{assignment: {...}, submissions: {columns, rows}}``. Served ONLY from
-    the local CanvasMirror — never live Canvas; a stale or missing mirror is
-    refused (call refresh_mirror first). ``pseudonyms`` (comma-separated)
+    the local CanvasMirror — never live Canvas; a missing mirror is refused,
+    and a stale one serves with its freshness labeled (refresh_mirror to
+    update it). ``pseudonyms`` (comma-separated)
     narrows to specific students; ``include_text=False`` drops the text
     column; text is trimmed to ``max_text_chars`` (0 = full). Attachments are
     never included. Historical rows remain; ``current_enrollment`` marks
@@ -1615,10 +1625,10 @@ def get_submissions(course_id: str, assignment_id: str,
 
     freshness = _freshness("mirror", "submissions", bundle.get("state", "unavailable"),
                            bundle.get("synced_at", ""))
+    # Age is metadata, not a gate: the bundle loaded and is structurally
+    # sound, so it serves with its freshness labeled. The attention hint stays
+    # attached but never blocks (brief decision #4).
     attention = _freshness_attention(freshness)
-    if attention:
-        return {"ok": False, "error": attention["reason"],
-                "freshness": freshness, "attention": attention}
 
     # Sync the full roster first so the scrub map covers every enrolled
     # student, not just the ones who submitted this assignment.
@@ -1661,6 +1671,8 @@ def get_submissions(course_id: str, assignment_id: str,
         columns = (_SUBMISSION_COLUMNS if include_text
                    else tuple(c for c in _SUBMISSION_COLUMNS if c != "text"))
         result["submissions"] = _tabulate(result["submissions"], columns)
+        if attention:
+            result["attention"] = attention
     return result
 
 
@@ -1870,9 +1882,10 @@ def get_gradebook_snapshot(course_id: str) -> dict:
     grades without a submission. ``ungraded`` follows Canvas workflow state;
     ``partially_scored`` is the subset of those rows with a numeric score.
     Their difference is not ungraded work.
-    Served ONLY from the local CanvasMirror — never live Canvas; a stale or
-    missing mirror is refused (call refresh_mirror first). Gated by the
-    outbound safety scan before tabulation."""
+    Served ONLY from the local CanvasMirror — never live Canvas; a missing
+    mirror is refused, and a stale one serves with its freshness labeled
+    (refresh_mirror to update it). Gated by the outbound safety scan before
+    tabulation."""
     identity_error = _saved_course_gate_check(course_id)
     if identity_error:
         return {"ok": False, "error": identity_error}
@@ -1895,10 +1908,10 @@ def get_gradebook_snapshot(course_id: str) -> dict:
     if not isinstance(freshness, dict):
         freshness = _freshness("mirror", "gradebook_snapshot", "current",
                                str(snapshot.get("synced_at") or ""))
+    # Age is metadata, not a gate: the snapshot loaded and is structurally
+    # sound, so it serves with its freshness labeled. The attention hint stays
+    # attached but never blocks (brief decision #4).
     attention = _freshness_attention(freshness)
-    if attention:
-        return {"ok": False, "error": attention["reason"],
-                "freshness": freshness, "attention": attention}
 
     students = snapshot.get("students") or []
 
@@ -1929,6 +1942,8 @@ def get_gradebook_snapshot(course_id: str) -> dict:
         payload["students"] = pseudonym_boundary.pseudonymize_gradebook_rows(vault, snapshot["students"])
         result = pseudonym_boundary.gate(payload, vault)
     if result.get("ok"):
+        if attention:
+            result["attention"] = attention
         result["assignments"] = _tabulate(result["assignments"], _GRADEBOOK_ASSIGNMENT_COLUMNS)
         result["students"] = _tabulate(result["students"], _GRADEBOOK_STUDENT_COLUMNS)
     return result
@@ -2098,6 +2113,33 @@ def discover_scoring_work() -> dict:
 
 _REFRESH_TIMEOUT_SECONDS = 25.0
 
+# Loop detection for refresh_mirror (brief decision #3): the teacher hears
+# about a refresh only when the agent is blocked (sync failed) or looping —
+# this many calls for one course inside this sliding window. Age alone never
+# escalates. The clock is a bound seam so tests can drive it.
+_REFRESH_LOOP_THRESHOLD = 3
+_REFRESH_LOOP_WINDOW_SECONDS = 120.0
+_refresh_loop_clock = time.monotonic
+_refresh_loop_calls: dict[str, list[float]] = {}
+
+
+def _refresh_loop_attention(course_id: str) -> dict | None:
+    """Record one refresh attempt; escalate on the threshold inside the window."""
+    now = _refresh_loop_clock()
+    key = str(course_id)
+    calls = [stamp for stamp in _refresh_loop_calls.get(key, ())
+             if now - stamp < _REFRESH_LOOP_WINDOW_SECONDS]
+    calls.append(now)
+    _refresh_loop_calls[key] = calls
+    if len(calls) < _REFRESH_LOOP_THRESHOLD:
+        return None
+    return {
+        "action": "ask_teacher_confirmation",
+        "reason": (f"refresh_mirror has run {len(calls)} times for this course in the "
+                   "last few minutes. Stop retrying and tell the teacher; they can "
+                   "use Refresh course data on the CanvasAgent page."),
+    }
+
 # refresh_mirror drives a submissions delta (course.refresh) AND a roster
 # pass, so a roster that has aged past the serve window is recoverable on
 # demand. Without the explicit roster scope the manual refresh runs a delta
@@ -2145,14 +2187,24 @@ def refresh_mirror(course_id: str, include_comments: bool = False, structure_onl
     """Ask Canvas Expert to sync this course's local CanvasMirror from Canvas
     (a submissions delta plus a roster refresh), then report freshness — the
     response is a sync STATUS, never Canvas data. Call this after
-    get_roster/get_submissions/get_gradebook_snapshot refuses as stale or
-    unavailable, then re-call that same tool; this tool never returns course,
+    get_roster/get_submissions/get_gradebook_snapshot refuses as unavailable,
+    or when a served result carries a refresh hint, then re-call that same
+    tool; this tool never returns course,
     roster, or submission data itself, so it needs no identity vault and no
-    outbound safety scan. It accepts any saved course (Current or Previous)."""
+    outbound safety scan. It accepts any saved course (Current or Previous).
+    Escalates to the teacher only when the sync fails (blocked) or repeats
+    without settling (looping)."""
 
+    if structure_only and include_comments:
+        return _inapplicable("include_comments cannot be used with structure_only.")
+    # Counted before dispatch so structure-only refreshes join the same
+    # per-course loop window as ordinary syncs.
+    loop_attention = _refresh_loop_attention(course_id)
     if structure_only:
-        if include_comments: return _inapplicable("include_comments cannot be used with structure_only.")
-        return _refresh_catalog(course_id)
+        result = _refresh_catalog(course_id)
+        if loop_attention:
+            result["attention"] = loop_attention
+        return result
     try:
         scopes = ["course.feedback_refresh", "roster", "groups"] if include_comments else _REFRESH_SCOPES
         plan_id = _enqueue_sync(course_id, scopes)
@@ -2170,15 +2222,26 @@ def refresh_mirror(course_id: str, include_comments: bool = False, structure_onl
                               if include_comments else "Mirror refreshed (roster, groups, assignments, and submissions status only). Re-read the refused tool now.")}
         result.update(identity)
         result["message"] += f" {identity.get('canvas_external_count', 0)} scores changed outside CE."
+        if loop_attention:
+            result["attention"] = loop_attention
         return result
     if state in ("queued", "running"):
         result = {"ok": True, "status": "syncing",
                   "message": "Still syncing — wait a few seconds, then try again."}
         result.update(identity)
+        if loop_attention:
+            result["attention"] = loop_attention
         return result
+    # Blocked: the agent cannot repair this itself, so this is the one place a
+    # read-surface refresh escalates to the teacher (brief decision #3).
     result = {"ok": False, "status": "failed",
-              "error": "Sync failed. Try again shortly, or the teacher can use Refresh course data on the CanvasAgent page."}
+              "error": "Sync failed. Try again shortly, or the teacher can use Refresh course data on the CanvasAgent page.",
+              "attention": {"action": "ask_teacher_confirmation",
+                            "reason": ("The course mirror sync failed, so Canvas Expert cannot repair this read itself. "
+                                      "Tell the teacher to use Refresh course data on the CanvasAgent page, then retry.")}}
     result.update(identity)
+    if loop_attention:
+        result["attention"] = loop_attention
     return result
 
 
@@ -2211,6 +2274,11 @@ def _refresh_catalog(course_id: str) -> dict:
         "oldest_section": result.get("oldest_section", ""),
         "oldest_last_success_at": result.get("oldest_last_success_at", ""),
         "error": "Course structure refresh failed; retry or inspect the local diagnostics.",
+        # Blocked: a failed structure refresh cannot repair itself either.
+        "attention": {"action": "ask_teacher_confirmation",
+                      "reason": ("The Course Catalog structure refresh failed, so Canvas Expert "
+                                "cannot repair this read itself. Tell the teacher to use Refresh "
+                                "course data on the CanvasAgent page, then retry.")},
     }
 
 

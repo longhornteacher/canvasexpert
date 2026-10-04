@@ -144,10 +144,18 @@ def _run_course_refresh(course_id: str):
 
 
 def _run_structure_refresh(course_id: str):
-    """Refresh the student-free v3 Course Catalog, including full modules."""
+    """Refresh the student-free v3 Course Catalog, including full modules.
+
+    Any saved course (Current or Previous): the catalog is student-free and
+    read-only, and the catalog reads accept saved courses, so the repair they
+    name must work for the same set.
+    """
     with _telemetry("course.structure_refresh"):
         course = next((item for item in config.active_courses()
                        if str(item.get("id")) == str(course_id)), None)
+        if not course:
+            course = next((item for item in config.saved_courses()
+                           if str(item.get("id")) == str(course_id)), None)
         if not course:
             return {"ok": False, "error_class": "course_unavailable"}
         result = course_catalog.refresh_catalog(
@@ -257,10 +265,15 @@ def enqueue_sync(course_id: str | None = None, scopes: list[str] | None = None,
 
 
 def refresh_course_structure(course_id: str, *, timeout_seconds: float = 30.0) -> dict:
-    """Refresh only through the coordinator and expose no Canvas rows."""
+    """Refresh only through the coordinator and expose no Canvas rows.
+
+    Accepts any saved course (Current or Previous) so the catalog reads'
+    ``refresh_mirror(structure_only=true)`` repair is executable for exactly
+    the set of courses those reads accept.
+    """
     if not any(str(course.get("id")) == str(course_id)
-               for course in config.active_courses()):
-        raise ValueError("Course is not in Current courses.")
+               for course in config.saved_courses()):
+        raise ValueError("Not a saved course.")
     plan_id = coordinator_instance().submit(
         [str(course_id)], ["course.structure_refresh"], priority="manual",
     )

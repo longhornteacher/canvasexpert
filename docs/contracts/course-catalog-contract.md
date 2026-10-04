@@ -14,7 +14,7 @@ Each course owns this canonical/previous pair in the machine-local `%LOCALAPPDAT
 ```
 
 The Canvas course ID, not a display name, is directory identity. A disk read is local-only;
-the Current-course structure refresh is the only full Catalog acquisition path.
+the structure refresh is the primary Catalog acquisition path.
 
 ## Root and scope schema
 
@@ -60,9 +60,9 @@ source for the local MCP page read.
 
 Catalog reads are disk-only. `refresh_mirror(structure_only=true)` queues the CanvasMirror
 coordinator's `course.structure_refresh` scope, which performs the read-only paginated
-acquisition for all four scopes in a Current course and returns sanitized state without
-paths or raw errors. A mirror pass may apply an assignment receipt it already acquired to
-the assignment scope only; it never live-fetches modules, groups, or pages.
+acquisition for all four scopes and returns sanitized state without paths or raw errors.
+A mirror pass may apply an assignment receipt it already acquired to the assignment scope
+only; it never live-fetches modules, groups, or pages.
 
 The typed read service exposes `catalog_assignments`, `catalog_modules`,
 `catalog_assignment_groups`, and `catalog_pages`. Consumers never use a Canvas fallback or

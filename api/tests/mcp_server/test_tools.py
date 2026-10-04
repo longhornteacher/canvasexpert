@@ -419,7 +419,8 @@ def test_get_course_pages_stale_names_catalog_refresh(monkeypatch, _set_active_c
     assert result["ok"] is True
     assert result["state"] == "stale"
     assert result["freshness"]["within_policy"] is False
-    assert result["attention"]["action"] == "ask_teacher_confirmation"
+    assert result["attention"]["action"] == "refresh_mirror"
+    assert "structure_only=true" in result["attention"]["reason"]
 
 
 def test_get_course_pages_includes_unpublished_pages_by_default(
@@ -1110,7 +1111,9 @@ def test_get_submissions_serves_fresh_typed_mirror_with_zero_live_calls(monkeypa
     _assert_no_leaks(result)
 
 
-def test_get_submissions_refuses_when_roster_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
+def test_get_submissions_serves_when_roster_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
+    """LAW (brief decision #4): a loaded stale scope serves with its age
+    labeled; the _explode_live guards prove no live Canvas fallback."""
     _mount_mirror()
     _set_active_courses([MIRROR_COURSE])
     _populate_mirror(str(tmp_path), roster_at=_STALE_STAMP)
@@ -1121,12 +1124,14 @@ def test_get_submissions_refuses_when_roster_stale(monkeypatch, tmp_path, _use_v
     bundle, error = tools._mirror_submission_bundle(MIRROR_COURSE, "700010")
     assert bundle is not None and error is None
     result = tools.get_submissions(MIRROR_COURSE, "700010")
-    assert result["ok"] is False
+    assert result["ok"] is True
     assert result["freshness"]["state"] == "stale"
-    assert "outside the configured freshness window" in result["error"]
+    assert result["freshness"]["within_policy"] is False
+    assert result["attention"]["action"] == "refresh_mirror"
+    assert result["submissions"]["rows"]
 
 
-def test_get_submissions_refuses_when_assignments_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
+def test_get_submissions_serves_when_assignments_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
     _mount_mirror()
     _set_active_courses([MIRROR_COURSE])
     _populate_mirror(str(tmp_path), assignments_at=_STALE_STAMP)
@@ -1137,13 +1142,13 @@ def test_get_submissions_refuses_when_assignments_stale(monkeypatch, tmp_path, _
     bundle, error = tools._mirror_submission_bundle(MIRROR_COURSE, "700010")
     assert bundle is not None and error is None
     result = tools.get_submissions(MIRROR_COURSE, "700010")
-    assert result["ok"] is False
-    assert result["ok"] is False
+    assert result["ok"] is True
     assert result["freshness"]["state"] == "stale"
-    assert "outside the configured freshness window" in result["error"]
+    assert result["attention"]["action"] == "refresh_mirror"
+    assert result["submissions"]["rows"]
 
 
-def test_get_submissions_refuses_when_submissions_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
+def test_get_submissions_serves_when_submissions_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
     _mount_mirror()
     _set_active_courses([MIRROR_COURSE])
     _populate_mirror(str(tmp_path), submissions_at=_STALE_STAMP)
@@ -1154,9 +1159,10 @@ def test_get_submissions_refuses_when_submissions_stale(monkeypatch, tmp_path, _
     bundle, error = tools._mirror_submission_bundle(MIRROR_COURSE, "700010")
     assert bundle is not None and error is None
     result = tools.get_submissions(MIRROR_COURSE, "700010")
-    assert result["ok"] is False
+    assert result["ok"] is True
     assert result["freshness"]["state"] == "stale"
-    assert "outside the configured freshness window" in result["error"]
+    assert result["attention"]["action"] == "refresh_mirror"
+    assert result["submissions"]["rows"]
 
 
 # --- get_gradebook_snapshot ---------------------------------------------------
@@ -1392,18 +1398,38 @@ def test_list_groups_projects_names_without_private_ids_or_student_selection(mon
 
 @pytest.mark.parametrize("scope", [
     {"state": "missing", "records": []},
-    {"state": "stale", "records": []},
-    {"state": "stale", "last_success_at": _STALE_STAMP, "records": []},
     {"state": "current", "records": "bad"},
 ])
 def test_list_groups_refuses_unusable_mirror_with_refresh_attention(monkeypatch, _set_active_courses, scope):
+    """Absent or malformed group data refuses; freshness never does (F1)."""
     _set_active_courses(["111"])
     monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: scope)
     result = tools.get_roster('111', include=['groups'])
     assert result["ok"] is False
-    assert result["attention"]["action"] == (
-        "ask_teacher_confirmation" if scope.get("last_success_at") else "refresh_mirror"
-    )
+    assert result["attention"]["action"] == "refresh_mirror"
+
+
+@pytest.mark.parametrize("scope", [
+    {"state": "stale", "records": []},
+    {"state": "stale", "last_success_at": _STALE_STAMP, "records": []},
+    {"state": "stale", "last_success_at": _STALE_STAMP, "records": [
+        {"category_name": "Teams", "groups": [{"name": "Blue"}]}]},
+    {"state": "current", "last_success_at": _STALE_STAMP, "records": [
+        {"category_name": "Teams", "groups": [{"name": "Blue"}]}]},
+])
+def test_list_groups_serves_stale_scope_with_labeled_age(monkeypatch, _set_active_courses, scope):
+    """LAW (brief decision #1): group names are not PII, so freshness never
+    blocks group discovery — stale scopes serve with age labeled."""
+    _set_active_courses(["111"])
+    monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: scope)
+    result = tools.get_roster('111', include=['groups'])
+    assert result["ok"] is True
+    assert result["freshness"]["within_policy"] is False
+    if scope["records"]:
+        assert result["group_sets"] == [{"name": "Teams", "groups": [{"name": "Blue"}]}]
+    else:
+        assert result["group_sets"] == []
+    assert result["attention"]["action"] == "refresh_mirror"
 
 
 def test_list_groups_lists_names_without_roster_selection(monkeypatch, _set_active_courses):
@@ -1511,6 +1537,110 @@ def test_refresh_mirror_enqueue_value_error_maps_to_ok_false(monkeypatch, _set_a
     monkeypatch.setattr(tools, "_enqueue_sync", _raise)
 
     assert tools.refresh_mirror("111") == {"ok": False, "error": "Not a Current course."}
+
+
+def test_refresh_mirror_failed_sync_carries_teacher_confirmation_attention(monkeypatch, _set_active_courses):
+    """LAW (brief decision #3): when sync fails (blocked), the response carries
+    ask_teacher_confirmation attention so the teacher is notified to retry manually."""
+    _set_active_courses(["111"])
+    monkeypatch.setattr(tools, "_enqueue_sync", lambda course_id, scopes=None: "plan-1")
+    monkeypatch.setattr(tools, "_wait_for_plan",
+                        lambda plan_id, **kwargs: {"state": "failed"})
+
+    result = tools.refresh_mirror("111")
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert result["attention"]["action"] == "ask_teacher_confirmation"
+    assert "Refresh course data" in result["attention"]["reason"]
+
+
+def test_refresh_mirror_loop_escalation_at_third_call_within_window(monkeypatch, _set_active_courses):
+    """LAW (brief decision #3): after 3 refresh_mirror calls for the same course
+    within 120 seconds, escalate to ask_teacher_confirmation to stop looping."""
+    _set_active_courses(["111"])
+    monkeypatch.setattr(tools, "_enqueue_sync", lambda course_id, scopes=None: "plan-1")
+    monkeypatch.setattr(tools, "_wait_for_plan",
+                        lambda plan_id, **kwargs: {"state": "succeeded"})
+
+    # Fake monotonic clock for testing the window.
+    call_times = [0.0, 10.0, 20.0]
+    clock_index = {"index": 0}
+    def fake_clock():
+        result = call_times[clock_index["index"]]
+        clock_index["index"] = min(clock_index["index"] + 1, len(call_times) - 1)
+        return result
+
+    monkeypatch.setattr(tools, "_refresh_loop_clock", fake_clock)
+    # Clear the module-level call log so this test doesn't see previous calls.
+    tools._refresh_loop_calls.clear()
+
+    try:
+        # First call: no attention
+        result1 = tools.refresh_mirror("111")
+        assert result1["ok"] is True
+        assert "attention" not in result1
+
+        # Reset clock position for second call
+        clock_index["index"] = 1
+        result2 = tools.refresh_mirror("111")
+        assert result2["ok"] is True
+        assert "attention" not in result2
+
+        # Third call within window: escalates
+        clock_index["index"] = 2
+        result3 = tools.refresh_mirror("111")
+        assert result3["ok"] is True
+        assert result3["attention"]["action"] == "ask_teacher_confirmation"
+        assert "3 times" in result3["attention"]["reason"]
+        assert "Stop retrying" in result3["attention"]["reason"]
+    finally:
+        # Clean up state so other tests aren't affected.
+        tools._refresh_loop_calls.clear()
+
+
+def test_refresh_course_structure_succeeds_on_saved_previous_course(monkeypatch, _set_previous_course):
+    """LAW (brief decision #2): refresh_course_structure accepts saved courses
+    (Current or Previous), so the catalog read's structure_only repair is
+    executable for all saved courses."""
+    from api.mirror import service as mirror_service
+
+    _set_previous_course("111")
+    monkeypatch.setattr(
+        mirror_service, "refresh_course_structure",
+        lambda course_id, timeout_seconds=30.0: {
+            "ok": True,
+            "status": "synced",
+            "operation_id": "op-1",
+            "revision": mirror_store.now_iso(),
+            "state": "current",
+            "result": "complete",
+            "sections": {},
+            "oldest_section": "",
+            "oldest_last_success_at": "",
+            "error_code": "",
+        }
+    )
+
+    result = tools.refresh_mirror("111", structure_only=True)
+    assert result["ok"] is True
+    assert result["status"] == "synced"
+
+
+def test_refresh_course_structure_raises_for_unsaved_course(monkeypatch, _set_active_courses):
+    """Course structure refresh must reject unsaved courses since the repair path
+    cannot execute for courses not in the saved list."""
+    from api.mirror import service as mirror_service
+
+    _set_active_courses(["111"])
+
+    def raise_value_error(course_id, timeout_seconds=30.0):
+        raise ValueError("Not a saved course.")
+
+    monkeypatch.setattr(mirror_service, "refresh_course_structure", raise_value_error)
+
+    result = tools.refresh_mirror("999", structure_only=True)
+    assert result["ok"] is False
+    assert "Not a saved course" in result["error"]
 
 
 # --- server wiring -------------------------------------------------------------

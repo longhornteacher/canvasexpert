@@ -49,19 +49,16 @@ authoring guidance, call `get_product_guide` with the relevant topic:
   process. It is not exposed beyond `127.0.0.1` and is not a client configuration surface.
 - **Mirror-bounded, never a live relay.** `get_roster`, `get_submissions`, and
   `get_gradebook_snapshot` serve exclusively from the local CanvasMirror
-  (`docs/mirror.md`). All three refuse
-  with a clear error when the required mirror data is stale or missing, instead
-  of fetching live from Canvas. The assistant's way past a refusal is
-  `refresh_mirror`, which triggers Canvas Expert's own sync and reports
-  freshness, never Canvas data. The agent runs it itself when a read is
-  outside policy and skips it when the data is within policy. This keeps the
-  AI's whole path to Canvas indirect: it can ask Canvas Expert to sync, then
-  read what Canvas Expert wrote to disk, but it can never receive a live Canvas
-  response directly.
+  (`docs/mirror.md`). All three serve stale data with its freshness labeled and a
+  non-blocking hint, instead of fetching live from Canvas. Missing or malformed
+  data refuses with `refresh_mirror` as the repair. The agent can ask Canvas
+  Expert to sync and then read what Canvas Expert wrote to disk, but it can never
+  receive a live Canvas response directly. The assistant runs `refresh_mirror`
+  itself when the age matters and skips it when the data is within policy.
 
 ## Tools
 
-Tool schema version 79 (37 tools).
+Tool schema version 80 (37 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -126,8 +123,8 @@ the Inbox for the preview pair. A draft that stages but fails to push is left st
 purpose, so the teacher can read what was authored.
 
 Group discovery is mirror-only: `get_roster(include=["groups"])` returns only group-set and
-group names, and refuses with `refresh_mirror` when the private group snapshot is stale or
-missing. Differentiated quiz delivery is `preview_content_push(kind="quiz", variants=[...])`:
+group names with freshness labeled; missing or malformed data refuses with `refresh_mirror`.
+Differentiated quiz delivery is `preview_content_push(kind="quiz", variants=[...])`:
 it resolves staged labels, captures a fresh private Canvas baseline through the
 Operation Ledger quiz adapter, and exposes only the safe frozen review projection.
 Every file declares one canonical pedagogical tier in `metadata.variant` (or
@@ -170,11 +167,11 @@ assignment changed in Canvas since the preview.
 The SIS grade-bridge pair is a bounded, linked-family grade-projection surface.
 Discovery, reconciliation, and preview read the current local sync/mirror only.
 Preview persists a local frozen operation and returns all three coordinates apply needs:
-`operation_id`, `batch_id`, and `review_digest`. A stale or missing mirror refuses with no
-live fallback. Preview does not inspect due dates, student coverage, overrides, or module
-placement. After teacher approval, apply pushes only the unchanged reviewed scores to the
-exact linked bridge, performs live postconditions for those writes, and requests a targeted
-mirror refresh. Bridge operations do not repair or rearrange modules.
+`operation_id`, `batch_id`, and `review_digest`. Missing or malformed mirror data refuses
+with no live fallback. Preview does not inspect due dates, student coverage, overrides, or
+module placement. After teacher approval, apply pushes only the unchanged reviewed scores to
+the exact linked bridge, performs live postconditions for those writes, and requests a
+targeted mirror refresh. Bridge operations do not repair or rearrange modules.
 
 The grade-adjustment pair is the only existing-score write lane. Preview reads the
 typed private mirror and returns pseudonym-only review rows; apply uses the Operation
@@ -373,24 +370,25 @@ arbitrary grade edit.
 Ordinary assignments may offer comment-only posting after the teacher answers its question.
 
 `get_roster`, `get_submissions`, and `get_gradebook_snapshot` only read the local
-CanvasMirror. None fall back to
-a live Canvas call. If the required mirror data is stale or missing, they return
+CanvasMirror. None fall back to a live Canvas call. Stale data serves with its freshness
+labeled (`state`, `age_minutes`, `within_policy`, `policy_window_minutes`) and a
+non-blocking `refresh_mirror` hint. Missing or malformed data refuses with
 `{"ok": false, "error": "..."}` naming the problem; the agent calls `refresh_mirror(course_id)`
-itself and retries the same read once it reports `"synced"`.
+itself and retries once it reports `"synced"`.
 
 Stale `get_course_content(kind="modules")` and `get_course_content(kind="pages")` results
 name `refresh_mirror(structure_only=true)` as their repair, which refreshes the whole
-Course Catalog (assignments, assignment groups, modules, and pages) for a Current course.
+Course Catalog (assignments, assignment groups, modules, and pages).
 Plain `refresh_mirror` refreshes the private mirror's roster, groups, assignments, and
 submissions; it does not refresh catalog modules or pages.
 
 The section, mirror, and Course Catalog reads named here reject an ID absent from
 `list_courses` before recommending a mirror or Course Catalog refresh. Student-data tools
 (`get_roster`, `get_submissions`, and `get_gradebook_snapshot`), group discovery,
-`get_course_content(kind="pages")`, and `refresh_mirror(structure_only=true)` are scoped to
-Current courses (`config.active_courses()`). `get_roster(include=["sections"])`,
-`get_course_content(kind="assignments")`, `get_course_content(kind="modules")`, and plain
-`refresh_mirror` accept any saved course, including Previous courses. Pseudonymized artifacts are
+and `get_course_content(kind="pages")` are scoped to Current courses (`config.active_courses()`).
+`get_roster(include=["sections"])`, `get_course_content(kind="assignments")`,
+`get_course_content(kind="modules")`, `refresh_mirror`, and `refresh_mirror(structure_only=true)`
+accept any saved course, including Previous courses. Pseudonymized artifacts are
 scrubbed, not anonymous: the pseudonym is stable, and student text still comes through as
 the student wrote it.
 

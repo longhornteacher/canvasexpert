@@ -198,14 +198,18 @@ def _assert_mcp_freshness_results(monkeypatch, tmp_path, *, age_minutes, within_
     return roster, submissions
 
 
-def test_mcp_r3_past_policy_window_asks_teacher_without_student_rows(monkeypatch, tmp_path):
+def test_mcp_r3_past_policy_window_serves_with_labeled_age_and_refresh_hint(monkeypatch, tmp_path):
+    """LAW (brief decision #4): age is metadata, not a gate. A projection that
+    loads serves with its freshness labeled and a non-blocking refresh hint —
+    never a refusal, never an escalation to the teacher."""
     roster, submissions = _assert_mcp_freshness_results(
         monkeypatch, tmp_path, age_minutes=601, within_policy=False)
     for result in (roster, submissions):
-        assert result["ok"] is False
-        assert result["attention"]["action"] == "ask_teacher_confirmation"
-        assert "roster" not in result
-        assert "submissions" not in result
+        assert result["ok"] is True
+        assert result["freshness"]["within_policy"] is False
+        assert result["attention"]["action"] == "refresh_mirror"
+    assert roster["roster"]["rows"]
+    assert submissions["submissions"]["rows"]
 
 
 def test_mcp_r3_within_policy_serves_past_mirror_cutoff(monkeypatch, tmp_path):
