@@ -1,9 +1,10 @@
 # Agentic center: next batch pointer
 
-Batch 2, MCP lean, was accepted GREEN on 2026-10-04. Its execution report is recorded in
-`docs/handoffs/agentic-center-2-mcp-lean.md` and the implementation is in the current `dev`
-history. The next senior should write a separate brief for Batch 3 after reading only the
-routed sections below.
+Batch 2, MCP lean, is implemented in commit `634f9d0`. Its focused and full gates pass, but
+the final live revision stage is pending because both existing revision work items are leased
+by another device. Do not start Batch 3 until that lease is intentionally released or taken
+over under the cross-device rules. The next senior should then write a separate brief for
+Batch 3 after reading only the routed sections below.
 
 ## Batch 3: console reduction
 
