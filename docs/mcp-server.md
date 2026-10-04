@@ -238,7 +238,7 @@ instructions point here rather than restating any of it.
 
 `list_staged_content(kind="")` also takes no `course_id` and carries no student data, so
 it likewise needs no course gate, no identity vault, and no safety scan. It reuses
-`webui.deps.list_inbox_files` (the same marker-gated To Review listing the push tabs use) and
+`api.staged_content.list_inbox_files` (the same marker-gated To Review listing the push tabs use) and
 returns only each draft's label, never its absolute path. Pass `kind` to narrow to one of
 `quiz`, `assignment`, or `page`; omit it to see everything staged across all three.
 
@@ -428,6 +428,16 @@ compact. Client and model token treatment varies:
   the machine.
 
 ## Running it
+
+Canvas Expert runs as one local process per PC. The first desktop agent to start it owns
+the runtime; another agent on that PC attaches to the same process through its local
+MCP endpoint. The browser console is optional: it can be opened while the runtime is
+running, and an unavailable console does not prevent the agent runtime from working.
+Closing an attached agent does not stop the owner process; the owner shuts down when
+its own entry point exits. `api/runtime.py` owns shared startup and shutdown work, while
+the runtime host serves MCP and mounts the console when available.
+If port 8765 is unavailable, the owning agent keeps its stdio connection; the console
+and second-agent attachment are unavailable until the runtime can bind that port.
 
 The CanvasAgent page in the local control console is the source for current local stdio setup.
 It resolves the exact Python interpreter and absolute entry point from the unzipped

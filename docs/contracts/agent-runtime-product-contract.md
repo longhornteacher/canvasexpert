@@ -94,10 +94,17 @@ The five cooperation concerns are:
 delegates to application services and safety owners; it does not become a
 second web router or a host-specific UI layer.
 
+`api/runtime.py` owns process startup and shutdown: workspace setup, authoring
+library construction, interrupted-operation recovery, mirror heartbeat, and
+work-lease release. The runtime host serves MCP and may mount the FastAPI
+control console. The console is optional and does not own runtime startup.
+
 The runtime's core read, privacy, session, workspace, and write services must
-be usable without starting the FastAPI server. Existing services may be
-extracted toward that boundary incrementally; do not create a speculative
-framework before a real workflow needs it.
+be usable without starting FastAPI. **Boundary law:** production modules outside
+`api/webui/` may not import `api.webui`, except for the runtime host's guarded
+console mount. Existing services may be extracted toward that boundary
+incrementally; do not create a speculative framework before a real workflow
+needs it.
 
 ### Read spine
 

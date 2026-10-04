@@ -40,9 +40,11 @@ in `get_course_content`. Inapplicable options are refused explicitly.
 
 Local-only, never served. See `AGENTS.md` Firm rules.
 
-The current version is `1.0.0-beta.5` (see `api/__init__.py`). The supported launcher is
-`py qf_ui.py` from `api/` or `py api/qf_ui.py` from the repository root; it binds
-only to `127.0.0.1` and preserves the `--port` and `--no-browser` options.
+The current version is `1.0.0-beta.5` (see `api/__init__.py`). The supported console
+launcher is `py qf_ui.py` from `api/` or `py api/qf_ui.py` from the repository root;
+it binds only to `127.0.0.1` and preserves the `--port` and `--no-browser` options.
+See [`docs/mcp-server.md`](../docs/mcp-server.md#running-it) for runtime ownership,
+local MCP setup and the console's optional role.
 `api/README.md` owns the backend, CLI, packaging, setup, credentials, workspace, and the
 `api/` files table. `api/webui/README.md` owns routes, pages, templates, static assets, and
 per-route script load order.
@@ -69,7 +71,7 @@ The token-holding runtime binds only loopback. Keep the token only in
 ## Workflow
 
 **Recommended: connect a desktop agent through the local MCP server** (see `docs/mcp-server.md`).
-Use the Web UI as the control console for first-run setup, connection/readiness checks,
+Use the optional Web UI control console for first-run setup, connection/readiness checks,
 CanvasMirror status, operation recovery, receipts, and private workspace management.
 CLI scripts remain available for bounded automation and legacy/headless workflows.
 

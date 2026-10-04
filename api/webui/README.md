@@ -1,5 +1,11 @@
 # Canvas Expert control console
 
+The console is mounted at `/` by the local runtime host. The runtime owns process
+startup and MCP; it can continue serving MCP when the console cannot be imported or
+started. The console also remains available through `py qf_ui.py` and can be opened
+while an agent-owned runtime is running. See [Running it](../../docs/mcp-server.md#running-it)
+for the one-process-per-PC and attach model.
+
 The local console supports setup, readiness, mirror refresh, operation recovery,
 receipts, settings, and private identity tools. The connected desktop agent authors,
 previews, and applies work through MCP; Canvas Live is the record for posted results.

@@ -68,3 +68,9 @@ slice-specific.
 
 See also `AGENTS.md` → *Lean engineering defaults* for the engineering-side
 expression of the same instinct.
+
+## Open decisions
+
+- Whether the time zone is a shared setting or comes from the Canvas course.
+- Whether free-text student names are blocked or flagged.
+- Whether tests use classes as house style and whether `pytest-randomly` stays enabled by default.
