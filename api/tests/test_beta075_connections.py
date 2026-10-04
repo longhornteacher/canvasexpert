@@ -177,8 +177,8 @@ def test_connections_page_and_mcpb_use_runtime_paths_without_client_config_write
     runpy.run_path(str(launcher_path), run_name="__main__")
     assert calls == [True]
 
-    monkeypatch.setattr(server.config, "token_is_set", lambda: True)
-    monkeypatch.setattr(server.config, "get_canvas_base", lambda: "https://canvas.invalid")
+    monkeypatch.setattr(config, "token_is_set", lambda: True)
+    monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
     response = TestClient(server.app).get("/")
     assert response.status_code == 200
     assert response.text.count("CanvasAgent") >= 1

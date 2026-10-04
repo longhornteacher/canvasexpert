@@ -155,6 +155,22 @@ def _isolate_real_machine_and_workspace_paths(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def isolated_runtime_owner(monkeypatch):
+    """Give runtime lifecycle tests clean, automatically restored process state."""
+    from api import runtime
+
+    for name, value in (
+        ("_started", False),
+        ("_stopped", False),
+        ("_heartbeat_stop", None),
+        ("_heartbeat_thread", None),
+    ):
+        monkeypatch.setattr(runtime, name, value)
+    yield runtime
+    runtime.stop()
+
+
+@pytest.fixture
 def grading_policy_files(tmp_path, monkeypatch):
     """Write ``Library/Grading Policy.txt`` and/or ``Library/Calendars/
     Holidays.csv`` into an isolated workspace root (decision 1 /

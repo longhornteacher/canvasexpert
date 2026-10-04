@@ -9,6 +9,7 @@ import pytest
 from api.webui import server
 from api.webui.routes import connections as connection_routes, pages
 from api.platform_services import workspace
+from api.platform_services import config
 from api.shared_storage import LegacyStorageReappearedError
 from api.platform_services.config import courses
 
@@ -35,8 +36,8 @@ def _ready_context():
 
 
 def _configure(monkeypatch, *, token=True):
-    monkeypatch.setattr(server.config, "token_is_set", lambda: token)
-    monkeypatch.setattr(server.config, "get_canvas_base", lambda: "https://canvas.example.test" if token else "")
+    monkeypatch.setattr(config, "token_is_set", lambda: token)
+    monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.example.test" if token else "")
     monkeypatch.setattr(connection_routes.connections, "connection_context", _ready_context)
     monkeypatch.setattr(connection_routes.mirror_service, "status", lambda: {
         "ok": True,

@@ -4,9 +4,9 @@ Thin ``@mcp.tool()`` wrappers delegate to the plain functions in
 ``tools.py`` so the tool layer stays testable without an MCP client. The
 authoritative count and shape live in ``contract.TOOL_SCHEMA_VERSION`` and its
 snapshot, not in prose here, so this docstring cannot drift. Run via
-``api/mcp_server/__main__.py`` over stdio. The Web UI process mounts the same
+``api/mcp_server/__main__.py`` over stdio. The runtime host serves the same
 FastMCP instance on loopback so a second stdio entry point can attach without
-opening the stores a second time.
+opening the stores a second time; the browser console is optional.
 
 Token discipline: the shared privacy rules live ONCE in the server
 instructions (not per tool), tool descriptions stay to a functional line or
@@ -198,30 +198,66 @@ def run_managed_stdio(lock=None, *, owns_lock: bool | None = None) -> None:
         _run_stdio_proxy(endpoint)
         return
 
-    # When MCP is the first entry point, run the normal local control console
-    # in this same process. The MCP client and browser then share one owner.
+    from api import runtime
+
+    # The loopback host is optional for this owner: stdio remains useful even
+    # when port 8765 is unavailable or the console has an import defect.
     port = 8765
-    publish_runtime(port)
     server = None
     server_thread = None
+    published = False
     try:
-        import uvicorn
-        from api.webui.server import app
+        runtime.start()
+        try:
+            import uvicorn
+            from api.runtime_host import create_host_app
 
-        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-        server = uvicorn.Server(config)
-        server_thread = threading.Thread(target=server.run, name="ce-local-webui", daemon=True)
-        server_thread.start()
-        if not _wait_for_runtime():
-            raise RuntimeError("local_runtime_start_failed")
+            host_app = create_host_app()
+            config = uvicorn.Config(
+                host_app, host="127.0.0.1", port=port,
+                log_level="critical", access_log=False,
+            )
+            server = uvicorn.Server(config)
+            server_thread = threading.Thread(
+                target=server.run, name="ce-local-runtime-host", daemon=True
+            )
+            server_thread.start()
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline and server_thread.is_alive() and not server.started:
+                time.sleep(0.05)
+            if server.started:
+                publish_runtime(port)
+                published = True
+                if not _wait_for_runtime(timeout_seconds=2.0):
+                    clear_runtime()
+                    published = False
+                    print(
+                        "Canvas Expert local console and second-agent attach are unavailable.",
+                        file=sys.stderr,
+                    )
+            else:
+                print(
+                    "Canvas Expert local console and second-agent attach are unavailable.",
+                    file=sys.stderr,
+                )
+        except Exception:
+            print("Canvas Expert local console and second-agent attach are unavailable.", file=sys.stderr)
         run_stdio()
     finally:
-        if server is not None:
-            server.should_exit = True
-        if server_thread is not None:
-            server_thread.join(timeout=5.0)
-        clear_runtime()
-        lock.release()
+        try:
+            if server is not None:
+                server.should_exit = True
+            if server_thread is not None:
+                server_thread.join(timeout=5.0)
+        finally:
+            try:
+                if published:
+                    clear_runtime()
+            finally:
+                try:
+                    runtime.stop()
+                finally:
+                    lock.release()
 
 
 def _compact(payload: dict) -> str:

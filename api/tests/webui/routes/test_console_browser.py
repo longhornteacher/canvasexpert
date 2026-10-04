@@ -2,7 +2,6 @@
 import os
 
 import pytest
-import uvicorn
 from fastapi.testclient import TestClient
 from api.webui.server import app
 
@@ -19,8 +18,11 @@ def test_synthetic_console_names_and_legacy_receipt_work_without_a_canvas_accoun
 
 
 @pytest.mark.skipif(os.environ.get("CE_CONSOLE_BROWSER") != "1", reason="opt-in rendered browser server")
-def test_serve_console_browser(synthetic_console):
-    # All persistence and credentials inherit api/tests/conftest.py isolation;
-    # no app lifespan, mirror heartbeat, or real Canvas/client probes start.
+def test_serve_console_browser(synthetic_console, monkeypatch):
+    # Exercise the console-first entry point and runtime host with isolated
+    # persistence and synthetic credentials. No real Canvas/client probes run.
+    from api import qf_ui
+
+    monkeypatch.setattr(qf_ui.sys, "argv", ["qf_ui.py", "--port", "8767", "--no-browser"])
     print("Synthetic console: http://127.0.0.1:8767 ; receipt /receipts/receipt-browser", flush=True)
-    uvicorn.run(app, host="127.0.0.1", port=8767, lifespan="off", access_log=False)
+    qf_ui.main()

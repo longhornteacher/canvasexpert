@@ -1,8 +1,6 @@
 """Local setup, readiness, private names, recovery, and receipts console."""
 import os
-import threading
 import traceback
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -10,12 +8,6 @@ from fastapi.staticfiles import StaticFiles
 
 from api import operational_log
 from api.mirror import coordinator as _mirror_coordinator
-from api.operation_ledger import recovery as _operation_ledger_recovery
-
-from api.platform_services import config
-from . import ai_ta
-from api.platform_services import workspace
-from api import runtime_paths
 
 from .deps import WEBUI_DIR
 
@@ -33,7 +25,6 @@ from .routes.support import router as _support_router
 from .routes.operations import router as _operations_router
 from .routes.mirror import router as _mirror_router
 from .routes.updates import router as _updates_router
-from .mirror_service import _mirror_heartbeat
 
 
 class _StaticFiles(StaticFiles):
@@ -45,50 +36,7 @@ class _StaticFiles(StaticFiles):
         return response
 
 
-@asynccontextmanager
-async def _lifespan(app):
-    """Startup work — kept out of module import so the app is cheap to import
-    (route-contract test, tooling). uvicorn fires this when actually serving."""
-    try:
-        workspace.ensure_workspace()
-    except Exception as e:
-        print(f"Workspace setup note: {e}")
-    try:
-        # Pin the resolved workspace path so the headless MCP server (launched by
-        # Claude Desktop / ChatGPT without the OneDrive env var) resolves the same
-        # workspace instead of falling back to stale machine-local state.
-        config.ensure_workspace_pinned()
-    except Exception as e:
-        print(f"Workspace pin note: {e}")
-    try:
-        # No workspace configured yet: never build the library, and never fall
-        # back to writing it under the repo root (see runtime_paths.ai_ta_dir).
-        ai_ta_target = runtime_paths.ai_ta_dir()
-        if ai_ta_target is not None:
-            ai_ta.build_library(ai_ta_target)
-    except Exception as e:
-        print(f"AI Authoring library build failed: {e}")
-    try:
-        # Reconcile any operation-ledger targets left claimed/sent_unknown by a
-        # crash mid-write, before new work can claim the same targets. Usually
-        # a no-op (empty scan).
-        _operation_ledger_recovery.recover_pending_operations()
-    except Exception as e:
-        print(f"Operation-ledger recovery note: {e}")
-    threading.Thread(target=_mirror_heartbeat, daemon=True).start()
-    # FastMCP's mounted Streamable HTTP endpoint is hosted by this same
-    # process. The stdio entry point proxies here when another CE process
-    # already owns the machine-local process lock.
-    from api.mcp_server.server import mcp as _mcp_server
-    async with _mcp_server.session_manager.run():
-        try:
-            yield
-        finally:
-            from api.shared_work import heartbeat_service
-            heartbeat_service().release_all()
-
-
-app = FastAPI(title="Canvas Expert", lifespan=_lifespan,
+app = FastAPI(title="Canvas Expert",
               docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", _StaticFiles(directory=os.path.join(WEBUI_DIR, "static")), name="static")
 
@@ -141,16 +89,3 @@ app.include_router(_support_router)
 app.include_router(_operations_router)
 app.include_router(_mirror_router)
 app.include_router(_updates_router)
-
-
-@app.get("/api/runtime/ping")
-def runtime_ping():
-    """Loopback-only rendezvous endpoint used by sibling CE entry points."""
-    return {"ok": True, "service": "canvas-expert"}
-
-
-# Keep the child MCP app last so every existing Web UI route retains its
-# normal owner and route ordering. FastMCP serves its /mcp endpoint from this
-# same local-only process.
-from api.mcp_server.server import mcp as _mcp_server
-app.mount("/", _mcp_server.streamable_http_app())

@@ -2,8 +2,9 @@
 
 Cwd-independent: resolves the repository root from this file so it works
 regardless of the caller's working directory (MCP clients typically launch it
-with an absolute path and an unpredictable cwd). No network bind — stdio
-transport only.
+with an absolute path and an unpredictable cwd). The lock owner also binds the
+local loopback runtime host so another agent can attach and the optional
+control console can open; stdio remains the agent transport.
 """
 import sys
 from pathlib import Path

@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 def test_workspace_paths_are_resolved_at_call_time(tmp_path, monkeypatch):
     from api import runtime_paths
     from api.platform_services import config, workspace
-    from api.webui import ai_ta, deps
+    from api import ai_authoring
+    from api import staged_content as deps
 
     roots = {"current": tmp_path / "one"}
     for label in ("one", "two"):
@@ -24,7 +25,7 @@ def test_workspace_paths_are_resolved_at_call_time(tmp_path, monkeypatch):
     roots["current"] = tmp_path / "two"
     assert runtime_paths.ai_ta_dir() == tmp_path / "two" / "Library" / "AI Authoring"
 
-    built = ai_ta.build_library(runtime_paths.ai_ta_dir())
+    built = ai_authoring.build_library(runtime_paths.ai_ta_dir())
     assert all(Path(path).is_relative_to(tmp_path / "two") for path in built)
 
     assert not hasattr(config, "RUBRIC_" + "FOLDERS")
@@ -50,33 +51,36 @@ def test_no_workspace_never_seeds_ai_authoring_under_the_repo_root(tmp_path, mon
     """
     from api import runtime_paths
     from api.platform_services import workspace
-    from api.webui import ai_ta, server
+    from api import ai_authoring, runtime
+    from api.mirror import service
 
     monkeypatch.setattr(workspace, "workspace_root", lambda: None)
     monkeypatch.setattr(runtime_paths, "app_root", lambda: tmp_path)
+    monkeypatch.setattr(workspace, "ensure_workspace", lambda: None)
+    monkeypatch.setattr("api.platform_services.config.ensure_workspace_pinned", lambda: None)
+    monkeypatch.setattr("api.operation_ledger.recovery.recover_pending_operations", lambda: None)
+    library_calls = []
+    monkeypatch.setattr(ai_authoring, "build_library", library_calls.append)
+    monkeypatch.setattr(service, "mirror_heartbeat_worker", lambda stop_event: stop_event.wait())
+    monkeypatch.setattr(runtime, "_started", False)
+    monkeypatch.setattr(runtime, "_stopped", False)
+    monkeypatch.setattr(runtime, "_heartbeat_stop", None)
+    monkeypatch.setattr(runtime, "_heartbeat_thread", None)
 
     assert runtime_paths.ai_ta_dir() is None
 
-    ai_ta_target = runtime_paths.ai_ta_dir()
-    if ai_ta_target is not None:
-        ai_ta.build_library(ai_ta_target)
+    runtime.start()
+    runtime.stop()
 
+    assert library_calls == []
     assert not (tmp_path / "AI Authoring").exists()
-    assert list(tmp_path.iterdir()) == []
 
-    # The same guard server._lifespan applies must be present in the module
-    # source, so a future edit that removes the None check is caught even if
-    # this test's own inline mirror of it is not.
-    import inspect
-    lifespan_src = inspect.getsource(server._lifespan)
-    assert "ai_ta_dir()" in lifespan_src
-    assert "is not None" in lifespan_src
 
 
 def test_all_content_pickers_use_only_the_synced_library(tmp_path, monkeypatch):
     from api import runtime_paths
     from api.platform_services import workspace
-    from api.webui import deps
+    from api import staged_content as deps
 
     repo_root = tmp_path / "repo-api"
     bundled = repo_root / "qf_materials" / "qf quiz examples"
@@ -107,7 +111,7 @@ def test_all_content_pickers_use_only_the_synced_library(tmp_path, monkeypatch):
 def test_txt_file_labels_disambiguate_only_on_a_name_collision(tmp_path):
     """Two files sharing a basename across different folders must each show
     their own folder in the label; a lone file just shows its name."""
-    from api.webui import deps
+    from api import staged_content as deps
 
     folder_a = tmp_path / "folder-a"
     folder_b = tmp_path / "folder-b"
@@ -124,7 +128,7 @@ def test_txt_file_labels_disambiguate_only_on_a_name_collision(tmp_path):
 
 def test_quick_fix_contract_and_version(monkeypatch, tmp_path):
     from api import __version__
-    from api.platform_services import workspace
+    from api.platform_services import config, workspace
     from api.webui import server
 
     from api.mcp_server import tools
@@ -168,8 +172,8 @@ def test_quick_fix_contract_and_version(monkeypatch, tmp_path):
     assert result["ok"] is True
     assert vault.save_calls == 1
 
-    monkeypatch.setattr(server.config, "token_is_set", lambda: True)
-    monkeypatch.setattr(server.config, "get_canvas_base", lambda: "https://canvas.invalid")
+    monkeypatch.setattr(config, "token_is_set", lambda: True)
+    monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")
     client = TestClient(server.app)
     retired_about = client.get("/about")
     assert retired_about.status_code == 404

@@ -1,11 +1,17 @@
 import anyio
 import httpx
+import sys
 
 from api.mcp_server.server import mcp
-from api.webui.server import app
+from api import runtime_host
 
 
-def test_lock_owner_exposes_the_same_tool_list_on_loopback():
+def test_http_ping_and_mcp_survive_console_import_failure(monkeypatch):
+    original = runtime_host.console_app
+    monkeypatch.setattr(runtime_host, "_console_import_error_logged", False)
+    monkeypatch.setitem(sys.modules, "api.webui.server", None)
+    app = runtime_host.create_host_app()
+
     async def exercise():
         async with mcp.session_manager.run():
             from mcp.client.session import ClientSession
@@ -20,6 +26,9 @@ def test_lock_owner_exposes_the_same_tool_list_on_loopback():
                 trust_env=False,
             )
             async with http_client:
+                ping = await http_client.get("/api/runtime/ping")
+                assert ping.status_code == 200
+                assert ping.json()["ok"] is True
                 async with streamable_http_client(
                     "http://127.0.0.1:8765/mcp",
                     http_client=http_client,
@@ -31,4 +40,7 @@ def test_lock_owner_exposes_the_same_tool_list_on_loopback():
                         assert "list_courses" in names
                         assert "get_course_content" in names
 
-    anyio.run(exercise)
+    try:
+        anyio.run(exercise)
+    finally:
+        runtime_host.console_app = original

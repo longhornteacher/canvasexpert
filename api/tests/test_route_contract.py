@@ -47,7 +47,6 @@ EXPECTED = [
     ('/api/readiness/probe', ('POST',)),
     ('/api/receipts', ('GET',)),
     ('/api/receipts/{receipt_id}', ('GET',)),
-    ('/api/runtime/ping', ('GET',)),
     ('/api/support-bundle', ('POST',)),
     ('/api/tier-colors', ('POST',)),
     ('/api/tier-tags', ('POST',)),

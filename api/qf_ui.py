@@ -42,9 +42,33 @@ def main():
         return
 
     url = f"http://{HOST}:{port}"
-    publish_runtime(port)
+    from api import runtime
+
+    published = False
+    cleaned_up = False
+
+    def cleanup_owner() -> None:
+        nonlocal published, cleaned_up
+        if cleaned_up:
+            return
+        cleaned_up = True
+        try:
+            if published:
+                clear_runtime()
+        finally:
+            try:
+                runtime.stop()
+            finally:
+                lock.release()
+
     try:
-        from api.webui.server import app
+        runtime.start()
+        from api.runtime_host import create_host_app, mounted_console_app
+
+        host_app = create_host_app()
+        console_app = mounted_console_app()
+        if console_app is None:
+            raise RuntimeError("The local control console could not be loaded.")
 
         if open_browser:
             threading.Timer(1.0, lambda: webbrowser.open(url)).start()
@@ -54,19 +78,35 @@ def main():
         # Built explicitly (rather than uvicorn.run(...)) so a route can ask
         # the server to stop with a specific exit code. "Open Canvas Expert.bat"
         # inspects that code: 7 means "a self-update is staged, apply it".
-        config = uvicorn.Config(app, host=HOST, port=port, log_level="info")
-        server = uvicorn.Server(config)
+        config = uvicorn.Config(host_app, host=HOST, port=port, log_level="info")
+
+        class _PublishingServer(uvicorn.Server):
+            async def startup(self, sockets=None):
+                nonlocal published
+                await super().startup(sockets=sockets)
+                if self.started:
+                    publish_runtime(port)
+                    published = True
+
+            async def shutdown(self, sockets=None):
+                try:
+                    await super().shutdown(sockets=sockets)
+                finally:
+                    # This runs inside Uvicorn's signal-capture context, before
+                    # it restores and re-raises Ctrl+Break on Windows.
+                    cleanup_owner()
+
+        server = _PublishingServer(config)
 
         def request_restart(exit_code: int) -> None:
-            app.state.restart_exit_code = exit_code
+            console_app.state.restart_exit_code = exit_code
             server.should_exit = True
 
-        app.state.request_restart = request_restart
+        console_app.state.request_restart = request_restart
         server.run()
-        raise SystemExit(getattr(app.state, "restart_exit_code", 0))
+        raise SystemExit(getattr(console_app.state, "restart_exit_code", 0))
     finally:
-        clear_runtime()
-        lock.release()
+        cleanup_owner()
 
 
 if __name__ == "__main__":
