@@ -1,0 +1,228 @@
+"""Durability, synchronization and causal history laws in disposable roots."""
+import shutil
+
+import pytest
+
+from api.mirror.evidence_schema import EvidenceValidationError, canonical_bytes, digest_record
+from api.mirror.evidence_store import EvidenceStore, StoreSnapshot, reduce_scope
+
+
+def test_validation_and_privacy_finish_before_any_safe_bytes(tmp_path, evidence_factory):
+    def reject(record):
+        if "Sensitive Synthetic" in canonical_bytes(record).decode():
+            raise ValueError("refused private value")
+    safe = tmp_path / "safe"
+    store = EvidenceStore(safe, "a" * 64, "1", verify_safe=reject, private_diagnostics_root=tmp_path.parent / (tmp_path.name + "-diagnostics"))
+    with pytest.raises(EvidenceValidationError, match="privacy_refused"):
+        store.publish_fact(evidence_factory["fact"](body="Sensitive Synthetic"))
+    assert not safe.exists()
+    invalid = evidence_factory["fact"]()
+    invalid["payload"]["user_id"] = "private"
+    with pytest.raises(EvidenceValidationError):
+        store.publish_fact(invalid)
+    assert not safe.exists()
+
+
+def test_immutable_fact_reuse_and_local_dependency_order(tmp_path, evidence_factory):
+    store = EvidenceStore(tmp_path, "a" * 64, "1", verify_safe=lambda record: None, private_diagnostics_root=tmp_path.parent / (tmp_path.name + "-diagnostics"))
+    record = evidence_factory["fact"]()
+    ref = store.publish_fact(record)
+    assert store.publish_fact(record) == ref
+    assert len(list(tmp_path.rglob("*.json"))) == 1
+    with pytest.raises(EvidenceValidationError, match="publication_dependencies_missing"):
+        store.publish_commit(evidence_factory["commit"](refs=["b" * 64], members=[record["entity_key"]]))
+    path = next(tmp_path.rglob("*.json"))
+    path.write_bytes(b"corrupt")
+    with pytest.raises(EvidenceValidationError, match="immutable_corruption"):
+        store.publish_fact(record)
+    assert path.read_bytes() == b"corrupt"
+
+
+def test_sync_pending_preserves_last_good_then_converges(tmp_path, evidence_factory):
+    writer = EvidenceStore(tmp_path / "writer", "a" * 64, "1", verify_safe=lambda record: None, private_diagnostics_root=tmp_path.parent / (tmp_path.name + "-diagnostics"))
+    reader = EvidenceStore(tmp_path / "reader", "a" * 64, "1", verify_safe=lambda record: None, private_diagnostics_root=tmp_path.parent / (tmp_path.name + "-diagnostics"))
+    first = evidence_factory["fact"](body="First")
+    ref1 = writer.publish_fact(first)
+    c1 = writer.publish_commit(evidence_factory["commit"](refs=[ref1], members=[first["entity_key"]]))
+    shutil.copytree(writer.course_root, reader.course_root)
+    second = evidence_factory["fact"](body="Second", attempt=2)
+    ref2 = writer.publish_fact(second)
+    c2 = writer.publish_commit(evidence_factory["commit"](refs=[ref2], parents=[c1], members=[second["entity_key"]], run_id="run-2"))
+    target = reader._path("commits", c2)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(writer._path("commits", c2), target)
+    pending = reduce_scope(reader.scan(), "assignment.submissions", "10")
+    assert pending.status == "sync_pending"
+    assert pending.current_refs == (ref1,)
+    assert pending.pending_commits == (c2,)
+    target = reader._path("objects", ref2)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(writer._path("objects", ref2), target)
+    assert reader.scan().revision == writer.scan().revision
+    assert reduce_scope(reader.scan(), "assignment.submissions", "10").current_refs == (ref2,)
+
+
+def test_partial_and_delta_do_not_delete_but_complete_empty_tombstones(tmp_path, evidence_factory):
+    store = EvidenceStore(tmp_path, "a" * 64, "1", verify_safe=lambda record: None, private_diagnostics_root=tmp_path.parent / (tmp_path.name + "-diagnostics"))
+    record = evidence_factory["fact"]()
+    ref = store.publish_fact(record)
+    first = store.publish_commit(evidence_factory["commit"](refs=[ref], members=[record["entity_key"]]))
+    partial = store.publish_commit(evidence_factory["commit"](parents=[first], complete=False, gaps=[{"code": "pagination_failed"}], run_id="partial"))
+    delta = store.publish_commit(evidence_factory["commit"](parents=[partial], mode="delta", complete=False, run_id="delta"))
+    assert reduce_scope(store.scan(), "assignment.submissions", "10").current_refs == (ref,)
+    store.publish_commit(evidence_factory["commit"](parents=[delta], run_id="empty"))
+    state = reduce_scope(store.scan(), "assignment.submissions", "10")
+    assert state.current_refs == ()
+    assert state.tombstones == (record["entity_key"],)
+    assert state.history_refs == (ref,)
+
+
+def test_causal_timestamp_observations_survive_conflicts_and_tombstones(tmp_path, evidence_factory):
+    store = EvidenceStore(tmp_path, "a" * 64, "1", verify_safe=lambda record: None, private_diagnostics_root=tmp_path.parent / (tmp_path.name + "-diagnostics"))
+    key = "attempt:10:Pikachu:1"
+    old = store.publish_fact(evidence_factory["fact"](kind="attempt_observation", entity_key=key))
+    c1 = store.publish_commit(evidence_factory["commit"](refs=[old], run_id="first"))
+    later = store.publish_fact(evidence_factory["fact"](kind="attempt_observation", entity_key=key, submitted_at="2026-01-02T00:00:00Z", late=False))
+    c2 = store.publish_commit(evidence_factory["commit"](refs=[later, old], parents=[c1], run_id="later"))
+    store.publish_commit(evidence_factory["commit"](parents=[c2], run_id="deleted"))
+    state = reduce_scope(store.scan(), "assignment.submissions", "10")
+    assert state.established_submitted_at[key] == "2026-01-01T00:00:00Z"
+    assert set(state.observation_discrepancies[key]) == {old, later}
+    assert set(state.history_refs) == {old, later}
+
+
+def test_concurrent_conflict_keeps_common_last_good_until_reconciliation(tmp_path, evidence_factory):
+    store = EvidenceStore(tmp_path, "a" * 64, "1", verify_safe=lambda record: None, private_diagnostics_root=tmp_path.parent / (tmp_path.name + "-diagnostics"))
+    key = evidence_factory["fact"]()["entity_key"]
+    refs = [store.publish_fact(evidence_factory["fact"](body=text)) for text in ("Base", "Branch A", "Branch B")]
+    base = store.publish_commit(evidence_factory["commit"](refs=[refs[0]], members=[key]))
+    branches = [store.publish_commit(evidence_factory["commit"](refs=[ref], parents=[base], members=[key], run_id=f"branch-{number}")) for number, ref in enumerate(refs[1:])]
+    state = reduce_scope(store.scan(), "assignment.submissions", "10")
+    assert state.status == "ambiguous"
+    assert state.current_refs == state.last_good_refs == (refs[0],)
+    assert state.ambiguous_entities == (key,)
+    store.publish_commit(evidence_factory["commit"](refs=[refs[1]], parents=branches, members=[key], run_id="reconciled"))
+    state = reduce_scope(store.scan(), "assignment.submissions", "10")
+    assert state.status == "ready"
+    assert state.current_refs == (refs[1],)
+
+
+def test_conflict_copies_deduplicate_and_refuse_corruption_and_private_text(tmp_path, evidence_factory):
+    def verifier(record):
+        if "Synthetic Private" in canonical_bytes(record).decode():
+            raise ValueError("private")
+    store = EvidenceStore(tmp_path, "a" * 64, "1", verify_safe=verifier, private_diagnostics_root=tmp_path.parent / (tmp_path.name + "-diagnostics"))
+    record = evidence_factory["fact"]()
+    ref = store.publish_fact(record)
+    commit = store.publish_commit(evidence_factory["commit"](refs=[ref], members=[record["entity_key"]]))
+    original = store._path("objects", ref)
+    copy = original.with_name(f"{ref}-provider arbitrary copy.json")
+    shutil.copyfile(original, copy)
+    assert len(store.scan().facts) == 1
+    assert store.scan().issues == ()
+    copy.write_bytes(b"corrupt")
+    unsafe = evidence_factory["fact"](body="Synthetic Private")
+    digest = digest_record(unsafe)
+    unsafe_path = store._path("objects", digest)
+    unsafe_path.parent.mkdir(parents=True, exist_ok=True)
+    unsafe_path.write_bytes(canonical_bytes(unsafe))
+    snapshot = store.scan()
+    assert digest not in snapshot.facts
+    assert len(snapshot.issues) == 2
+    state = reduce_scope(snapshot, "assignment.submissions", "10")
+    assert state.current_refs == (ref,)
+    assert state.status == "sync_pending"
+    assert snapshot.commits[commit]["record_refs"] == [ref]
+    saved = [p.read_bytes() for p in store.private_diagnostics_root.rglob("*.bin")]
+    assert b"corrupt" in saved
+    assert canonical_bytes(unsafe) in saved
+    assert copy.read_bytes() == b"corrupt"
+    assert unsafe_path.read_bytes() == canonical_bytes(unsafe)
+    assert str(tmp_path) not in repr(snapshot.issues)
+
+
+def test_diagnostics_cannot_overlap_safe_root(tmp_path):
+    with pytest.raises(EvidenceValidationError, match="diagnostics_root_overlap"):
+        EvidenceStore(tmp_path, "a" * 64, "1", verify_safe=lambda record: None, private_diagnostics_root=tmp_path / "private")
+
+
+def test_cross_assignment_references_and_ancestry_are_refused(tmp_path, evidence_factory):
+    store = EvidenceStore(tmp_path, "a" * 64, "1", verify_safe=lambda record: None, private_diagnostics_root=tmp_path.parent / (tmp_path.name + "-diagnostics"))
+    ref = store.publish_fact(evidence_factory["fact"]())
+    with pytest.raises(EvidenceValidationError, match="reference_scope_mismatch"):
+        store.publish_commit(evidence_factory["commit"](refs=[ref], scope_id="20"))
+    parent = store.publish_commit(evidence_factory["commit"](scope_id="20"))
+    with pytest.raises(EvidenceValidationError, match="parent_scope_mismatch"):
+        store.publish_commit(evidence_factory["commit"](parents=[parent]))
+
+
+def test_concurrent_attempt_timestamps_remain_explicitly_unresolved(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path)
+    key = "attempt:10:Pikachu:1"
+    refs = [store.publish_fact(evidence_factory["fact"](kind="attempt_observation", entity_key=key, submitted_at=stamp)) for stamp in ("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")]
+    for number, ref in enumerate(refs):
+        store.publish_commit(evidence_factory["commit"](refs=[ref], run_id=f"branch-{number}"))
+    state = reduce_scope(store.scan(), "assignment.submissions", "10")
+    assert state.status == "ambiguous"
+    assert state.established_submitted_at[key] is None
+    assert set(state.observation_discrepancies[key]) == set(refs)
+
+
+def test_import_arrival_never_displaces_live_or_proves_absence(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path)
+    key = evidence_factory["fact"]()["entity_key"]
+    live = store.publish_fact(evidence_factory["fact"](body="Live"))
+    store.publish_commit(evidence_factory["commit"](refs=[live], members=[key]))
+    historical = store.publish_fact(evidence_factory["fact"](body="Historical"))
+    store.publish_commit(evidence_factory["commit"](refs=[historical], members=[key], mode="import", complete=False, run_id="import"))
+    state = reduce_scope(store.scan(), "assignment.submissions", "10")
+    assert state.current_refs == (live,)
+    assert set(state.history_refs) == {live, historical}
+
+
+def test_tombstones_are_bound_to_their_exact_membership_scope(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path)
+    key = evidence_factory["fact"]()["entity_key"]
+    first = store.publish_fact(evidence_factory["fact"]())
+    other = store.publish_fact(evidence_factory["fact"](entity_key="submission:20:Pikachu", assignment_id="20"))
+    parent = store.publish_commit(evidence_factory["commit"](refs=[first], members=[key]))
+    store.publish_commit(evidence_factory["commit"](refs=[other], members=["submission:20:Pikachu"], scope_id="20"))
+    store.publish_commit(evidence_factory["commit"](parents=[parent], run_id="deleted"))
+    snapshot = store.scan()
+    assert reduce_scope(snapshot, "assignment.submissions", "10").tombstones == (key,)
+    state = reduce_scope(snapshot, "assignment.submissions", "20")
+    assert state.current_refs == (other,)
+    assert state.tombstones == ()
+
+
+def test_long_causal_history_does_not_depend_on_python_recursion(evidence_factory):
+    fact = evidence_factory["fact"]()
+    ref = digest_record(fact)
+    commits = {}
+    parents = []
+    for number in range(1100):
+        commit = evidence_factory["commit"](refs=[ref], members=[fact["entity_key"]], parents=parents, mode="delta", complete=False, run_id=f"run-{number}")
+        digest = digest_record(commit)
+        commits[digest] = commit
+        parents = [digest]
+    snapshot = StoreSnapshot({ref: fact}, commits, (), "c" * 64, lambda record: None)
+    state = reduce_scope(snapshot, "assignment.submissions", "10")
+    assert state.status == "ready"
+    assert state.current_refs == (ref,)
+    assert state.heads == tuple(parents)
+
+
+def test_first_refused_scoped_commit_remains_visible_without_accepted_commit(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path)
+    record = evidence_factory["commit"](refs=["b" * 64], members=["submission:10:Pikachu"])
+    digest = digest_record(record)
+    path = store._path("commits", digest)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(canonical_bytes(record) + b"\n")
+    snapshot = store.scan()
+    assert snapshot.commits == {}
+    key = ("a" * 64, "1", "assignment.submissions", "10")
+    assert snapshot.scopes[key].status == "sync_pending"
+    assert snapshot.scopes[key].current_refs == ()
+    assert snapshot.issues[0].source_key == "a" * 64
+    assert str(tmp_path) not in repr(snapshot.issues)

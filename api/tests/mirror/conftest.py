@@ -42,3 +42,47 @@ def submission_history_support():
                 "size": len(payload), "content_type": "text/plain"}
 
     return {"Response": Response, "row": row, "file_record": file_record}
+
+
+@pytest.fixture
+def evidence_factory():
+    """Synthetic safe records shared by evidence store and index tests."""
+    from api.mirror.evidence_store import EvidenceStore
+
+    source = "a" * 64
+    course = "1"
+
+    def store(root, verify_safe=None):
+        return EvidenceStore(root, source, course,
+                             verify_safe=verify_safe or (lambda record: None),
+                             private_diagnostics_root=root.parent / (root.name + "-diagnostics"))
+
+    def fact(kind="submission", entity_key="submission:10:Pikachu", payload=None, **fields):
+        if payload is None and kind in {"submission", "attempt_observation"}:
+            payload = {
+                "assignment_id": "10", "pseudonym": "Pikachu", "attempt": 1,
+                "submitted_at": "2026-01-01T00:00:00Z", "body": "Draft",
+            }
+        return {
+            "schema_version": 1, "kind": kind, "source_key": source,
+            "course_id": course, "entity_key": entity_key,
+            "payload": {**(payload or {}), **fields},
+        }
+
+    def commit(refs=(), members=(), scope="assignment.submissions", scope_id="10",
+               parents=(), mode="snapshot", complete=True, **changes):
+        record = {
+            "schema_version": 1, "source_key": source, "course_id": course,
+            "scope": scope, "scope_id": scope_id, "writer_key": "writer-a",
+            "run_id": "run-1", "parents": list(parents),
+            "acquisition_started_at": "2026-01-01T00:00:00Z",
+            "acquisition_finished_at": "2026-01-01T00:00:00Z",
+            "mode": mode, "membership_complete": complete,
+            "record_refs": list(refs), "member_keys": list(members),
+            "gaps": [], "watermarks": {},
+        }
+        record.update(changes)
+        return record
+
+    return {"source": source, "course": course, "store": store,
+            "fact": fact, "commit": commit}

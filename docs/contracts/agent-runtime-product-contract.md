@@ -109,6 +109,12 @@ needs it.
 
 ### Read spine
 
+The teacher-approved next direction is a durable synced CanvasMirror store with
+supported direct agent reads of pseudonymized records and MCP queries over the
+same information. See `docs/reference/canvasmirror-synced-store-direction.md` for
+the decisions and remaining design choices. This direction is not yet implemented;
+the following describes the existing read boundary.
+
 CanvasMirror and the Course Catalog are local projections, not authorities.
 Canvas remains truth. Agent-facing student-data reads stay indirect and obey
 the mirror freshness/refusal rules in `docs/mirror.md`.

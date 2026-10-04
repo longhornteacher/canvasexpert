@@ -484,6 +484,22 @@ def archive_dir(root=None):
     return system_folder("Archive", root)
 
 
+def canvas_mirror_evidence_root(root=None):
+    """Synchronized pseudonymized evidence root; no files are created here."""
+    return _join_root("CanvasMirror", root)
+
+
+def canvas_mirror_originals_root(root=None):
+    """Private synchronized archive for exact submitted file bytes."""
+    base = archive_dir(root)
+    return os.path.join(base, "CanvasMirror Originals") if base else None
+
+
+def canvas_mirror_control_root(root=None):
+    """Private synchronized acquisition coordination root."""
+    return system_folder("CanvasMirror Control", root)
+
+
 def canvas_catalog_root():
     """Return this machine's disposable Canvas Catalog cache root."""
     return str(runtime_paths.local_cache_dir() / CANVAS_CATALOG_NAME)
