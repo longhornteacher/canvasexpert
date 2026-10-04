@@ -130,3 +130,21 @@ def test_registered_argument_validation_failure_logs_once_without_arguments():
     assert records[0]["outcome"] == "error"
     assert records[0]["error_class"] == "ValidationError"
     assert "Synthetic Student" not in json.dumps(records)
+
+
+@pytest.mark.parametrize("result", ["not json", "[]", "null", [], object()])
+def test_unparseable_result_returns_unchanged_and_logs(monkeypatch, result):
+    from types import SimpleNamespace
+
+    async def dispatch(*args, **kwargs):
+        return result
+
+    manager = SimpleNamespace(call_tool=dispatch, get_tool=lambda name: SimpleNamespace(name="list_courses"))
+    server._log_tool_calls(manager)
+    before = len(operational_log.tail())
+    assert asyncio.run(manager.call_tool("list_courses", {})) is result
+    records = operational_log.tail()[before:]
+    assert len(records) == 1
+    assert records[0]["event"] == "mcp.tool.list_courses"
+    assert records[0]["outcome"] == "error"
+    assert "error_class" not in records[0]

@@ -62,6 +62,16 @@ _SERVER_INSTRUCTIONS = (
 mcp = FastMCP("canvas-expert", instructions=_SERVER_INSTRUCTIONS)
 
 
+def _result_outcome(result) -> str:
+    """Classify diagnostics without imposing a result shape on tool dispatch."""
+    try:
+        text = result if isinstance(result, str) else result[0].text
+        payload = json.loads(text)
+        return "ok" if payload.get("ok") else "refused"
+    except Exception:
+        return "error"
+
+
 def _log_tool_calls(manager) -> None:
     """Wrap registered dispatch once, including argument validation, without payload logging."""
     call_tool = manager.call_tool
@@ -75,16 +85,16 @@ def _log_tool_calls(manager) -> None:
         started = time.perf_counter()
         outcome = "error"
         error_class = None
+        result = None
         try:
             result = await call_tool(name, arguments, *args, **kwargs)
-            text = result if isinstance(result, str) else result[0].text
-            payload = json.loads(text)
-            outcome = "ok" if payload.get("ok") else "refused"
             return result
         except Exception as error:
             error_class = type(error.__cause__ or error)
             raise
         finally:
+            if error_class is None:
+                outcome = _result_outcome(result)
             fields = {"duration_ms": int((time.perf_counter() - started) * 1000)}
             if error_class is not None:
                 fields["error_class"] = error_class

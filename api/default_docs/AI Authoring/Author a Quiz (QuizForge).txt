@@ -99,14 +99,13 @@ The teacher reviews the family in Canvas Live and owns Canvas Grade Sync.
 - Modes other than exact are experimental. The LLM may produce them, but tools are not required to support or validate them yet.
 - **ESSAY** and **FILEUPLOAD** (classic only) — `prompt` and explicit finite nonnegative teacher-chosen `points` are required, and they do not support rationale feedback. Authored points are not rescaled.
 - **Classic refusals** — a classic file cannot use `ORDERING` or `CATEGORIZATION` (use `MATCHING` or `MC`), FITB `answer_mode: "wordbank"` (use `dropdown`), `fuzzy_match`, or `case_sensitive: true`, or NUMERICAL `percent_margin` or `decimal_places`. Also, calculator type, shuffle questions, build-on-last-attempt, attempt cooldown, and keep-first scoring have no classic equivalent.
-- **STIMULUS** — Requires `id`. STIMULUS items are unscored; do not include a `points` field. Prompt is optional, but put substantive content students need in `prompt`, including media with appropriate alt text. Author 2–4 questions per stimulus as a guideline, not an enforced limit or a promise about Canvas layout. Optional `layout`: `"below"` (default) or `"right"`; only QTI export uses it for orientation. Optional `format` (`"text" | "code" | "markdown"`) and `assets` (a list of `{ "type": "image|table|audio|video|data", "uri": "...", "alt_text": "..." }`) are not consumed by the live API push, QTI export, or printable renderer. Printables detect code and poetry from `prompt` markup instead.
+- **STIMULUS** — Requires `id`. STIMULUS items are unscored; do not include a `points` field. Prompt is optional, but put substantive content students need in `prompt`, including media with appropriate alt text. Author 2–4 questions per stimulus as a guideline, not an enforced limit or a promise about Canvas layout. Optional `layout`: `"below"` (default) or `"right"`; only QTI export uses it for orientation. Optional `format` (`"text" | "code" | "markdown"`) and `assets` (a list of `{ "type": "image|table|audio|video|data", "uri": "...", "alt_text": "..." }`) are not consumed by the live API push or QTI export.
   - **STIMULUS is for actual content students must reference** — a passage, excerpt, poem, code block, image, or data table. It is NOT a heading or instruction wrapper. Simple directions like `"Read the passage below."`, `"Answer the following questions."`, or `"Use the chart to respond."` are NOT valid STIMULUS content; place that text in the individual question prompts instead. If there is no substantive content to display alongside the questions, do not create a STIMULUS block.
 - **STIMULUS_END** — Type only; `prompt` may be empty (`""`). STIMULUS_END is only a structural marker. Do not include points or rationales for STIMULUS_END.
 
 ### Stimulus behavior by output path
 - **Canvas Expert live API push:** Each scored question with a matching explicit `stimulus_id` gets the stimulus `prompt` HTML prefixed to its own stem. The same stimulus HTML is repeated in every linked question; the push does not create one shared/native Canvas stimulus item. `STIMULUS` and `STIMULUS_END` are omitted from posted items. A question without `stimulus_id` does not inherit the preceding stimulus.
 - **QTI-ZIP export for manual import:** Emits the stimulus as a separate zero-point text item and records parent-stimulus metadata on linked questions. QuizForge's QTI conversion can use the most recent preceding stimulus when `stimulus_id` is absent, until `STIMULUS_END`. This describes the generated QTI structure, not how Canvas will display an imported package.
-- **Printables:** Render one stimulus block followed by its questions in source order. `STIMULUS_END` closes that group. Keep the questions after the stimulus in the source items.
 
 ## 5a. FILL IN THE BLANK (FITB) — DETAILED GUIDANCE
 
@@ -245,7 +244,7 @@ delivery fields.
 ## 8. ACCESSIBILITY OPTIONS
 Use clear language, active voice, alt text, or chunked prompts when the teacher chooses them
 or they suit the requested work.
-- **Stimulus layout in QTI export:** `"layout": "below"` (default) sets top orientation; `"layout": "right"` sets left orientation in the generated QTI. The live API push and printables ignore `layout`; check the imported result in Canvas rather than assuming a particular display.
+- **Stimulus layout in QTI export:** `"layout": "below"` (default) sets top orientation; `"layout": "right"` sets left orientation in the generated QTI. The live API push ignores `layout`; check the imported result in Canvas rather than assuming a particular display.
 
 ## 9. PLANNING FROM TEACHER INTENT
 - Extract: topic/standard, grade level, question count/types, requested tier (default Core), UDL/ELL cues, provided passages/poetry/code, tone, and scaffolds.

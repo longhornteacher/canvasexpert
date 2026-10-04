@@ -1,8 +1,8 @@
 """AI Authoring library builder: seeds a teacher's workspace with the paste-ready
-MagicSchool / Copilot skill files that live at ``api/default_docs/AI Authoring/``.
+assistant reference and authoring files that live at ``api/default_docs/AI Authoring/``.
 
 That folder is the sole repository source for these files -- every "Author a ...",
-START HERE, Reference, and MagicSchool Toolkit file there is already the exact
+START HERE and Reference file there is already the exact
 paste-ready text a teacher pastes into an AI assistant. This module never
 regenerates that text; it only seeds it into a teacher's workspace (once, never
 overwriting an edit).
@@ -47,12 +47,16 @@ RETIRED_FILES = {
     # contract; replace only old shipped bytes and preserve teacher edits. The
     # reference entry is nested under Reference/.
     "Author an Assignment (AssignmentForge).txt": frozenset({
+        # Before the console charter and removal of generated printables.
+        "936f2bd4688abc25e8d519009b751f44715791fc27843360753665121e48713b",
         "9194737963ee24d8de9e65990bd2aa9f58eb88abffde4c5643cacaf0a2daca7e",
     }),
     "Author a Page (PageForge).txt": frozenset({
         "deafeb6f8f4d6be6dc3324f278099155e1863ec45676218ebb4ae95163830d53",
     }),
     "Author a Quiz (QuizForge).txt": frozenset({
+        # Before the console charter and removal of generated printables.
+        "7db317a92a6208833c8e8e8fc238798375bd0fa30d2557f31425ee43a7d962e4",
         "5f74c61040b83f5b3f43243adf5d424ab2c9037a14fa40d7f9232ca4d99fc181",
     }),
     "Reference/QF_REF_Stimulus_Formatting.md": frozenset({
@@ -68,6 +72,7 @@ RETIRED_FILES = {
     }),
     # Indexed the file above, so an unedited copy is stale the moment it goes.
     "About This Folder.txt": frozenset({
+        "e637eda43b8124b8ba166e272130a16b79716309b6531148c11561e8d6715f32",
         "c3d90d2d29fd36ac9b3fecbc8982b9681d967a409fcda69c3d4d65d9e70e63b6",
         "00a7c1d978e5d02effde0f4b6d0a96d7d131ca324372eea641be2ee1cd247115",
         # Before the folder index named the retired display contract, schedule,
@@ -82,6 +87,8 @@ RETIRED_FILES = {
     # Same-name updates. Teachers are told to hand this file to an AI, so a
     # stale copy answers setup questions wrongly rather than harmlessly.
     "START HERE - CanvasAgent.txt": frozenset({
+        # Before the console charter and removal of generated printables.
+        "09748aad91afbb4215ad61dc86122e7fdb1f4a9a584b1e96038a6a675acb9a25",
         # Before the MCP lean surface and feedback-revision scoring mode.
         "23e29b3a7df5e0994c3a17a78c2e0fc1640c597509114fb931c9f701eb895ed2",
         # Before routines, writing history, and learning objectives were retired.
@@ -148,6 +155,8 @@ RETIRED_FILES = {
     # Said the agent must not draw integrity conclusions from the timeline; it now
     # may, in teacher-only agent commentary.
     "Writing Timeline (tracked assignments).txt": frozenset({
+        # Before the retired Students handwriting control was removed.
+        "643763410cba72a0a1542e2068ce23c6144e13c6781698200eda917973ed0bc7",
         "7f69ea5e6f9171a2f2625b6fc7fed3e7fdb7cbe5253d816c0e249998dfb141c5",
     }),
 }

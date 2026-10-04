@@ -61,8 +61,8 @@ canonical owner of business logic.
 - `api/webui/` is the runtime's control console. Keep setup, trust, review, recovery,
   and diagnostics here, and keep the product center in the runtime rather than in
   browser feature work.
-- `engine/` is the offline parse/validate/render/package library. It has no token, network,
-  or student data.
+- `engine/` holds offline Forge HTML rendering, palettes, author-HTML validation,
+  authored points, and text utilities. It has no token, network, or student data.
 - `api/default_docs/AI Authoring/Author a *.txt` are the canonical authoring contracts.
   Backend code should not change their meaning. Read `api/README.md` before changing
   Canvas push behavior.
@@ -88,8 +88,8 @@ Use only the row relevant to the active handoff.
 
 | Area | Start here | Boundary to preserve |
 |---|---|---|
-| Create / Course Expert | `docs/reference/course-expert-module-map.md` | Forge contracts are canonical; live content writes use the reviewed operation path. |
-| Forge presentation / tiers | `docs/contracts/forge-presentation-contract.md`; batch plan `docs/reference/forge-presentation-plan.md` (senior only, section-routed) | Agents author content only; Canvas Expert renders the look, palette, and printables. Three tiers; no student-to-tier knowledge. |
+| Agent authoring and push | `api/default_docs/AI Authoring/Author a *.txt`, `api/content_push.py` | Forge contracts are canonical; the agent previews and applies live content through the reviewed operation path. |
+| Forge presentation / tiers | `docs/contracts/forge-presentation-contract.md`; batch plan `docs/reference/forge-presentation-plan.md` (senior only, section-routed) | Agents author content only; Canvas Expert renders the Canvas look and palette. Three tiers; no student-to-tier knowledge. |
 | Settings | `docs/reference/settings-module-map.md`, `docs/guides/more-than-one-computer.md` | Secrets stay in the credential store; district configuration stays outside the repo. |
 | Connections / diagnostics | `api/README.md`, then the exact owners named by the handoff | Diagnostics are read-only. One-click Connect/Disconnect (`api/ai_clients.py`) intentionally edits the Claude Desktop and ChatGPT config files, with merge, backup, and rollback. Nothing installs software, changes `PATH`, elevates, or starts tunnels. |
 | Gradebook | `docs/reference/gradebook-module-map.md`, `docs/contracts/grade-adjustment-contract.md` | Grade/status operations and roster context are private; write work is high risk. |
@@ -104,7 +104,6 @@ Use only the row relevant to the active handoff.
 | Classic Quizzes (stop-gap) | `docs/reference/classic-quiz-design.md` | Stop-gap until New Quizzes support drafted scores/feedback; one QuizForge contract with `quiz_engine: "classic"`; Hub differentiation only; verified Canvas facts live there. |
 | New Quizzes responses | `api/powergrader/new_quiz_fetch.py` | Response acquisition is read-only. Canvas Expert does not write New Quiz item scores or per-item feedback; grade existing writing in Canvas and author future writing portions as separate assignments. |
 | Control console / Web UI | `docs/contracts/agent-runtime-product-contract.md`, `api/webui/README.md`, then `docs/reference/webui-presentation-system.md` | Keep the console small and trustworthy: setup, readiness, mirror, review, recovery, receipts, diagnostics, and private workspace controls. Preserve route-specific load order and verify affected rendered routes; the host agent already renders, so skip UI parity with it. |
-| Physical output | relevant Forge contract and rendering owner named by the handoff | PDF uses installed Microsoft Edge through Playwright and DOCX uses `pypandoc-binary`. District machines have no admin rights, so don't add managed browser downloads. |
 
 ## Firm rules
 

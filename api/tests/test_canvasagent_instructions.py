@@ -125,25 +125,11 @@ def test_assignment_and_page_contracts_are_2_0_content_only():
         assert "{{file:" in body and "{{page:" in body
         assert "resolved per course at push time" not in body
     assert '"response": "short"' in assignment
-    assert '"lines": 3' in assignment
+    assert "printable" not in assignment.casefold()
     assert "missing rubric" in assignment.lower() and "teacher" in assignment.lower()
     assert '"layout": "standard"' in page
     assert '"layout": "freeform"' in page
 
-
-def test_canvasagent_and_magicschool_setup_do_not_request_forge_styling():
-    root = Path(REPO_ROOT)
-    ai_authoring = root / "api" / "default_docs" / "AI Authoring"
-    start_here = (ai_authoring / "START HERE - CanvasAgent.txt").read_text(encoding="utf-8")
-    assert "Canvas Expert renders its presentation" in start_here
-    setup_paths = (
-        ai_authoring / "MagicSchool Toolkit" / "Assignment Author — SETUP.txt",
-        ai_authoring / "MagicSchool Toolkit" / "Page Author — SETUP.txt",
-        ai_authoring / "MagicSchool Toolkit" / "Quiz Author — SETUP.txt",
-    )
-    combined = "\n".join(path.read_text(encoding="utf-8") for path in setup_paths).casefold()
-    assert "heading style" not in combined
-    assert "describe style" not in combined
 
 
 def test_every_envelope_tag_claimed_is_one_the_code_actually_reads(text):
@@ -207,7 +193,6 @@ def test_current_bridge_guidance_is_source_in_module_and_bridge_out():
     root = Path(REPO_ROOT)
     authority = [
         root / "api" / "README.md",
-        root / "api" / "webui" / "README.md",
         root / "api" / "default_docs" / "AI Authoring" / "START HERE - CanvasAgent.txt",
         root / "docs" / "guides" / "sis-grade-bridges.md",
         root / "docs" / "contracts" / "sis-grade-bridge-contract.md",
@@ -247,7 +232,6 @@ def test_current_authority_has_no_retired_assignment_family_direction():
         root / "docs" / "guides" / "scoring-sessions.md",
         root / "docs" / "contracts" / "sis-grade-bridge-contract.md",
         root / "docs" / "reference" / "assignment-differentiation-design.md",
-        root / "docs" / "reference" / "course-expert-module-map.md",
         root / "docs" / "reference" / "operation-ledger-module-map.md",
         root / "docs" / "reference" / "quiz-operation-design.md",
         root / "api" / "default_docs" / "AI Authoring" / AGENT_NAME,

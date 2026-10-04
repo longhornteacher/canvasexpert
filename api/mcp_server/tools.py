@@ -33,7 +33,7 @@ import re
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-from api import attempts_grant, content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, grading_policy, live_verify, operational_log, roster_context, roster_service, sis_grade_bridge
+from api import attempts_grant, content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, grading_policy, live_verify, operational_log, roster_service, sis_grade_bridge
 from api.operation_ledger import claims as operation_claims
 from api.operation_ledger.adapters import forge_files
 from api.operation_ledger import executor as operation_executor
@@ -665,8 +665,7 @@ def preview_roster_student_change(course_id: str, pseudonym: str, patch: dict) -
 
 
 def _apply_roster_update(course_id: str, vault, user_id: str, patch: dict) -> dict:
-    from api.webui import roster_mcp
-    return roster_mcp.update_student(
+    return roster_service.update_student(
         course_id, user_id, patch, vault)
 
 
@@ -1453,7 +1452,7 @@ def stage_content(kind: str, label: str, content: str) -> dict:
 
     The staging step an assistant used to have to perform with file access:
     the envelope and its byte-count marker are written together, so the draft
-    appears in the matching push tab for the teacher to review and land. No
+    is available for the agent to prepare, preview, and apply. No
     Canvas write, and an existing label is refused rather than overwritten.
     """
     return content_push.stage_content(kind, label, content)

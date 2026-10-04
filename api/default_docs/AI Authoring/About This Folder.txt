@@ -11,16 +11,14 @@ File categories:
   an appendix as needed for chat-only setup and authoring. Connected agents use
   the runtime as their primary working surface. Read this one first.
 - Authoring skills: one file each for QuizForge, AssignmentForge, and PageForge,
-  plus files for a Class Schedule and a Learning Objective.
+  for agent-authored Canvas content.
 - Scoring uses the reviewed rubric attached to each Canvas assignment.
 - Reference: supporting material some authoring skills point to.
-- Writing Record and Writing Timeline: longitudinal history and tracked-assignment guidance.
-- MagicSchool Toolkit: setup recipes for building these as reusable custom tools in MagicSchool.ai.
+- Writing Timeline: tracked-assignment guidance.
 
 Canvas Expert seeds missing files in this folder, then leaves existing files
 alone so you can refine them by hand. When one file is replaced by a newer one,
 the old file is removed only if you never edited it. If you did edit it, your
 version stays and the new file arrives alongside it.
-The app never overwrites a file you edited, so your version stays and the new one arrives
-beside it. An assistant connected over MCP reads the current shipped text from the app's own
+The app preserves teacher edits. An assistant connected over MCP reads the current shipped text from the app's own
 files rather than your workspace copy.

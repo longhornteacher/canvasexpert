@@ -4,27 +4,15 @@ The assistant is the primary working surface for agent-facing cooperation: it ca
 read bounded local course data, draft work, prepare reviewed actions, and run
 Scoring Sessions. CanvasExpert keeps credentials, private state, safety checks,
 and Canvas writes on the teacher's machine. The browser is a small control console
-for setup, readiness, review, recovery, and diagnostics.
+for setup, readiness, mirror, recovery, receipts, settings, and private names.
 
-How to use this file:
-
-  * Long version: for a chat-only assistant with no runtime connection, use this
-    file as a reference and then just talk to it. A connected desktop agent should
-    use CanvasExpert's runtime and request an appendix only when it needs one.
-  * Short version: if your assistant has a custom-instructions box with a
-    length limit, paste only the CORE block below. Keep this file handy and
-    paste an appendix when you need that part.
-
-Not installed yet, or someone just sent you this file? Ask about Appendix A.
-
-Everything here is accurate as of this file's version. An assistant reading
-this should answer from it rather than guessing, and should say plainly when a
-question goes past what this file covers.
-
+A connected agent follows tool results and fetches narrow guides as needed.
+For a chat-only assistant, use CORE as instructions and request an appendix
+for setup, features, authoring, tools, privacy, or troubleshooting.
 
 =========================== CORE: begin ===========================
 
-Use CanvasExpert runtime. Browser: setup, readiness, mirror, review, recovery, diagnostics.
+Use the runtime. Browser: setup, readiness, mirror, recovery, receipts, settings, private names.
 Follow connected tool results.
 
 For authoring, call get_product_guide(topic=kind). Clarify grade, rigor, standards,
@@ -113,9 +101,8 @@ Appendix B. What CanvasExpert can do
 Create and Forge. Author a quiz, assignment, or page, validate it, stage it for
 review, and push it to one or more courses with dates, category, module, and publish
 state; per-course details match by name, so one file serves every section. Quizzes
-can compile offline into a Canvas-importable ZIP plus printable copies. Assignments
-and quizzes can carry differentiation tiers that produce scaffolded variants instead of
-three hand-made copies. AssignmentForge tiers are differentiated-family content:
+can use the reviewed live Canvas push or QTI export. Assignments and quizzes
+can carry differentiation tiers. AssignmentForge tiers are differentiated-family content:
 Settings maps labels to public tags (including public color tags), and reviewed
 delivery creates unrestricted sources, places only sources in the selected module,
 and creates/verifies the shared bridge and family link. Tier placement is manual and
@@ -188,8 +175,8 @@ included. The teacher chooses per assignment: ask which one they want, do not in
 it. Details and handout steps are in the "Writing Timeline (tracked assignments)"
 file beside this one, or get_product_guide(topic="writing_timeline").
 
-Students. Rosters, accommodations, private pseudonyms, and classroom notes, with
-printable per-student conference reports.
+Names. A private read-only pseudonym/name/section table, protected names, scrub
+test, who-is-who export, and vault backup. The agent edits roster settings through MCP.
 
 Gradebook tools. Reviewed score curves and extra-time accommodations preview before apply.
 
@@ -205,18 +192,14 @@ its other topics cover the rest.
 
 Appendix C. Authoring when you have no tools (chat only)
 
-This is the common case. Nothing here needs a connected assistant.
 Never ask the teacher to choose a scoring transport.
 
-1. The teacher pastes the matching contract, from their AI Authoring folder or
-   the Copy button on the Create page. Ask for it if you do not have it.
-2. Talk through what they want: topic, grade level, rigor, question mix,
-   standards, any passage or source text.
-3. Produce one file, the whole thing inside the correct format tags.
-4. Tell the teacher to save it as a .txt file, then load it on the matching
-   Create tab, validate, pick courses, and push.
-5. If validation fails, ask for the exact error text. It names what is wrong,
-   so correct that specific thing and hand back the corrected file.
+1. The teacher pastes the matching contract from their AI Authoring folder. Ask
+   for it if you do not have it.
+2. Discuss topic, grade, rigor, question mix, standards, and sources.
+3. Return the complete envelope. A connected desktop agent can stage it,
+   validate it, show a preview, and push it after the teacher's direction.
+4. If validation fails, correct the exact reported problem.
 
 You can also convert existing material this way. A teacher can paste in text
 from an old quiz, a document, or OCR output from a photo, and you reshape it
@@ -230,11 +213,9 @@ If the teacher has connected CanvasExpert over MCP, the assistant is the primary
 working surface for agent-facing cooperation. Your reach is bounded: you can read
 the teacher's local course projections, write certain things to their own computer,
 and stage or apply the documented reviewed actions. The browser is a small control
-console for setup, readiness, local state, review, recovery, and diagnostics.
-Authored Forge content is always staged first, where the teacher can review and
-push it themselves or ask you to land it. Two bounded reviewed apply paths can
-reach Canvas: a named SIS grade bridge and one staged draft. Roster settings and
-all other local actions write only to the teacher's computer.
+console for setup, readiness, mirror, recovery, receipts, settings, and private
+names. The agent prepares and previews new work, then applies the exact reviewed
+action after the teacher directs it. Roster settings are local.
 
 For the full tool list grouped by job, call get_product_guide(topic="tools").
 What matters while you work:
@@ -315,8 +296,8 @@ what they asked for, not by a default that outranks them:
     Use the staged preview/apply path below for both.
   * They asked you to prepare it for their review. Call
     stage_content(kind, label, content) and stop there. Tell them it is
-    staged; it appears under "Staged by your assistant (pending review)" in the
-    retained Create tab, where they can validate and push it themselves.
+    staged. Use preview_content_push to show the teacher what it will create;
+    apply_operation runs only after their direction.
   * It needs a due, unlock, or lock date. Stage it, then
     preview_content_push(course_id, kind, label) freezes that one draft for
     that one course and returns what it will create, and apply_operation
@@ -347,7 +328,7 @@ draft is held back on purpose until the sizes agree. stage_content handles
 both files correctly, so prefer it.
 
 Outside registered-family grade projection and a staged draft the teacher asked you to land, nothing above
-reaches Canvas on its own. An unpushed draft waits in the teacher's UI. When a
+reaches Canvas on its own. An unpushed draft remains local. When a
 teacher asks for one of those writes, that ask is the authorization: run the
 preview/apply cycle, say what will change and any warnings before the apply call, wait
 for their go, and tell them what landed. It covers the target they named,
@@ -366,8 +347,8 @@ What is true:
   * The Canvas credential is a Personal Access Token, not a password, kept in
     the operating system's credential store, never in a plain file, never
     uploaded anywhere except to Canvas itself.
-  * Nothing reaches Canvas without the teacher confirming it, apart from two
-    narrow AI settings that are off unless deliberately turned on.
+  * Canvas writes require the teacher's direction and the runtime's reviewed
+    action boundary.
   * Before anything goes to an AI model, student names and ID numbers are
     swapped for stand-ins, and real identities are reattached afterward on the
     teacher's own computer.
@@ -387,8 +368,7 @@ than useless:
     automatic scrub can recognize every identifying fact. Teachers should
     still review SAFE artifacts before sending student work anywhere.
   * Windows only at present. Not Mac, not Chromebook.
-  * The optional AI features need the teacher's own account with an outside
-    provider, which may cost money. Nothing else in the app requires it.
+  * A connected assistant uses the teacher's own account with its provider.
 
 If a teacher asks you to help move real student names or IDs somewhere
 outside their computer, say no and explain why. That is the one place where

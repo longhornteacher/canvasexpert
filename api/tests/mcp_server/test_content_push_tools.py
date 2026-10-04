@@ -1,14 +1,9 @@
 """Landing a staged draft in Canvas from the connected agent.
 
-The pair is deliberately thin: it resolves one staged label, hands the same
-prepare request the push tab hands the adapter, and applies through the same
-Operation Ledger executor. What these tests hold down is the boundary around
-that -- which drafts it can reach, which options each kind accepts, and what
-crosses back out to the client.
-
-The retained push tab is a control-console path; these tests protect equivalence
-at the runtime/write boundary, not a requirement that the browser remain the
-primary authoring surface.
+The pair resolves one staged label, prepares through the shared operation
+adapter, and applies through the Operation Ledger executor. These tests hold
+the boundary around which drafts it can reach, which options each kind
+accepts, and what crosses back to the client.
 """
 
 from __future__ import annotations
@@ -78,7 +73,7 @@ class RecordingAdapter:
             "course_name": "Invented Course",
             "page_title": payload["title"],
             "baseline_has_existing_page": False,
-            "dependencies": [{"type": "printable", "path": r"C:\private\packet.pdf"}],
+            "dependencies": [{"type": "attachment", "path": r"C:\private\packet.pdf"}],
         }
 
 
@@ -230,7 +225,7 @@ def test_preview_freezes_one_staged_draft_for_one_course(_adapter):
 def test_preview_never_returns_a_local_path(_adapter):
     """The label goes in, the label comes back; the Inbox path stays home.
 
-    The adapter above returns a printable dependency path that no option on
+    The adapter above returns an attachment dependency path that no option on
     this boundary can set, standing in for a future adapter field.
     """
     _stage("page", "welcome")
@@ -238,7 +233,7 @@ def test_preview_never_returns_a_local_path(_adapter):
     result = content_push.preview_content_push("course-x", "page", "welcome")
     serialized = server._compact(result)
 
-    assert result["preview"]["dependencies"] == [{"type": "printable"}]
+    assert result["preview"]["dependencies"] == [{"type": "attachment"}]
     assert "packet.pdf" not in serialized
     assert "To Review" not in serialized
 

@@ -15,7 +15,6 @@ changes needed.
 from .canvas import (
     get_canvas_base, set_canvas_base,
     get_token, set_token, token_is_set,
-    get_download_root, set_download_root,
     save_canvas_account,
     get_workspace_path, set_workspace_path, ensure_workspace_pinned, get_whisper_model_cache,
     resolve_env,
@@ -59,22 +58,15 @@ from .protected_names import (
 
 # --- student reports ---
 from .reports import (
-    STUDENT_REPORTS_DEFAULT,
-    get_student_reports_root, set_student_reports_root,
     get_monitored_students, set_monitored_student, remove_monitored_student,
 )
 
 # --- Roster Console settings ---
 from .roster import (
-    ROSTER_SCORE_MATRIX_DEFAULT, ROSTER_RELATIONSHIPS_DEFAULT,
-    ROSTER_BASELINE_DEFAULT,
     get_roster_student_settings, set_roster_student_settings,
     update_roster_student_settings,
     CLASSROOM_PROFILE_KEYS, CLASSROOM_CELEBRATION_KEYS,
     validate_classroom_profile, empty_classroom_profile,
-    get_roster_score_matrix, set_roster_score_matrix,
-    get_roster_relationships, set_roster_relationships,
-    get_roster_baseline, set_roster_baseline,
 )
 
 # --- SIS grade bridge registrations ---
@@ -101,7 +93,6 @@ from . import _io
 
 # Re-export public constants from _io so consumers can still access config.SERVICE etc.
 CANVAS_BASE_DEFAULT = _io.CANVAS_BASE_DEFAULT
-DOWNLOAD_ROOT_DEFAULT = _io.DOWNLOAD_ROOT_DEFAULT
 CONFIG_PATH = _io.CONFIG_PATH
 SYNCED_KEYS = _io.SYNCED_KEYS
 SERVICE = _io.SERVICE

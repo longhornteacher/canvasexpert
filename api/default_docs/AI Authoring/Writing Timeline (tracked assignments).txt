@@ -126,8 +126,8 @@ A clean trail proves nothing either. A student who retypes AI output instead of
 pasting produces a flawless organic-looking trail. This is evidence about
 process, not about who thought of it.
 
-Handwriting is a legitimate no-trail case. A student flagged for paper
-submission in Students is skipped by the timeline rather than flagged by it.
+Handwriting is a legitimate no-trail case; the teacher interprets this evidence
+in the context of the chosen submission method.
 
 Filename oddities are not evidence. OneDrive and mobile apps generate renames
 and conflict copies on their own.

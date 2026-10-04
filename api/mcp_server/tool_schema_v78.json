@@ -1,5 +1,5 @@
 {
-  "schema_version": 77,
+  "schema_version": 78,
   "tools": [
     {
       "name": "abandon_operation",

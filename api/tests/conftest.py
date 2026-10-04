@@ -144,9 +144,6 @@ def _isolate_real_machine_and_workspace_paths(tmp_path, monkeypatch):
     # LOCALAPPDATA must be an explicit fake path, not unset: runtime_paths.local_app_dir()
     # falls back to Path.home() -- the real user profile -- when it's absent.
     monkeypatch.setenv("LOCALAPPDATA", str(fake_root / "LocalAppData"))
-    # Forge printable preparation now writes PDFs during build_payload. Keep
-    # those outputs in this test's private temp tree even without a workspace.
-    monkeypatch.setattr(runtime_paths, "printables_dir", lambda: fake_root / "Printables")
     # SharedVault derives only synthetic identities during tests. Never read
     # or write the developer's machine credential from an automated suite.
     monkeypatch.setattr(pseudonym_secret, "get_secret", lambda: b"t" * 32)

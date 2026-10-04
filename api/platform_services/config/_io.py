@@ -20,13 +20,11 @@ TOKEN_KEY = "canvas_token"
 # Empty by default — the first-run wizard collects the teacher's Canvas URL.
 # An empty base is the signal that onboarding is not yet complete.
 CANVAS_BASE_DEFAULT   = ""
-DOWNLOAD_ROOT_DEFAULT = os.path.join(os.path.expanduser("~"), "Desktop", "Canvas Downloads")
 CONFIG_PATH = str(runtime_paths.local_app_dir() / "config.json")
 SYNCED_KEYS = ("saved_courses", "extra_time",
                "tier_tags", "tier_colors",
                "roster_student_settings",
-               "roster_score_matrices", "roster_relationships",
-               "monitored_students", "roster_baselines",
+               "monitored_students",
                "sis_grade_bridges",
                "protected_packs_enabled", "protected_names_custom")
 

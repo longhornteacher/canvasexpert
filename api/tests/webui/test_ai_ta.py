@@ -39,27 +39,6 @@ def test_build_library_writes_expected_files(tmp_path):
     assert "SENTINEL" in sentinel.read_text(encoding="utf-8")
 
 
-def test_toolkit_subfolder_created(tmp_path):
-    target = tmp_path / "AI Authoring"
-    ai_ta.build_library(target)
-
-    toolkit = target / "MagicSchool Toolkit"
-    assert toolkit.is_dir(), "MagicSchool Toolkit subfolder should be created"
-
-    toolkit_names = {p.name for p in toolkit.iterdir()}
-    for tool in ["Quiz Author", "Assignment Author", "Page Author"]:
-        assert f"{tool} — SETUP.txt" in toolkit_names, f"Missing SETUP for {tool}"
-    assert not any("Rubric" in name for name in toolkit_names)
-    for tool in ["Quiz Author", "Assignment Author", "Page Author"]:
-        assert f"{tool} — INSTRUCTIONS.txt" not in toolkit_names
-
-    assert not any("KNOWLEDGE" in n for n in toolkit_names)
-
-    quiz_setup = (toolkit / "Quiz Author — SETUP.txt").read_text(encoding="utf-8")
-    assert "../Author a Quiz (QuizForge).txt" in quiz_setup
-    assert "../Reference/QuizForge_example_quiz.txt" in quiz_setup
-    assert "../Reference/QF_MOD_ELA_Question_Design.md" in quiz_setup
-
 
 def test_build_library_seeds_repo_default_docs_first(tmp_path, monkeypatch):
     default_ai_ta = tmp_path / "default_docs" / "AI Authoring"

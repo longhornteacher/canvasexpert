@@ -14,7 +14,7 @@ from api import feedback_vault
 from api.mcp_server import server, tools
 
 
-# v77 merges the listing; pin its measured wire size and instruction weight.
+# v78 removes generated printables from results; input schemas/listing stay unchanged.
 INSTRUCTION_BUDGET = 2303
 LISTING_BUDGET = 14658
 DESCRIPTION_BUDGET = 343

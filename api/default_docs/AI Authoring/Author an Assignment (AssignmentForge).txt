@@ -37,7 +37,7 @@ or Hub. Never infer the style; re-fetch this contract after the choice.
   "overview": "<p>Make a claim about teen sleep and support it with evidence.</p>",
   "directions": [
     { "html": "<p>Choose a side.</p>", "response": "none" },
-    { "html": "<p>Write your claim sentence.</p>", "response": "short", "lines": 3 },
+    { "html": "<p>Write your claim sentence.</p>", "response": "short" },
     { "html": "<p>Write the full paragraph.</p>", "response": "long" }
   ],
   "sections": [
@@ -76,10 +76,8 @@ or Hub. Never infer the style; re-fetch this contract after the choice.
   it for Everyone (no tiers).
 - `overview`: required student-facing introduction as HTML.
 - `directions`: required non-empty array. Each item has `html` and may have
-  `response`: `none`, `short`, or `long`. `lines` is an optional integer from 1 to
-  12 and is valid only with `response: "short"`. It sets the number of ruled lines
-  in a generated printable; it does not add answer space online. `long` indicates
-  an extended response; `none` is instruction only.
+  `response`: `none`, `short`, or `long`. `long` indicates an extended response;
+  `none` is instruction only. These describe the expected work.
 - `sections`: optional array of `{ "heading", "html", "kind" }`. `kind` is
   `section` (default) or `callout`. Omit `heading` for a callout.
 - `rubric`: optional object with non-empty `criteria`. Each criterion has a name,
@@ -147,9 +145,8 @@ silently removed. Allowed tags and attributes are listed in
 `docs/contracts/forge-presentation-contract.md` section 8. Do not include styling,
 colors, widths, layout wrappers, or course-resource placeholders. The renderer
 adds the title banner, tier tag and palette, numbered direction layout, section
-boxes, rubric and support details, submission wording, unit information, and a
-printable link when one is available. It adds links for the listed attachments and
-lists their labels under Materials in the generated printable.
+boxes, rubric and support details, submission wording, unit information, and
+links for the listed attachments.
 
 Write concise, age-appropriate content. Make the task, requirements, and expected
 submission clear in words. You may use allowed emphasis, lists, tables, and links
@@ -160,8 +157,7 @@ presentation.
 Before returning the envelope, confirm:
 1. The version is `2.0-json`, type is `ASSIGNMENT`, and required fields are present.
 2. Points are supplied by the teacher or confirmed with them; no default is assumed.
-3. Directions are non-empty; each `response` is valid and `lines` appears only with
-   `short` and is between 1 and 12.
+3. Directions are non-empty and each `response` is valid.
 4. Submission settings are consistent, including the external tool URL if needed.
 5. If present, rubric criterion points sum to assignment points.
 6. `differentiation` is explicit when tiers are present. Bridge has at least two
