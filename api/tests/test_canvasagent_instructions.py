@@ -358,14 +358,12 @@ def test_the_port_matches_the_launcher(text):
 
 
 def test_the_python_floor_matches_the_launcher(text):
-    """Both the batch file and the instructions state a minimum version."""
+    """The launcher and setup guide name the tested OCR Python matrix."""
     with open(os.path.join(REPO_ROOT, "Open Canvas Expert.bat"), encoding="utf-8") as f:
         bat = f.read()
-    wanted = re.search(r"Python (\d+\.\d+) or newer", bat)
-    assert wanted, "launcher no longer states a Python version"
-    assert f"Python {wanted.group(1)} or newer" in text, (
-        f"launcher requires Python {wanted.group(1)} but the instructions disagree"
-    )
+    assert "Python 3.13 or 3.14 on Windows x64" in bat
+    assert "Python 3.13 or 3.14 on Windows x64" in text
+    assert "sys.version_info[:2] in ((3, 13), (3, 14))" in bat
 
 
 def test_setup_instructions_match_user_scoped_python_installer(text):

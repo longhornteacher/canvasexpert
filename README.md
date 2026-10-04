@@ -18,7 +18,7 @@ setup, connections, recovery, receipts and private name lookups.
    anywhere in your own files.
 2. Double-click `Open Canvas Expert.bat`. The first run installs Python and everything else it
    needs into your own user account, with no admin rights, then opens the console in your
-   browser. If Windows Package Manager is unavailable, install Python 3.13 or newer from
+   browser. If Windows Package Manager is unavailable, install Python 3.13 or 3.14 for Windows x64 from
    [python.org](https://www.python.org/downloads/) with **Install for me only**, then run the
    launcher again. If it ever stops starting, double-click `Repair.bat`.
 3. Follow the setup steps, then use **Connect** on the CanvasAgent page for Claude Desktop or

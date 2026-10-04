@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from api.platform_services import config, workspace
 from api.platform_services.canvas_client import canvas_get
+from api.mirror.extraction.ocr_assets import readiness as ocr_readiness
 
 
 _LOCK = threading.RLock()
@@ -99,7 +100,7 @@ def _public(components: dict, checked_at: str | None) -> dict:
 def snapshot() -> dict:
     with _LOCK:
         if _LAST_PROBE is None:
-            unknown = {name: _component("unknown") for name in ("canvas", "privacy")}
+            unknown = {name: _component("unknown") for name in ("canvas", "privacy", "ocr")}
             return _public(unknown, None)
         return _public(_LAST_PROBE["components"], _LAST_PROBE["checked_at"])
 
@@ -112,6 +113,7 @@ def probe(force: bool = False) -> dict:
         components = {
             "canvas": _probe_canvas(),
             "privacy": _probe_privacy(),
+            "ocr": ocr_readiness(),
         }
         _LAST_PROBE = {"checked_at": _now(), "components": components}
         return snapshot()

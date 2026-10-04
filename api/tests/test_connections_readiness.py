@@ -40,3 +40,19 @@ def test_readiness_probe_route_contract_is_preserved(monkeypatch):
     response = TestClient(server.app).post("/api/readiness/probe?force=true")
     assert response.status_code == 200
     assert response.json() == expected
+
+
+def test_missing_ocr_assets_are_actionable_without_blocking_other_probes(monkeypatch):
+    monkeypatch.setattr(readiness, "_probe_canvas", lambda: {"status": "ready"})
+    monkeypatch.setattr(readiness, "_probe_privacy", lambda: {"status": "ready"})
+    monkeypatch.setattr(readiness, "ocr_readiness", lambda: {
+        "status": "degraded", "code": "assets_missing",
+    })
+    readiness._reset_for_tests()
+    result = readiness.probe(force=True)
+    assert result["components"] == {
+        "canvas": {"status": "ready"},
+        "privacy": {"status": "ready"},
+        "ocr": {"status": "degraded", "code": "assets_missing"},
+    }
+    assert result["status"] == "degraded"

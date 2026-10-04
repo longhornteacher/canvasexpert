@@ -27,6 +27,14 @@ python-docx>=1.2.0      # extract text and embedded media from DOCX submissions/
 Pillow>=10.0            # validate embedded submission images
 pypdf>=4.0             # extract text from PDF assignment uploads (lazy-imported)
 
+# Local CPU OCR and scanned-PDF rasterization. RapidOCR 3.9.2 bundles the three
+# verified ONNX models listed in mirror/extraction/ocr_asset_manifest.json, so
+# inference requires no network or separate system OCR installation. This set
+# was installed and exercised on Windows x64 Python 3.13 and 3.14.
+rapidocr==3.9.2
+onnxruntime==1.29.0
+pypdfium2==5.1.0
+
 # Tests only — Starlette's TestClient (used by api/tests/test_*_routes.py) needs httpx.
 # Pinned to the 0.x line that matches the Starlette pin above (Starlette 1.x switched to httpx2).
 pytest>=8.0             # test runner (py -m pytest api/tests)

@@ -46,7 +46,7 @@ likely to stop them.
 
 What it needs:
   * Windows. Not Mac, not Chromebook.
-  * Python 3.13 or newer. If it is missing, the launcher can install it for the
+  * Python 3.13 or 3.14 on Windows x64. If it is missing, the launcher can install 3.13 for the
     current Windows user through winget; no admin rights are needed.
   * No admin rights and no ticket to IT. Everything lands inside the teacher's
     own user folder. Nothing is written to Program Files or the registry.

@@ -1,0 +1,1 @@
+"""Synthetic extraction capability tests."""
