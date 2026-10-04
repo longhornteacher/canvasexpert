@@ -25,8 +25,7 @@ script load order, and the per-page feature behavior described in each page's se
 
 ## Rendered verification (read-only)
 
-Use a lifespan-disabled server for read-only browser verification so enabled routines
-cannot fire:
+Use a lifespan-disabled server for read-only browser verification:
 
 ```powershell
 cd api
@@ -41,7 +40,7 @@ interactions. Do not expand that matrix by ritual. For each named route, confirm
 - Required page globals exist and scripts occur once in dependency order.
 - Deep links, course focus/targets, keyboard focus, dialogs, and theme initialization work.
 - Browser console has zero new CanvasExpert errors or warnings.
-- No Canvas write, external AI request, routine execution, or session start occurs during
+- No Canvas write, external AI request, or session start occurs during
   read-only verification.
 
 Source tests never substitute for rendered verification.
@@ -59,7 +58,6 @@ Source tests never substitute for rendered verification.
 | `/ai-expert` | **AI helper files** — paste-ready LLM skill files | inline |
 | `/course` | Course Info detail page | `course_info.js` |
 | `/settings` | Settings | `settings.js` |
-| `/routines` | **Routines** — local automation control surface (`workspace/full`) | inline / route-driven |
 | `/receipts/{receipt_id}` | Read-only local receipt summary | `receipt.html`; detail remains private JSON |
 
 CanvasAgent's secondary Canvas refresh queues local read-only coordinator work and polls its
@@ -176,86 +174,6 @@ local stdio config available without competing with health status. The local cli
 connect/disconnect routes update only the selected user's desktop config, preserve other
 servers, and keep a backup.
 
-### Routines
-
-Routines are saved automations that run on this machine with no external scheduler
-(locked-down district laptops; no cloud, ever). Three triggers, all in-app:
-
-1. **"Run now"** buttons on the **Routines** page (works everywhere, always).
-2. **Catch-up on launch** — a background thread starts with the server, waits 90 s,
-   then runs whatever is enabled and due.
-3. The same thread re-checks **every 30 minutes** while the app is open.
-
-"Daily" therefore means "next time the app is open after 24 h have passed" — that's
-the design, not a bug.
-
-Six routines ship now:
-
-| id | Label | Writes to Canvas? | Default |
-|---|---|---|---|
-| `sweep` | Auto-sweep late work | Yes (idempotent) | disabled, 24 h |
-| `download` | Auto-download new student work | No (local files) | disabled, 24 h |
-| `curve` | Auto-curve low assignment averages | flag: no · apply: yes | disabled, 168 h |
-| `grading_debt` | Grading-debt report | No | **enabled**, 24 h |
-| `student_reports` | Refresh monitored-student reports | No | disabled, 168 h |
-| `sis_bridge_sync` | Differentiated bridge grade sync | Yes (idempotent) | disabled, 24 h |
-
-Routine state is stored **machine-locally** (`api/webui/config.json`, `routines` key)
-— NOT synced via the workspace. The synced workspace must not make one machine think
-another machine's run satisfied it.
-
-Routines are available at `/routines`:
-a "how it works" strip, a card per routine with inline-editable params, and a "Build
-your own" panel that shows the `custom_routines/` folder path and the files found in
-it. Each routine's params are editable inline on its card. Every run lands in the
-Activity Log under action `routine`.
-
-**Auto-curve idempotency:** the curve routine skips any assignment that already has a
-non-reverted curve event, so weekly runs don't re-lift grades as new scores come in.
-
-**Differentiated bridge grade sync:** each run visits linked families in Current courses
-and uses one Operation Ledger preview/apply cycle per family. It copies an unambiguous posted
-final from whichever linked source contains it, ignores tier membership as grade authority,
-holds submitted-but-ungraded, hidden, or conflicting work, and writes a missing zero only after
-the bridge due time. It never invokes Canvas Grade Sync; review the bridge in Canvas Live and
-run SIS sync yourself.
-
-**Flag vs. apply mode:** in flag mode (default), the routine lists assignments averaging
-below the floor without touching Canvas. In apply mode, it performs a do-no-harm
-target-average curve up to the floor and records a revertible event per assignment.
-
-The **✎** marker on a routine row means it writes to Canvas; **due** on a row means
-it's enabled and hasn't run within its `every_hours` window.
-
-### Custom routines
-
-Forkers can drop `.py` files in `api/custom_routines/` to add their own routines to the
-Routines page (they show a **custom** badge). Each file registers one or more routines via the `@routine` decorator
-— no imports needed; helpers (`canvas_get_all`, `active_courses`, `canvas_send`, etc.)
-are injected automatically into the file's global scope.
-
-- Files starting with `_` are **templates** (`_example_missing_work.py`) and are **not**
-  loaded — copy to a name without the underscore to activate.
-- A custom `rid` that collides with a built-in (`sweep`, `download`, `curve`,
-  `grading_debt`, `student_reports`, `sis_bridge_sync`) is silently skipped; built-ins are
-  authoritative.
-- A broken `.py` file is caught per-file (traceback logged to console) — the app never
-  crashes from a bad custom routine.
-- Custom routines get the same three triggers (Run now / catch-up on launch / every
-  30 min), the same `config.set_routine_state` persistence, and the same Activity Log
-  entries as built-ins. They pass through the identical `_ROUTINE_DEFS` /
-  `_ROUTINE_RUNNERS` registries — no parallel path.
-
-**Authoring:** paste `api/custom_routines/AUTHORING.md` into an LLM assistant and
-describe what you want the routine to check or do. The doc covers the runner contract,
-the `@routine` decorator, every injected helper with its signature, and a worked example.
-
-**Future tier:** a declarative, shareable JSON form ("RoutineForge") that an LLM emits
-and a sandboxed interpreter runs — planned but not built yet. This tier 1 is for people
-running their own copy who are comfortable writing Python (or having their LLM write it).
-
----
-
 ## Create (`/course-expert`)
 
 One page, five tabs: **Quiz · Assignment · Page · Rubric · *Quick***.
@@ -342,9 +260,7 @@ dates**, **Adjustments**, **Comments**.
 **Monitored toggle:** each student has a ☆ Monitor / ★ Monitored button on their row.
 Monitored students form a private cohort. Because the names and notes are student PII,
 they are synced to the OneDrive workspace (`settings.json`, in-tenant/FERPA-conscious), not
-left in machine-local `config.json`. The **`student_reports`** routine (see Routines below) auto-refreshes
-packets for just this cohort, skipping courses whose data hasn't changed (dedupe via
-`_manifest.json`). The private note attached to a monitored student is never rendered
+left in machine-local `config.json`. The private note attached to a monitored student is never rendered into any packet. The private note attached to a monitored student is never rendered
 into any packet.
 
 **New Quizzes status:** Enrollment-gated personal access tokens can retrieve constructed

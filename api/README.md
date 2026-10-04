@@ -31,7 +31,6 @@ The runtime supports:
   `refresh_mirror(include_comments=true)` deliberately acquires full comment IDs
   and staff proof; the default refresh remains unchanged.
   See `docs/guides/scoring-sessions.md` for prepare/read/stage/apply and blocker recovery.
-- **Daily Writing:** longitudinal Writing Record and tracked-assignment Writing Timeline
 - **Download** — submission bundles by assignment or by student
 
 Local-only, never served. See `AGENTS.md` Firm rules.
@@ -124,19 +123,13 @@ pseudonymized artifacts are not anonymous and need review before sharing.
 See the [multi-computer guide](../docs/guides/more-than-one-computer.md) for
 workspace setup, privacy checks, sync conflicts, and per-computer refreshes.
 
-Read-aloud media evidence uses an optional local `faster-whisper` `small.en` model.
-The application never downloads model weights during a Scoring Session; if the
-local model is unavailable, the affected media evidence remains held. Weights stay in
-`%LOCALAPPDATA%\CanvasExpert\speech-models` or the machine-local
-`CANVAS_EXPERT_WHISPER_MODEL_CACHE` override, never in the workspace or an AI packet.
-
 **Control-console and retained-surface reference** (Settings, readiness, mirror status,
   operations, receipts, retained Create/Roster/Course Info surfaces):
   **`api/webui/README.md`**. Agent-facing workflows are defined by the MCP contract and
   the relevant runtime/feature contracts, not by browser page parity.
 
-Differentiated bridge grade sync is available as a default-off built-in Routine and through
-the assistant tools documented in the [SIS Grade Bridges guide](../docs/guides/sis-grade-bridges.md).
+Differentiated bridge grade sync is available through the assistant tools documented in
+the [SIS Grade Bridges guide](../docs/guides/sis-grade-bridges.md).
 Each family uses the reviewed Operation Ledger preview/apply/recovery path and writes only
 changed bridge grades in Canvas Live. The teacher reviews there and owns Canvas Grade Sync.
 
@@ -225,10 +218,7 @@ safety remain part of the reviewed family operation. Tier placement is manual an
 | `operation_ledger/` | High-risk operation checkpoints, claims, receipts, and recovery coordination |
 | `../docs/guides/sis-grade-bridges.md` | SIS grade-bridge operation, recurring update, privacy, verification, and Attention recovery guide |
 | `work_registry/` | Local work items and progress projections |
-| `dailywriting/` | Writing Record and Writing Timeline extraction and storage helpers |
 | `rubrics/` | Default rubric library consumed by authoring and scoring skill generation |
-| `custom_routines/` | Teacher-authored local automation jobs and the routine authoring contract |
-| `learning_objectives.py` | Reviewed, revision-protected per-course Learning Objectives storage and validation |
 | `course_catalog.py` | Student-free local course, module, assignment, and page catalog reads |
 | `webui/` | Local control console: FastAPI app (`server.py`), single-account + bookmark config, templates/static, retained feature scripts |
 | `qf_materials/qf quiz examples/` | QuizForge fixtures (contract lives at `default_docs/AI Authoring/Author a Quiz (QuizForge).txt`) |

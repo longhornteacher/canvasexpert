@@ -198,7 +198,7 @@ while `current`/`latest_attempt` always reflect the newest fetch alone.
 
 ## Scheduling (`api/webui/mirror_service.py`)
 
-A daemon heartbeat (started in the server lifespan, alongside the routines
+A daemon heartbeat (started in the server lifespan
 heartbeat) ticks every 15 minutes for Current courses only:
 
 - first tick 2 minutes after launch (catch-up)

@@ -92,18 +92,14 @@ Use only the row relevant to the active handoff.
 | Forge presentation / tiers | `docs/contracts/forge-presentation-contract.md`; batch plan `docs/reference/forge-presentation-plan.md` (senior only, section-routed) | Agents author content only; Canvas Expert renders the look, palette, and printables. Three tiers; no student-to-tier knowledge. |
 | Settings | `docs/reference/settings-module-map.md`, `docs/guides/more-than-one-computer.md` | Secrets stay in the credential store; district configuration stays outside the repo. |
 | Connections / diagnostics | `api/README.md`, then the exact owners named by the handoff | Diagnostics are read-only. One-click Connect/Disconnect (`api/ai_clients.py`) intentionally edits the Claude Desktop and ChatGPT config files, with merge, backup, and rollback. Nothing installs software, changes `PATH`, elevates, or starts tunnels. |
-| Gradebook | `docs/reference/gradebook-module-map.md` | Grade/status operations and roster context are private; write work is high risk. |
+| Gradebook | `docs/reference/gradebook-module-map.md`, `docs/contracts/grade-adjustment-contract.md` | Grade/status operations and roster context are private; write work is high risk. |
 | Roster | `docs/reference/roster-module-map.md` | Names, IDs, groups, accommodations, and monitored notes are student data. |
 | PowerGrader / Scoring Sessions | `docs/reference/powergrader-scoring-map.md`, `docs/guides/scoring-sessions.md`, `docs/contracts/feedback-scoring-contract.md` | Sessions are private. Review happens in the agent's preview before a push and in Canvas Live after. Agent commentary is teacher-only and never reaches Canvas. |
 | Score records | `docs/contracts/score-ledger-contract.md`, `docs/contracts/submission-history-contract.md` | Private, append-only score evidence. |
 | Work discovery | `docs/contracts/work-registry-contract.md` | One cross-course index of resumable work; it does not own Canvas objects or student records. |
-| Oral reading | `docs/contracts/oral-reading-evidence-contract.md` | Audio and transcripts stay on the machine. |
-| Daily Writing / writing records | `docs/reference/writing-record-module-map.md` | Private, scrubbed writing evidence; the record is evidence, not a grading authority. |
-| Routines | `api/custom_routines/AUTHORING.md` | Local jobs only; scheduled Canvas posting requires a specific teacher opt-in and the PowerGrader write safeguards. |
 | CanvasMirror | `docs/mirror.md` for current behavior; exact sections of `docs/reference/canvasmirror-1.0beta-information-spine.md` for target design (long, so read only the sections a brief names) | A disposable local copy for reads and planning. Operation-ledger writes re-check live Canvas before changing it. |
 | Course Catalog | `docs/contracts/course-catalog-contract.md` | Student-free navigation/search projection only; no PII, raw HTML, URLs, credentials, private paths, evidence, or write preflight. |
 | Agent runtime / MCP server | `docs/contracts/agent-runtime-product-contract.md`, `docs/mcp-server.md` | Primary agent-facing boundary: pseudonymized reads through CE, bounded local actions with prepare/review/apply behavior, host-neutral results. |
-| Learning Objectives | `api/learning_objectives.py`, with `api/default_docs/AI Authoring/Author a Learning Objective.txt` for the authoring grammar | Reviewed objectives are teacher-confirmed and revision-protected; a write applies only the exact reviewed preview. |
 | Operation Ledger | `docs/reference/operation-ledger-module-map.md` | High-risk Canvas write boundary; preserve checkpoints, idempotency, verification, and receipts. |
 | Classic Quizzes (stop-gap) | `docs/reference/classic-quiz-design.md` | Stop-gap until New Quizzes support drafted scores/feedback; one QuizForge contract with `quiz_engine: "classic"`; Hub differentiation only; verified Canvas facts live there. |
 | New Quizzes responses | `api/powergrader/new_quiz_fetch.py` | Response acquisition is read-only. Canvas Expert does not write New Quiz item scores or per-item feedback; grade existing writing in Canvas and author future writing portions as separate assignments. |
@@ -269,7 +265,7 @@ checked and zero new browser console errors confirmed.
 - Close GREEN work by accepting it and retiring its brief in the same batch (Git history is
   its record). A RED/YELLOW brief remains current only while the senior is actively deciding
   or correcting it. Superseded or abandoned briefs are retired with an explicit status.
-- Closing a GREEN brief that finishes or advances a vision-doc batch (spine §17.1) leaves a
+- Closing a GREEN brief that finishes or advances a vision-doc batch leaves a
   single current pointer to the next batch, not a log, naming the next batch-table row, the
   exact vision-doc sections it requires, and any outstanding senior decisions carried over
   from other batches. A new senior reads only that pointer and the sections it names, not the
@@ -283,36 +279,4 @@ checked and zero new browser console errors confirmed.
 
 ## Tool routing
 
-Tool discovery is conditional, not mandatory reading. Consult `tools/TOOLS.md` and only the
-relevant manifest before brute-force inspection of a large/repetitive document, log, diff,
-HTML/API response, or unfamiliar repository area. Skip it when the active brief already
-names a small set of files and symbols. A `planned` tool isn't available, so work without it.
-
-Prefer tools for retrieval, parsing, validation, and compact summaries. Use reasoning for
-architecture decisions, tradeoffs, review, and specifications. Don't use repository-wide
-indexing to get around a handoff's bounded reference list; the list is there to keep
-context small.
-
-## Build, test, and run
-
-Windows and PowerShell; current local tests use Python 3.14 through `py`. Select commands
-proportionally rather than running every suite by default.
-
-```powershell
-# Control console (http://127.0.0.1:8765)
-cd api; py qf_ui.py
-
-# Suites
-py -m pytest api/tests
-py -m pytest engine/tests
-
-# Focused PowerGrader regressions
-py -m pytest api/tests/powergrader api/tests/test_route_contract.py
-
-# Dependencies
-py -m pip install -r api/requirements.txt
-```
-
-The launcher installs Python dependencies only. Printable PDF generation requires an
-installed, policy-allowed Microsoft Edge; `CANVAS_EXPERT_EDGE_PATH` may point to a
-nonstandard `msedge.exe`.
+Consult `tools/TOOLS.md` only when a handoff needs a developer helper not otherwise named.

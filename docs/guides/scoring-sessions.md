@@ -206,7 +206,7 @@ integrity concerns such as copying, AI-generated text, or work that doesn't matc
 the student's other writing. Canvas Expert gathers the evidence and the agent reads
 it:
 
-- `writing_timeline` on tracked assignments, and `get_writing_history` for a
+- `writing_timeline` on tracked assignments, and Canvas submission reads for a
   student's earlier work;
 - `evidence.overlap` on a SAFE response row, present when two responses to the same
   item share 25 or more words outside the shared prompt text. It names the other

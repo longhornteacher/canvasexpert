@@ -460,7 +460,7 @@ pagination, invalid root, or rejected record cannot.
 
 ---
 
-## 11. Tool-to-Canvas routing
+## 11. Tool-to-Canvas routing — superseded
 
 The product map the senior should preserve while writing briefs. The module maps under
 `docs/reference/` own the per-route implementation detail; this table owns the durable
@@ -529,7 +529,7 @@ protocols; their routine metadata calls should move behind the read service.
 
 ---
 
-## 13. Gradebook as a first-class mirror consumer
+## 13. Gradebook as a first-class mirror consumer — superseded
 
 Gradebook is where the information-spine idea becomes most valuable and most dangerous.
 
@@ -755,7 +755,7 @@ stale/unavailable behavior, source/timestamp reaching the UI, live/local equival
 private-field leakage, and write paths still consulting live transport — embodied in the
 shipped consumer suites.
 
-### 19.4 Mutation tests
+### 19.4 Mutation tests — superseded
 
 Authoritative pre-execution reload, drift rejection, idempotency/receipt preflight, ambiguous
 verification, exact post-write reconciliation, no repeated write on reconcile failure,

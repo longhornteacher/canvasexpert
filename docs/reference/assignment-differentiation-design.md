@@ -72,6 +72,10 @@ declares its style explicitly, and the runtime never infers the style from the s
 
 QuizForge families remain Bridge only.
 
+## Preview-time tag validation
+
+The configured public tag for an `Accelerate` tier is checked during delivery preview. The authoring contract does not report missing tag configuration, so a file can be authored successfully and then be refused at preview. The refusal names the unconfigured tier; configure its public tag in Settings before preparing the push.
+
 ## Differentiated Hub
 
 **Shape.** The hub is an ordinary whole-class assignment. It carries the shared

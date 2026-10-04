@@ -60,57 +60,7 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 75 (67 tools). Version 75 removes the missing-sweep tools because
-Canvas owns its missing-submission policy. Version 74 adds `get_scoring_preview`, the read an
-agent shows the teacher between staging and pushing, and renames the staged
-teacher-only field to `agent_commentary` (it is now stored and returned in the preview);
-see `docs/guides/scoring-sessions.md`. Version 73 adds private durable score records,
-immutable local `gap_close` curve rules, ledger-based revert, and read-back verification
-for numeric score writes; use `get_score_ledger` for bounded recorded-only history.
-Version 72 adds `refresh_scoring_session`, which
-brings late-arriving and resubmitted local-mirror work into an open Scoring Session
-without a Canvas call; `get_scoring_packet` now refuses a changed mirror with
-`session_mirror_changed` instead of superseding the session. See
-`docs/guides/scoring-sessions.md`. Version 71 added a `late_policy` parameter to
-`prepare_scoring_session`; current sessions default to applying first-meaningful-attempt
-days without a question, while incomplete history always needs per-row days or a waive
-(none in `feedback_only` mode).
-Version 70 adds `prepare_feedback_revision`,
-`get_feedback_revision_packet`, `stage_feedback_revisions`, and
-`apply_staged_feedback_revisions` for revising selected existing staff comments
-on graded ordinary assignments while preserving scores. `stage_feedback_revisions`
-optionally accepts an exact staged `attachment_file`, frozen/validated before any
-send and attached once per revised student through the native comment-file lane.
-Separate durable upload/comment receipts prevent resends and expose partial work.
-`refresh_mirror(include_comments=true)` opts into a full comment-bearing refresh;
-the default remains a status-only delta. Revision rows are exactly
-`{pseudonym, comment_key, feedback}`. This path edits comments with concise plain
-text, uses immutable local packets/shared work leases, and persists each send
-intent/outcome without submission/grade read-back or blind retry. Missing comment IDs and
-old current data are repaired by the agent with `refresh_mirror(include_comments=true)`;
-`use_existing_mirror=true` acknowledges data the teacher says is unchanged.
-See `docs/guides/scoring-sessions.md` for the concrete continuations.
-Version 69 adds `get_submission_history`, a bounded
-read of retained local submission evidence that remains historical after mirror pruning.
-Version 68 replaces structured feedback fields and the
-`exemplars`/`disclosure` staging inputs with one teacher-authored `feedback` string per result.
-Canvas Expert preserves the string and adds `Draft score: X/Y` only in `feedback_only` mode.
-Version 67 adds optional `grade_mode` (`post_score` default, or
-`feedback_only`) to `stage_scoring_results`: `feedback_only` posts the numeric draft score in the
-feedback comment only and sends no gradebook score or grade-policy fields. Version 66 adds `preview_attempts_grant` and
-`apply_attempts_grant`, the reviewed extra-attempts and reopen grant for one assignment (regular
-online, Classic Quiz, or New Quiz): `grant` names `students` (`"all"` or an exact pseudonym list),
-`extra_attempts` (1 to 100, or `"unlimited"` for `"all"` only), and/or a `reopen` window. The
-review names attention items, and the result and receipt keep every pseudonym as granted,
-skipped, or failed with its before value. Version 64 adds optional `insincere` and
-`late_days` fields to `stage_scoring_results`; no new tool. Version 63 replaces free-text scoring feedback with structured fields
-Version 63 replaced free-text scoring feedback with structured feedback fields. Version 62 adds `stage_attachment(source_path)` for safely
-staging teacher-posted files from chat into the private Forge attachment inbox. Version 61 removes the legacy group field from differentiated quiz variants
-and removes student-group data from roster settings. Version 60 adds the reviewed existing-grade adjustment
-pair. Version 59 added `verify_live`, `resume_operation`, and
-`abandon_operation`, and adds a `verify_hint` field to every successful apply
-(`apply_content_push`, `push_content_live`, `apply_assignment_update`, `apply_sis_grade_bridge`)
-naming the object(s) it created or changed for a follow-up `verify_live` call.
+Tool schema version 76 (62 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -126,10 +76,6 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `get_modules(course_id, include_items=false)` | Disk-only catalog modules; set `include_items=true` to include their items; reports aged unconfirmed CE writes | No |
 | `refresh_course_structure(course_id)` | Coordinator-backed refresh of all four student-free catalog sections; reports each section's state and the oldest successful read, with no Canvas rows | No |
 | `get_course_pages(course_id, full_text=false, include_unpublished=true)` | Normalized pages from the Current course's local v3 catalog, including unpublished pages by default; set `full_text=true` for complete bodies or `include_unpublished=false` to filter; reports aged unconfirmed CE writes | No |
-| `list_learning_objectives(course_id)` | Current reviewed learning objectives as a compact table; Current-course and local-document gated | No |
-| `preview_learning_objective(course_id, objective, effective_start, effective_end, source_refs, replaces?)` | Exact reviewed create or replacement preview grounded in current local module, assignment, or page records | No |
-| `apply_learning_objective(course_id, preview, preview_digest, expected_revision)` | Applies only the exact reviewed create or replacement preview after catalog/source/revision checks; replacement identity comes from the digest-protected preview | No |
-| `delete_learning_objective(course_id, entry_id, expected_revision)` | Directly deletes one selected reviewed objective with revision protection | No |
 | `get_authoring_contract(kind)` | Canonical authoring contract for Forge (`quiz`, `assignment`, `page`) from `api/default_docs/AI Authoring/` | No |
 | `get_product_guide(topic="")` | CanvasExpert product knowledge; omit `topic` for the overview, use the annotated topic map to choose detail, or select `tools` for the complete generated inventory | No |
 | `stage_content(kind, label, content)` | Writes one authored draft and its `.done` marker into the per-kind review Inbox; refuses an existing label rather than overwriting | No |
@@ -149,7 +95,6 @@ naming the object(s) it created or changed for a follow-up `verify_live` call.
 | `clear_roster_student_field(course_id, pseudonym, field, expected_settings_digest)` | Direct digest-protected clear for supported local settings; nickname fields are rejected | Yes, pseudonymized |
 | `get_submissions(course_id, assignment_id, include_text=true, pseudonyms="", max_text_chars=2000)` | Mirror submissions including historical rows; current_enrollment marks same-mirror roster membership; optional pseudonym narrowing and bounded text | Yes, pseudonymized |
 | `get_submission_history(course_id, assignment_id, pseudonyms="", include_text=true, max_text_chars=12000, offset=0, limit=50)` | Paginated, scrubbed observations from the private retained archive; URL-free text provenance and consistency/conflict flags; observed-only coverage, no freshness or enrollment claim; original files stay local | Yes, pseudonymized |
-| `get_writing_history(pseudonym, since="", until="", include_text=false, max_text_chars=2000)` | Private longitudinal Writing Record evidence; date-bounded, optional prose, and never a score, coaching, or judgment | Yes, pseudonymized |
 | `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state; exact saved family links label each bridge and differentiated source with its partner IDs | Yes, pseudonymized |
 | `preview_grade_adjustment(course_id, assignment_id, adjustment)` | Mirror-backed, pseudonymized before/after review for a points-based adjustment, including rule-based raw/entered baselines and ledger-linked `revert_rule` previews | Yes, pseudonymized |
 | `apply_grade_adjustment(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grade adjustment with live per-student checks, score readback, durable outcome evidence, and a receipt | Yes, pseudonymized |
@@ -262,7 +207,7 @@ The grade-adjustment pair is the only existing-score write lane. Preview reads t
 typed private mirror and returns pseudonym-only review rows; apply uses the Operation
 Ledger assignment drift check and live prior-score check before each `posted_grade` PUT.
 Undo is another preview with `adjustment.kind = "revert"`, and completed, non-reverted
-receipts supply the private student-report projection and the built-in curve routine's
+receipts supply the private grade-adjustment projection and the reviewed curve operation's
 already-adjusted guard.
 
 Rule previews include every eligible numeric entered score, including zero, Canvas-missing,
@@ -468,9 +413,7 @@ The section, mirror, and Course Catalog reads named here reject an ID absent fro
 `list_courses` before recommending a mirror or Course Catalog refresh. Student-data tools (`get_roster`, `get_submissions`, and
 `get_gradebook_snapshot`) are scoped to Current courses (`config.active_courses()`). The
 catalog reads (`list_sections`, `get_course_assignments`, and `get_modules`) and
-`refresh_mirror` accept any saved course, including Previous courses. `get_course_pages` and
-the Learning Objective preview/apply pair require a Current course
-sections (the latter names the candidate ids to retry with). Pseudonymized artifacts are
+`refresh_mirror` accept any saved course, including Previous courses. `get_course_pages` is available for saved courses. Pseudonymized artifacts are
 scrubbed, not anonymous: the pseudonym is stable, and student text still comes through as
 the student wrote it.
 

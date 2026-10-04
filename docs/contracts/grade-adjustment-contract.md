@@ -114,7 +114,7 @@ tools work. An approval covers that one operation and nothing broader.
 
 The control console's curve preview, apply, and revert, and its local curve-event
 store, are retired. Grade adjustment operations appear in the console's existing
-operations and receipts pages. The built-in `curve` routine builds a `rule`
+operations and receipts pages. A reviewed score adjustment builds a `rule`
 (`target_average`) preview and applies it through this same service. It decides whether
 an assignment was already curved from its completed, un-reverted grade adjustment
 operations, not from a separate store.

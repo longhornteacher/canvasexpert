@@ -73,7 +73,7 @@ Each job has exactly this public index shape:
   "assignment_id": "string or empty",
   "resumable_url": "local relative URL beginning with /",
   "source_ref": {
-    "type": "workspace_relative | canvas_finding | routine_state | operation_receipt",
+    "type": "workspace_relative | canvas_finding | operation_receipt",
     "value": "non-secret reference"
   },
   "counts": {
@@ -123,7 +123,6 @@ Canvas.
 The registry never copies authoritative subsystem payloads:
 
 - Scoring Session truth remains private in the session store and is not projected into Work.
-- Routine enablement and due state remain machine-local in `config/routines.py`.
 - Forge source truth remains in the workspace library or staged temp file.
 - Canvas assignment/submission truth remains in Canvas and bounded discovery caches.
 - Prepared operations and receipts use the Operation Ledger Contract.
@@ -144,7 +143,7 @@ freshness/error metadata, and may run in parallel with a maximum documented conc
 
 Initial providers, in order:
 
-1. Enabled/due routines and failed/partial routine receipts.
+1. Failed or partial operation receipts.
 2. Cross-course grading debt: assignments with submitted work lacking teacher score,
    comment, or CanvasExpert session evidence.
 3. Aggregate late-work findings using school-day and extra-time math.

@@ -16,8 +16,7 @@ layout, section boxes, and unit-info box. See
 </PAGEFORGE_JSON>
 ```
 Return strict JSON with double quotes, no comments or trailing commas, and escaped
-quotes inside strings. Set `version` to `2.0-json` and `type` to `PAGE`. Version
-`1.0-json` is retired; ask the teacher to fetch this current contract again.
+quotes inside strings. Set `version` to `2.0-json` and `type` to `PAGE`.
 
 ## 3. STANDARD PAGE FIELDS
 ```json

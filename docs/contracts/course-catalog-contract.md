@@ -54,7 +54,7 @@ Title and body are normalized plain text. Control characters and content that ca
 normalized are rejected, making the page scope incomplete; raw HTML is never retained.
 Canvas URLs/slugs, editor identity, roles, lock explanations, block-editor JSON, and every
 other response field are forbidden. The page scope is student-free and is the only Catalog
-source for the local MCP page read and Learning Objective source references.
+source for the local MCP page read.
 
 ## Reads and refresh
 

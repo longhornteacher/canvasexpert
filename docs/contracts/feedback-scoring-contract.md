@@ -135,7 +135,7 @@ unchanged.
 
 `agent_commentary` is where the agent says what it found and how strong it thinks the
 evidence is, in plain words, citing what it relied on (`writing_timeline`,
-`evidence.overlap`, `get_submission_history`, `get_writing_history`, or its own checks
+`evidence.overlap`, `get_submission_history`, or its own checks
 such as a web search for distinctive phrases). Canvas Expert passes it through as written.
 It does not change the score or the student-facing feedback by itself; the teacher
 decides. Integrity concerns stay out of `feedback`, which the student reads, and an

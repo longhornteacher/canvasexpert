@@ -21,8 +21,7 @@ box. See `docs/contracts/forge-presentation-contract.md` for the rendered design
 </ASSIGNMENTFORGE_JSON>
 ```
 Return strict JSON: double quotes, no comments or trailing commas, and escape quotes
-inside strings. Set `version` to `2.0-json` and `type` to `ASSIGNMENT`. Version
-`1.0-json` is retired; ask the teacher to fetch this current contract again.
+inside strings. Set `version` to `2.0-json` and `type` to `ASSIGNMENT`.
 Before authoring tiered work, ask the teacher to choose Everyone (no tiers), Bridge,
 or Hub. Never infer the style; re-fetch this contract after the choice.
 

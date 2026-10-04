@@ -47,15 +47,11 @@ Useful starting references for new debugging and refactor sessions:
 - `docs/reference/roster-module-map.md` - Roster route/script ownership and current hotspot map.
 - `docs/reference/assignment-corrections-design.md` - accepted private correction behavior for
   AssignmentForge results, its exact-ID association, and the remaining bounded constraints.
-- `docs/reference/authoring-contract-drift.md` - three audited divergences between the live authoring
-  contract, the synced workspace playbook, and how differentiated families are actually built,
-  including which findings are resolved in `dev`.
 
 ## Handoff Convention
 
 The senior agent makes the difficult product and architecture decisions, then writes
-one substantial brief. A lead executor runs it, and may split the work across parallel
-subagents that each own their own files.
+one substantial brief. A lead executor runs it and owns integration.
 
 Keep one active brief by default in handoffs/. The brief is the durable context checkpoint when a chat is
 compacted, an executor changes, or work moves between agents. It locks scope,
@@ -63,9 +59,9 @@ decisions, file ownership, references, verification, and what to ask about befor
 implementation starts. The lead records its compact traffic-light result in that same
 brief before handback so test evidence and current state don't exist only in chat.
 
-Handoff closure belongs to the implementation batch. Archive a completed brief only when it
-has continuing reference value; otherwise it may be deleted because Git preserves history.
-A separate acceptance or archive pass just to move documentation adds no product value.
+Retire a completed brief in the implementation batch. Keep it only when it has continuing
+reference value; otherwise delete it because Git preserves history. A separate archive pass
+adds no product value.
 
 Verification is risk-proportional. Focused checks are normal, affected subsystem checks are
 used for shared changes, and the full suite (about two minutes) is run whenever it helps and

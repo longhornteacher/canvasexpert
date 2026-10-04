@@ -1,7 +1,7 @@
 # Operation Ledger Contract
 
 Status: implemented durable contract. Design rationale is recorded in
-`docs/reference/operation-ledger-design.md`.
+`docs/reference/operation-ledger-module-map.md`, including its accepted design reference.
 
 ## Boundary and storage
 
@@ -111,8 +111,8 @@ Canvas calls.
 
 One immutable receipt is written per invoked attempt. Its common envelope contains:
 
-- `version`, opaque `receipt_id`, `subject_type: operation | routine`, and `subject_id`;
-- optional `operation_id`, `batch_id`, or routine run ID;
+- `version`, opaque `receipt_id`, `subject_type`, and `subject_id`; legacy routine receipts remain readable.
+- optional `operation_id` or `batch_id`; legacy routine run IDs remain opaque.
 - kind, attempt and completion timestamps;
 - `applied | partial | failed | blocked | no_effect` status;
 - source/review digests where applicable;
@@ -120,8 +120,7 @@ One immutable receipt is written per invoked attempt. Its common envelope contai
   redacted error code, and PRIVATE detail;
 - reversal descriptor and state.
 
-`no_effect` means an invoked routine completed and proved there was nothing to change.
-A disabled or not-due routine was not invoked and creates no receipt. General activity
+`no_effect` means the recorded operation completed and proved there was nothing to change. General activity
 gets only a content-free projection (kind, course count, status, receipt ID, local
 detail URL); it is never authoritative.
 
