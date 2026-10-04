@@ -1,7 +1,9 @@
-"""Shared roster fetch, section, and vault-upsert use cases."""
+"""Runtime-owned roster reads, identity synchronization, and local student updates."""
 from __future__ import annotations
 
 from collections.abc import Callable
+
+from api.platform_services import config
 
 
 def enrollment_section_ids(users: list[dict]) -> dict:
@@ -19,54 +21,16 @@ def enrollment_section_ids(users: list[dict]) -> dict:
     return result
 
 
-def compute_warnings(student: dict, vault_entries_by_id: dict,
-                     protected_names: set[str], collisions: dict,
-                     roster_change: dict | None = None) -> list[str]:
-    """Return warning string codes for one student row.
-
-    ``roster_change`` is this student's entry (if any) from
-    ``api.roster_context.diff_roster_baseline`` against the teacher's last
-    acknowledged roster -- ``{"is_new": True}`` or
-    ``{"changed_section": <detail>}``. A departed student has no live row to
-    attach a warning to, so that code is reported by the caller directly.
-    """
-    warnings: list[str] = []
-    cid = student["id"]
-
-    vault_entry = vault_entries_by_id.get(cid, {})
-    pseudo = vault_entry.get("pseudonym", "")
+def compute_warnings(student: dict, vault_entries_by_id: dict) -> list[str]:
+    """Warnings the agent can resolve through the roster tools."""
+    warnings = []
+    pseudo = vault_entries_by_id.get(student["id"], {}).get("pseudonym", "")
     if not pseudo or pseudo.startswith("S0"):
         warnings.append("missing_pseudonym")
-
-    et = student.get("extra_time", {})
-    if et.get("enabled") and not (et.get("days") and int(et.get("days", 0)) > 0):
+    extra_time = student.get("extra_time", {})
+    if extra_time.get("enabled") and not (extra_time.get("days") and int(extra_time.get("days", 0)) > 0):
         warnings.append("extra_time_without_days")
-
-    nicknames = vault_entry.get("nicknames", [])
-    for nn in nicknames:
-        if nn.lower() in protected_names:
-            warnings.append("protected_name_collision")
-            break
-
-    if vault_entry:
-        if collisions.get("literary"):
-            for lit in collisions["literary"]:
-                if vault_entry.get("real_name", "").lower() in lit.lower():
-                    warnings.append("protected_name_collision")
-                    break
-        for bucket in ("dup_first", "common_word"):
-            for item in collisions.get(bucket, []):
-                if vault_entry.get("real_name", "").lower() in item.lower():
-                    warnings.append("nickname_collision")
-                    break
-
-    if roster_change:
-        if roster_change.get("is_new"):
-            warnings.append("student_added")
-        if roster_change.get("changed_section"):
-            warnings.append("student_changed_section")
-
-    return list(dict.fromkeys(warnings))
+    return warnings
 
 
 def fetch_students(course_id: str, *, canvas_get_all=None) -> tuple[list[dict] | None, str | None]:
@@ -138,3 +102,98 @@ def sync_roster_for_course(
         with transaction():
             upsert_roster(vault, users)
     return users, None
+
+
+# Replacement would erase the teacher's scrub-coverage list. Only additive
+# nickname changes are allowed through the runtime, even for direct callers.
+ALLOWED_STUDENT_PATCH_KEYS = frozenset({
+    "add_nicknames", "extra_time", "monitored", "classroom_profile",
+})
+
+
+def _as_int(value, field_name: str) -> tuple[int | None, str | None]:
+    try:
+        return int(value), None
+    except (TypeError, ValueError):
+        return None, f"{field_name} must be an integer."
+
+
+def update_student(course_id: str, user_id: str, patch: dict, vault) -> dict:
+    """Validate and apply one student's roster update."""
+    if not course_id or not user_id:
+        return {"ok": False, "error": "course_id and user_id required."}
+
+    data = patch
+    if not isinstance(data, dict):
+        return {"ok": False, "error": "patch must be a JSON object."}
+
+    unknown = set(data.keys()) - ALLOWED_STUDENT_PATCH_KEYS
+    if unknown:
+        return {"ok": False, "error": f"Unknown patch keys: {sorted(unknown)}"}
+
+    # Validate every value before opening the vault transaction or touching any
+    # external/local setting store.  MCP uses this same callable path and must
+    # never leave an earlier field applied when a later field is malformed.
+    nicknames = None
+    if "add_nicknames" in data:
+        nicknames = data["add_nicknames"]
+        if not isinstance(nicknames, list) or any(not isinstance(value, str) for value in nicknames):
+            return {"ok": False, "error": "add_nicknames must be a list of strings."}
+
+    classroom_profile = None
+    if "classroom_profile" in data and data["classroom_profile"] is not None:
+        try:
+            classroom_profile = config.validate_classroom_profile(data["classroom_profile"])
+        except ValueError as error:
+            return {"ok": False, "error": str(error)}
+
+    extra_time = None
+    if "extra_time" in data:
+        extra_time = data["extra_time"]
+        if not isinstance(extra_time, dict):
+            return {"ok": False, "error": "extra_time must be an object."}
+        if extra_time.get("enabled"):
+            _, err = _as_int(extra_time.get("days", 0), "extra_time.days")
+            if err:
+                return {"ok": False, "error": err}
+
+    monitored = None
+    if "monitored" in data:
+        monitored = data["monitored"]
+        if not isinstance(monitored, dict):
+            return {"ok": False, "error": "monitored must be an object."}
+
+    with vault.transaction():
+        if nicknames is not None:
+            vault.add_nicknames(user_id, nicknames)
+
+    if extra_time is not None:
+        et = extra_time
+        et_list = config.get_extra_time(course_id)
+        et_list = [e for e in et_list if e.get("id") != user_id]
+        if et.get("enabled"):
+            days, _ = _as_int(et.get("days", 0), "extra_time.days")
+            et_list.append({
+                "id": user_id,
+                "name": et.get("name", ""),
+                "days": days,
+            })
+        config.set_extra_time(course_id, et_list)
+
+    if monitored is not None:
+        m = monitored
+        if m.get("enabled"):
+            config.set_monitored_student(
+                user_id,
+                name=m.get("name", ""),
+                note=m.get("note", ""),
+            )
+        else:
+            config.remove_monitored_student(user_id)
+
+    if "classroom_profile" in data:
+        config.update_roster_student_settings(
+            course_id, user_id, {"classroom_profile": classroom_profile}
+        )
+
+    return {"ok": True}

@@ -37,22 +37,6 @@ def token_is_set() -> bool:
     return bool(t and not t.startswith("PASTE"))
 
 
-def get_download_root() -> str:
-    state = _io_code._machine_load()
-    if state.get("download_root"):
-        return state["download_root"]
-    root = workspace.workspace_root()
-    if root:
-        return os.path.join(root, "Exports")
-    return _io_code.DOWNLOAD_ROOT_DEFAULT
-
-
-def set_download_root(path: str):
-    _io_code._modify_machine(
-        lambda state: state.__setitem__("download_root", path) or state
-    )
-
-
 def save_canvas_account(base_url: str, token: str | None = None):
     """Save base URL (always) and token (only if provided)."""
     set_canvas_base(base_url)

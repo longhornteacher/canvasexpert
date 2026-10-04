@@ -48,8 +48,6 @@ ALLOWED_DIRECT_HTTP = {
     # Deliberate live reads / fallbacks (tracked; not accidental)
     "api/webui/routes/courses.py",       # group/membership reads feeding Canvas group writes (design law 5.7)
     "api/webui/routes/settings.py",      # token validation + OpenRouter connectivity checks
-    "api/portfolio_service.py",          # portfolio live fallback (requests.Session)
-    "api/student_packet.py",             # student-report live fallback (requests.Session)
 }
 
 

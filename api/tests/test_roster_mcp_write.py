@@ -168,7 +168,7 @@ def test_adapter_itself_refuses_the_replacing_nickname_key(monkeypatch, tmp_path
     reached this adapter without going through _validate_mcp_roster_patch could
     otherwise erase it, so the replacing key is not in the adapter's allowlist.
     """
-    from api.webui import roster_mcp
+    from api import roster_service
 
     path, _pseudo = _setup(monkeypatch, tmp_path)
     vault = Vault(path)
@@ -177,7 +177,7 @@ def test_adapter_itself_refuses_the_replacing_nickname_key(monkeypatch, tmp_path
                         lambda self, *a, **k: calls.append(a))
 
     with vault.transaction():
-        result = roster_mcp.update_student("course-1", "910001", {"nicknames": ["Wipe"]}, vault)
+        result = roster_service.update_student("course-1", "910001", {"nicknames": ["Wipe"]}, vault)
 
     assert result["ok"] is False
     assert calls == []

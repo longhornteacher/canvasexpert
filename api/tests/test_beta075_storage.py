@@ -29,7 +29,7 @@ def _settings_writer(barrier, index: int):
         f"roster-course-{index}", {f"student-{index}": {"monitored": True}}
     )
     canvas.set_canvas_base(f"https://canvas-{index}.invalid")
-    canvas.set_download_root(f"download-{index}")
+    canvas.set_workspace_path(f"workspace-{index}")
 
 
 def test_concurrent_shared_vault_writers_append_without_rewriting_seed(tmp_path):
@@ -99,7 +99,7 @@ def test_settings_transactions_preserve_interleaved_nested_updates(tmp_path, mon
         assert machine["canvas_base"] in {
             "https://canvas-1.invalid", "https://canvas-2.invalid"
         }
-        assert {machine.get("download_root")} <= {"download-1", "download-2"}
+        assert {machine.get("workspace_path")} <= {"workspace-1", "workspace-2"}
         if root:
             from api.shared_kv import SharedKVStore
             synced = SharedKVStore("settings", root=root).read()

@@ -1,28 +1,17 @@
-"""Name Manager API — the vault-editor surface behind the Name Manager screen.
-
-Protected (literary) names, live scrub-test, and who-is-who / vault-backup
-export. These teacher-only endpoints touch the PII vault in the private
-M365-synced workspace. Split out of routes/feedback.py
-— distinct surface, its own `names_router`.
-
-Roster sync and nickname management are
-owned by the Roster Console (`GET /api/roster`, `POST /api/roster/student`,
-see `roster.py` and `roster_updates.py`) and its MCP adapter; the equivalent
-Name Manager routes were dead (zero production callers) and were deleted
-rather than ported to the schema-v3 one-word pseudonym contract.
-"""
+"""Private identity table, protected names, scrub test, and vault exports."""
 import csv
 import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Form
+from fastapi import APIRouter, Form, Query
 from fastapi.responses import JSONResponse
 
 from api import feedback_scrub
 from api.identity_vault_service import open_vault
 from api import roster_service
+from api.mirror import store as mirror_store
 from api.platform_services import config, workspace
 from api.shared_storage import (
     LegacyStorageReappearedError, SharedStoreConflictError,
@@ -36,6 +25,39 @@ names_router = APIRouter(prefix="/api/names", tags=["names"])
 
 def _vault():
     return open_vault()
+
+
+@names_router.get("")
+def course_names(course_id: str = Query("")):
+    """Read one course's private who-is-who table without roster edit fields."""
+    if not course_id:
+        return JSONResponse({"ok": False, "error": "course_id required."})
+    document = mirror_store.read_roster(course_id)
+    if document is not None and document.get("state") == "current":
+        users = list(document["students"].values())
+        section_map = document["sections"]
+    else:
+        users, error = roster_service.fetch_students(course_id)
+        if error:
+            return JSONResponse({"ok": False, "error": f"Canvas fetch failed: {error}"})
+        section_map = roster_service.fetch_sections(course_id)
+    vault = _vault()
+    with vault.transaction():
+        roster_service.upsert_roster(vault, users)
+        entries = {entry["canvas_id"]: entry for entry in vault.entries()}
+    section_ids = roster_service.enrollment_section_ids(users)
+    rows = []
+    for user in users or []:
+        uid = str(user["id"])
+        entry = entries.get(uid, {})
+        rows.append({
+            "pseudonym": entry.get("pseudonym", ""),
+            "real_name": entry.get("real_name") or user.get("name") or user.get("sortable_name", ""),
+            "sections": [{"id": sid, "name": section_map.get(sid, f"Section {sid}")}
+                         for sid in section_ids.get(uid, [])],
+        })
+    rows.sort(key=lambda row: row["real_name"].casefold())
+    return JSONResponse({"ok": True, "students": rows})
 
 
 @names_router.get("/protected")

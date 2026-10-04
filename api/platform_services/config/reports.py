@@ -1,30 +1,5 @@
-"""Student Reports configuration — synced workspace output root + monitored cohort.
-
-Uses lazy module-reference so monkeypatches to config._io propagate correctly.
-"""
-import os
-
-from .. import workspace
+"""Private monitored student settings used by the roster runtime."""
 from . import _io as _io_mod
-
-STUDENT_REPORTS_DEFAULT = os.path.join(
-    os.path.expanduser("~"), "Desktop", "Canvas Student Reports")
-
-
-def get_student_reports_root() -> str:
-    state = _io_mod._machine_load()
-    if state.get("student_reports_root"):
-        return state["student_reports_root"]
-    root = workspace.student_work_reports_root()
-    if root:
-        return root
-    return STUDENT_REPORTS_DEFAULT
-
-
-def set_student_reports_root(path: str):
-    _io_mod._modify_machine(
-        lambda state: state.__setitem__("student_reports_root", path) or state
-    )
 
 
 def get_monitored_students() -> dict:

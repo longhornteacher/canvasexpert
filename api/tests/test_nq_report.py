@@ -1,19 +1,16 @@
-"""Offline tests for the New Quizzes student_analysis parser + portfolio renderer.
+"""Offline tests for the New Quizzes student_analysis parser.
 
 Runs in CI — no live Canvas, no PII (fixture is fully synthetic). Validates the
 positional parse, prompt<->response pairing, choice-vs-essay handling, multi-line
-quoted-HTML integrity, entity decoding, summary fields, and a clean DOCX render.
+quoted-HTML integrity, entity decoding, and summary fields.
 """
 import os
-
-from docx import Document
 
 from api.nq_report import (
     constructed_responses,
     html_to_text,
     parse_student_analysis_file,
 )
-from api.portfolio import render_student_docx
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures",
                        "student_analysis_sample.csv")
@@ -87,15 +84,3 @@ def test_item_points_possible_inferred_from_cohort():
     # And attached per-item on each student.
     ada = data["students"][0]
     assert ada["items"][2]["points_possible_est"] == 10.0
-
-
-def test_render_docx(tmp_path):
-    ada = _parsed()["students"][0]
-    dest = tmp_path / "ada.docx"
-    render_student_docx(ada, str(dest), quiz_title="THG Ch1-9 Test")
-    assert dest.exists() and dest.stat().st_size > 0
-    doc = Document(str(dest))
-    text = "\n".join(p.text for p in doc.paragraphs)   # headings are paragraphs too
-    assert "Ada Lovelace" in text                       # title heading rendered
-    assert "crisp" in text                              # autumn essay body rendered
-    assert "(8 possible)" in text                       # earned (possible) shown for scale

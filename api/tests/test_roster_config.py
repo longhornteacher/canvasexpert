@@ -122,54 +122,6 @@ def test_classroom_profile_rejects_invalid_values(profile):
         config.validate_classroom_profile(profile)
 
 
-def test_score_matrix_round_trip_is_course_scoped():
-    first = {
-        "columns": [{"id": "score-writing", "label": "Writing"}],
-        "values_by_section": {"section-a": {"student-a": {"score-writing": 12.5}}},
-    }
-    second = {
-        "columns": [{"id": "score-reading", "label": "Reading"}],
-        "values_by_section": {},
-    }
-
-    assert config.get_roster_score_matrix("missing") == config.ROSTER_SCORE_MATRIX_DEFAULT
-    config.set_roster_score_matrix("course-a", first)
-    config.set_roster_score_matrix("course-b", second)
-
-    assert config.get_roster_score_matrix("course-a") == first
-    assert config.get_roster_score_matrix("course-b") == second
-    assert "roster_score_matrices" in config.SYNCED_KEYS
-
-
-def test_relationships_round_trip_is_course_scoped():
-    first = {"by_section": {"section-a": [{
-        "student_a": "student-a", "student_b": "student-b",
-        "type": "keep_apart", "reason": "private",
-    }]}}
-    second = {"by_section": {}}
-
-    assert config.get_roster_relationships("missing") == config.ROSTER_RELATIONSHIPS_DEFAULT
-    config.set_roster_relationships("course-a", first)
-    config.set_roster_relationships("course-b", second)
-
-    assert config.get_roster_relationships("course-a") == first
-    assert config.get_roster_relationships("course-b") == second
-    assert "roster_relationships" in config.SYNCED_KEYS
-
-
-def test_roster_baseline_round_trip_is_course_scoped():
-    first = {"acknowledged_at": "2026-08-01T00:00:00", "students": {"101": ["44"]}}
-    second = {"acknowledged_at": "2026-08-02T00:00:00", "students": {}}
-
-    assert config.get_roster_baseline("missing") == config.ROSTER_BASELINE_DEFAULT
-    config.set_roster_baseline("course-a", first)
-    config.set_roster_baseline("course-b", second)
-
-    assert config.get_roster_baseline("course-a") == first
-    assert config.get_roster_baseline("course-b") == second
-    assert "roster_baselines" in config.SYNCED_KEYS
-
-
 def test_courses_are_independent():
     config.set_roster_student_settings("100", {"101": {"tier": "Support"}})
     config.set_roster_student_settings("200", {"201": {"tier": "Core"}})

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from api import report_local_reads, storage_support
+from api import storage_support
 from api.platform_services import workspace
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="MAX_PATH 260-char limit is Windows-only")
@@ -38,20 +38,3 @@ def test_atomic_write_json_survives_deep_path(tmp_path):
     storage_support.atomic_write_json(Path(target), {"schema": 1, "value": "second"})
     with open(workspace.extended_path(target), encoding="utf-8") as handle:
         assert json.load(handle)["value"] == "second"
-
-
-def test_write_source_manifest_survives_deep_path(tmp_path):
-    deep = _deep_dir(tmp_path)
-    os.makedirs(workspace.extended_path(deep), exist_ok=True)
-
-    report_local_reads.write_source_manifest(deep, {"essay.docx": {"tokens": 12}})
-    manifest_path = os.path.join(deep, "_source_manifest.json")
-    assert len(manifest_path) > 260
-    with open(workspace.extended_path(manifest_path), encoding="utf-8") as handle:
-        assert json.load(handle) == {"essay.docx": {"tokens": 12}}
-
-    # A second write merges into the existing deep manifest (read + rewrite).
-    report_local_reads.write_source_manifest(deep, {"notes.txt": {"tokens": 3}})
-    with open(workspace.extended_path(manifest_path), encoding="utf-8") as handle:
-        merged = json.load(handle)
-    assert merged == {"essay.docx": {"tokens": 12}, "notes.txt": {"tokens": 3}}
