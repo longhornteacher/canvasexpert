@@ -1,1 +1,1 @@
-# Optional developer tools are listed here only when a handoff needs one.
+# Optional developer tools are listed in `README.md` in this folder.

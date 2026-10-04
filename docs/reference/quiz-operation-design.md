@@ -65,7 +65,7 @@ Sources:
 
 For each source in request order:
 
-1. create the color-suffixed New Quiz and checkpoint its exact quiz/assignment ID;
+1. create the tag-suffixed New Quiz and checkpoint its exact quiz/assignment ID;
 2. create and verify every ordered item by exact ID; and
 3. patch and verify the assignment as published, unrestricted, points-graded, omitted from the
    final grade, SIS-disabled, and carrying any teacher-supplied date (or no date).
@@ -77,7 +77,8 @@ due at 23:59 on the same source date and UTC offset and carries the runtime Canv
 
 ### Durable progress and recovery
 
-The polling progress endpoint exposes PII-minimized target and step state. Every Canvas send has a
+The console's operation status read (`/api/operations/{operation_id}/status`) exposes only
+PII-minimized target and step state. Every Canvas send has a
 write-ahead marker and exact-ID postcondition. Same-title matching never proves success. Unknown
 matches block; only checkpointed exact IDs are excluded during retry.
 
@@ -86,14 +87,15 @@ failure is partial and resumes only from exact-ID reconciliation. Retry cannot d
 items, bridge, module, or module item. The family link is saved only after all required
 live postconditions pass.
 
-### Browser and teacher workflow
+### Agent and teacher workflow
 
-The browser sends ordered `{path}` variants and shared delivery settings. A legacy `group_name`
-field is ignored for compatibility. It sends no Canvas URL, group/category ID, student ID, or
-pre-suffixed title. Frozen review shows each pedagogical tier, public tag, exact source title,
-unrestricted source behavior, common settings, and the planned bridge.
+The agent calls `preview_content_push(kind="quiz", variants=[{"label": ...}, ...])` with
+ordered staged labels and shared delivery settings; the runtime resolves each label to its staged
+file. A variant with any key besides `label` is refused. The agent sends no Canvas URL,
+group/category ID, student ID, or pre-suffixed title. Frozen review shows each pedagogical tier,
+public tag, exact source title, unrestricted source behavior, common settings, and the planned
+bridge, and `apply_operation` applies it.
 
 A teacher request to land the family authorizes the internal reviewed sequence for that exact
 course and family. Results report the created source and bridge URLs and direct the teacher to
-Canvas Live for review and teacher-owned Canvas Grade Sync. The retired differentiated CLI cannot
-perform live writes.
+Canvas Live for review and teacher-owned Canvas Grade Sync.

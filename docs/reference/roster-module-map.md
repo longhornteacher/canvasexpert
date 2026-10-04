@@ -24,11 +24,12 @@ export and vault backup remain console-only private tools.
   student data. Never place them in source, fixtures, generic logs or support output.
 - `get_roster`, `preview_roster_student_change` and `apply_roster_student_change`
   use pseudonyms. A student's read returns its expected digest; preview freezes a
-  patch and apply refuses if the settings moved. A null patch field clears it.
+  patch and apply refuses if the settings moved. A null `extra_time`, `monitored` or
+  `classroom_profile` clears that field.
 - MCP roster writes call `roster_service.update_student`, with no Web UI route
   import. The service owns validation and extra-time/monitored handling.
-- Nicknames remain outside the MCP patch surface because changing them would
-  overwrite the teacher's scrub-coverage list.
+- The MCP patch can only add nicknames (`add_nicknames`). Replacing them stays outside
+  the patch surface because it would overwrite the teacher's scrub-coverage list.
 - Canvas Expert has no student-to-tier mapping and does not edit group membership.
   Teachers assign tier assignments to students or pods in Canvas.
 - Identity exports and vault backups remain private workspace artifacts.

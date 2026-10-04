@@ -11,8 +11,9 @@ supports setup and operation recovery; it is not a second bridge workflow.
 
 A differentiated AssignmentForge or QuizForge delivery creates one Canvas family. The real
 student work uses the base title plus a configured public tag, such as `Reading Check - Blue`
-or a teacher-defined suffix. The unsuffixed `Reading Check` may be a source or a bridge;
-Canvas structure decides which role it has.
+or a teacher-defined suffix. Delivery names the bridge `Reading Check - Bridge`. In an
+existing family, an unsuffixed `Reading Check` may be a source or a bridge; Canvas structure
+decides which role it has.
 
 Only the configured-tag-suffixed source assignments appear in the selected module; the bridge is gradebook-only. Source-tier placement is manual and teacher-owned. The bridge keeps one whole-course gradebook column available
 for teacher-owned Canvas Grade Sync.
@@ -44,7 +45,7 @@ date, the source timestamp is preserved and the bridge is due at 23:59 on the sa
 If real Canvas titles drift from the configured `Base - <tag>` shape, the family remains
 recoverable without renaming anything in Canvas; an agent can propose the exact source IDs for
 teacher confirmation. Title matching normalizes casefold, collapsed whitespace, dash variants,
-one trailing tier tag or legacy `- Bridge` suffix, and one source-only parenthetical (for
+one trailing tier tag or `- Bridge` suffix, and one source-only parenthetical (for
 example `(Paper)`); two titles that share the same words in a different order are reported,
 never silently merged. A family with two tag-suffixed sources and one unsuffixed member always
 treats that member as the bridge, and repairs its SIS/final-grade settings through the same

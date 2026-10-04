@@ -6,7 +6,7 @@ It exists so this context stops living in scattered chat threads and retired
 handoffs and getting lost.
 
 Keep it short and current. When a fact here changes (a launch date, a user
-count), edit it — do not append a log.
+count), edit it; do not append a log.
 
 ## Status: active single-teacher pilot
 
@@ -16,7 +16,7 @@ submissions, scoring work, and grade history.
 
 ## Userbase: 1 for the first semester
 
-- As of **2026-09-16** the active userbase is exactly **1 — the developer, who is also
+- As of **2026-09-16** the active userbase is exactly **1: the developer, who is also
   the pilot teacher**.
 - The userbase remains one through roughly December 2026. Additional users come only
   after a deliberate decision to widen the pilot.
@@ -54,7 +54,7 @@ slice-specific.
   docs must be lean and un-wordy. Do not invent bespoke personas, make whole-file
   instructions the default for a connected agent, or add step-by-step orchestration
   on top of assistants that already provide conversation and rendering (Claude
-  Cowork, MagicSchool, ChatGPT Work). Rely on the host assistant's own conversational
+  Desktop, ChatGPT desktop). Rely on the host assistant's own conversational
   ability; ship the runtime contract and narrow reference material, not a second
   harness around it. A standalone CanvasAgent reference may still include appendices
   for chat-only or setup use when no runtime connection is available.

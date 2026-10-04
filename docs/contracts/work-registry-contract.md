@@ -12,11 +12,11 @@ genuinely local-only operations.
 
 The Work Registry gives CanvasExpert one durable, cross-course index of work without
 making that index the source of truth for Canvas objects, student records, or authored
-Forge files. Scoring Sessions are not Home/Work jobs.
+Forge files. Scoring Sessions are not registry jobs; the agent lists and transfers
+them with `list_work_items` and `transfer_work_item`.
 
-The agent discovers and resumes work through the runtime. The console presents
-operation recovery and receipt links on CanvasAgent; it has no Work rail or
-separate job-opening surface.
+The console lists operations needing attention and recent receipts directly from
+their owning services. No console page or MCP tool reads the registry today.
 
 ## Persistence boundary
 
@@ -102,21 +102,21 @@ their connected agent; Canvas Live remains the review/edit surface.
 
 ## Detected findings
 
-Discovery is an explicit asynchronous read-only request; `GET /` must not synchronously
-scan Canvas. A scan is bounded to active bookmarked courses, cached with per-course
-freshness/error metadata, and may run in parallel with a maximum documented concurrency.
+Discovery runs in the background after each mirror heartbeat tick and reads the mirror
+first; no page request scans Canvas. A scan is bounded to Current courses, cached with
+per-course freshness/error metadata, and runs at most three courses in parallel within a
+30-second deadline.
 
 Runtime discovery providers reduce grading debt, roster warnings and
 student-response follow-up to aggregates. Operation recovery and recent receipts
 are listed directly by their owning services on CanvasAgent.
 
-Discovery persists counts and stable object IDs only. Student identities and submission
-text are retained only when a job opens in a PRIVATE workspace. An explicit discovery
-scan may inspect private metadata transiently for an approved aggregate reduction, but
-must discard it before the scan returns.
+Discovery persists counts and stable object IDs only. A discovery scan may inspect
+private metadata transiently for an approved aggregate reduction, but must discard it
+before the scan returns.
 
-The Home-attention provider reads submission comments only during the explicit discovery
-request. It reduces them immediately to assignment-scoped counts; it never returns,
+The comment follow-up provider reads submission comments only during a discovery
+scan. It reduces them immediately to assignment-scoped counts; it never returns,
 logs, hashes, caches, or persists comment text, author identity, or per-student state.
 Its definite follow-up signal requires an ordered latest student-authored response. A
 later non-student response with unprovable staff origin is a separate aggregate
@@ -146,16 +146,9 @@ Ignoring a job never mutates Canvas or its authoritative subsystem.
 
 ## Course context
 
-Focused course and write targets are distinct:
-
-- The focused course feeds course-specific reads and selectors.
-- Target courses are the explicit live-write scope.
-- Focus is independent of targets. `setFocus` never mutates write targets.
-- Deep links override only fields they explicitly supply.
-- Context never broadens a previously single-course action silently.
-
-The console has no shared write-target picker or browser context API. The agent's
-explicit operation scope and the runtime's frozen review define write targets.
+A job's `focused_course_id` is an index hint only and never a write target. The
+agent's explicit operation scope and the runtime's frozen review define write targets,
+and context never broadens a single-course action silently.
 
 ## Forbidden behavior
 

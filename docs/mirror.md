@@ -13,9 +13,9 @@ the agent tools and the control console handle it differently, by design.
 
 This document covers the runtime's read boundary. The connected agent/MCP path is the
 primary agent-facing read surface and is served from the mirror. The browser is a
-retained control console, so its teacher-in-the-loop diagnostics and decision surfaces
-may use the explicitly documented live fallback. That fallback stays in the console and
-doesn't turn into a generic browser-first architecture.
+small control console; its private Names page may use the documented live roster
+fallback below. That fallback stays in the console and doesn't turn into a generic
+browser-first architecture.
 
 For the agent:
 
@@ -37,14 +37,13 @@ For the agent:
    files are treated as absent, never repaired in place.
 2. **Sync is deterministic.** No LLM anywhere in the data path. CanvasExpert's
    heartbeat moves data; assistants only consume the result.
-3. **Real data at rest under teacher custody** — the same boundary as Canvas
+3. **Real data at rest under teacher custody**, the same boundary as Canvas
    itself. Pseudonymization stays exactly where it was: at the outbound
    MCP/LLM gate. The mirror changes where reads come from, never what leaves
    the machine.
 4. **Freshness is always visible.** Every collection carries an envelope
    (`state`, `last_success_at`, `last_attempt_at`, `error_code`); every
-   mirror-served read is labeled `source: "mirror"` + `synced_at`; the web
-   UI's own live fallbacks are labeled `source: "canvas"`. Staleness is reported
+   mirror-served read is labeled `source: "mirror"` + `synced_at`. Staleness is reported
    honestly in every read, so the agent can tell when a refresh is worth its
    time (see law 6).
 5. **Foreground wins.** Sync runs on a background heartbeat and yields to
@@ -55,9 +54,10 @@ For the agent:
    through the pseudonym gate, and Canvas Expert stays the only thing that
    talks to Canvas. When a read is outside the freshness policy, the agent
    refreshes it without asking the teacher: `refresh_mirror` triggers Canvas
-   Expert's own sync engine (the same coordinator behind "Sync now") and
-   reports a freshness status rather than Canvas data;
-   `refresh_mirror(course_id, structure_only=true)` refreshes a course's module structure; and
+   Expert's own sync engine (the same coordinator behind the console's **Refresh
+   course data**) and reports a freshness status rather than Canvas data;
+   `refresh_mirror(course_id, structure_only=true)` refreshes a Current course's
+   student-free Course Catalog (assignments, assignment groups, modules, and pages); and
    `refresh_scoring_session` brings late or resubmitted work from the mirror
    into an open Scoring Session. The agent skips a refresh when the data is
    already within policy, because a refresh costs time.
@@ -72,7 +72,7 @@ check protects each reviewed write from overwriting a newer Canvas change.
 ```
 %LOCALAPPDATA%\CanvasExpert\cache\Canvas Mirror\<course_id>\
   _sync.v1.json                    pass envelopes + delta watermarks
-  roster.v1.json                   students + sections (consumer fields only —
+  roster.v1.json                   students + sections (consumer fields only;
                                    no emails, no avatars)
   assignments.v1.json              slim Canvas-shaped assignment index
                                    (the authoring catalog stays the rich source;
@@ -85,7 +85,7 @@ check protects each reviewed write from overwriting a newer Canvas change.
                                    private, course-level freshness sidecar for
                                    comment-bearing submission acquisition only
                                    (schema, course id, state, last success/attempt
-                                   timestamps, sanitized error code — no comment
+                                   timestamps, sanitized error code; no comment
                                    content; see the submission-comments paragraph below)
   new_quiz_capability.v1.json      New Quiz metadata-scope capability record
                                    (student-free; see "New Quiz capability gate" below)
@@ -103,13 +103,14 @@ Ordinary assignment attempt evidence has a separate durable home under the
 selected workspace's `_System/Archive/Submission History/<course>/<assignment>/`.
 Its URL-free manifest keeps pseudonymized observations and references immutable
 original-file blobs; it is private teacher evidence, not a current Canvas
-projection. Workspace reset does not include this archive.
+projection.
 
 ## Sync passes (`api/mirror/sync.py`)
 
-- **full** — backfill and nightly reconcile are the *same code path*: fetch
+- **full**: backfill and nightly reconcile are the *same code path*: fetch
   everything (with `submission_history` and, only on this pass,
-  `submission_comments`), rewrite collections with attempt-preserving replace
+  `submission_comments`; scoring refreshes run a full pass without comments),
+  rewrite collections with attempt-preserving replace
   merges, prune assignments/students that no longer exist, reset watermarks.
   The full pass is also the only thing that can fix `missing`-flag drift:
   Canvas flips `missing` when a due date passes with no student action, which
@@ -120,50 +121,40 @@ projection. Workspace reset does not include this archive.
   prior success, `unavailable` before one) without touching any submission
   file. A failure earlier in the pass (assignments, students) never attempts
   the comment fetch and so never touches this sidecar at all.
-- **delta** — two course-level questions since the last watermark:
-  `submitted_since` (with history — catches resubmissions as new attempts)
+- **delta**: two course-level questions since the last watermark:
+  `submitted_since` (with history, which catches resubmissions as new attempts)
   and `graded_since`. Near-empty for stagnant courses; a stagnant assignment
   costs zero requests forever. Delta never requests `submission_comments` and
   never reads or writes the comment sidecar, so a newer comment-free delta can
   never be mistaken for comment freshness.
-- **roster** — students + sections; rosters rarely change, so daily. Roster
-  also never touches the comment sidecar.
+- **roster**: students + sections, refreshed before the roster can age past
+  the serve window (see Scheduling). Roster also never touches the comment sidecar.
 
-Every other submission-refresh path — the focused single-assignment refresh, the
+Every other submission-refresh path (the focused single-assignment refresh, the
 `submissions.course_delta` write-through refresh, and group/roster
-reconciliation — is narrower than a full pass and likewise never advances or
+reconciliation) is narrower than a full pass and likewise never advances or
 claims comment freshness; only a comment-inclusive full pass may do so.
 
-Roster uses the private roster document only when its state is exactly `current` for
-student and section reads. Roster also uses its separate private `groups.v1.json` only
-when it is exactly `current` and under 24 hours old; it stores category/group IDs and
+Groups live in a separate private `groups.v1.json`; it stores category/group IDs and
 names plus membership `{id,user_id}` pairs, never student names or raw Canvas fields.
-Missing, corrupt, stale, or unavailable group snapshots follow the existing live group
-loader and a successful normalized live read replaces the snapshot. Local group data remains display context only and never authorizes a mutation.
+Group discovery reads it mirror-only and refuses with a `refresh_mirror` repair when the
+snapshot is missing, malformed, or outside the freshness policy. Local group data remains
+display context only and never authorizes a mutation.
 
 Watermarks advance only on success, to pass-start minus a 10-minute overlap;
 store merges are idempotent so overlap duplicates are harmless. Failures
 degrade the pass envelope (`stale` after a prior success, `unavailable`
 before one) and never touch collection files.
 
-The Current-course Course Catalog refresh can acquire one complete assignment
-collection and forward its in-memory receipt to the Catalog and this mirror's
-assignment-membership commit. The mirror applies the existing complete-receipt
-validation and membership writer only: it does not update a pass envelope or
-watermark, reconcile submissions, or perform New Quiz work. The two local
-projection commits are independent rather than transactional.
-
-Every `full_pass`/`delta_pass` invocation — the 15-minute heartbeat, the nightly
-reconcile, and manual "Sync now" alike — forwards the same already-acquired
+Every `full_pass`/`delta_pass` invocation (the 15-minute heartbeat, the nightly
+reconcile, and manual refreshes alike) forwards its already-acquired
 assignment receipt to Course Catalog's assignment scope only, via
 `course_catalog.refresh_catalog_assignments_only`. This happens before either
 pass's own `assignment_error` early-return, so Catalog receives and applies the
 receipt (good or bad) independently of whether the mirror pass itself continues.
-Catalog's modules and assignment-groups scopes are never touched by this
-path — they stay exactly as last committed. This is the same non-transactional,
-independently-durable coordination the manual Catalog-refresh route already
-uses, extended to the passes that previously re-fetched assignments without
-ever updating Catalog.
+Catalog's modules, assignment-groups, and pages scopes are never touched by this
+path; they stay exactly as last committed until a structure refresh. The two local
+projection commits are independent rather than transactional.
 
 Names reads the course's current private roster projection and otherwise falls back
 to a bounded live roster read. Runtime operation preparation and execution keep
@@ -171,8 +162,7 @@ live drift/preflight checks; local projection data never authorizes a write.
 
 **Attempt history is append-only** within a living submission: students who
 resubmit accumulate `attempts` keyed by attempt number, which survive full-
-pass rewrites. This is the substrate for regrade queues, revision chains, and
-growth-over-time views. The disposable projection still prunes removed
+pass rewrites. The disposable projection still prunes removed
 students and assignments, while observed ordinary assignment attempts and
 captured originals remain in the private retained-history archive for draft
 comparison. This archive reports observed history only; it does not establish
@@ -180,22 +170,24 @@ current membership or freshness. New Quiz response snapshots follow the same law
 attempts captured earlier but absent from a later report are carried forward,
 while `current`/`latest_attempt` always reflect the newest fetch alone.
 
-## Scheduling (`api/webui/mirror_service.py`)
+## Scheduling (`api/mirror/service.py`)
 
-A daemon heartbeat (started in the server lifespan
-heartbeat) ticks every 15 minutes for Current courses only:
+A daemon heartbeat (started by `api/runtime.py` when the runtime starts, and stopped
+with it) ticks every 15 minutes for Current courses only:
 
 - first tick 2 minutes after launch (catch-up)
 - **full** when none has succeeded in 24 h (first-run backfill, then nightly)
-- otherwise **delta** every tick, plus **roster** daily
+- otherwise **delta** every tick, plus **roster** once it reaches the serve window
+  (`mirror_serve_max_age_hours`, at most 24 h)
 - Every successful **full** or **roster** maintenance pass also makes one
   best-effort private group-context read through Roster's existing normalized
   loader. Its result is nested evidence on that pass, not a new cadence or
   pass envelope: success replaces `groups.v1.json`; failure retains its
   last-good categories and marks that snapshot stale without failing the core
   maintenance pass. Ordinary deltas do not refresh groups.
-- `notify_course_changed(course_id)` — write-through hook: after CanvasExpert
-  itself pushes grades (PowerGrader push, curve apply/revert), a short-delay
+- `notify_course_changed(course_id)` is a write-through hook: after CanvasExpert
+  itself pushes grades (grade adjustments, including curves and reverts, and SIS
+  bridge writes), a short-delay
   `submissions.course_delta` refresh issues only the overlapping submitted and
   graded collection questions. It does not fetch assignment structure or New
   Quiz metadata, and it deliberately leaves the general delta pass and
@@ -203,16 +195,17 @@ heartbeat) ticks every 15 minutes for Current courses only:
   freshness authority.
 
 Config (machine-local): `mirror_enabled` (default true),
-`mirror_serve_max_age_hours` (default 6; older than this, the control console's own
-readers fall back to live Canvas, while the MCP tools report it and the agent refreshes, per law 6).
+`mirror_serve_max_age_hours` (default 6; older than this, the private roster projection
+is not served, internal readers with a live fallback read Canvas instead, and the MCP
+tools report it so the agent refreshes, per law 6).
 
 Routes: `GET /api/mirror/status` (per-course pass envelopes + watermarks, and
 sanitized plan progress when passed `plan_id`), `POST /api/mirror/sync-now`
-(asynchronous manual read-only sync; returns an opaque plan ID with `202`). The Home
-surface polls the plan before rescanning its local Work findings. The legacy internal
-`sync_now()` compatibility function remains direct for existing callers/tests; the HTTP
-route uses the two-worker coordinator. Heartbeat and post-write refreshes also submit
+(asynchronous manual read-only sync; returns an opaque plan ID with `202`). The
+CanvasAgent page's **Refresh course data** button calls it and polls the plan. The route
+uses the two-worker coordinator. Heartbeat and post-write refreshes also submit
 read-only coordinator plans, so background GETs yield to foreground local requests.
+Each heartbeat tick also rescans local work findings after its plans finish.
 See
 `docs/contracts/canvasmirror-coordinator-contract.md`.
 
@@ -224,7 +217,7 @@ workspace; it is never a Canvas content/grade write tool.
 New Quiz metadata follows the same full/delta cadence without generating
 Student Analysis reports. Per-quiz metadata fetches are skipped while the
 stored doc is current (unchanged assignment `updated_at`, under a 24 h
-true-up age) — a stagnant quiz costs zero requests per tick; the daily
+true-up age), so a stagnant quiz costs zero requests per tick; the daily
 true-up bounds staleness from item edits that don't bump `updated_at`. PowerGrader's focused New Quiz acquisition writes
 the response snapshot on success. A fresh response snapshot can satisfy a
 later PowerGrader read without another ordinary submission/report read; native
@@ -232,7 +225,8 @@ file evidence still uses the focused live transport.
 
 ### New Quiz capability gate (1.0beta slices 01a / 02b)
 
-New Quiz endpoints are gated on active enrollment (`api/README.md` ~205-213): the
+New Quiz endpoints are gated on active enrollment (see the New Quizzes notes in
+`api/README.md`): the
 same token returns 200 in an actively-enrolled course and 403 in a
 concluded/past-enrollment course, deterministically, for the metadata scope. Design:
 **lifecycle predicts, probe confirms, circuit backstops**
@@ -242,7 +236,7 @@ predictor and suppresses normal concluded-course New Quiz metadata work.
 
 `sync_metadata` (`api/mirror/new_quizzes.py`) keeps a small, student-free
 capability record per course (`new_quiz_capability.v1.json`, via
-`api/mirror/store.py`'s course_dir/course_lock/atomic-write conventions —
+`api/mirror/store.py`'s course_dir/course_lock/atomic-write conventions,
 its own file rather than widening `_sync.v1.json`'s schema): `capability`
 (`supported` / `restricted` / `unknown`), `last_probe_at`, `retry_after`, and
 a sanitized `evidence` (`forbidden` / `unauthorized` category + consecutive
@@ -267,8 +261,8 @@ reports incomplete metadata without replacing last-good quiz data.
 
 Gate: while restricted and the cooldown has not expired, `sync_metadata`
 skips the entire metadata pass (zero Canvas calls) and records the run as
-skipped-restricted. Once the cooldown expires, and for a manual
-`sync_now(course_id)` with at least one New Quiz assignment, it makes one
+skipped-restricted. Once the cooldown expires, and for a manual-priority
+refresh of a course with at least one New Quiz assignment, it makes one
 collection probe. A successful probe can clear the restriction even when every
 local quiz document is fresh, without inventing metadata. An empty New Quiz
 assignment set remains zero-call. Skipped-restricted runs and circuit opens/clears are counted
@@ -280,7 +274,7 @@ observable without exposing course names.
 
 Implements the `gradebook_queries` interface (`course_students`,
 `course_assignments`, `course_submissions`, `assignment`,
-`assignment_submissions` — each returning `(data, error)`) from the store.
+`assignment_submissions`, each returning `(data, error)`) from the store.
 The MCP `get_roster` / `get_submissions` / `get_gradebook_snapshot` tools are
 served
   from the mirror when fresh (zero Canvas calls, works offline),
@@ -288,7 +282,7 @@ served
   `synced_at`. These tools call
   `mirror_queries` directly and refuse (a structured `{"ok": false, "error":
   ...}`) rather than falling through to a live fetch when the mirror can't
-  serve — see "MCP reads and the refresh tool" below.
+  serve; see "MCP reads and the refresh tool" below.
 
 Explicit `queries=` overrides and monkeypatched test seams always bypass the
 mirror in the control-console loader, so offline tests exercise the live path
@@ -303,9 +297,9 @@ the mirror (design law 6): when it is outside the freshness policy they return
 `{"ok": false, "error": "..."}` naming the problem, rather than a live Canvas
 payload. `refresh_mirror(course_id)` is how the agent moves past that, and the
 agent calls it on its own, without asking the teacher. The tool calls
-`mirror_service.enqueue_sync` (the same manual-priority
-coordinator plan behind the control console's "Sync now") and waits up to
-`tools._REFRESH_TIMEOUT_SECONDS` (25s) via `mirror_service.wait_for_plan`,
+`api/mirror/service.py::enqueue_sync` (the same manual-priority
+coordinator plan behind the control console's **Refresh course data**) and waits up to
+`tools._REFRESH_TIMEOUT_SECONDS` (25s) via `wait_for_plan`,
 then reports `{"ok": true, "status": "synced"}`, `{"ok": true, "status":
 "syncing"}` (still running past the timeout, so retry shortly), or
 `{"ok": false, "status": "failed"}`. It never returns course, roster, or
@@ -321,8 +315,8 @@ with `coverage: observed_only`; it never refreshes Canvas or returns raw files.
 Approved text/DOCX originals may contribute scrubbed text; PDF and other
 formats remain local-only for teacher inspection in the private archive.
 
-Scoring Session continuation follows the same boundary. Once a queue item has
-been selected, preparation reads fresh roster, assignment, and submission
+Scoring Session continuation follows the same boundary. Once the teacher has
+selected an assignment, preparation reads fresh roster, assignment, and submission
 projections only. Ordinary submission text enters the existing SAFE pipeline;
 attachment-bearing, media-only, empty, or unreadable rows remain held for
 review, and no evidence bytes are downloaded. The assignment projection's
@@ -331,8 +325,9 @@ student-free quiz classification stops a true New Quiz with
 
 ## v1 non-goals (deliberate)
 
-- Submission **comments** are captured only by the nightly full pass (author
-  id, author role, comment text, created_at only — no names/avatars/
+- Submission **comments** are captured only by comment-inclusive full passes (the
+  nightly full pass and the opt-in `refresh_mirror(course_id, include_comments=true)`;
+  author id, author role, comment text, created_at only; no names/avatars/
   attachments). Delta stays lean: a comment-only change between full passes is
   still a blind spot until the next full pass, but that staleness is no longer
   silently inferred from the full/delta pass envelopes. A dedicated, private
@@ -343,15 +338,15 @@ student-free quiz classification stops a true New Quiz with
   newer comment-free delta's freshness. `read_service.private_submission_comments`
   reuses the normal submission records but reports this sidecar's envelope, and
   a missing or corrupt sidecar reads as `unavailable` without ever touching the
-  last-good submission files. This slice is read-service-only: no Home/Work
-  consumer, report fallback, or write-triggered invalidation is wired to it yet.
+  last-good submission files. Feedback revision preparation and local work
+  findings read it; no write-triggered invalidation is wired to it.
 - Arbitrary attachment handling, media derivatives, OCR, and PDF extraction.
   Ordinary assignment originals are retained privately as evidence; only the
   existing approved text/DOCX routing may contribute scrubbed text to the new
   history read.
 - New Quiz item-level grading or feedback writes. Mirror snapshots are read-only,
   and Canvas Expert does not write New Quiz item scores or per-item feedback.
-- Multi-machine conflict smarts beyond disposability. (`vault.json` — not a
-  mirror file — remains the one cross-machine-conflict-sensitive artifact.)
+- Multi-machine conflict smarts beyond disposability. Shared stores under `_Shared/`,
+  not mirror files, carry the cross-machine conflict handling.
 - Startup-item registration (separate slice; per-user Startup folder,
   no admin).

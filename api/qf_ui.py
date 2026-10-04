@@ -1,9 +1,9 @@
-"""Launch the local Canvas Expert web UI.
+"""Launch the local Canvas Expert control console.
 
-Starts a local server (default http://127.0.0.1:8765) wrapping Forge validation,
-planning, and reviewed Operation Ledger delivery behind a browser UI — no terminal commands, no
-remembering tokens or course IDs (see api/webui/ for the implementation,
-api/README.md for the walkthrough).
+Starts the console (default http://127.0.0.1:8765) for setup, AI app connections,
+health, Canvas data, operation recovery, receipts and private name lookups. It shares
+one process with any connected agent; startup is owned by api/runtime.py. See
+api/webui/ for the console and api/README.md for the walkthrough.
 
 Run: py qf_ui.py [--port 8765] [--no-browser]
 """

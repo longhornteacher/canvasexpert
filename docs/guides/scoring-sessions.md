@@ -14,9 +14,10 @@ For “what needs grading,” call `discover_scoring_work()` with no arguments.
 Canvas Expert returns assignment, freshness, and attention tables for every
 configured Current course without enqueueing, waiting for, polling, or retrying a
 refresh. The result is student-free and includes one freshness row per course:
-`course_id`, `course_name`, `state`, `last_success_at`, `age_minutes`, and
-`requires_teacher_confirmation` (true when the snapshot is older than the policy
-below, meaning a refresh is due).
+`course_id`, `course_name`, `state`, `last_success_at`, `age_minutes`,
+`requires_teacher_confirmation` (true when the snapshot has reached the policy window
+below, meaning a refresh is due), and the policy fields `within_policy`,
+`policy_window_minutes`, and `school_hours`.
 
 The agent keeps the mirror current itself. When a freshness row is outside policy
 it calls `refresh_mirror(course_id)` (or `refresh_mirror(course_id, structure_only=true)` for
@@ -44,10 +45,10 @@ course mirror and retry.
    `needs_scoring_norms` with a bounded teacher question. Missing or invalid Canvas points
    return `assignment_points_unavailable`; zero is preserved.
 
-   During Monday-Friday 07:00-16:30 America/Chicago, a valid current snapshot may
-   be silently up to 60 minutes old; outside those hours the threshold is 600
-   minutes. At the threshold itself no refresh is needed. Beyond it,
-   preparation returns `mirror_refresh_needed` without creating or replacing a
+   During Monday-Friday 07:00-16:30 America/Chicago on school days, a valid current
+   snapshot may be silently less than 60 minutes old; outside those hours, and on
+   configured no-school dates, the window is 600 minutes. Once a snapshot reaches the
+   window, preparation returns `mirror_refresh_needed` without creating or replacing a
    session. Call `refresh_mirror(course_id)` and retry the exact call. If the
    teacher has said nothing changed, retry with `use_existing_mirror=true` instead.
 
@@ -193,8 +194,8 @@ says to push. Canvas Live is the record afterward. A previously verified numeric
 row still in the current session can be corrected through review; later edits happen in
 Canvas Live.
 
-The same habit covers every Canvas write (`apply_operation`, scoring and roster applies,
-and `push_content_live`).
+The same habit covers every `apply_*` call (including `apply_operation` and the scoring
+and roster applies) and `push_content_live`.
 Before the call, the agent says what will change and any warnings, then waits for
 the teacher's go. One go can cover the several rows or assignments the teacher
 selected.
@@ -268,8 +269,7 @@ returns `feedback_packet_too_large`, rather than silently omitting text.
 Stage selected `{pseudonym, comment_key, feedback}` rows with
 `stage_scoring_results(scoring_session_id, results, expected_packet_digest,
 attachment_file=null)`. Feedback
-is teacher-controlled concise plain text, without the ordinary grading renderer's
-Glows/Grows or extra-credit requirements. Report selected and untouched counts.
+is teacher-controlled concise plain text. Report selected and untouched counts.
 Call `get_scoring_preview(scoring_session_id)` and follow every page before asking
 for a push. Show each current comment, its exact replacement, and the attachment
 filename when selected. On direct teacher instruction, call
@@ -316,7 +316,7 @@ send intents, outcomes, and earlier runs remain in private append-only work hist
 | Signal | Meaning | What to do |
 |---|---|---|
 | `needs_scoring_norms` | No rubric or guidance is available | Ask for bounded guidance and retry the same preparation |
-| `mirror_refresh_needed` | The valid local snapshot exceeds the applicable America/Chicago 60-minute school-hours or 600-minute outside-hours threshold | Refresh this course's mirror with `refresh_mirror`, then retry. If the teacher has said nothing changed, retry with `use_existing_mirror=true` instead |
+| `mirror_refresh_needed` | The valid local snapshot has reached the applicable America/Chicago 60-minute school-hours or 600-minute outside-hours window | Refresh this course's mirror with `refresh_mirror`, then retry. If the teacher has said nothing changed, retry with `use_existing_mirror=true` instead |
 | `mirror_projection_unavailable` | A required projection is missing, corrupt, or not current | Refresh the Current course mirror, then retry the exact call |
 | `scoring_session_already_open` | A usable assignment session already exists | Continue from its packet; do not prepare it again. If work arrived late or was resubmitted, call `refresh_scoring_session` and tell the teacher what it brought in |
 | `session_mirror_changed` | The mirror moved on after the session was prepared; the session is unchanged | Call `refresh_scoring_session(scoring_session_id)`, tell the teacher about any new or resubmitted work, then read the packet again |

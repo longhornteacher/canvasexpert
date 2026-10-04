@@ -135,13 +135,9 @@ inventory the migration must preserve:
 - **Course Catalog v1** — student-data-free assignment/module projection with strict
   allowlists, rich descriptions/rubric data/module outlines, atomic writes, previous
   snapshots, corruption recovery, and OneDrive conflict warnings.
-- **Existing write safety** — operation-ledger adapters own most content/gradebook
-  mutations; PowerGrader keeps explicit review, live preflight, idempotency, and receipts.
-  Its live-course New Quiz item-finalization lane uses Canvas's first-party short-lived
-  signed grader transport (preflight freeze, result-version drift detection, verification,
-  receipts, fail-closed SpeedGrader fallback); active/current instructor enrollment is
-  required and restricted courses can return `403`; NQ scheduled/late-catch-up/interactive
-  auto-posting remain unavailable.
+- **Existing write safety**: operation-ledger adapters own most content/gradebook
+  mutations; PowerGrader keeps explicit review, idempotency, post-write verification, and
+  receipts. Canvas Expert writes no New Quiz item scores or per-item feedback.
 
 The migration must converge these pieces. It must not replace them with a database, a new
 job platform, a raw-response cache, or a second write system.
@@ -207,8 +203,8 @@ extension, group change, late-policy change, or content mutation.
 
 ### 5.8 Foreground teacher work outranks background freshness
 
-Create must not wait for unrelated submission synchronization. A focused assignment refresh
-must outrank a concluded-course maintenance pass. Background work yields or pauses while a
+Content delivery must not wait for unrelated submission synchronization. A focused
+assignment refresh must outrank a concluded-course maintenance pass. Background work yields or pauses while a
 write preflight is active.
 
 ### 5.9 Deletion is a first-class change
@@ -248,7 +244,7 @@ flowchart LR
     Catalog["Student-free catalog projection<br/>course structure and pickers"]
     Private["Private course projection<br/>roster, groups, submissions, grade facts"]
     Evidence["Focused evidence projection<br/>attachments and New Quiz response evidence"]
-    Views["Derived local views<br/>gradebook, work, reports, revision chains"]
+    Views["Derived local views<br/>gradebook, work, submission history"]
 
     ReadService["Typed Canvas read service<br/>source + state + synced_at"]
     UI["Retained console views<br/>MCP semantic results"]
@@ -298,9 +294,9 @@ not call Canvas and do not know UI routes.
 data plus provenance and freshness. It may request a bounded refresh according to explicit
 policy.
 
-**Derived views** compute reusable teacher concepts—gradebook snapshots, attention rows,
-grading debt, revision chains, report facts—from projections. They do not become a second
-Canvas cache.
+**Derived views** compute reusable teacher concepts (gradebook snapshots, attention rows,
+grading debt, submission history) from projections. They do not become a second Canvas
+cache.
 
 **Live command boundary** owns every mutation and its authoritative reads. The operation
 ledger and PowerGrader remain the principal implementations.
@@ -312,6 +308,10 @@ ledger and PowerGrader remain the principal implementations.
 The following table is the target scope decision. “Required” means a concrete current
 consumer justifies the scope before 1.0 beta. “Focused” means acquire only in response to a
 teacher-selected object or write workflow. “Deferred” means do not add merely for symmetry.
+
+Superseded in part: the console consumers named below (Home, Create, Course Info, Gradebook,
+reports, Student Reports) are retired, and the MCP runtime is the consumer; Canvas owns late
+policy and Canvas Expert never reads it (`docs/contracts/grading-policy-contract.md`).
 
 | Canvas information | 1.0-beta treatment | Projection / owner | Primary consumers | Important boundary |
 |---|---|---|---|---|
@@ -335,7 +335,7 @@ teacher-selected object or write workflow. “Deferred” means do not add merel
 | Attachment/file bytes | Focused only | Canonical private evidence owner | PowerGrader, explicit evidence acquisition | Never background-prefetch all files |
 | Assignment overrides | Focused/live | Command or focused report owner | Extensions, differentiation, write preflight | Do not globally mirror override trees for 1.0 beta |
 | Page/module item stubs | Required through modules | Student-free catalog | Course structure/navigation | Title/type/content ID only |
-| Page bodies | Required since 2026-08-01 | Student-free catalog `pages` scope | `get_course_content(kind="pages", ...)` MCP course context, retained control-console course-catalog route | Normalized plain text only; every URL rewritten to `[link]` |
+| Page bodies | Required since 2026-08-01 | Student-free catalog `pages` scope | `get_course_content(kind="pages", ...)` MCP course context | Normalized plain text only; every URL rewritten to `[link]` |
 | Classic Quiz questions and detailed responses | Live/focused or Canvas-native | PowerGrader/SpeedGrader boundary | Grading | No broad mirror in 1.0 beta |
 | Teacher/TA/observer directory | Deferred/minimal classification only | None unless a current consumer proves need | Comment authorship edge cases | Do not mirror emails for convenience |
 | Student email and avatars | No current consumer | No persistence | Future named consumer only | Privacy cost exceeds routine value |
@@ -460,7 +460,11 @@ pagination, invalid root, or rejected record cannot.
 
 ---
 
-## 11. Tool-to-Canvas routing — superseded
+## 11. Tool-to-Canvas routing
+
+Superseded: `docs/mcp-server.md` and the module maps under `docs/reference/` own tool
+routing; the late sweep, late-policy writes and New Quiz finalization writes named below are
+retired.
 
 The product map the senior should preserve while writing briefs. The module maps under
 `docs/reference/` own the per-route implementation detail; this table owns the durable
@@ -508,12 +512,12 @@ This table states the end-state owner, not permission to change every caller at 
 | Group categories/groups/memberships | Private groups scope | Roster and operation adapters | Remove N+1 display reads |
 | Course submissions | Private submission delta/reconcile | Focused assignment and write preflight | No duplicate surface fetches |
 | Assignment submissions | Named focused scope | PowerGrader/grade command | Never imply whole-course sync |
-| Late policy/course grading config | Gradebook-config scope | Late-policy adapter | Display local, mutation live |
+| Late policy/course grading config | None | None; Canvas owns late policy | Canvas Expert never reads or sets the course late policy |
 | Assignment overrides | None globally | Extension/differentiation focused owner | Remain live/focused for beta |
 | Core quizzes / Classic Quiz details | None broadly | Focused grading/content owner | Do not mirror for completeness |
 | New Quiz metadata/items | New Quiz metadata scope | Quiz operation preflight | Capability circuit required |
 | New Quiz reports/responses | Focused response scope | PowerGrader report owner | Report generation never global heartbeat work |
-| Native New Quiz launch/result/item calls | None | Specialized PowerGrader grader/evidence owner | Credentials and signed URLs memory-only |
+| Native New Quiz launch/result/item calls | None | Specialized PowerGrader evidence owner | Credentials and signed URLs memory-only |
 | Files/attachments | Metadata in projections | Focused evidence/upload owner | No background binary sweep |
 | Pages | Module stubs plus catalog `pages` scope | Page operation adapter; catalog owns the projection | Plain-text bodies only; no raw HTML or URLs |
 | Discussions/announcements/events | None | Future named consumer only | Out of 1.0-beta scope |
@@ -525,7 +529,12 @@ the read service.
 
 ---
 
-## 13. Gradebook as a first-class mirror consumer — superseded
+## 13. Gradebook as a first-class mirror consumer
+
+Superseded: the Gradebook console page, late sweep and late-policy writes are retired.
+`get_gradebook_snapshot` serves read-only views, `set_score_curve_rule` and
+`preview_grade_adjustment` own curves, `preview_attempts_grant` owns extensions, and late
+work follows `docs/contracts/grading-policy-contract.md`.
 
 Gradebook is where the information-spine idea becomes most valuable and most dangerous.
 
@@ -714,7 +723,7 @@ Metrics should be bounded rotating operational records, not a student-data wareh
 1. Suppress repeated concluded-course New Quiz authorization fan-out.
 2. Replace whole delta calls with named scopes for PowerGrader and post-write refresh.
 3. Share assignments acquisition between private mirror and Course Catalog.
-4. Coalesce duplicate scope requests from Home, routines, MCP, and UI routes.
+4. Coalesce duplicate scope requests from the runtime heartbeat, MCP, and console routes.
 5. Use fixed small concurrency across independent scope/course work while preserving
    foreground priority and Canvas rate limits.
 6. Keep binary evidence and report generation focused.
@@ -751,7 +760,10 @@ stale/unavailable behavior, source/timestamp reaching the UI, live/local equival
 private-field leakage, and write paths still consulting live transport — embodied in the
 shipped consumer suites.
 
-### 19.4 Mutation tests — superseded
+### 19.4 Mutation tests
+
+Superseded: the sweep is retired; the operation-ledger and scoring suites cover mutation
+safety.
 
 Authoritative pre-execution reload, drift rejection, idempotency/receipt preflight, ambiguous
 verification, exact post-write reconciliation, no repeated write on reconcile failure,
@@ -789,8 +801,7 @@ source/freshness, and any Canvas rate-limit evidence. Never record private respo
 
 **Accepted beta limitation:** Per-student override staleness (Batch 7 unit 03).
 The mirror stores no override projection; `submissions.cached_due_date` can lag
-an override-only change. The former report consumer was retired on 2026-10-04.
-Future consumers must reassess this field's freshness. See
+an override-only change. Future consumers must reassess this field's freshness. See
 `docs/reference/mutation-reconciliation-map.md` family 3.
 
 **Deferred to the live start-of-year run** (needs a real 1-current/2-concluded profile with
@@ -800,7 +811,7 @@ live students and current New Quizzes; we chose not to build a synthetic Canvas)
    cold/warm/GET targets.
 2. Live state matrices: offline launch + write-refusal, two-machine OneDrive conflict, and
    network-fault recovery — all unit-covered; live confirmation pending.
-3. Rendered-route sweep completion (12 routes already clean).
+3. Rendered-route sweep of the five console routes.
 
 Note: the 2026-07-20 live sync surfaced no code defect — it honestly reported "could not
 finish" when an out-of-profile shell course and 503-throttled archived New Quizzes made
@@ -835,20 +846,16 @@ They are not speculative feature requests.
 
 1. **Duplicate structure acquisition:** Course Catalog and private mirror independently
    acquire assignments.
-2. **Retired console bypasses (2026-10-04):** the former roster editors,
-   course-detail views, content pickers and report/portfolio metadata paths were
-   deleted. They no longer seed migration work.
-6. **Comment-only blind spot:** nightly full capture bounds staleness but cannot support a
+2. **Comment-only blind spot:** nightly full capture bounds staleness but cannot support a
    truly current agent follow-up view; deleted comments can persist under omit-versus-
    empty ambiguity.
-7. **Transport ownership drift:** specialized and accidental direct HTTP calls are not yet
+3. **Transport ownership drift:** specialized and accidental direct HTTP calls are not yet
    enforced by an architecture boundary.
 
 These open seams remain the natural starting points if migration work resumes, beginning
 with item 1 (duplicate Course Catalog/private-mirror assignment acquisition). The safety
 seams retired from this list — assignment-deletion consistency, PowerGrader refresh scope,
-the New Quiz retry circuit, the lifecycle model, sweep safety, New Quiz write-status
-documentation, and mirror collection completeness — remain regression boundaries that
+the New Quiz retry circuit, the lifecycle model, New Quiz write-status documentation, and mirror collection completeness — remain regression boundaries that
 routing more surfaces through the mirror must not reintroduce; their history is in git.
 
 ---
@@ -885,11 +892,11 @@ The senior must reverify symbols on `dev` before writing a handoff. As of this d
 |---|---|
 | Core Canvas transport | `api/platform_services/canvas_client.py`, `api/gradebook_queries.py` |
 | Mirror storage/sync/query | `api/mirror/store.py`, `api/mirror/sync.py`, `api/mirror/queries.py` |
-| Mirror scheduler/manual sync | `api/webui/mirror_service.py` |
+| Mirror scheduler/manual sync | `api/mirror/service.py`, heartbeat started by `api/runtime.py` |
 | New Quiz mirror | `api/mirror/new_quizzes.py` |
 | Course Catalog | `api/course_catalog.py`, `docs/contracts/course-catalog-contract.md` |
 | Shared read service | `api/mirror/read_service.py` |
-| Work provider compatibility shim | `api/work_registry/providers/__init__.py` |
+| Work provider shared helpers | `api/work_registry/providers/__init__.py` |
 | PowerGrader acquisition | `api/powergrader/canvas_fetch.py`, `assignment_refresh.py`, `new_quiz_fetch.py` |
 | New Quiz response acquisition (read-only) | `api/powergrader/new_quiz_fetch.py` |
 | Gradebook | `api/grade_adjustment.py`, `api/operation_ledger/adapters/grade_adjustment.py` |

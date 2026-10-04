@@ -17,8 +17,8 @@ See `api/README.md` for setup and runtime ownership and
 | Route | Purpose | Template and page script |
 |---|---|---|
 | `/` | CanvasAgent: desktop connections, Canvas readiness, mirror status/refresh, privacy, operations needing attention and recent receipts | `canvasagent.html`, `canvasagent.js` |
-| `/welcome` | First-run account setup | `welcome.html` |
-| `/settings` | Account, Current/Previous courses, Forge tags/colors, workspace/privacy, and updates | `settings.html`, `settings.js`, `settings/*.js` |
+| `/welcome` | First-run setup: workspace folder, Canvas address and token | `welcome.html`, `welcome.js` |
+| `/settings` | Canvas account, Canvas data, Current/Previous courses, differentiation tags and colors, workspace, Identity Vault across devices, updates and support bundle | `settings.html`, `settings.js`, `settings/*.js` |
 | `/names` | Read-only searchable pseudonym, real name and section table; protected names, scrub test, who-is-who export and vault backup | `names.html`, `names.js` |
 | `/receipts/{id}` | Private receipt detail | `receipt.html` |
 
@@ -27,8 +27,8 @@ Navigation contains CanvasAgent, Names and Settings. These are the only console 
 ## Recovery and receipts
 
 CanvasAgent reads `/api/operations` for interrupted, uncertain or failed operations.
-The existing retry route retries eligible unresolved work; each row links to its
-receipt. `/api/receipts` supplies recent receipt links. The console never prepares,
+`POST /api/operations/{id}/retry` retries eligible unresolved work; each row links to
+its receipt. `/api/receipts` supplies recent receipt links. The console never prepares,
 reviews or applies a new operation. Abandoning work belongs to the agent's
 `abandon_operation` tool. Historical receipt step details remain readable.
 
@@ -51,9 +51,11 @@ configuration. `/api/download-contract` serves canonical seeded authoring refere
 
 Settings stores the Canvas token in Windows Credential Manager. Current courses define
 normal runtime discovery and pickers; Previous courses remain available when explicitly
-selected. Workspace/privacy controls manage the configured private workspace, pseudonym
-secret and shared-store conflicts. `/api/open-folder` opens that workspace.
-Self-update is teacher-initiated and uses the pinned public repository.
+selected. Workspace shows the configured private workspace, and `/api/open-folder`
+opens it. Identity Vault across devices moves the pseudonym key between computers.
+Shared-store conflicts surface on CanvasAgent through `routes/names.py`. Self-update is
+teacher-initiated and uses the pinned public repository. Support bundle builds a
+private diagnostic ZIP.
 
 ## Presentation and verification
 

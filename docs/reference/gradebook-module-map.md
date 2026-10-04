@@ -1,35 +1,33 @@
 # Gradebook Module Map
 
 Routing scope: open this map when gradebook services, reviewed grading operations,
-or gradebook-shaped runtime reads are in scope. The local console gradebook page and
-its route-specific services were retired; the agent-facing runtime and Canvas Live
-own teacher grading work.
+or gradebook-shaped runtime reads are in scope. The agent-facing runtime and Canvas
+Live own teacher grading work.
 
-## Remaining services
+## Services
 
-- `api/grade_adjustment.py` — mirror-backed previews and receipt-backed reviewed
+- `api/grade_adjustment.py`: mirror-backed previews and receipt-backed reviewed
   grade adjustments and reversals.
-- `api/attempts_grant.py` — reviewed extra-attempts and reopened-window grants for
+- `api/attempts_grant.py`: reviewed extra-attempts and reopened-window grants for
   one assignment (preview/apply service), with
   `api/operation_ledger/adapters/attempts_grant.py` (kind `gradebook.attempts_grant`)
   owning the per-kind Canvas transport, live re-reads, and checkpointed steps.
-- `api/gradebook_snapshot.py` — pure `build_snapshot` aggregation and
+- `api/gradebook_snapshot.py`: pure `build_snapshot` aggregation and
   `needs_grading` classification shared by runtime consumers.
-- `api/gradebook_queries.py` — live Canvas-shaped assignment, roster, and submission
+- `api/gradebook_queries.py`: live Canvas-shaped assignment, roster, and submission
   reads used by retained application services and runtime seams.
-- [`docs/guides/sis-grade-bridges.md`](../guides/sis-grade-bridges.md) — preview,
+- [`docs/guides/sis-grade-bridges.md`](../guides/sis-grade-bridges.md): preview,
   apply, recurring-update, and recovery routing for SIS grade bridges.
 
 ## Runtime boundaries
 
 The MCP runtime owns bounded gradebook reads, explicit preparation and review, verified
 Canvas actions, and durable receipts. `get_gradebook_snapshot` serves the local mirror
-with pseudonymized student columns. Existing-grade adjustments use the reviewed Operation Ledger path. The runtime has no console route or browser
-presentation contract for these workflows.
+with pseudonymized student columns. Existing-grade adjustments use the reviewed
+Operation Ledger path. The runtime has no console route or browser presentation
+contract for these workflows.
 
-Canvas Live is the teacher's review and edit surface for grading. Course page Canvas
-quick links remain available for direct navigation when a work-rail item needs teacher
-attention.
+Canvas Live is the teacher's review and edit surface for grading.
 
 ## First places to look by symptom
 
@@ -72,14 +70,6 @@ afterward, unless marked otherwise.
 
 ## Scoring Session late days
 
-Canvas owns late points; Canvas Expert owns the days sent with a Scoring Session score.
-Days use the first meaningful attempt and apply in every course. Canvas Expert does not
-read the course late policy or compute point deductions. Packet baselines and score
-changes use entered score (`entered_score`, falling back to `score + points_deducted`),
-never the post-deduction score. A newer attempt after a verified push may clear Canvas's
-late box; the scoring preview flags `late_box_reset`. A previously verified numeric-score
-push in the current session can be corrected through the same preview and explicit apply
-path. Comment-only and feedback-only changes use the feedback-revision tools. Missing work is
-handled by Canvas's own missing-submission policy; Canvas Expert has no missing sweep.
-See [`grading-policy-contract.md`](../contracts/grading-policy-contract.md) and the
-Scoring Sessions guide for packet fields and warnings.
+Canvas owns late points; Canvas Expert sends only late days from the first meaningful
+attempt. The rules, packet fields and warnings live in
+[`grading-policy-contract.md`](../contracts/grading-policy-contract.md).

@@ -37,7 +37,7 @@ canvas_stream_get = _platform_canvas_stream_get
 from api.platform_services.canvas_client import canvas_headers
 
 
-LAUNCH_DELAY_SECONDS = 120        # after the routines heartbeat's 90 s
+LAUNCH_DELAY_SECONDS = 120        # let startup and the first agent reads settle
 TICK_SECONDS = 900                # delta cadence while the app runs
 FULL_MAX_AGE_HOURS = 24.0         # backfill + nightly reconcile
 ROSTER_MAX_AGE_HOURS = 24.0

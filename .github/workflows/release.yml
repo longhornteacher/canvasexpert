@@ -5,9 +5,8 @@ name: Release
 # to the GitHub release for that tag. api/webui/self_update.py is the only
 # consumer of these two assets -- keep their names and shape in step with it.
 #
-# main is rebuilt as a clean orphan snapshot for releases (see
-# docs/reference/public-repo-structure.md); .github/ must survive that rebuild
-# or this workflow stops existing on main.
+# main is fast-forwarded to dev before a release is tagged; only v* tags build
+# a release. .github/ lives on both branches, so this workflow ships with main.
 
 on:
   push:

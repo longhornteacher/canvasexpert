@@ -1,3 +1,8 @@
+# Forge presentation plan
+
+Batch plan for `docs/contracts/forge-presentation-contract.md`. Earlier batches are in Git
+history.
+
 ## 7. Batch 4: Canvas rubric from the payload
 
 **Risk:** high, since it is a new Canvas write. **Depends on:** Batch 2. D2 = yes.
@@ -54,11 +59,8 @@ remains outstanding; use unpublished `[TEST]` items.
 
 ## 10. Known adjacent defects (outside this plan)
 
-- `{{page:…}}` placeholders are never resolved (§1.5). They are refused until page links
-  are designed. `{{file:…}}` is refused and directs authors to `canvas_file` attachments.
+- `{{page:…}}` placeholders are never resolved. They are refused until page links are
+  designed. `{{file:…}}` is refused and directs authors to `canvas_file` attachments.
 - `PageAdapter.build_payload` silently drops `module_id` and `create_module`, which
   `content_push._KIND_OPTIONS["page"]` accepts. That contradicts the rule that unsupported
   options are refused, not dropped.
-- `preview_assignment_update` and `apply_operation` would write description HTML
-  outside the renderer. This needs a later decision: re-render from a 2.0 payload, or
-  restrict edits to fields that don't bypass the look.

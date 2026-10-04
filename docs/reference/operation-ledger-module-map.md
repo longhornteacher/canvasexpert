@@ -11,7 +11,7 @@ results.
 
 ## Facades
 
-- `api/operation_ledger/adapters/assignment.py` — `AssignmentAdapter` payload build,
+- `api/operation_ledger/adapters/assignment.py`: `AssignmentAdapter` payload build,
   digest, target verification, baseline/drift, review shaping, retry/reversal, and
   transport seams for `_upload_course_file` and `requests`.
 - Assignment preparation freezes teacher attachment
@@ -20,55 +20,55 @@ results.
   Canvas HTML contains specific attachment link slots; after review, apply
   may fill only those slots from checkpointed Canvas file IDs. The final outbound
   content request is write-ahead recorded after URL binding.
-- `api/operation_ledger/adapters/quiz.py` — `QuizAdapter` payload build, digest,
+- `api/operation_ledger/adapters/quiz.py`: `QuizAdapter` payload build, digest,
   target verification, baseline/drift, review shaping, and retry/reversal. A plan that
   declares `quiz_engine: "classic"` branches to `quiz_classic.py` at payload, digest,
   baseline, drift, review, execute, and reconcile; every other plan is untouched.
-- `api/operation_ledger/adapters/page.py` — page payload, teacher attachment upload
+- `api/operation_ledger/adapters/page.py`: page payload, teacher attachment upload
   steps and links, page create/reconcile, and Page-specific module-item behavior
   because Canvas page module attachment semantics differ from Assignment-type items.
-- `api/operation_ledger/adapters/quick_assignment.py` — quick-assignment create/reconcile facade.
+- `api/operation_ledger/adapters/quick_assignment.py`: quick-assignment create/reconcile facade.
 
 ## Execution Owners
 
-- `api/operation_ledger/adapters/assignment_whole.py` — whole-class assignment create,
+- `api/operation_ledger/adapters/assignment_whole.py`: whole-class assignment create,
   attachment upload steps, module attachment and
   whole reconcile.
-- `api/operation_ledger/adapters/assignment_tiered.py` — differentiated family source
+- `api/operation_ledger/adapters/assignment_tiered.py`: differentiated family source
   assignment-draft creation, shared attachment uploads,
   and exact-ID tiered reconcile. It performs no roster/group, override, module, or
   family-tail work.
-- `api/operation_ledger/adapters/assignment_hub.py` — sequences the tier pages and
+- `api/operation_ledger/adapters/assignment_hub.py`: sequences the tier pages and
   one whole-class assignment for Differentiated Hub AssignmentForge, over `tier_pages.py`.
-- `api/operation_ledger/adapters/tier_pages.py` — the shared Hub page owner (AssignmentForge
+- `api/operation_ledger/adapters/tier_pages.py`: the shared Hub page owner (AssignmentForge
   Hub and classic QuizForge Hub): restricted tier-page create, visibility restriction, tag
   assignment, fail-closed publish and compensation, link substitution, exact-step page
   reconciliation, the frozen review `hub` block, and the live tag read with its
   title-collision refusal. It knows tier to tag, never tag membership.
-- `api/operation_ledger/adapters/quiz_classic.py` — Classic Quiz delivery for
+- `api/operation_ledger/adapters/quiz_classic.py`: Classic Quiz delivery for
   `content.quiz` (`quiz_engine: "classic"`): Hub payload rendering, review, and the
   checkpointed steps `create_quiz:0`, `create_question:0:<index>`, `save_quiz:0`,
   `patch_assignment:0`, `attach_module:0` (a `Quiz`-type module item), `publish_quiz:0`, and
   `rollback_quiz:0`, plus reconcile. Existence is proven by the quiz's assignment id, never
   the quiz GET alone (a deleted classic quiz still answers 200). Its one Canvas write
   helper, `_send`, is the sole mutation owner in the transport registry.
-- `api/operation_ledger/adapters/quiz_whole.py` — whole-class quiz coordinator and reconcile.
-- `api/operation_ledger/adapters/quiz_differentiated.py` — differentiated quiz
-  coordinator, extra-time bucket handling, variant failure-state policy, shared
-  family-tail dispatch, and reconcile.
-- `api/operation_ledger/adapters/quiz_steps.py` — shared quiz write-ahead helpers for
+- `api/operation_ledger/adapters/quiz_whole.py`: whole-class quiz coordinator and reconcile.
+- `api/operation_ledger/adapters/quiz_differentiated.py`: differentiated quiz
+  coordinator, variant failure-state policy, shared family-tail dispatch, and
+  reconcile.
+- `api/operation_ledger/adapters/quiz_steps.py`: shared quiz write-ahead helpers for
   quiz creation, item creation, assignment restriction, override creation, assignment
   patch verification, and Assignment-type module attachment.
-- `api/operation_ledger/adapters/sis_grade_bridge.py` — linked-family exact-ID
+- `api/operation_ledger/adapters/sis_grade_bridge.py`: linked-family exact-ID
   verification, all-source posted-final resolution independent of tier membership,
   bridge comparison, provenance-safe clear planning, aggregate review, grade projection,
   and ambiguous grade-write reconciliation for `gradebook.sis_bridge`. It owns no family
   discovery, structure repair, family-link repair, or SIS-sync request.
-- `api/operation_ledger/adapters/grade_adjustment.py` — mirror-backed existing-grade
+- `api/operation_ledger/adapters/grade_adjustment.py`: mirror-backed existing-grade
   baseline, assignment drift check, per-student prior-score guard, posted-grade
   write/readback, uncertainty reconciliation, and private receipt entries for
   `gradebook.grade_adjustment`.
-- `api/operation_ledger/adapters/attempts_grant.py` — `gradebook.attempts_grant`: the
+- `api/operation_ledger/adapters/attempts_grant.py`: `gradebook.attempts_grant`: the
   per-kind transport table (`KIND_TABLE`: regular, Classic Quiz, New Quiz), the live
   assignment classification read with base dates, per-step `observe` re-reads shared by
   execute and reconcile, the single `_send` write owner, override adoption on resume, and
@@ -77,15 +77,18 @@ results.
 
 ## Shared Support
 
-- `api/operation_ledger/adapters/adapter_support.py` — shared content-adapter step/result
+- `api/operation_ledger/adapters/adapter_support.py`: shared content-adapter step/result
   primitives: ordered projection for explicit orders, prepend/ensure/replace helpers,
   module-id recovery, outbound-marker detection, scalar-to-list normalization,
   uncertain transport classification, and standard result shaping. File upload steps
   use these ordered write-ahead/checkpoint primitives; confirmed exact file IDs are
   checkpointed before the next Canvas call.
-- `api/operation_ledger/adapters/module_placement.py` — shared Canvas Assignment-type
+- `api/operation_ledger/adapters/forge_files.py`: private teacher-file resolution under
+  `To Review/Attachments/`, hashing, and reviewed upload checkpoints shared by Assignment,
+  Page, and feedback-revision attachments.
+- `api/operation_ledger/adapters/module_placement.py`: shared Canvas Assignment-type
   module find/create/attach behavior for Assignment and Quiz flows only.
-- `api/operation_ledger/adapters/differentiated_bridge.py` — one shared owner for
+- `api/operation_ledger/adapters/differentiated_bridge.py`: one shared owner for
   public-tag normalization, source/bridge shape verification, end-of-day bridge due
   time, runtime review instructions, bridge create/activate, source-only module
   placement, final family verification, and student-free family-link save.
@@ -167,7 +170,7 @@ All operation-ledger records are PRIVATE and machine-affine, stored under
 | `receipts.v1.json` | Immutable receipts (existing, unchanged) | Single JSON document, atomic-replaced |
 
 Batches are embedded inside the operation record (see §2.3). There is no separate
-batches file — a batch is a frozen review snapshot stored on the operation.
+batches file: a batch is a frozen review snapshot stored on the operation.
 
 ### paths.py additions
 
@@ -181,8 +184,9 @@ def claims_file() -> Path:
 
 ### Atomicity
 
-All writes use the existing `storage.atomic_write_json()` (temp-file + fsync + atomic
-replace) under `storage.storage_lock()` (process-wide RLock). Corrupt documents are
+All writes use `atomic_write_json()` from `api/storage_support.py` (temp-file + fsync +
+atomic replace) under the storage module's process-wide RLock and, for operations and
+claims, the shared OS-locked `ledger.v1.lock` file (§4.2). Corrupt documents are
 quarantined via `storage._quarantine()`.
 
 ## 2. Data models
@@ -210,19 +214,23 @@ quarantined via `storage._quarantine()`.
 
 ```
 working → prepared → reviewed → applying → applied | partial | failed | attention
+working | prepared | reviewed | partial | failed | attention → abandoned
 ```
 
-- `working` — created, not yet validated/frozen
-- `prepared` — server-validated, source digest stored, targets verified
-- `reviewed` — batch frozen, review digest stored, ready to apply
-- `applying` — at least one target is claimed or in-flight
-- `applied` — all targets applied
-- `partial` — some targets applied, some failed/blocked/sent_unknown
-- `failed` — all targets failed
-- `attention` — at least one target is `sent_unknown` or `blocked` and needs human review
+- `working`: created, not yet validated/frozen
+- `prepared`: server-validated, source digest stored, targets verified
+- `reviewed`: batch frozen, review digest stored, ready to apply
+- `applying`: at least one target is claimed or in-flight
+- `applied`: all targets applied
+- `partial`: some targets applied, some failed/blocked/sent_unknown
+- `failed`: all targets failed
+- `attention`: at least one target is `sent_unknown` or `blocked` and needs human review
+- `abandoned`: the teacher gave up on the operation (`abandon_operation`); terminal, and
+  later resume or apply is refused
 
-Transitions are forward-only except `attention → applying` (retry) and
-`applying → attention` (uncertain outcome). No status may skip `prepared` or `reviewed`.
+Transitions are forward-only except `attention → applying` and `partial → applying`
+(retry of unresolved targets). No status may skip `prepared` or `reviewed`. The
+transition table lives in `api/operation_ledger/models.py`.
 
 ### 2.2 Target
 
@@ -253,14 +261,14 @@ Transitions are forward-only except `attention → applying` (retry) and
 pending → claimed → sent_unknown → applied | failed | blocked | skipped
 ```
 
-- `pending` — not yet attempted
-- `claimed` — write-ahead persisted, Canvas call in flight or about to be
-- `sent_unknown` — Canvas call returned uncertain (timeout, disconnect, crash window,
+- `pending`: not yet attempted
+- `claimed`: write-ahead persisted, Canvas call in flight or about to be
+- `sent_unknown`: Canvas call returned uncertain (timeout, disconnect, crash window,
   unparseable response); needs recovery; automatic resend is forbidden
-- `applied` — Canvas confirmed success; returned IDs persisted
-- `failed` — Canvas returned an unambiguous rejection (4xx with clear error)
-- `blocked` — adapter detected drift or ambiguous foreign content; needs human review
-- `skipped` — idempotency check proved the effect already exists (by exact ID, never
+- `applied`: Canvas confirmed success; returned IDs persisted
+- `failed`: Canvas returned an unambiguous rejection (4xx with clear error)
+- `blocked`: adapter detected drift or ambiguous foreign content; needs human review
+- `skipped`: idempotency check proved the effect already exists (by exact ID, never
   by title); no Canvas call made
 
 ### 2.3 Batch (embedded review snapshot)
@@ -320,17 +328,17 @@ required steps are `applied` or `skipped`. If an earlier step is `sent_unknown` 
 
 ## 3. Adapter interface
 
-Every registered kind implements this Protocol. The registry maps kind strings to
-adapter instances.
+Every registered kind implements this Protocol (`api/operation_ledger/registry.py`). The
+registry maps kind strings to adapter instances.
 
 ```python
 class OperationAdapter(Protocol):
     kind: str                          # e.g. "content.page"
 
     def build_payload(self, prepare_request: dict) -> dict:
-        """Parse/validate the browser-submitted prepare request.
+        """Parse/validate the caller-submitted prepare request.
         Returns the normalized private payload. Raises ValueError on invalid input.
-        Never trusts browser-supplied Canvas paths, endpoints, or method names."""
+        Never trusts caller-supplied Canvas paths, endpoints, or method names."""
 
     def source_digest(self, payload: dict) -> str:
         """Deterministic SHA-256 over the normalized payload (not including targets)."""
@@ -374,11 +382,6 @@ class OperationAdapter(Protocol):
     def retry_selector(self, operation: dict) -> list[dict]:
         """Return only the targets that are unresolved (sent_unknown, failed, blocked).
         Applied/skipped targets are never retried."""
-
-    def reversal_descriptor(self, payload: dict, target: dict) -> dict:
-        """Describe whether/how this target can be reversed.
-        {supported: bool, method: str | null, snapshot: dict | null}.
-        If no separately validated API path exists, supported is false."""
 ```
 
 ## 4. Claim / lease / recovery rules
@@ -439,10 +442,9 @@ Retry creates a **new attempt** for unresolved targets only. The executor:
 
 ## Shipped adapters
 
-The single `content.page` pilot that this design was first written against has been
-superseded by the full shipped adapter set under `api/operation_ledger/adapters/`
-(page, quiz, assignment, and module-placement families).
-For per-kind behavior, route contracts, and the current invariants, treat
+The shipped adapter set lives under `api/operation_ledger/adapters/` (page, quiz,
+assignment, assignment update, quick assignment, grade adjustment, attempts grant, and SIS
+bridge kinds). For per-kind behavior and the current invariants, treat
 `docs/contracts/operation-ledger-contract.md` and the adapter modules as authoritative;
 this document remains the durable explainer for the storage schema, state machine,
 adapter Protocol, and claim/lease/recovery rules above.

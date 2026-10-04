@@ -17,8 +17,8 @@ objects, then call the shared family tail.
 
 ## Preparation and payload
 
-The authored envelope contains content only. Delivery preview requires at least
-two unique tiers. The teacher must also choose the due date, module placement, and publication
+The authored envelope contains content only. Bridge delivery preview requires at
+least two unique tiers. The teacher must also choose the due date, module placement, and publication
 intent. A module is either an exact existing `module_id` or an explicit
 `create_module` request with a name; the runtime never guesses.
 
@@ -74,7 +74,11 @@ QuizForge families remain Bridge only.
 
 ## Preview-time tag validation
 
-The configured public tag for an `Accelerate` tier is checked during delivery preview. The authoring contract does not report missing tag configuration, so a file can be authored successfully and then be refused at preview. The refusal names the unconfigured tier; configure its public tag in Settings before preparing the push.
+The configured public tag for every used tier is checked during delivery preview. The
+authoring contract does not report missing tag configuration, so a file can be authored
+successfully and then be refused at preview. The refusal names the unconfigured tier;
+configure its public tag in Settings before preparing the push. Two used tiers with the
+same tag are refused as `tier_tag_collision`.
 
 ## Differentiated Hub
 

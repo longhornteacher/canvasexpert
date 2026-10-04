@@ -868,10 +868,11 @@ def test_preview_assignment_update_refuses_with_no_field_and_no_canvas_call(
 
 # --- the staging contract still says where drafts go ---------------------------
 
-def test_the_staging_appendix_offers_the_push_without_replacing_the_push_tab():
+def test_the_staging_appendix_routes_review_through_the_agent():
     contract = tools.get_product_guide('page')["contract"]
 
-    assert "Canvas Expert push tab" in contract
+    assert "push tab" not in contract
+    assert "list_staged_content" in contract
     assert "preview_content_push" in contract
     assert "apply_operation" in contract
 

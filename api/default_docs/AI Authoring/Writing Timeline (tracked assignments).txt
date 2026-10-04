@@ -101,9 +101,8 @@ What it reports
 
 Every timestamp is US Central, labeled CST or CDT.
 
-The connected agent's scoring context, or a retained control-console assignment
-view when one is used, can show a "Tracked DOCX" Writing Timeline badge on a
-tracked assignment. On a not-tracked assignment the result says so explicitly
+The connected agent's scoring context can show a "Tracked DOCX" Writing
+Timeline badge on a tracked assignment. On a not-tracked assignment the result says so explicitly
 rather than showing an empty timeline, so "not examined" is never mistaken for
 "no revision trail". Canvas Expert does not maintain a separate local scoring queue.
 

@@ -56,6 +56,8 @@ RETIRED_FILES = {
         "deafeb6f8f4d6be6dc3324f278099155e1863ec45676218ebb4ae95163830d53",
     }),
     "Author a Quiz (QuizForge).txt": frozenset({
+        # Before the role line stopped naming the retired QTI export.
+        "631eaa6e04d27c90b77472fc27f1975ae489feb7530c33697a8e2d526e5fbb33",
         # Before the console charter and removal of generated printables.
         "7db317a92a6208833c8e8e8fc238798375bd0fa30d2557f31425ee43a7d962e4",
         "5f74c61040b83f5b3f43243adf5d424ab2c9037a14fa40d7f9232ca4d99fc181",
@@ -156,9 +158,22 @@ RETIRED_FILES = {
     # Said the agent must not draw integrity conclusions from the timeline; it now
     # may, in teacher-only agent commentary.
     "Writing Timeline (tracked assignments).txt": frozenset({
+        # Before the retired console assignment view was dropped from the text.
+        "7cf276c0b7e78cb28a0537eba33869d006c2a2a3939ceed7b3ef02f72fd82c8c",
         # Before the retired Students handwriting control was removed.
         "643763410cba72a0a1542e2068ce23c6144e13c6781698200eda917973ed0bc7",
         "7f69ea5e6f9171a2f2625b6fc7fed3e7fdb7cbe5253d816c0e249998dfb141c5",
+    }),
+    # Writing records and get_writing_history were retired; every shipped
+    # version is listed so any unedited copy is removed.
+    "Writing Record (longitudinal writing history).txt": frozenset({
+        "f68f7a05a55690cdf5508999a118a1d4a687d7fb732cc00e7e5c653557291d7e",
+        "2c851cd820d055113eeafd4fc23249abf35873002fd54656cb71151b6163909c",
+        "79abb78507e8bc5dee89a6e41384586665228be821008e3af0ee109d45be03e4",
+        "cab5e04457d488c4ab4f25ec7d85e004185413412508378b744cf4c525ae5237",
+        "33867d18ea26d3bc93f798cfaa96f475615395dc1d8147d1f6fbf9464d07253c",
+        "3bbc8706b8522303fd084b5a710480afeb74b4853e9df87082285e60a8392716",
+        "14e1518a277e277c5477cd2ead375297752f9af9a79e386d97365aebedccaa4a",
     }),
 }
 

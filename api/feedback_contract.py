@@ -72,7 +72,7 @@ def scoring_output_contract(
         "feedback by itself; the teacher decides. Keep integrity concerns out of "
         "`feedback`, which the student reads.",
         "Use the full score range; `possible` gives each item's maximum.",
-        "Do not infer pronunciation, expression, prosody, identity, disability, effort, or diagnosis; low ASR confidence is not a reading error.",
+        "Do not infer identity, disability, effort, or diagnosis.",
     ]
     return {
         "format_instruction": (

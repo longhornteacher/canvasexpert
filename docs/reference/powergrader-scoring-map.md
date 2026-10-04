@@ -14,8 +14,9 @@ The agent refreshes the mirror and the session itself (`refresh_mirror`,
 ## Current ownership
 
 - `feedback_revision.py` owns feedback-only reopening of already graded ordinary
-  assignments. Four thin MCP tools prepare/read/stage/apply existing staff comments;
-  the numeric score is read-only packet context. It uses the existing scope lock,
+  assignments. `prepare_scoring_session(mode="feedback_revision")` opens a session
+  whose id starts `feedback-`, and the normal packet, stage, preview and apply tools
+  route that id here; the numeric score is read-only packet context. It uses the existing scope lock,
   SharedWorkStore leases and append-only snapshots, complete text or typed blockers,
   exact frozen comment-only PUTs, and durable intents/outcomes without read-back or
   blind retry. It preserves ordinary scoring behavior and private pilot history.
@@ -30,7 +31,9 @@ The agent refreshes the mirror and the session itself (`refresh_mirror`,
   session) and resolves the one current session per exact
   `(course_id, assignment_id)`. The MCP preparation guard reuses a usable
   actionable record and returns `scoring_session_already_open` without a refresh;
-  stale, missing, or invalid packets are the replacement cases. An allowed
+  stale, missing, or invalid packets are the replacement cases. Teacher scoring
+  guidance and the contract choice survive a refresh retry as private preparation
+  state in `_System/PowerGrader/Preparation/`. An allowed
   successful preparation persists its new record with the next private positive
   scope generation and supersedes every other actionable record for that scope;
   terminal and already-superseded records are untouched. Generated records resolve
@@ -111,26 +114,8 @@ The agent refreshes the mirror and the session itself (`refresh_mirror`,
 
 ## Late days and corrections
 
-The packet adds `prior_entered`, `attempt_count`, `first_attempt_at`,
-`latest_attempt_at`, and `posted_attempt`. `prior_entered` uses Canvas's `entered_score`
-or `score + (points_deducted or 0)`, never the post-deduction score. Late days come
-from the first meaningful attempt in every course. Blank text and upload attempts are
-skipped; a URL attempt is skipped only when the mirror confirms its URL is empty.
-Older URL attempts without presence evidence and any other incomplete history require
-teacher input. Canvas calculates late points from status and seconds; Canvas Expert
-does not read the course late policy or calculate deductions. Preview late data is
-`{decision, days, basis, first_attempt_at, latest_attempt_at}` with plain dates.
-Warnings include `late_days_set`, `late_none`, `late_waived`, `late_days_unknown`,
-and `late_box_reset`.
-
-A changed result for a previously verified numeric-score push in the current session is
-a correction. Comment-only and feedback-only pushes stay on the existing feedback-revision
-path. A correction uses the same stage, preview, and explicit apply boundary, exposes prior entered score, days,
-and attempt in `correction`, and warns `correction_of_pushed_row`. It reconstructs the
-prior push from verified score-ledger evidence and the session push journal when needed.
-For a second or later draft, the agent discusses the draft and proposes the entered score
-with the teacher. An unchanged comment is omitted. Verified correction events link to the prior verified
-event; ambiguous sends stay blocked and identical restaging does not send.
+Late days, packet history fields, late warnings and corrections of a verified push are
+owned by [`grading-policy-contract.md`](../contracts/grading-policy-contract.md) §5.
 
 ## Boundaries to keep
 
@@ -180,9 +165,11 @@ event; ambiguous sends stay blocked and identical restaging does not send.
 Start with `api/tests/powergrader/test_session_store.py`,
 `api/tests/powergrader/test_scoring_preparation.py`,
 `api/tests/powergrader/test_overlap.py`,
+`api/tests/powergrader/test_feedback_revision.py`,
 `api/tests/mcp_server/test_prepare_scoring_session.py`,
-`test_scoring_apply_tools.py`,
-`test_new_quiz_scoring_tools.py`, `api/tests/powergrader/test_scoring_packet.py`,
-and `test_scoring_apply.py`. Verify affected retained control-console routes separately
+`api/tests/mcp_server/test_scoring_apply_tools.py`,
+`api/tests/mcp_server/test_new_quiz_scoring_tools.py`,
+`api/tests/powergrader/test_scoring_packet.py`, and
+`api/tests/powergrader/test_scoring_apply.py`. Verify affected retained control-console routes separately
 when executable console code changes; source-text checks do not establish rendered
 behavior.

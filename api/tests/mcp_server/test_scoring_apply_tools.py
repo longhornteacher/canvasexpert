@@ -171,7 +171,7 @@ def test_posted_comment_only_row_without_verified_score_receipt_is_bounded(
                                          grade_mode="feedback_only")
     assert result["ok"] is False and result["code"] == "no_valid_results"
     assert "no verified numeric-score receipt" in result["error"]
-    assert "feedback-revision tools" in result["error"]
+    assert 'mode="feedback_revision"' in result["error"]
 
 
 @pytest.mark.parametrize(("due", "first", "latest", "canvas_late", "posted_attempt",

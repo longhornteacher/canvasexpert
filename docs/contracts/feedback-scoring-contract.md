@@ -14,11 +14,11 @@ widens the assignment-scoped authorization described below.
 Each discovery freshness row reports the oldest required local scope. A valid old
 snapshot remains usable, but an unavailable, corrupt, or non-current projection is
 reported as `mirror_projection_unavailable`. The scoring freshness advisory is
-decided during preparation, not discovery. A valid current snapshot up to 60
-minutes old during Monday-Friday 07:00-16:30 America/Chicago, or up to 600
-minutes outside those hours, is silently accepted; the exact threshold is also
-accepted. No discovery path enqueues, waits for,
-polls, or retries a refresh.
+decided during preparation, not discovery. A valid current snapshot younger than 60
+minutes during Monday-Friday 07:00-16:30 America/Chicago, or younger than 600
+minutes outside those hours (weekends and dates in `Library/Calendars/Holidays.csv`
+count as outside), is silently accepted; at the threshold the teacher confirms.
+No discovery path enqueues, waits for, polls, or retries a refresh.
 
 Privacy invariant: the agent sees pseudonyms and scrubbed work only. Real names,
 Canvas/SIS IDs, signed URLs, credentials, and private paths remain in the local
@@ -34,8 +34,9 @@ shape change requires a major bump.
 contracts without course or student data. Each row carries the contract id,
 name, conversational `applies_to` text, a short summary, and projected token
 size. `prepare_scoring_session(course_id, assignment_id, scoring_guidance="",
-use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="")`
-requires one exact Current course and assignment and prepares it from valid
+use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="",
+late_policy="", mode="score")` requires one exact Current course and assignment and
+prepares it from valid
 local projections. It performs no refresh, Canvas write, or direct Canvas read.
 The product-owned result shape in `api/feedback_contract.py` requires only
 `pseudonym`, `item_id`, `score`, and `feedback`, with an optional teacher-only
@@ -107,8 +108,8 @@ authors future writing portions as separate AssignmentForge assignments with tea
 
 The agent stages one result per `(pseudonym, item_id)` supplied by the packet, using
 `stage_scoring_results(scoring_session_id, results, expected_packet_digest,
-review_digest="", answers=None, grade_mode="post_score")`. `grade_mode` accepts `post_score` or
-`feedback_only`; an omitted mode keeps the session's stored selection, or defaults
+review_digest="", answers=None, grade_mode=None, attachment_file=None)`.
+`grade_mode` accepts `post_score` or `feedback_only`; an omitted mode keeps the session's stored selection, or defaults
 to `post_score` when the session has no selection. A separate
 `apply_staged_scoring_results(scoring_session_id, expected_stage_digest,
 idempotency_key="")` applies only the unchanged private stage after a direct,
@@ -147,10 +148,11 @@ failure returns count-only `errors`/`warnings` plus a `fields` list naming the
 offending fields. Out-of-range scores and other judgment conditions do not receive
 implicit defaults.
 
-If a safe ordinary-assignment plan has no questions, Canvas Expert freezes it locally
-without a Canvas call. When teacher judgment is required (for example, overwriting a score,
-exceeding the maximum, ordinary-assignment comment-only posting, a pseudonym in feedback, or held work
-receiving nothing), the tool returns `needs_teacher_input`, pseudonym-only questions,
+If a safe ordinary-assignment plan has no questions, Canvas Expert freezes it locally.
+Staging's only Canvas call is one read of the assignment's posting policy for preview
+warnings; it never blocks staging and is outside every digest. When teacher judgment is
+required (for example, exceeding the maximum, ordinary-assignment comment-only posting,
+a pseudonym in feedback, or held work receiving nothing), the tool returns `needs_teacher_input`, pseudonym-only questions,
 the allowed answers, and a review digest without writing. The agent asks the teacher,
 then resubmits the unchanged results and packet digest with every explicit answer and
 the exact review digest. A successful stage returns an opaque stage digest and
@@ -172,6 +174,7 @@ Submissions request contains only `comment`; it omits the entire `submission`
 object, including `posted_grade`, `late_policy_status`, and
 `seconds_late_override`. This is a comment-only write with a numeric draft score
 in the rendered feedback; it does not null or discard the structured numeric score.
+
 ## Session consumption and write safety
 
 Feedback reopening uses the scoring tools with
@@ -196,7 +199,8 @@ the staged attachment filename, for the teacher's review before apply. Apply
 uses the existing Submission Comments PUT endpoint with only `{"comment": text}`;
 it cannot send grade, status, or late-policy fields. Without an attachment it
 never appends a new comment.
-The optional `attachment_file` names one exact already-staged local teacher file;
+The optional `attachment_file` stage option (revision sessions only) names one exact
+already-staged local teacher file;
 no Canvas Files search occurs. Its private path/name/SHA-256/size/content type are
 frozen in the stage digest and verified for the full batch before any send, then
 again per upload. For each revised student, this explicit option uploads a native

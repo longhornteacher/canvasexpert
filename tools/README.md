@@ -13,4 +13,10 @@ Reports `.py` and `.js` files at or above 300 lines, marking 500+ line files as
 large. The report is advisory and exits successfully; it is meant to guide small
 refactor slices, not block urgent fixes.
 
-- Is the command documented?
+```powershell
+py tools/canvasmirror_release_benchmark.py --self-check --output <path outside the repo and workspace>
+```
+
+Read-only CanvasMirror release harness. `--self-check` runs a synthetic
+disposable-cache check; `--live-readonly` measures the configured courses
+against real Canvas using GET requests only. See `docs/mirror.md`.

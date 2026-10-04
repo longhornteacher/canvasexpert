@@ -19,13 +19,13 @@ page-owned stylesheet and is added through `head_extra`.
   `primary`, `right_rail`, and `workspace_scripts`.
 - `layouts/document.html`: `document_variant`, `primary`, and `document_scripts`.
 - `layouts/wizard.html`: `primary` and `wizard_scripts`. It deliberately has no app
-  header or readiness script so first-run setup stays focused.
-- `layouts/_app_header.html`: the single migrated app header. It preserves the
-  readiness strip and `theme-toggle` ID.
-- `ui/_macros.html`: `page_header`, `panel`, `notice`, `empty_state`,
+  header so first-run setup stays focused.
+- `layouts/_app_header.html`: the single app header. It holds the navigation and the
+  `theme-toggle` ID.
+- `ui/_macros.html`: `page_header`, `page_section`, `notice`, `empty_state`,
   `action_bar`, and `rail`. Native form controls remain native HTML.
-  `page_header` emits a `div`, not a `<header>`: the app header is the page's only
-  `<header>` and the contract test enforces that. `rail` wraps its caller content in
+  `page_header` emits a `div`, not a `<header>`, so the app header stays the page's
+  only `<header>`. `rail` wraps its caller content in
   `ce-rail__inner`, which is what makes rail contents follow the stage as it scrolls.
 
 Workspace variants are `full`, `three`, and `left-main`. The layout owns outer
@@ -44,7 +44,7 @@ That rules out a whole category of page that is easy to write by reflex:
 - **No taglines, no value propositions, no "why this exists" copy.** If a control needs
   a sentence explaining its worth, the control is wrong. Fix the control.
 - **The working surface comes first.** A page opens on the thing the teacher operates:
-  the list, the queue, the builder, the editor. Explanation goes below it, or in a rail
+  the status, the list, the setting. Explanation goes below it, or in a rail
   group named Reference, or nowhere.
 - **No onboarding-first layout.** Pages are seen hundreds of times and read once. A
   first-run tour occupying permanent space is a tax on every later visit. Setup guidance
@@ -89,23 +89,17 @@ That rules out a whole category of page that is easy to write by reflex:
 Shared component classes are never JavaScript selectors. Behavior selectors use an
 ID, existing feature class, or `data-ce-hook`.
 
-## Migration map
+## Route registry
 
 The enforcement registry is `api/tests/test_presentation_contracts.py`. It is the
-source of truth for route, template, layout, variant, rail count, and migration state.
+source of truth for route, template, layout, variant and rail count, and it checks
+that each route renders one `<main>`, the shared stylesheet bundle and unique IDs.
 This is a retained control-console presentation contract, not a mandate to add browser
 routes or duplicate agent-facing workflows.
 CanvasAgent uses `workspace/full`; Names and Settings use `workspace/left-main`;
 Welcome uses `wizard`; receipt detail uses `document/standard`. The wizard omits
 the app header. Navigation contains CanvasAgent, Names and Settings. The only
 routes are `/`, `/welcome`, `/settings`, `/names` and `/receipts/{id}`.
-
-All registry rows are migrated. Its source checks are repo-wide: every live template
-is layout-backed and free of static inline styles, all feature CSS consumes shared
-tokens, and no live template can reference the removed legacy stylesheet pair.
-`style.css`, `workbench.css`, `workbench_base.html`, `_workbench_header.html`,
-`name_manager.html`, and `_course_picker.html` are retired. No compatibility routes
-remain for retired pages.
 
 ## Change propagation
 
@@ -117,5 +111,5 @@ remain for retired pages.
 | Shared panel structure | `ui/_macros.html` or `ui/components.css` |
 | Feature-only layout | page stylesheet |
 
-Partials move with their first consumer. `_readiness_strip.html` belongs to the
-shared app header. Preserve each retained page's script load order.
+Partials move with their first consumer. Preserve each retained page's script load
+order.

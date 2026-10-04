@@ -1,9 +1,0 @@
-<PAGEFORGE_JSON>
-{
-  "version": "1.0-json",
-  "type": "PAGE",
-  "title": "Unit 5 Hub: Poetry & Figurative Language",
-  "metadata": { "subject": "ELA", "grade": 7, "unit": "Unit 5" },
-  "body": "<h2>Unit 5: Poetry &amp; Figurative Language</h2><p>Everything you need for this unit lives on this page. Bookmark it!</p><h3>What we're learning</h3><ul><li>Identify and interpret <strong>metaphor, simile, and personification</strong>.</li><li>Analyze how structure (line breaks, stanzas) shapes meaning.</li><li>Write an original found poem.</li></ul><h3>Key resources</h3><ul><li>{{file:Poetry Terms Glossary.pdf}}</li><li>{{page:How to Annotate a Poem}}</li><li><a href=\"https://www.poetryfoundation.org\">Poetry Foundation</a> (find poems for inspiration)</li></ul><div style=\"padding:12px 16px;border-left:4px solid #0b67c2;background:#eef5fc;border-radius:6px\"><strong>Heads up:</strong> Your found poem assignment opens this Friday and uses the rubric linked above.</div>"
-}
-</PAGEFORGE_JSON>

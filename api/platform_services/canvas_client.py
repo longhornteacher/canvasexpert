@@ -325,7 +325,7 @@ def canvas_get_all_complete(path, params=None, timeout=30):
 
 def _canvas_send(method, path, payload, timeout=30):
     """POST/PUT/PATCH a JSON payload to Canvas — returns (json, error).
-    204 / empty bodies (e.g. late_policy PATCH) come back as {}."""
+    204 / empty bodies come back as {}."""
     started = time.monotonic()
     method_label = str(method or "unknown").strip().lower()
     if not method_label.isidentifier():

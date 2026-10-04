@@ -1,7 +1,7 @@
 # Course Catalog v3 contract
 
-Course Catalog is Canvas Expert's durable, student-free projection of navigation, search,
-and reviewed classroom objective evidence for one configured course. Canvas remains
+Course Catalog is Canvas Expert's durable, student-free projection of navigation and
+search for one configured course. Canvas remains
 authoritative for focused state, submissions, grades, comments, and every write.
 
 ## Location and identity
@@ -14,7 +14,7 @@ Each course owns this canonical/previous pair in the machine-local `%LOCALAPPDAT
 ```
 
 The Canvas course ID, not a display name, is directory identity. A disk read is local-only;
-the Current-course refresh route is the only Catalog acquisition path.
+the Current-course structure refresh is the only full Catalog acquisition path.
 
 ## Root and scope schema
 
@@ -58,14 +58,16 @@ source for the local MCP page read.
 
 ## Reads and refresh
 
-`GET /api/course-catalog?course_id=...` is disk-only. `POST /api/course-catalog/refresh`
-performs the read-only paginated acquisition for all four scopes. Both routes enforce the
-Current-course boundary and return sanitized state/warnings without paths or raw errors.
+Catalog reads are disk-only. `refresh_mirror(structure_only=true)` queues the CanvasMirror
+coordinator's `course.structure_refresh` scope, which performs the read-only paginated
+acquisition for all four scopes in a Current course and returns sanitized state without
+paths or raw errors. A mirror pass may apply an assignment receipt it already acquired to
+the assignment scope only; it never live-fetches modules, groups, or pages.
 
 The typed read service exposes `catalog_assignments`, `catalog_modules`,
 `catalog_assignment_groups`, and `catalog_pages`. Consumers never use a Canvas fallback or
-private mirror file for these scopes. MCP page/objective reads are Current-course gated;
-all MCP reads label source, state, and freshness.
+private mirror file for these scopes. `get_course_content(kind="pages")` is Current-course
+gated; all MCP reads label source, state, and freshness.
 
 ## Durability and forbidden material
 

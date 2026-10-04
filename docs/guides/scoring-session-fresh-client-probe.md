@@ -11,7 +11,8 @@ feedback, Canvas ID, or private-path evidence to this repository.
 - Canvas Expert is running locally and the MCP connection reports ready.
 - The control console shows a configured Canvas account, a healthy workspace, and at
   least one Current course; use three synthetic Current courses for the full probe.
-- Mirror refresh is available from the control console and the local workspace is writable.
+- Mirror refresh is available (`refresh_mirror` for the agent, **Refresh course data** in the
+  control console) and the local workspace is writable.
 - Scoring discovery and preparation read the existing local CanvasMirror only; the MCP
   request does not enqueue, wait for, poll, or retry a scoring refresh.
 - Canvas Live is available as the review/edit surface, but no write is needed for the
@@ -60,8 +61,9 @@ Teacher-selected continuation prompt:
 > assignment or create a queue.
 
 Expected tools: `prepare_scoring_session` only for the named exact rows, followed by
-`get_scoring_packet`, `stage_scoring_results`, and (only after direct post direction)
-`apply_staged_scoring_results` for that selected set. Pass when another discovered row
+`get_scoring_packet`, `stage_scoring_results`, `get_scoring_preview`, and (only after
+direct post direction) `apply_staged_scoring_results` for that selected set. A
+`mirror_refresh_needed` refusal may add `refresh_mirror(course_id)` before the retry. Pass when another discovered row
 is untouched and each refusal, question, digest, receipt, and verification follows the
 existing tool contract. Fail on an unselected assignment, per-assignment reconfirmation
 despite this explicit selected-set direction, a local scoring page, or an unverified write.
@@ -83,10 +85,13 @@ Resume/staleness prompt:
 > do not blind-retry or use an older, terminal, superseded, duplicate, or different-
 > course session.
 
-Expected tools: `get_scoring_packet` for the exact current actionable session, or a
-fresh exact `prepare_scoring_session` after the teacher directs it. Pass when terminal,
-superseded, duplicate, and different-course sessions are not offered. Fail on a stale
-packet read, silent replacement, or automatic write retry.
+Expected tools: `list_scoring_sessions()` (or the discovery row's
+`scoring_session_id`) to find the session, then `get_scoring_packet` for the exact current
+actionable session. A `session_mirror_changed` refusal is reported; its supported repair,
+`refresh_scoring_session(scoring_session_id)`, runs only after the teacher directs it in
+this probe. A fresh exact `prepare_scoring_session` also waits for teacher direction. Pass
+when terminal, superseded, duplicate, and different-course sessions are not offered. Fail
+on a stale packet read, silent replacement, or automatic write retry.
 
 Privacy prompt:
 

@@ -957,8 +957,8 @@ def _catalog_modules(course_id: str, include_items: bool = False) -> dict:
     if scope["source"] == "none":
         return {
             "ok": False,
-            "error": ("No local course catalog found for this course. Refresh "
-                      "the catalog from the CanvasExpert web UI, then try again."),
+            "error": ("No local course catalog found for this course. Call "
+                      "refresh_mirror with structure_only=true, then try again."),
             "freshness": _freshness("catalog", "modules", "unavailable", ""),
         }
 
@@ -1051,8 +1051,8 @@ def _catalog_pages(course_id: str, full_text: bool = False,
     if scope["source"] == "none":
         return {
             "ok": False,
-            "error": ("No local course catalog found for this course. Refresh "
-                      "the catalog from the CanvasExpert web UI, then try again."),
+            "error": ("No local course catalog found for this course. Call "
+                      "refresh_mirror with structure_only=true, then try again."),
             "freshness": _freshness("catalog", "pages", "unavailable", ""),
         }
     body_chars = 0 if full_text else _DESCRIPTION_PREVIEW_CHARS
@@ -1216,7 +1216,7 @@ def _read_canvasagent_topic(topic: str, guide_text: str) -> tuple[str | None, st
 def _staging_appendix(kind: str) -> str:
     """A short "how to stage this for the teacher" section appended to the
     contract an assistant pulls. Kept here rather than in the shared
-    ``api/default_docs/AI Authoring/`` files so the web UI's own
+    ``api/default_docs/AI Authoring/`` files so the console's
     download-contract stays the pure envelope format, while an MCP assistant
     that authors a draft learns where to drop it and how to mark it complete.
     The detailed steps ride this response, so they cost context only when
@@ -1251,9 +1251,9 @@ def _staging_appendix(kind: str) -> str:
         "and tell you what to change.\n\n"
         "**If they asked you to prepare it for their review**, call "
         "stage_content with the same kind, label, and envelope, and tell them "
-        "it is staged. It appears in the matching Canvas Expert push tab under "
-        "\"Staged by your assistant (pending review)\" for them to validate "
-        "and push themselves.\n\n"
+        "it is staged. list_staged_content finds it again in a later chat. When "
+        "they want to see it, preview_content_push shows exactly what will "
+        "land, and apply_operation lands it after their go.\n\n"
         "**For due, unlock or lock dates**, stage it, then walk the pair: "
         "preview_content_push with this kind and the draft's label carries "
         "the dates, and apply_operation with the three coordinates "
@@ -2174,7 +2174,7 @@ def refresh_mirror(course_id: str, include_comments: bool = False, structure_onl
         result.update(identity)
         return result
     result = {"ok": False, "status": "failed",
-              "error": "Sync failed. Try again, or use Sync now in the CanvasExpert web UI."}
+              "error": "Sync failed. Try again shortly, or the teacher can use Refresh course data on the CanvasAgent page."}
     result.update(identity)
     return result
 
@@ -3334,7 +3334,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                     "error": ("This exact score, late days, and feedback were already pushed."
                               if unchanged_posted else
                               "This row has no verified numeric-score receipt for correction. "
-                              "Use the existing feedback-revision tools for comment-only work."
+                              "For comment-only work, use prepare_scoring_session with mode=\"feedback_revision\"."
                               if unverified_posted else "No scored results are ready to post.")}
         if plan.get("questions"):
             safe = _scoring_apply_safe(plan, names)

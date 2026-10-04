@@ -65,9 +65,8 @@ Rows whose new score equals the current score produce no entry.
 
 - Reads the local CanvasMirror only (course roster, assignment, submissions). If the
   submissions projection is not within freshness policy, the preview returns the
-  standard freshness attention and does not refresh. This deliberately replaces the
-  old rule that curve preview baselines must be read live: the apply-time live check
-  in section 5 is what protects the write.
+  standard freshness attention and does not refresh. The apply-time live check in
+  section 5 is what protects the write.
 - Returns host-neutral facts: `operation_id`, `batch_id`, `review_digest`, the
   assignment title and `points_possible`, the adjustment as understood, a summary
   (`eligible`, `changed`, `unchanged`, `raised`, `lowered`, `capped`, `skipped` by
@@ -107,14 +106,11 @@ never overwritten. A revert operation is itself revertible like any other.
 ## 7. Authorization
 
 The agent may propose any adjustment. Only the teacher's explicit approval of the
-specific preview authorizes `apply_operation`, the same way the other apply
-tools work. An approval covers that one operation and nothing broader.
+specific preview authorizes `apply_operation`, as for every ledger-backed preview.
+An approval covers that one operation and nothing broader.
 
 ## 8. Other callers
 
-The control console's curve preview, apply, and revert, and its local curve-event
-store, are retired. Grade adjustment operations appear in the console's existing
-operations and receipts pages. A reviewed score adjustment builds a `rule`
-(`target_average`) preview and applies it through this same service. It decides whether
-an assignment was already curved from its completed, un-reverted grade adjustment
-operations, not from a separate store.
+The MCP tools are the only callers. Grade adjustment operations that need attention
+appear on the control console's home page, and their receipts appear with the other
+receipts.

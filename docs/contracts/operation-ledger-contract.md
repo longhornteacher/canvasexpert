@@ -12,7 +12,7 @@ not a browser cart and not a claim of atomic Canvas writes.
 Working -> Prepared -> Reviewed -> Applying -> Applied / Partial / Failed / Attention
 ```
 
-Operations, batches, receipts, claims, and migration backups are PRIVATE and
+Operations, batches, receipts, and claims are PRIVATE and
 machine-affine. Store them under `%LOCALAPPDATA%\CanvasExpert\workbench\private\`,
 never the synced workspace, repository, browser storage, SAFE artifacts, fixtures,
 console, or general activity log. The work registry remains in the configured
@@ -135,14 +135,16 @@ emitted in the console base markup and sent in a header, plus strict same-origin
 loopback Host/Origin checks. The token is not persisted. Missing or invalid protection
 returns 403 before reading a private record or performing work.
 
-- `GET /api/operations` — PII-minimized summaries.
-- `GET /api/operations/{operation_id}` — private operation status.
-- `POST /api/operations/{operation_id}/retry` — proven unresolved targets only.
-- `GET /api/receipts` — PII-minimized summaries.
-- `GET /api/receipts/{receipt_id}` — PRIVATE detail from the local UI.
+- `GET /api/operations`: PII-minimized summaries.
+- `GET /api/operations/{operation_id}/status`: private operation status.
+- `POST /api/operations/{operation_id}/retry`: proven unresolved targets only.
+- `GET /api/receipts`: PII-minimized summaries.
+- `GET /api/receipts/{receipt_id}`: PRIVATE detail from the local UI.
 
-New operation preparation, review and apply are runtime/MCP actions. The console
-exposes recovery and receipts only. Route additions deliberately update
+New operation preparation, review and apply are runtime/MCP actions. A reviewed
+operation applies through `apply_operation`; `push_content_live` runs the same review
+and apply internally in one call (see `docs/mcp-server.md`). The console exposes
+recovery and receipts only. Route additions deliberately update
 `api/tests/test_route_contract.py`.
 
 ## Invariants and forbidden behavior

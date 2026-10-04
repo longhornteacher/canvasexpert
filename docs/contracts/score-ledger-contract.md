@@ -1,6 +1,6 @@
 # Durable score ledger and curve rules
 
-Status: locked for implementation, 2026-10-02.
+Status: current, locked 2026-10-02.
 
 ## 1. Authority and private storage
 
@@ -30,8 +30,8 @@ it never replaces the sent value. Preserve both when Canvas omits or changes it.
 `canvas_score` is the actual observed post-policy score. Unknown historical raw
 scores stay unknown; comments and inverse curves are never raw-score authority.
 An adjustment may preserve a known raw score, but never manufacture it from an
-entered value. Missing-fill/clear and bridge-copy actions retain honest distinct
-provenance; they are not described as authored scoring.
+entered value. Bridge-copy actions retain honest distinct provenance; they are
+not described as authored scoring.
 
 ## 2. Curves and review
 
@@ -83,8 +83,8 @@ reversions, so partial completion and held rows remain visible.
 
 Before every CE score send, append a durable intent with exact sent values;
 accepted/failed/unknown outcomes append. Scoring-session writes, grade
-adjustment/revert, missing-fill/undo and SIS bridge score copies all use this
-shared evidence service, preserving their existing operation ownership.
+adjustment/revert, and SIS bridge score copies all use this shared evidence
+service, preserving their existing operation ownership.
 
 After accepted numeric scoring writes, read all selected rows in bounded
 batches through the existing private read transport. Capture score,

@@ -13,14 +13,14 @@ canonical cooperation loop live in
 
 The connected tools and their results carry the operational contract; a fresh client
 does not need repository or workspace files before using the supported path. For deeper
-authoring guidance, call the relevant product guide or authoring contract:
+authoring guidance, call `get_product_guide` with the relevant topic:
 
 - Optional teacher workspace references may add local authoring or incident context, but
   they are not required for the supported connected scoring path and are never a
   substitute for the tool contracts below.
 
 - **Local and indirect.** Serves this teacher's own Canvas data from Canvas Expert's
-  local copy on their computer. It never holds the Canvas token. Canvas writes use
+  local copy on their computer. The agent never holds the Canvas token. Canvas writes use
   bounded preview/apply or operation-ledger paths, except a teacher-requested
   `push_content_live` and the Scoring Session apply. A direction to score and post one
   assignment authorizes valid results only for that exact course/assignment, after the
@@ -33,14 +33,15 @@ authoring guidance, call the relevant product guide or authoring contract:
   but a fresh client is not required to read a repository or arbitrary workspace file.
 - **Pseudonymized, not anonymous.** Every student-data tool routes its result through the identity vault
   (`api/feedback_vault.py`) before returning it. Students are identified only by a stable
-  one-word pseudonym (e.g. "Pikachu") — never a real name, Canvas user ID, or SIS ID. See
+  one-word pseudonym (e.g. "Pikachu"), never a real name, Canvas user ID, or SIS ID. See
   `docs/contracts/pseudonym-contract.md` for the full pseudonym shape contract. The teacher
   may keep private identity records in M365 OneDrive for device sync; the MCP boundary still
   returns only pseudonymized data and never returns the vault or private filesystem paths.
 - **Fail-closed.** Every student-data result also passes the existing outbound safety scan
   (`api/feedback_safety.py::scan_payload`) as a final check. If it isn't green, the tool
   withholds the payload and returns only a sanitized violation description.
-- **Session-local.** Nothing here logs tool arguments or results. The pseudonym is the
+- **Session-local.** Nothing here logs tool arguments or results; the local usage log
+  records tool names only (see the end of this page). The pseudonym is the
   only student handle that crosses the wire, so it is also the only one an assistant has
   to work with.
 - **stdio is the agent transport.** A loopback-only Streamable HTTP endpoint is mounted
@@ -102,18 +103,16 @@ Tool schema version 78 (37 tools).
 | `transfer_work_item` | Take over or hand off one shared work lease after sync. | No |
 | `set_score_curve_rule` | Create or deactivate a local score curve rule without changing Canvas grades. | No |
 
-`get_course_content(kind="assignments")` and `get_course_content(kind="modules")` only read the local course catalog written by
-the CanvasExpert runtime/control console — neither ever falls back to a live Canvas call.
-If the catalog hasn't been refreshed yet, call `refresh_mirror(structure_only=true)` first, then retry. Unlike the mirror
-tools below, `get_course_content(kind="modules")` returns whatever module records
-the catalog holds, labeled with `source`, `synced_at`, and `state`; stale scope is not write-authoritative.
+`get_course_content` only reads the local Course Catalog and never falls back to a live
+Canvas call. If the catalog hasn't been refreshed yet, or a result is outside policy, call
+`refresh_mirror(structure_only=true)` first, then retry. Unlike the mirror tools below,
+`get_course_content(kind="modules")` returns whatever module records the catalog holds,
+labeled with `source`, `synced_at`, and `state`; stale scope is not write-authoritative.
 
 The staged-content push tools land authored content in Canvas. Authoring still stages
 first, always: the envelope and its `.done` marker go into the per-kind To Review Inbox,
-exactly as `get_product_guide` describes, and the draft appears in the matching push
-tab. What changed is who performs that step. `stage_content` lets the assistant stage the
-draft itself, so a client with no file access can reach the Inbox, and the teacher no
-longer hand-drops a file in the middle of a request they already made.
+exactly as `get_product_guide` describes. `stage_content` lets the assistant stage the
+draft itself, so a client with no file access can reach the Inbox.
 
 From there the route is chosen by what the teacher asked for, not by a default that
 outranks them. A teacher who asked for content in their course gets `push_content_live`:
@@ -123,36 +122,35 @@ route, so the assistant does not stage the draft and ask again, and does not put
 in front of them that they never asked to see. Before the call it says what will land and
 any warnings, then waits for their go. A teacher who asked for a draft
 prepared for their review gets `stage_content` and stops there, with the draft waiting in
-the push tab. A draft that stages but fails to push is left staged on purpose, so the
-teacher can read what was authored.
+the Inbox for the preview pair. A draft that stages but fails to push is left staged on
+purpose, so the teacher can read what was authored.
 
-Group discovery is mirror-only: `get_roster(include=["groups"])` returns only group-set and group names
-and the Roster-selected set, and refuses with `refresh_mirror` when the private group
-snapshot is stale or missing. Differentiated quiz preview is the separate write path:
+Group discovery is mirror-only: `get_roster(include=["groups"])` returns only group-set and
+group names, and refuses with `refresh_mirror` when the private group snapshot is stale or
+missing. Differentiated quiz delivery is `preview_content_push(kind="quiz", variants=[...])`:
 it resolves staged labels, captures a fresh private Canvas baseline through the
 Operation Ledger quiz adapter, and exposes only the safe frozen review projection.
 Every file declares one canonical pedagogical tier in `metadata.variant` (or
 `metadata.variant_label`) and carries the same unsuffixed base title. Settings maps those
-tiers to the configured public suffixes. Apply creates the exact configured-tag-suffixed sources and one
-unsuffixed no-submission bridge, attaches only the sources to the selected module, and
-links the verified family. The result directs the teacher to Canvas Live for review;
-the teacher owns Canvas Grade Sync.
+tiers to the configured public suffixes. Apply creates the exact configured-tag-suffixed
+sources and one `<base title> - Bridge` no-submission bridge, attaches only the sources to
+the selected module, and links the verified family. The result directs the teacher to
+Canvas Live for review; the teacher owns Canvas Grade Sync.
 
 The reviewed-preview machinery runs on every route. Whole-class drafts may remain
 unpublished. Differentiated sources use the reviewed family operation, including source-only
-module placement, bridge verification, and family-link save. QuizForge retains group
-restriction. Bridge AssignmentForge sources are unrestricted and tier placement is
-teacher-owned; Hub tier pages are restricted and assigned to live differentiation tags.
+module placement, bridge verification, and family-link save. Bridge sources from
+AssignmentForge and QuizForge are unrestricted and tier placement is teacher-owned; Hub tier
+pages are restricted and assigned to live differentiation tags.
 
 The live push carries no due, unlock, or lock dates. Scheduling stays on
 `preview_content_push`, because dated work is the case that most wants a look before it
 lands, and every parameter is paid for in the tool listing of every session. Dated
 content goes `stage_content`, then the preview pair. `preview_content_push` names the draft by the label
-`list_staged_content` returns, builds the same adapter payload the push tab builds,
-captures the Canvas baseline, and persists one frozen operation; `apply_operation`
-takes only the three coordinates that preview returned and runs the same Operation Ledger
-apply, so a draft landed from chat and a draft landed from the web UI are the same write
-with the same claim, drift check, per-step checkpoints, and receipt. One draft, one
+`list_staged_content` returns, builds the adapter payload, captures the Canvas baseline,
+and persists one frozen operation; `apply_operation` takes only the three coordinates
+that preview returned and runs the Operation Ledger apply, with its claim, drift check,
+per-step checkpoints, and receipt. One draft, one
 course, one call: the assistant cannot reach a second course or a draft the teacher did
 not name, and a course that changed under the frozen review is refused as drift rather
 than overwritten. Delivery options are per kind, and naming one a kind cannot carry is
@@ -225,10 +223,10 @@ then receive the Forge-only staging appendix.
 
 `get_product_guide(topic="")` closes the gap between what the tool list implies and what
 the app actually does. Every successful response returns an ordered object that annotates
-all ten topics with one-line summaries. `overview` serves Appendix B; the other named
+every guide topic with a one-line summary. `overview` serves Appendix B; the other named
 CanvasAgent sections serve their exact Appendix A-F slices; `full` serves the entire file;
-and the two writing topics serve their own canonical files. `tools` is generated from the
-frozen schema-v53 contract and groups all 42 tools exactly once by teacher-facing job.
+a standalone guide topic serves its own canonical file. `tools` is generated from the
+current schema contract and groups every tool exactly once by teacher-facing job.
 Topic matching trims surrounding whitespace and ignores case. The download route's
 CanvasAgent bytes equal `topic="full"`; section topics are extracted from those same bytes.
 Results are text-only MCP content: the server returns one minified JSON text block and
@@ -238,7 +236,7 @@ instructions point here rather than restating any of it.
 
 `list_staged_content(kind="")` also takes no `course_id` and carries no student data, so
 it likewise needs no course gate, no identity vault, and no safety scan. It reuses
-`api.staged_content.list_inbox_files` (the same marker-gated To Review listing the push tabs use) and
+`api.staged_content.list_inbox_files` (the marker-gated To Review listing) and
 returns only each draft's label, never its absolute path. Pass `kind` to narrow to one of
 `quiz`, `assignment`, or `page`; omit it to see everything staged across all three.
 
@@ -251,12 +249,12 @@ An unavailable, corrupt, or non-current projection is reported as
 The assistant reports all rows and waits for teacher direction, then calls
 `prepare_scoring_session(course_id, assignment_id, scoring_guidance="")` only for
 selected exact assignments. Preparation reads only current local projections and
-saves one assignment-scoped session on success. If the oldest required snapshot is
-older than the applicable local-time threshold (60 minutes during Monday-Friday
-07:00-16:30 America/Chicago, 600 minutes otherwise), it returns
-`mirror_refresh_needed`; the agent calls `refresh_mirror(course_id)` and retries, or
-retries with `use_existing_mirror=true` when the teacher has said nothing changed. At
-exactly the threshold no refresh is needed. Once a usable session id exists,
+saves one assignment-scoped session on success. If the oldest required snapshot has
+reached the applicable freshness window (60 minutes during Monday-Friday 07:00-16:30
+America/Chicago on school days, 600 minutes otherwise, including configured no-school
+dates), it returns `mirror_refresh_needed`; the agent calls `refresh_mirror(course_id)`
+and retries, or retries with `use_existing_mirror=true` when the teacher has said
+nothing changed. Once a usable session id exists,
 continue locally from its packet and do not prepare that assignment again. A
 repeated call returns `scoring_session_already_open`. Late or resubmitted work
 arrives through `refresh_scoring_session`, which the agent calls itself, telling the
@@ -319,7 +317,7 @@ operation token, or private local id crosses the MCP boundary. A stale packet,
 changed review plan, invalid answer, or ambiguous write fails closed. The preview is the
 first review; Canvas Live is the record. Previously verified numeric-score pushes in the
 current assignment session can use the reviewed correction path; comment-only and
-feedback-only edits use the feedback-revision tools. Later edits happen in Canvas Live. The teacher's go
+feedback-only edits use feedback revision mode. Later edits happen in Canvas Live. The teacher's go
 authorizes only the exact selected assignment set, not later discovered work.
 
 Preparation uses fresh local CanvasMirror roster, assignment, and submission
@@ -364,8 +362,8 @@ comments through the frozen, verified assignment write lane, then reads back eve
 numeric score once (`score_mismatch`, `late_not_honored` with `score_readback_mismatch`, or
 `score_readback_unavailable`). Previously verified numeric-score pushes in the current
 session can be corrected through a newly reviewed stage; identical restages do not send,
-and `sent_unknown` remains blocked. Comment-only and feedback-only edits use the existing
-feedback-revision tools.
+and `sent_unknown` remains blocked. Comment-only and feedback-only edits use feedback
+revision mode.
 Canvas Expert does not write New Quiz item scores, per-item feedback, assignment totals, or
 fallback comments. Results return only aggregate counts and pseudonym-keyed outcomes. A teacher who directs
 the agent to score and post the selected assignments has authorized each exact stage to post,
@@ -380,15 +378,19 @@ a live Canvas call. If the required mirror data is stale or missing, they return
 `{"ok": false, "error": "..."}` naming the problem; the agent calls `refresh_mirror(course_id)`
 itself and retries the same read once it reports `"synced"`.
 
-Stale `get_course_content(kind="modules")` and `get_course_content(kind="pages")` results name the Course Catalog refresh surface
-as their repair. `refresh_mirror` reports only its actual roster, assignments, and
-submissions scope; it does not refresh catalog modules or pages.
+Stale `get_course_content(kind="modules")` and `get_course_content(kind="pages")` results
+name `refresh_mirror(structure_only=true)` as their repair, which refreshes the whole
+Course Catalog (assignments, assignment groups, modules, and pages) for a Current course.
+Plain `refresh_mirror` refreshes the private mirror's roster, groups, assignments, and
+submissions; it does not refresh catalog modules or pages.
 
 The section, mirror, and Course Catalog reads named here reject an ID absent from
-`list_courses` before recommending a mirror or Course Catalog refresh. Student-data tools (`get_roster`, `get_submissions`, and
-`get_gradebook_snapshot`) are scoped to Current courses (`config.active_courses()`). The
-catalog reads (`get_roster(include=["sections"])`, `get_course_content(kind="assignments")`, and `get_course_content(kind="modules")`) and
-`refresh_mirror` accept any saved course, including Previous courses. `get_course_content(kind="pages")` is available for saved courses. Pseudonymized artifacts are
+`list_courses` before recommending a mirror or Course Catalog refresh. Student-data tools
+(`get_roster`, `get_submissions`, and `get_gradebook_snapshot`), group discovery,
+`get_course_content(kind="pages")`, and `refresh_mirror(structure_only=true)` are scoped to
+Current courses (`config.active_courses()`). `get_roster(include=["sections"])`,
+`get_course_content(kind="assignments")`, `get_course_content(kind="modules")`, and plain
+`refresh_mirror` accept any saved course, including Previous courses. Pseudonymized artifacts are
 scrubbed, not anonymous: the pseudonym is stable, and student text still comes through as
 the student wrote it.
 
@@ -424,14 +426,16 @@ compact. Client and model token treatment varies:
   ungraded-work count: `total_ungraded` sums submitted or pending-review work
   without a grade across the returned roster rows.
 - The outbound safety scan always runs on the full row payload **before** tabulation and
-  truncation happens **before** the scan — the gate inspects exactly the bytes that leave
+  truncation happens **before** the scan, so the gate inspects exactly the bytes that leave
   the machine.
 
 ## Running it
 
-Canvas Expert runs as one local process per PC. The first desktop agent to start it owns
-the runtime; another agent on that PC attaches to the same process through its local
-MCP endpoint. The browser console is optional: it can be opened while the runtime is
+Canvas Expert runs as one local process per PC, guarded by an OS lock. The first entry
+point to start (a desktop agent through `api/mcp_server/__main__.py`, or
+`Open Canvas Expert.bat` through `api/qf_ui.py`) owns the runtime; another agent on that
+PC attaches to the same process through its local MCP endpoint. The browser console is
+optional: it can be opened while the runtime is
 running, and an unavailable console does not prevent the agent runtime from working.
 Closing an attached agent does not stop the owner process; the owner shuts down when
 its own entry point exits. `api/runtime.py` owns shared startup and shutdown work, while
@@ -461,7 +465,7 @@ with the current page values:
 
 ## Claude Desktop
 
-Use CanvasAgent → Advanced setup → Download Claude package, then in the already installed Claude Desktop open
+On the CanvasAgent page, open Advanced setup and instructions → Download Claude package, then in the already installed Claude Desktop open
 Settings → Extensions → Advanced settings → Install Extension and select the package.
 The package is folder-linked: it contains only a launcher and a manifest, while Canvas
 Expert and its dependencies remain in the unzipped folder. The package embeds the current
@@ -482,12 +486,12 @@ supported local client; do not expose the MCP server publicly.
 
 ## Verifying it works
 
-After registering, try `list_courses` first (no Canvas call, no student data — a quick
+After registering, try `list_courses` first (no Canvas call, no student data; a quick
 sanity check that the process starts and the interpreter resolves correctly), then
 `get_gradebook_snapshot` on a Current course. Every student name in the output should be a
-pseudonym you don't recognize from the real roster — that's the privacy boundary working as
+pseudonym you don't recognize from the real roster; that's the privacy boundary working as
 intended, not a bug. If the mirror hasn't synced this course yet, `get_gradebook_snapshot`
-(or `get_roster`/`get_submissions`) refuses instead — call `refresh_mirror` for that course
+(or `get_roster`/`get_submissions`) refuses instead; call `refresh_mirror` for that course
 and retry.
 
 Merged options are mode-specific. Inapplicable options return `inapplicable_option` before
@@ -514,6 +518,6 @@ outcome (`ok`, `refused`, or `error`) and duration; errors may add only the clas
 existing log envelope includes app version. Arguments, result content, identifiers, names and
 pseudonyms are never logged. No refusal-code field is added to the log allowlist.
 
-Schema v78 wire pins: 37 tools, 14,658 characters for tools/list and 2,303 characters
-for server instructions (down from 21,762 and 2,667). The warn-before-push rule ends
-within the first 2,048 characters. These are wire measurements, not token promises.
+Schema v78 wire budgets: 37 tools, at most 14,658 characters for tools/list and 2,303
+characters for server instructions. The warn-before-push rule ends within the first 2,048
+characters. These are wire measurements, not token promises.

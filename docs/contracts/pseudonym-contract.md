@@ -39,47 +39,45 @@ dex order, minus the omissions below.
   rather than removing from it. Names that
   directly imply poor intelligence or uselessness are also excluded: `Slowpoke`,
   `Slowbro`, `Slowking`, `Numel`, `Magikarp`, and `Wobbuffet`.
-- The registry is an allowlist. Code must never fall back to a word outside it.
-- The retired `fake_first_names.txt` and `fake_last_names.txt` pools do not coexist with
-  this registry.
+- The registry is an allowlist for new assignments. Code must never fall back to a word
+  outside it.
 
 Registry shape and uniqueness are validated when loaded. An invalid or exhausted registry
 fails closed with an actionable local error; it never emits a placeholder or numbered word.
 
-## Assignment and editing
+## Assignment and permanence
 
-- The Identity Vault remains the private source of truth and continues to key identity by
-  stable Canvas user ID.
-- First assignment chooses an unused registry word that does not case-fold to any real
-  roster-name token supplied for collision avoidance.
-- Once assigned, the pseudonym is stable until the teacher explicitly changes or regenerates
-  it.
-- Pseudonyms are unique across the whole current vault under case-folded comparison.
-- Manual edits accept one registry word as a string. Regeneration chooses a different
-  available registry word. Both use the same collision checks.
+- The Identity Vault is the private source of truth and keys identity by stable Canvas
+  user ID.
+- First assignment chooses a registry word from an HMAC of the Canvas user ID under the
+  teacher's shared pseudonym secret, skipping words already recorded. A computer without
+  that secret refuses to assign (`pseudonym_secret_not_configured`); see
+  `docs/guides/more-than-one-computer.md`.
+- A new pseudonym must not case-fold to any real roster-name token supplied for collision
+  avoidance.
+- Pseudonyms are permanent. Once recorded, a pseudonym never changes, and nothing renames
+  or regenerates it. A recorded word that later leaves the registry stays valid.
+- Pseudonyms are unique across the whole vault under case-folded comparison. When two
+  computers record the same word for different students before syncing, the earliest
+  assignment wins and the other student is provisional; scoring work for that student
+  refuses with `pseudonym_provisional` until it is resolved.
 - A pseudonym is always transported and compared as the exact stored string. Consumers do
   not split, decorate, concatenate, or infer a second name component.
 
-## Private vault schema and clean break
+## Private vault storage
 
-The current vault document declares `schema_version: 3`. Each student entry stores one
-`pseudonym` string plus the existing private identity, nickname, and first-seen fields.
-`pseudo_first` and `pseudo_last` do not exist.
-
-This is a pre-launch clean break:
-
-- Runtime code does not migrate, dual-read, or silently rewrite an older vault.
-- A missing vault starts empty and is populated by the normal roster upsert.
-- A present document with the wrong/missing schema version, retired component fields, or an
-  out-of-registry pseudonym is rejected before mutation.
-- Retiring a developer's pre-launch private vault is an explicit, recoverable operational
-  cutover outside normal runtime behavior. It is never performed by tests or automatically
-  on application startup.
+The vault lives in the synced workspace at `_Shared/vault/`: an immutable `seed.v1.json`,
+an immutable `pokemon.v1.json` copy of the registry, and one append-only
+`journal.<machine>.jsonl` per computer. Journal events either assign a pseudonym or record
+private identity fields (real name, SIS ID, nicknames, first seen). A missing vault starts
+from an empty seed and is populated by the normal roster upsert. Runtime code does not
+migrate or dual-read an older vault, and a file at a retired vault location blocks
+student-data access without being opened.
 
 ## Consumer rules
 
-- Names displays the exact one-word value in the private console table. MCP roster
-  patches use `pseudonym: string` through the reviewed runtime path.
+- Names displays the exact one-word value in the private console table. MCP roster tools
+  identify a student by the exact `pseudonym` string.
 - Scrubbing maps the full real name, every real-name token, and each nickname to the same
   full one-word pseudonym. IDs continue to map to the neutral ID placeholder.
 - SAFE artifacts, PowerGrader, CanvasMirror projections, and MCP

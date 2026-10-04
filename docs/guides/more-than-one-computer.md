@@ -21,14 +21,14 @@ MCP tools access student records through Canvas Expert's vault service and retur
 pseudonyms; agents must not open vault files or browse the workspace directly. Keep the
 vault folder private to the teacher and Canvas Expert.
 
-Configure the same pseudonym secret on both computers in **Settings → Local workspace &
-privacy**. Compare the short fingerprint shown on each computer to confirm the credentials
-match. The secret itself stays in each computer's Windows Credential Manager.
+Configure the same Identity Vault transfer key on both computers in **Settings → Identity
+Vault across devices**. Compare the six-character fingerprint shown on each computer to
+confirm the keys match. The key itself stays in each computer's Windows Credential Manager.
 
 ## Setting up another computer
 
 1. Configure both computers to use the same OneDrive workspace.
-2. Set the same pseudonym secret on each computer and confirm the fingerprints match.
+2. Save the same transfer key on each computer and confirm the fingerprints match.
 3. Let OneDrive finish syncing `_Shared/` before opening Canvas Expert on the other computer.
 4. Refresh CanvasMirror separately on each computer; its cache is local to that computer.
 
@@ -39,7 +39,7 @@ OneDrive finish syncing, then call `transfer_work_item(work_id, action="take_ove
 on the other computer. A stale lease requires an explicit confirmed takeover with
 `confirm_stale=true`; orphaned events and sync conflicts remain visible.
 
-If the **Local workspace & privacy** card reports a shared-store conflict, stop student-data
+If the CanvasAgent page's **Local workspace & privacy** card reports a shared-store conflict, stop student-data
 work and resolve the listed conflict in Canvas Expert before retrying. Do not merge or delete
 conflict copies by hand.
 
@@ -58,10 +58,10 @@ The storage checkpoint (`85ce67a`) passed its automated gates. These checks need
 the teacher, both computers, or live Canvas:
 
 - One week of same-day use on both computers with zero `*-<MACHINE>.*` files under `_Shared/`.
-- The same pseudonyms on both computers after migration; a test student added on one computer appears unchanged on the other.
+- The same pseudonyms on both computers; a test student added on one computer appears unchanged on the other.
 - Scoring session handoff between computers (clean hand-off, and stale-lease takeover with orphaned events surfaced).
-- Start the Web UI, then the MCP server: the MCP server attaches and exactly one process holds `ce.lock`.
-- One Web UI content refresh leaves all four catalog sections current; a Canvas create and delete show up in `added_ids` and `deleted_ids`.
+- Open Canvas Expert, then start a desktop agent: the agent attaches and exactly one process holds `ce.lock`.
+- One `refresh_mirror(course_id, structure_only=true)` leaves all four catalog sections current; a page created and one deleted in Canvas show up correctly in `get_course_content` afterwards.
 - A CE push appears in `pending_writes`, not the catalog, until the next refresh; an unpublished page push lists with `published:false` after refresh.
 - Four `discover_scoring_work` calls start no refresh operations; every read tool returns the freshness envelope.
 

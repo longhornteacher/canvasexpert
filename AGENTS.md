@@ -16,7 +16,7 @@ Every agent reads this file. A lead executor then reads:
 - `docs/guides/scoring-sessions.md`: canonical Scoring Session reference
 - `api/default_docs/AI Authoring/Author an Assignment (AssignmentForge).txt`: canonical AssignmentForge authoring reference
 
-Skip archived handoffs, every module map, `tools/TOOLS.md`, and whole architecture visions
+Skip archived handoffs, every module map, `tools/README.md`, and whole architecture visions
 unless the brief names them; they cost context and rarely change the work. A handoff that
 cites a long document should name the required numbered sections. Historical handoffs are not
 implementation authority, because the code and current docs are.
@@ -35,34 +35,29 @@ browser is a small control console around it.
 Canvas Expert's primary interface is the local stdio MCP runtime used by a teacher's
 desktop AI agent. The runtime owns bounded Canvas reads, privacy checks, resumable work
 sessions, explicit approval boundaries, verified Canvas actions, and durable receipts.
-
-The host agent may render previews and interactive HTML in its own conversation surface.
-Core Canvas Expert behavior therefore returns host-neutral semantic data, summaries,
-warnings, artifact references, and stable continuation fields. A second CE-specific
-presentation framework would duplicate what the host already does, and behavior that
-depends on ChatGPT, Claude, or another host's rendering features would break for every
-other host, so keep both out of the runtime.
+The host agent renders previews in its own conversation surface, so the runtime returns
+host-neutral data (see the product contract).
 
 The Web UI is a small local control console for setup, readiness, mirror status and
-refresh, operation review/recovery, receipts, diagnostics, and private workspace
-management. It is not the default home for new agent-facing workflows, a substitute for
-Canvas Live, or a reason to add duplicate dashboards, scoring queues, or authoring flows.
+refresh, operation recovery, receipts, diagnostics, and private workspace management.
+It is not the default home for new agent-facing workflows, a substitute for Canvas Live,
+or a reason to add duplicate dashboards, scoring queues, or authoring flows.
 Routes and browser scripts consume shared application services; they do not become the
 canonical owner of business logic.
 
 ## Repository boundary
 
-- `api/` is the local-only runtime, MCP server, control console, and secondary CLI
-  surface. It holds the Canvas token, handles private student data, and may perform
-  Canvas writes.
+- `api/` is the local-only runtime, MCP server, and control console. It holds the Canvas
+  token, handles private student data, and may perform Canvas writes.
 - `api/mcp_server/` is the primary agent-facing protocol boundary. Keep its tool
   contracts, refusal behavior, privacy rules, session lifecycles, and receipts stable
   and host-neutral.
-- `api/webui/` is the runtime's control console. Keep setup, trust, review, recovery,
+- `api/webui/` is the runtime's control console. Keep setup, trust, recovery, receipts,
   and diagnostics here, and keep the product center in the runtime rather than in
   browser feature work.
 - `engine/` holds offline Forge HTML rendering, palettes, author-HTML validation,
-  authored points, and text utilities. It has no token, network, or student data.
+  submission wording, authored points, and text utilities. It has no token, network, or
+  student data.
 - `api/default_docs/AI Authoring/Author a *.txt` are the canonical authoring contracts.
   Backend code should not change their meaning. Read `api/README.md` before changing
   Canvas push behavior.
@@ -103,14 +98,13 @@ Use only the row relevant to the active handoff.
 | Operation Ledger | `docs/reference/operation-ledger-module-map.md` | High-risk Canvas write boundary; preserve checkpoints, idempotency, verification, and receipts. |
 | Classic Quizzes (stop-gap) | `docs/reference/classic-quiz-design.md` | Stop-gap until New Quizzes support drafted scores/feedback; one QuizForge contract with `quiz_engine: "classic"`; Hub differentiation only; verified Canvas facts live there. |
 | New Quizzes responses | `api/powergrader/new_quiz_fetch.py` | Response acquisition is read-only. Canvas Expert does not write New Quiz item scores or per-item feedback; grade existing writing in Canvas and author future writing portions as separate assignments. |
-| Control console / Web UI | `docs/contracts/agent-runtime-product-contract.md`, `api/webui/README.md`, then `docs/reference/webui-presentation-system.md` | Keep the console small and trustworthy: setup, readiness, mirror, review, recovery, receipts, diagnostics, and private workspace controls. Preserve route-specific load order and verify affected rendered routes; the host agent already renders, so skip UI parity with it. |
+| Control console / Web UI | `docs/contracts/agent-runtime-product-contract.md`, `api/webui/README.md`, then `docs/reference/webui-presentation-system.md` | Keep the console small and trustworthy: setup, readiness, mirror, recovery, receipts, diagnostics, and private workspace controls. Preserve route-specific load order and verify affected rendered routes; the host agent already renders, so skip UI parity with it. |
 
 ## Firm rules
 
 These three hold everywhere. Everything else in this file is a default.
 
-1. **No secrets or student data in the repo.** Tokens live in the OS credential store (or the
-   gitignored `api/.env` for CLI use). Names, IDs, submissions, grades, comments, notes, and
+1. **No secrets or student data in the repo.** Tokens live in the OS credential store. Names, IDs, submissions, grades, comments, notes, and
    roster data never go into commits, fixtures, logs, or output that leaves the teacher's
    machine. Private output belongs in the teacher's workspace or gitignored folders. The
    pre-commit hook is only a backstop.
@@ -185,7 +179,7 @@ agent memory. After compaction, resume from the brief and the current diff.
 - For agent-facing work, start from the cooperation loop: discover, prepare, decide,
   act, verify, and resume. Treat the MCP/runtime path as primary and the browser as a
   supporting control console.
-- Add a Web UI surface for setup, trust, review, recovery, diagnostics, private workspace
+- Add a Web UI surface for setup, trust, recovery, receipts, diagnostics, private workspace
   management, or a genuinely local-only operation that an agent cannot safely own. The host
   agent already renders previews, so don't duplicate them or build dashboard parity by default.
 - Keep MCP wrappers, routes, and templates thin. Shared application services own business
@@ -225,13 +219,7 @@ Two measurements justify this discipline:
   schema snapshot, generated inventory, and wrapper tests synchronized; do not rely on a
   hard-coded tool count in this guidance.
 
-Two house-style decisions remain open and must be answered explicitly rather than inferred:
-
-- Whether test classes are house style. Exactly one of the 136 test files uses them, and it is
-  brand-new uncommitted work.
-- Whether `pytest-randomly` should remain enabled by default. Runs currently need
-  `-p no:randomly` to be reproducible, and nondeterministic failure order increases diagnosis
-  cost.
+Open test house-style decisions live under "Open decisions" in `docs/reference/project-state.md`.
 
 ## Risk and verification
 
@@ -239,7 +227,7 @@ Two house-style decisions remain open and must be answered explicitly rather tha
 |---|---|---|
 | Low | copy/layout, local UI state, offline parsing, narrow internal refactor | Focused tests if useful; render affected browser routes. |
 | Medium | reversible Canvas content operations, settings, shared browser utilities | Focused tests, affected subsystem tests, affected rendered routes. |
-| High | grades/comments, credentials, FERPA boundaries, external AI, scheduled writes | Happy/failure/idempotency checks, relevant broader suite, and user diff review. |
+| High | grades/comments, credentials, FERPA boundaries, external AI | Happy/failure/idempotency checks, relevant broader suite, and user diff review. |
 
 During implementation, run the named focused gate that exercises the changed behavior. Its
 passing result is the slice gate; a slice confined to its declared surface does not owe a
@@ -278,4 +266,4 @@ checked and zero new browser console errors confirmed.
 
 ## Tool routing
 
-Consult `tools/TOOLS.md` only when a handoff needs a developer helper not otherwise named.
+Consult `tools/README.md` only when a handoff needs a developer helper not otherwise named.

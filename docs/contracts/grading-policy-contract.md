@@ -83,9 +83,8 @@ not been verified in a live quiz.
 `Library/Grading Policy.txt` is optional and contains `floor_percent: N` for effort
 credit, an integer from 0 through 100. If present but invalid, it blocks scoring with
 `grading_policy_file_invalid`; Canvas Expert does not fall back to no-policy behavior.
-The file may retain the retired `missing_percent` and
-`sweep_after_school_days` keys; unknown keys are ignored. No missing-work sweep exists.
-Without the file, scoring uses raw scores with no effort credit and late-day behavior is unchanged.
+Unknown keys are ignored. Without the file, scoring uses raw scores with no effort credit
+and late-day behavior is unchanged.
 
 `Library/Calendars/Holidays.csv` is optional. Each row is `start`, `start,end`, or
 `start,end,name`; dates accept ISO `YYYY-MM-DD` or US `M/D/YYYY`. A header or invalid
@@ -98,8 +97,9 @@ Effort credit and late days apply to Scoring Sessions. Results may include `insi
 and `late_days` (integer 0-60), consistent across every item row for one pseudonym.
 Late days are calculated from the first meaningful attempt and apply in every course,
 regardless of a grading-policy file. School days count Monday through Friday after the
-due date through the submission date, excluding `Holidays.csv` dates and the student's
-grace days. A late attempt is at least one day; an on-time first meaningful attempt is zero.
+due date through the submission date, excluding `Holidays.csv` dates. A late attempt
+counts at least one day before the student's grace days are subtracted, and the result
+never goes below zero; an on-time first meaningful attempt is zero.
 
 Incomplete history produces `needs_teacher_input` for affected rows only. The question
 asks for days; do not infer a count. The default has no late-days question. A teacher can
@@ -127,9 +127,9 @@ verified Canvas Expert push attempt, or null).
 
 A row from a previously verified numeric-score push in the current assignment session
 can be restaged when its entered score, late days, or feedback changes. Comment-only and
-feedback-only pushes are outside this correction path; use the existing feedback-revision
-tools for comment edits. An identical restage reports `no_valid_results`
-and says it was already pushed. A row with an ambiguous `sent_unknown` push remains
+feedback-only pushes are outside this correction path; use
+`prepare_scoring_session(mode="feedback_revision")` for comment edits. An identical
+restage reports `no_valid_results` and says it was already pushed. A row with an ambiguous `sent_unknown` push remains
 blocked. Older superseded sessions are not reopened.
 
 When needed, prior push data is reconstructed from verified score-ledger evidence and

@@ -2,61 +2,65 @@
 
 A computer science teacher's project to stay sharp and get some work done.
 
-Free. Private. Open source. Uses your secure Canvas "Personal Access Token". Runs entirely on your computer.
+Free and open source. It uses your Canvas "Personal Access Token" and runs on your own
+computer; the token and the map of real names to stand-in names stay there.
 
-Canvas Expert is a local, teacher-controlled cooperation layer between Canvas and the
-desktop AI agent you already use. ChatGPT Desktop, Claude Desktop, or another MCP-capable
-agent is the primary working surface; Canvas Expert keeps the Canvas token, private data,
-local mirror, approval boundaries, and verified writes on your machine. The browser app is
-a small control console for setup, readiness, recovery, receipts and private identity tools.
+Canvas Expert sits between Canvas and the desktop AI agent you already use, such as Claude
+Desktop or the ChatGPT desktop app. You work in conversation with your agent. Canvas Expert
+holds the Canvas token and your private data, keeps a local copy of your courses, shows the
+agent student work only under stand-in names, and makes every Canvas change go through a
+preview you approve, a check after it lands, and a receipt. A small browser console handles
+setup, connections, recovery, receipts and private name lookups.
 
 ## Getting started
 
-Step 1 - Click the green **Code** button near the top of this page, then **Download ZIP** and unzip it.
-Step 2 - Put the unzipped folder anywhere in your own files.
-Step 3 - Double-click `Open Canvas Expert.bat`. The first run installs Python and everything else it needs into your own user account, no admin needed, then opens the app in your browser. If Windows Package Manager is unavailable, install Python 3.13 or newer from [python.org](https://www.python.org/downloads/) with **Install for me only**, then run the launcher again. If it ever stops starting, double-click `Repair.bat`.
+1. Click the green **Code** button near the top of this page, then **Download ZIP**, and unzip it
+   anywhere in your own files.
+2. Double-click `Open Canvas Expert.bat`. The first run installs Python and everything else it
+   needs into your own user account, with no admin rights, then opens the console in your
+   browser. If Windows Package Manager is unavailable, install Python 3.13 or newer from
+   [python.org](https://www.python.org/downloads/) with **Install for me only**, then run the
+   launcher again. If it ever stops starting, double-click `Repair.bat`.
+3. Follow the setup steps, then use **Connect** on the CanvasAgent page for Claude Desktop or
+   ChatGPT. Restart that app and ask it to list your courses.
+
+Using more than one computer? Point each one at the same OneDrive workspace; see
+[docs/guides/more-than-one-computer.md](docs/guides/more-than-one-computer.md).
 
 ## What it does
 
-**Create** quizzes, assignments, pages, rubrics, and quick gradebook columns with your agent,
-then have Canvas Expert validate, preview, and push them to Canvas after your review.
-Set due, unlock, and lock dates, grading category, module placement, shuffle, time limit, attempts, and
-access code on the way out. Classic Quizzes and New Quizzes are both supported.
+**Create.** Your agent drafts quizzes (Classic or New Quizzes), assignments and pages. Canvas
+Expert validates them, shows a preview, and pushes them after you say go, with due, unlock and
+lock dates, assignment group, module placement and publish state.
 
-**Differentiate** the same work in three tiers (Support, Core, Accelerate), each with a teacher-configured
-public Canvas tag. Canvas Expert has no student-to-tier mapping; the teacher assigns tier assignments to
-students or pods in Canvas.
+**Differentiate.** The same work in three tiers (Support, Core, Accelerate), each with a public
+Canvas tag you choose. Canvas Expert keeps no student-to-tier mapping; you assign tiers to
+students in Canvas.
 
-**Scoring Sessions** let a connected AI agent discover outstanding work across every Current course,
-report one compact student-free digest, and wait for your direction. The agent then prepares only the
-exact assignment(s) you select; each SAFE pseudonymized packet remains limited to one assignment.
-Canvas's rubric takes precedence; otherwise, the agent asks for bounded scoring guidance. When a
-scoring decision is needed, it pauses before submitting validated results through guarded write
-handling. Canvas Live is the only place to review or edit posted work; there is no local scoring queue
-or hosted grader.
+**Score and give feedback.** Your agent finds outstanding work across your current courses,
+reports what it found, and waits for you to choose. For each assignment you pick, it reads the
+work under stand-in names, follows the Canvas rubric (or asks you for scoring guidance),
+stages scores and comments, and shows you a preview with any warnings before anything posts.
+Canvas Expert posts what you approve and checks it landed. Notes the agent writes for you,
+such as integrity concerns, stay with you and never reach Canvas. You can also reopen graded
+work to revise the feedback only.
 
-**Gradebook tools** for one course at a time: set Canvas's own late policy, honor per-student extra time,
-apply curves, and take snapshots.
+**Gradebook.** Grade adjustments and curve rules, extra attempts, gradebook snapshots, and SIS
+grade bridges for differentiated work, each previewed before it changes anything. Late work is
+counted in days from the student's first real attempt; Canvas applies its own late penalty.
 
-**Names** is a private searchable who-is-who table with protected names, scrub tests,
-identity export and vault backup. Your agent manages local roster settings through
-pseudonymized, reviewed MCP tools.
+**Roster.** Your agent manages extra time, monitored students and classroom profiles through
+stand-in names. The **Names** page in the console is where you look up who is who.
 
-**CanvasAgent** connects the AI you already use. Download one instruction file and paste it into any chat,
-or connect Claude Desktop or the ChatGPT desktop app so the assistant can read your course data itself,
-pseudonymized, over a local connection that never leaves your machine. The agent can render
-assignment and scoring previews in its own app; Canvas Expert supplies the bounded data,
-state, safety checks, and actions behind those previews.
-
-Everything works from a local copy of your Canvas data, so the app stays fast and keeps working when the
-network does not. It refreshes in the background and updates itself when you say so.
+Everything reads from a local copy of your Canvas data, so it stays fast. Your agent refreshes
+that copy when it's out of date, and Canvas Expert updates itself when you say so.
 
 ## Learn more
 
 Want more detail? Give `api/default_docs/AI Authoring/START HERE - CanvasAgent.txt` to a
 chatbot and ask it anything. That file is also the CanvasAgent instruction set: paste the
 whole thing into an AI chat, or just its CORE block into a custom-instructions box, and the
-assistant knows how to draft coursework CanvasExpert can validate and push.
+assistant knows how to draft coursework Canvas Expert can validate and push.
 
 For developers: see `AGENTS.md` and `docs/README.md`.
 
@@ -68,16 +72,18 @@ MIT, see `LICENSE`.
 
 CanvasExpert was built by a teacher working with AI coding tools.
 
-The AI features are optional and off until you turn them on. When you use one, CanvasExpert replaces real
-names and Canvas/SIS ID numbers with stable fake ones before anything leaves your computer, and checks the
-result again before it sends. The real-to-fake map stays on your machine and is never transmitted.
+Nothing goes to an AI service until you connect one. When your agent reads from Canvas Expert,
+real names and Canvas/SIS ID numbers are replaced with stable stand-in names, and the result is
+checked again before it is returned. The map from real names to stand-ins stays on your
+computer and is never sent.
 
-That is not a guarantee. The check knows the students on your synced rosters and nothing else, so a name it
-has never seen, a name spelled differently than Canvas spells it, or a phone number, address, or email a
-student typed into their own essay can pass through. Read what you are about to send. The app shows it to
-you first for exactly that reason.
+That is not a guarantee. The check knows the students on your synced rosters and nothing else,
+so a name it has never seen, a name spelled differently than Canvas spells it, or a phone
+number, address, or email a student typed into their own work can pass through. Stand-in names
+make student data pseudonymized, not anonymous. Before anything goes back to Canvas, your agent
+shows you a preview; read it.
 
-Never send anyone's personally identifiable information (PII) to an AI service. Not only is that uncool,
-it's illegal.
+Never send anyone's personally identifiable information (PII) to an AI service. Not only is
+that uncool, it's illegal.
 
 If you use this, follow all relevant employer policies and rules.

@@ -29,10 +29,6 @@ work, the host may schedule a prompt; any Canvas write still requires the
 runtime's normal preparation, teacher approval, and verified action path.
 Canvas Expert runs no scheduler that writes to Canvas.
 
-Canvas Expert does not maintain separate oral-reading capture, writing-history,
-or learning-objective workflows. The agent works with Canvas submissions and
-authors objectives as ordinary assignment or page content.
-
 ## Primary interface
 
 The local stdio MCP server is the primary agent-facing interface. MCP tool
@@ -75,15 +71,15 @@ agent request
 
 The five cooperation concerns are:
 
-1. **Discover** — identify the exact course, assignment, scope, and usable
+1. **Discover**: identify the exact course, assignment, scope, and usable
    freshness state.
-2. **Prepare** — freeze the input, plan, packet, or draft that the agent may
+2. **Prepare**: freeze the input, plan, packet, or draft that the agent may
    discuss.
-3. **Decide** — ask only the bounded teacher questions or approvals needed to
+3. **Decide**: ask only the bounded teacher questions or approvals needed to
    proceed.
-4. **Act** — perform only the exact authorized operation through the owning
+4. **Act**: perform only the exact authorized operation through the owning
    write boundary.
-5. **Verify and resume** — confirm postconditions, record receipts, and make
+5. **Verify and resume**: confirm postconditions, record receipts, and make
    interruption or ambiguity visible instead of silently retrying.
 
 ## Runtime boundaries
@@ -94,10 +90,15 @@ The five cooperation concerns are:
 delegates to application services and safety owners; it does not become a
 second web router or a host-specific UI layer.
 
-`api/runtime.py` owns process startup and shutdown: workspace setup, authoring
-library construction, interrupted-operation recovery, mirror heartbeat, and
-work-lease release. The runtime host serves MCP and may mount the FastAPI
-control console. The console is optional and does not own runtime startup.
+`api/runtime.py` owns process startup and shutdown: workspace setup and
+pinning, authoring library construction, interrupted-operation recovery, mirror
+heartbeat, and work-lease release. One Canvas Expert process runs per computer,
+held by an OS lock. The lock owner serves stdio MCP and starts the loopback
+runtime host (`api/runtime_host.py`), which serves a ping route and `/mcp` so a
+second agent on the same computer attaches to the same process. The host mounts
+the FastAPI control console only if it imports, so a console failure never stops
+the agent. The console does not own runtime startup. Running on more than one
+computer over one workspace is covered in `docs/guides/more-than-one-computer.md`.
 
 The runtime's core read, privacy, session, workspace, and write services must
 be usable without starting FastAPI. **Boundary law:** production modules outside
@@ -126,13 +127,15 @@ review boundary, or reuse a stale or superseded session.
 
 `api/webui/` has exactly five page routes:
 
-- `/` — CanvasAgent setup/readiness, mirror status/refresh, privacy, operations
-  needing attention with Retry and receipt links, and recent receipts.
-- `/welcome` — first-run setup.
-- `/settings` — account, courses, Forge preferences, workspace/privacy and updates.
-- `/names` — private searchable who-is-who table, protected names, scrub test,
+- `/`: CanvasAgent. AI app connections, health, Canvas account, Canvas data and
+  mirror refresh, local workspace and privacy, operations needing attention with
+  Retry and receipt links, recent receipts, and the CanvasAgent instructions download.
+- `/welcome`: first-run setup.
+- `/settings`: Canvas account, courses, differentiation tags, workspace, Identity
+  Vault across devices, updates and support bundle.
+- `/names`: private searchable who-is-who table, protected names, scrub test,
   who-is-who export and vault backup. The table has no edit controls.
-- `/receipts/{id}` — private receipt detail, including historical operation steps.
+- `/receipts/{id}`: private receipt detail, including historical operation steps.
 
 Navigation contains CanvasAgent, Names and Settings. The console does not prepare,
 review or apply new operations; the agent does. Roster setting changes also belong
