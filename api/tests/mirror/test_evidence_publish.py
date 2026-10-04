@@ -150,7 +150,7 @@ def test_html_attribute_secrets_are_removed_without_flattening_code(tmp_path):
                       "body": '<p>if (a &lt; b) {\treturn “yes”; }</p>'
                               '<a href="https://canvas.example.test/files/1?token=secret">source</a>'
                               ' https://user:password@canvas.example.test/path'
-                              ' C:/Users/Teacher/private.txt'}],
+                              ' C:/Users/user/private.txt'}],
         roster_complete=True, submissions_complete=True,
         writer_key="writer-a", run_id="run-a",
         acquired_at="2026-01-02T00:00:00Z",
@@ -160,9 +160,9 @@ def test_html_attribute_secrets_are_removed_without_flattening_code(tmp_path):
     assert 'if (a < b) {\treturn “yes”; }' in body
     assert "source" in body
     assert "token=secret" not in body and "password" not in body
-    assert "C:/Users/Teacher" not in body
+    assert "C:/Users/user" not in body
     safe_bytes = b"".join(path.read_bytes() for path in (root / "CanvasMirror").rglob("*.json"))
-    for forbidden in (b"token=secret", b"password", b"C:/Users/Teacher"):
+    for forbidden in (b"token=secret", b"password", b"C:/Users/user"):
         assert forbidden not in safe_bytes
 
 
