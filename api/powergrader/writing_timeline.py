@@ -21,7 +21,6 @@ from zoneinfo import ZoneInfo
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 DC_NS = "http://purl.org/dc/elements/1.1/"
 CP_NS = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
-APP_NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
 
 _W_INS = f"{{{W_NS}}}ins"
 _W_DEL = f"{{{W_NS}}}del"

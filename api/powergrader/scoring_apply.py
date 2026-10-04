@@ -120,7 +120,7 @@ def _projected_payload(student: dict, session: dict | None = None, *,
 def default_transports():
     """This module owns the Canvas transport, so the MCP layer never imports it.
 
-    ``api/tests/dailywriting/test_dw_canvas_ingest.py`` enforces that no
+    Scoring-boundary tests enforce that no
     ``api/mcp_server/`` module imports ``canvas_client``: the assistant-facing
     layer is not allowed to hold a live Canvas call. Callers there ask this
     package to do the talking instead. Tests still inject their own fakes.

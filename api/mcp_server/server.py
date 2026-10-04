@@ -322,36 +322,6 @@ def get_course_pages(course_id: str, full_text: bool = False,
 
 
 @mcp.tool(structured_output=False)
-def list_learning_objectives(course_id: str) -> str:
-    """Reviewed objectives for the Current course as a {columns, rows} table."""
-    return _compact(tools.list_learning_objectives(course_id))
-
-
-@mcp.tool(structured_output=False)
-def preview_learning_objective(course_id: str, objective: str,
-                               effective_start: str, effective_end: str,
-                               source_refs: list, replaces: str = None) -> str:
-    """Preview one evidence-grounded learning objective without writing."""
-    return _compact(tools.preview_learning_objective(
-        course_id, objective, effective_start, effective_end, source_refs, replaces))
-
-
-@mcp.tool(structured_output=False)
-def apply_learning_objective(course_id: str, preview: dict,
-                             preview_digest: str, expected_revision: int) -> str:
-    """Apply an exact reviewed objective preview after revision and source checks."""
-    return _compact(tools.apply_learning_objective(
-        course_id, preview, preview_digest, expected_revision))
-
-
-@mcp.tool(structured_output=False)
-def delete_learning_objective(course_id: str, entry_id: str,
-                              expected_revision: int) -> str:
-    """Delete one reviewed objective using an expected document revision."""
-    return _compact(tools.delete_learning_objective(course_id, entry_id, expected_revision))
-
-
-@mcp.tool(structured_output=False)
 def get_roster(course_id: str) -> str:
     """Read a Current roster as stable one-word student stand-ins and section names."""
     return _compact(tools.get_roster(course_id))
@@ -432,19 +402,6 @@ def get_score_ledger(course_id: str, assignment_id: str,
                      pseudonyms: str = "", offset: int = 0, limit: int = 50) -> str:
     """Read bounded pseudonymized score evidence from the private local archive."""
     return _compact(tools.get_score_ledger(course_id, assignment_id, pseudonyms, offset, limit))
-
-
-@mcp.tool(structured_output=False)
-def get_writing_history(pseudonym: str, since: str = "", until: str = "",
-                        include_text: bool = False,
-                        max_text_chars: int = 2000) -> str:
-    """Read private Writing Record evidence for one pseudonym; never score, coach, or judge.
-    Date filters use YYYY-MM-DD; include_text=false omits prose and max_text_chars=0
-    returns it in full."""
-    return _compact(tools.get_writing_history(
-        pseudonym, since=since, until=until,
-        include_text=include_text, max_text_chars=max_text_chars,
-    ))
 
 
 @mcp.tool(structured_output=False)

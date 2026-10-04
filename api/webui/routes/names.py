@@ -38,11 +38,6 @@ def _vault():
     return open_vault()
 
 
-# Re-exported for `api/tests/test_feedback_pipeline.py`, which exercises
-# roster upsert (preferred-name-as-nickname capture) through this module path.
-_upsert_roster = roster_service.upsert_roster
-
-
 @names_router.get("/protected")
 def get_protected():
     """Return protected packs + custom names."""

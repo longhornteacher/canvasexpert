@@ -154,16 +154,3 @@ def api_ai_ta_rebuild():
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
     return JSONResponse({"ok": True, "files": [os.path.basename(p) for p in files]})
-
-
-_CONTRACT_FILE_MAP = {
-    "AssignmentForge_Base": "Author an Assignment (AssignmentForge).txt",
-    "PageForge_Base": "Author a Page (PageForge).txt",
-    "QuizForge_Base": "Author a Quiz (QuizForge).txt",
-    # Not Forge contracts, but the same "hand this text to an AI" delivery and
-    # the same canonical source, so they reuse this route rather than adding
-    # one. Both are also served by the MCP get_product_guide tool, so a pasted
-    # assistant and a connected one read identical bytes.
-    "CanvasAgent": "START HERE - CanvasAgent.txt",
-    "WritingTimeline": "Writing Timeline (tracked assignments).txt",
-}

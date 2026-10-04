@@ -25,16 +25,6 @@ WEBUI_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR   = os.path.dirname(WEBUI_DIR)
 REPO_ROOT = os.path.dirname(API_DIR)
 
-def _workspace_folder(name: str):
-    return runtime_paths.workspace_folder(name)
-
-
-def _exports_dir():
-    """Where printable (DOCX) versions land: the synced workspace Printables
-    folder when OneDrive is present, else the repo-local Finished_Exports fallback."""
-    return runtime_paths.printables_dir()
-
-
 # Stable compatibility facade; workspace-derived paths remain call-time only.
 TEMP_DIR = str(runtime_paths.temp_dir())
 

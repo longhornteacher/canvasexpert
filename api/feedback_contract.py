@@ -62,8 +62,8 @@ def scoring_output_contract(
         "concerns such as copying, AI-generated text, or work that doesn't match "
         "the student's other writing.",
         "Investigate as you see fit. Canvas Expert's evidence includes "
-        "`writing_timeline`, `evidence.overlap`, `get_submission_history`, and "
-        "`get_writing_history`; your own checks (a web search for distinctive "
+        "`writing_timeline`, `evidence.overlap`, and `get_submission_history`; "
+        "your own checks (a web search for distinctive "
         "phrases, reading level, anything useful) help too.",
         "Say what you found and how strong you think it is, in plain words, and "
         "cite the evidence. Detector-style percentages aren't reliable, so leave "

@@ -47,9 +47,6 @@ def _reserve_filename(filename, used):
 # Section keys the UI offers (order preserved in the document):
 SECTIONS = ["standing", "late", "adjustments", "comments", "work"]
 
-DOWNLOADABLE = {"online_text_entry", "online_upload", "online_url"}
-
-
 # ── DOCX ─────────────────────────────────────────────────────────────────
 
 

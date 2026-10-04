@@ -488,8 +488,8 @@ def _attempt_record(normalized, *, catalog, root, duplicate=False):
 
 
 def write_response_snapshot(course_id, assignment_id, *, assignment=None, quiz=None,
-                            items=None, normalized_attempts=None, latest=None,
-                            root=None, attempted_at=None):
+                            items=None, normalized_attempts=None, root=None,
+                            attempted_at=None):
     """Persist one successful focused response acquisition.
 
     Duplicate student/attempt joins are retained as separate list entries and
@@ -500,10 +500,7 @@ def write_response_snapshot(course_id, assignment_id, *, assignment=None, quiz=N
     ``current``/``latest_attempt`` always reflect this fetch alone — Canvas is
     truth for the present, the mirror is richer about the past.
 
-    ``latest`` is accepted for caller compatibility but unused — the
-    current/latest pointer is derived from ``normalized_attempts``.
     """
-    del latest
     _require_dir(course_id, root)
     attempted_at = attempted_at or now_iso()
     catalog = normalize_items(items or []) if isinstance(items, list) else (items or {})
@@ -657,12 +654,8 @@ def read_fresh_snapshot(course_id, assignment_id, *, root=None, max_age_hours=6.
 
 
 def write_fetch_snapshot(course_id, assignment_id, *, assignment, items,
-                         normalized_attempts, latest=None, root=None,
-                         attempted_at=None):
-    """Adapter used by ``new_quiz_fetch.fetch`` after report/native work.
-    ``latest`` is accepted for callback compatibility but unused — the
-    current/latest pointer is derived from ``normalized_attempts``."""
-    del latest
+                         normalized_attempts, root=None, attempted_at=None):
+    """Adapter used by ``new_quiz_fetch.fetch`` after report/native work."""
     return write_response_snapshot(
         course_id, assignment_id, assignment=assignment, items=items,
         normalized_attempts=normalized_attempts, root=root,

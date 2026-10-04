@@ -8,18 +8,6 @@ from . import _io as _io_mod
 
 
 SETTINGS_KEY = "sis_grade_bridges"
-# These private key names remain stable for persisted pilot state. Product and
-# MCP language calls the record a verified family link.
-_REGISTRATION_KEYS = (
-    "family_title",
-    "source_assignment_ids",
-    "source_titles",
-    "bridge_assignment_id",
-    "bridge_state_digest",
-)
-_OPTIONAL_REGISTRATION_KEYS = ("family_key", "grading_excluded", "module_id", "module_name")
-
-
 def _clean_text(value, field: str) -> str:
     text = str(value or "").strip()
     if not text:

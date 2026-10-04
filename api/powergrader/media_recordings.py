@@ -16,7 +16,6 @@ from pathlib import Path
 
 MAX_MEDIA_BYTES = 100 * 1024 * 1024
 MAX_MEDIA_SECONDS = 15 * 60
-CANONICAL_MIME = "audio/wav"
 
 
 def held(code: str, message: str, *, filename: str = "recording", item_id: str = "", attempt=1) -> dict:

@@ -31,7 +31,7 @@ def generate_physical_outputs(quiz: Quiz, output_folder: str) -> Dict[str, str]:
 
     from engine.rendering.physical.emit_docx import html_to_docx
     from engine.rendering.physical.emit_pdf import html_to_pdf
-    from engine.rendering.physical.html_renderer import default_css_path, render_html
+    from engine.rendering.physical.html_renderer import render_html
     from engine.rendering.physical.quiz_adapter import to_printdoc
     from engine.rendering.physical.reference_doc import build_reference_docx
 
@@ -63,9 +63,8 @@ def generate_physical_outputs(quiz: Quiz, output_folder: str) -> Dict[str, str]:
             log_path,
         )
 
-    css_path = default_css_path()
-    _try_emit(lambda: html_to_pdf(quiz_html, css_path, str(quiz_pdf)), "quiz pdf", log_path)
-    _try_emit(lambda: html_to_pdf(key_html, css_path, str(key_pdf)), "key pdf", log_path)
+    _try_emit(lambda: html_to_pdf(quiz_html, str(quiz_pdf)), "quiz pdf", log_path)
+    _try_emit(lambda: html_to_pdf(key_html, str(key_pdf)), "key pdf", log_path)
 
     rationale_path = _create_rationale_sheet(quiz, output_folder)
     _log_validation_stats(quiz, str(log_path))

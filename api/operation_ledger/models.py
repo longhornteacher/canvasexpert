@@ -12,20 +12,6 @@ VERSION = 1
 
 # ── Enums ────────────────────────────────────────────────────────────────
 
-OPERATION_STATUSES = (
-    "working", "prepared", "reviewed", "applying",
-    "applied", "partial", "failed", "attention", "abandoned",
-)
-
-TARGET_STATES = (
-    "pending", "claimed", "sent_unknown",
-    "applied", "partial", "failed", "blocked", "skipped",
-)
-
-STEP_STATES = TARGET_STATES  # same vocabulary
-
-CLAIM_STATES = ("claimed", "released", "expired")
-
 OPERATION_TRANSITIONS = {
     "working":   {"prepared", "abandoned"},
     "prepared":  {"reviewed", "abandoned"},

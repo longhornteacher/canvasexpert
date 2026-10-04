@@ -25,7 +25,6 @@ from api.powergrader import student_attachments
 from api.powergrader import media_recordings
 
 
-REQUEST_TIMEOUT = 30
 DOWNLOAD_TIMEOUT = 120
 MAX_REDIRECTS = 5
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
@@ -188,7 +187,6 @@ def fetch_submissions(course_id: str, assignment_id: str, *, session_id: str | N
                 course_id, assignment_id, assignment=adata,
                 items=payload.get("items") or [],
                 normalized_attempts=payload.get("normalized_attempts") or [],
-                latest=payload.get("latest") or [],
                 root=workspace.workspace_root(),
                 attempted_at=new_quizzes.now_iso(),
             )

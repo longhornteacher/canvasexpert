@@ -12,7 +12,6 @@ from api.webui import readiness
 
 __all__ = ["connection_context", "generic_stdio_config", "build_claude_mcpb"]
 
-_LAUNCHER_ERROR = "Canvas Expert folder is unavailable; regenerate this extension."
 _LAUNCHER_SOURCE = '''"""Folder-linked Canvas Expert MCPB launcher."""
 from pathlib import Path
 import os

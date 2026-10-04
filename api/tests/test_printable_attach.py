@@ -336,7 +336,7 @@ def test_assignment_attachment_and_printable_apply_then_resume(monkeypatch, tmp_
         "attachments": [{"file": "handout.pdf", "label": "Read the handout"}],
     }, []))
 
-    def fake_pdf(_html, _css, out_path):
+    def fake_pdf(_html, out_path):
         Path(out_path).write_bytes(b"%PDF synthetic")
         return out_path
 

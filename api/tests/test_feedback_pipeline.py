@@ -9,10 +9,22 @@ import os
 import shutil
 
 from api.feedback_vault import Vault
-from api import feedback_pipeline as fp
+from types import SimpleNamespace
+
+from api import feedback_artifacts, feedback_contract, feedback_results
 from api import feedback_safety as safety
 from api.nq_report import parse_student_analysis_file
 from api.platform_services import workspace
+
+fp = SimpleNamespace(
+    build_contract_text=feedback_contract.build_contract_text,
+    merge_rows_by_uid=feedback_results.merge_rows_by_uid,
+    pseudonymize=feedback_artifacts.pseudonymize,
+    pseudonymize_submissions=feedback_artifacts.pseudonymize_submissions,
+    reidentify=feedback_results.reidentify,
+    render_results=feedback_results.render_results,
+    validate_results=feedback_results.validate_results,
+)
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures",
                        "student_analysis_sample.csv")
@@ -252,14 +264,14 @@ def test_pseudonymize_submissions_fake_names_avoid_roster(tmp_path):
 def test_upsert_roster_captures_preferred_name_as_nickname(tmp_path):
     """A student's Canvas short_name (preferred name) must be recorded as a nickname
     so the scrub removes it — the top leak vector (legal 'Joseph', goes by 'Joey')."""
-    from api.webui.routes.names import _upsert_roster
+    from api.roster_service import upsert_roster
     from api import feedback_scrub as scrub
     from api.platform_services import config
 
     v = Vault(str(tmp_path / "vault.json"))
     users = [{"id": 8801, "name": "Joseph Smith", "sortable_name": "Smith, Joseph",
               "short_name": "Joey", "sis_user_id": "7001"}]
-    _upsert_roster(v, users)
+    upsert_roster(v, users)
 
     entry = v.entries()[0]
     assert "Joey" in entry["nicknames"], "short_name should be captured as a nickname"

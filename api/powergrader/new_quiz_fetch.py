@@ -981,7 +981,6 @@ def fetch(course_id, assignment_id, core_submissions, *, session=None, sleep=tim
                 report_rows=rows or [],
                 items=items or [],
                 normalized_attempts=all_attempts,
-                latest=subs,
             )
         except Exception as exc:
             # A disposable local mirror must never turn a successful focused

@@ -19,7 +19,6 @@ from .module_placement import attach_assignment_type_module_item
 
 CANONICAL_TIERS = ("Support", "Core", "Accelerate")
 SUPPORTED_RENDERERS = ("assignment", "quiz")
-RECONCILIATION_FIELDS = ("name", "description", "due_at")
 
 _FAMILY_KEYS = ("family_id", "differentiation_family_id", "canonical_family_id")
 _TIER_KEYS = ("tier", "canonical_tier", "variant", "variant_label")

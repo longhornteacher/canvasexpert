@@ -10,14 +10,127 @@ location. A test's own explicit monkeypatch.setattr calls still take effect
 normally, since they run after this fixture within the same test.
 """
 import os
+import copy
+import fnmatch
+import json
+from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from api import grading_policy, pseudonym_secret, runtime_paths
+from api import feedback_vault, grading_policy, pseudonym_secret, runtime_paths
 from api.platform_services import workspace
 from api.platform_services.config import _io as config_io
-from api.webui import profiles
+from api.storage_support import atomic_write_json, interprocess_lock
+
+
+class VaultTestDouble(feedback_vault.IdentityVault):
+    """File-backed test adapter for the shared identity operations mixin.
+
+    Production opens ``SharedVault`` only. This adapter keeps tests isolated
+    from the teacher workspace while preserving the small on-disk behavior
+    older unit fixtures need.
+    """
+
+    SCHEMA_VERSION = 3
+
+    def __init__(self, path=None):
+        self.path = str(path or "vault.json")
+        self._by_id = {}
+        self._by_pseudo = {}
+        self.conflict_files = []
+        self._load()
+
+    def _lock_path(self):
+        path = Path(self.path)
+        return path.with_name(path.name + ".lock")
+
+    def _load(self):
+        try:
+            with open(self.path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except FileNotFoundError:
+            self._by_id, self._by_pseudo = {}, {}
+            return
+        except json.JSONDecodeError as error:
+            raise feedback_vault.VaultSchemaError("Identity Vault document is invalid.") from error
+        if (not isinstance(data, dict)
+                or data.get("schema_version") != self.SCHEMA_VERSION
+                or not isinstance(data.get("by_canvas_id"), dict)):
+            raise feedback_vault.VaultSchemaError("Identity Vault document is invalid.")
+        self._by_id = data["by_canvas_id"]
+        self._by_pseudo = {
+            entry["pseudonym"]: str(canvas_id)
+            for canvas_id, entry in self._by_id.items()
+            if isinstance(entry, dict) and entry.get("pseudonym")
+        }
+        for entry in self._by_id.values():
+            if isinstance(entry, dict) and ("pseudo_first" in entry or "pseudo_last" in entry):
+                raise feedback_vault.VaultSchemaError("Identity Vault document uses retired pseudonym fields.")
+
+    def _save_unlocked(self):
+        path = Path(self.path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(path, {
+            "schema_version": self.SCHEMA_VERSION,
+            "by_canvas_id": self._by_id,
+            "written_by": "test",
+            "written_at": "2026-01-01T00:00:00",
+            "entry_count": len(self._by_id),
+        })
+
+    def save(self):
+        with interprocess_lock(self._lock_path()):
+            self._save_unlocked()
+
+    @contextmanager
+    def transaction(self):
+        with interprocess_lock(self._lock_path()):
+            self._load()
+            before_id, before_pseudo = copy.deepcopy(self._by_id), dict(self._by_pseudo)
+            try:
+                yield self
+            except Exception:
+                self._by_id, self._by_pseudo = before_id, before_pseudo
+                raise
+            else:
+                self._save_unlocked()
+
+    def conflicts(self):
+        directory = Path(self.path).parent
+        own_name = Path(self.path).name.casefold()
+        try:
+            return sorted(
+                name for name in os.listdir(directory)
+                if name.casefold() != own_name
+                and fnmatch.fnmatch(name.casefold(), "vault*.json")
+            )
+        except OSError:
+            return []
+
+    def set_pseudonym(self, canvas_id, value):
+        """Seed a fixed synthetic pseudonym for a test case."""
+        cid = str(canvas_id)
+        canonical = feedback_vault._canonical_registry_word(value)
+        if canonical is None:
+            raise feedback_vault.InvalidPseudonymError("test pseudonym must be a registry word")
+        holder = self._by_pseudo.get(canonical)
+        if holder is not None and holder != cid:
+            raise feedback_vault.PseudonymCollisionError("test pseudonym is already assigned")
+        entry = self._by_id.setdefault(cid, {
+            "pseudonym": "", "real_name": "", "sis_id": "",
+            "nicknames": [], "first_seen": "2026-01-01T00:00:00",
+        })
+        old = entry.get("pseudonym") or ""
+        self._by_pseudo.pop(old, None)
+        entry["pseudonym"] = canonical
+        self._by_pseudo[canonical] = cid
+
+
+# Older tests import this storage-shaped double from the production module.
+# Keep the alias inside pytest collection only; runtime code has no base Vault.
+feedback_vault.Vault = VaultTestDouble
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +139,6 @@ def _isolate_real_machine_and_workspace_paths(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config_io, "CONFIG_PATH", str(fake_root / "config.json"))
     monkeypatch.setattr(workspace, "CONFIG_PATH", str(fake_root / "config.json"))
-    monkeypatch.setattr(profiles, "PROFILES_PATH", str(fake_root / "profiles.json"))
 
     # LOCALAPPDATA must be an explicit fake path, not unset: runtime_paths.local_app_dir()
     # falls back to Path.home() -- the real user profile -- when it's absent.

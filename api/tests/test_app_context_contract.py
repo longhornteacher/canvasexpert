@@ -51,8 +51,8 @@ b.context.reconcile([{id:"fresh",name:"Fresh"}], {source:"all-courses", authorit
 if (b.context.snapshot().targetCourses.length !== 0 || b.context.snapshot().focusedCourse !== null) throw new Error("authoritative prune");
 
 b = boot({"canvasExpert.push.coursePicker.v1": JSON.stringify({selectedIds:[12,"13"],focusedId:13})});
-if (b.context.snapshot().focusedCourse.id !== "13" || b.context.snapshot().targetCourses.length !== 2) throw new Error("migration");
-if (!b.store["canvasExpert.context.v1"] || !b.store["canvasExpert.push.coursePicker.v1"]) throw new Error("migration persistence");
+if (b.context.snapshot().focusedCourse !== null || b.context.snapshot().targetCourses.length !== 0) throw new Error("legacy state ignored");
+if (b.store["canvasExpert.push.coursePicker.v1"] !== JSON.stringify({selectedIds:[12,"13"],focusedId:13}) || b.store["canvasExpert.context.v1"]) throw new Error("legacy state untouched");
 b = boot({"canvasExpert.context.v1":"not-json"});
 if (b.context.snapshot().targetCourses.length !== 0) throw new Error("malformed storage");
 "ok";
@@ -71,4 +71,4 @@ def test_app_context_source_exposes_only_contract_methods():
     for name in ["snapshot", "setFocus", "setTargets", "reconcile", "subscribe"]:
         assert f"{name}: {name}" in SOURCE
     assert "canvasExpert.context.v1" in SOURCE
-    assert "canvasExpert.push.coursePicker.v1" in SOURCE
+    assert "canvasExpert.push.coursePicker.v1" not in SOURCE

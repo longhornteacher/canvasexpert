@@ -25,7 +25,6 @@ from engine.utils.text_utils import safe_filename_component
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR = os.path.dirname(MODULE_DIR)
-REPO_ROOT = os.path.dirname(API_DIR)
 CONFIG_PATH = str(runtime_paths.local_app_dir() / "config.json")
 DEFAULT_DOCS_DIR = os.path.join(API_DIR, "default_docs")
 WORKSPACE_NAME = "CanvasExpert"
@@ -33,11 +32,10 @@ WORKSPACE_NAME = "CanvasExpert"
 # The Library: reusable collections the teacher authors or keeps.
 LIBRARY_NAME = "Library"
 AI_AUTHORING_SUBFOLDER = "AI Authoring"
-LEARNING_OBJECTIVES_SUBFOLDER = "Learning Objectives"
 FEEDBACK_CONTRACTS_SUBFOLDER = "Feedback Contracts"
 LIBRARY_SUBFOLDERS = [
     AI_AUTHORING_SUBFOLDER, "Quizzes", "Pages",
-    "Calendars", "Source Materials", LEARNING_OBJECTIVES_SUBFOLDER,
+    "Calendars", "Source Materials",
     FEEDBACK_CONTRACTS_SUBFOLDER,
 ]
 
@@ -517,12 +515,6 @@ def course_catalog_v3_path(course_id):
 def course_catalog_v3_previous_path(course_id):
     directory = course_catalog_dir(course_id)
     return os.path.join(directory, "catalog.v3.previous.json") if directory else None
-
-
-def learning_objectives_path(root=None):
-    """The sole canonical reviewed Learning Objectives document."""
-    directory = library_folder(LEARNING_OBJECTIVES_SUBFOLDER, root)
-    return os.path.join(directory, "Learning Objectives.json") if directory else None
 
 
 def canvas_mirror_root():

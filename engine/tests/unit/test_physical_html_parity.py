@@ -192,7 +192,7 @@ def test_generate_physical_outputs_uses_new_paths_with_mocked_emitters(monkeypat
         Path(out_path).write_bytes(b"docx")
         return out_path
 
-    def fake_pdf(html: str, css_path: str, out_path: str) -> str:
+    def fake_pdf(html: str, out_path: str) -> str:
         Path(out_path).write_bytes(b"%PDF")
         return out_path
 
@@ -226,7 +226,7 @@ def test_generate_physical_outputs_logs_missing_engine_warnings(monkeypatch, tmp
     def missing_docx(html: str, reference_docx: str, out_path: str) -> str:
         raise RuntimeError("Pandoc unavailable")
 
-    def missing_pdf(html: str, css_path: str, out_path: str) -> str:
+    def missing_pdf(html: str, out_path: str) -> str:
         raise RuntimeError("Microsoft Edge unavailable")
 
     monkeypatch.setattr(emit_docx, "html_to_docx", missing_docx)

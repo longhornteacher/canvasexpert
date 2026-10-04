@@ -187,6 +187,29 @@ def test_provenance_without_guidance_or_contract_is_ignored(monkeypatch, tmp_pat
     assert session_store.load_preparation_state("c1", "a1") == {}
 
 
+def test_preparation_guidance_uses_on_demand_folder_and_ignores_legacy_sessions(monkeypatch, tmp_path):
+    """Old prep files stay unread; reads do not create folders, writes do."""
+    root = tmp_path / "workspace"
+    monkeypatch.setattr(session_store.workspace, "workspace_root", lambda: str(root))
+    old = root / "_System" / "PowerGrader" / "Sessions"
+    old.mkdir(parents=True)
+    legacy = old / f"prep-{session_store.scope_digest('c1', 'a1')}.json"
+    legacy.write_text('{"scoring_guidance":"retired guidance"}', encoding="utf-8")
+    legacy_files_before = sorted(path.name for path in old.iterdir())
+
+    assert session_store.load_preparation_state("c1", "a1") == {}
+    preparation = root / "_System" / "PowerGrader" / "Preparation"
+    assert not preparation.exists()
+
+    session_store.save_preparation_state(
+        "c1", "a1", scoring_guidance="Current guidance",
+        scoring_guidance_provenance="teacher")
+
+    assert session_store.load_preparation_state("c1", "a1")["scoring_guidance"] == "Current guidance"
+    assert legacy.read_text(encoding="utf-8") == '{"scoring_guidance":"retired guidance"}'
+    assert sorted(path.name for path in old.iterdir()) == legacy_files_before
+
+
 @pytest.mark.parametrize("policy, expected", [(None, "apply"), ("waive", "waive"), ("apply", "apply")])
 def test_the_late_policy_is_stored_on_the_private_session(monkeypatch, tmp_path, policy, expected):
     saved, _prepare = _wire(monkeypatch, tmp_path, assignment=_assignment(

@@ -63,7 +63,7 @@ def test_snapshot_retains_attempts_identity_and_relative_evidence(tmp_path, monk
 
     result = new_quizzes.write_response_snapshot(
         COURSE, ASSIGNMENT, assignment=_assignment(), items=_items(),
-        normalized_attempts=[older, latest], latest=[latest], root=str(tmp_path),
+        normalized_attempts=[older, latest], root=str(tmp_path),
         attempted_at=NOW,
     )
     assert result == {"ok": True, "state": "current", "students": 1, "attempts": 2}
@@ -141,7 +141,7 @@ def test_duplicate_or_stale_snapshots_fail_closed(tmp_path):
     duplicate_again = _attempt(1, "one-again", result_id="result-1b")
     result = new_quizzes.write_response_snapshot(
         COURSE, ASSIGNMENT, assignment=_assignment(), items=_items(),
-        normalized_attempts=[duplicate, duplicate_again], latest=[duplicate],
+        normalized_attempts=[duplicate, duplicate_again],
         root=str(tmp_path), attempted_at=NOW,
     )
     assert result["state"] == "incomplete"
@@ -153,7 +153,7 @@ def test_duplicate_or_stale_snapshots_fail_closed(tmp_path):
     current = _attempt(1, "current", result_id="result-current")
     new_quizzes.write_response_snapshot(
         COURSE, ASSIGNMENT, assignment=_assignment(), items=_items(),
-        normalized_attempts=[current], latest=[current], root=str(tmp_path),
+        normalized_attempts=[current], root=str(tmp_path),
         attempted_at="2026-07-01T12:00:00Z",
     )
     snapshot, error = new_quizzes.read_fresh_snapshot(
@@ -171,7 +171,7 @@ def test_corrupt_v2_files_are_absent_and_identical_refresh_is_idempotent(tmp_pat
     row = _attempt(1, "same", result_id="result-same")
     kwargs = {
         "assignment": _assignment(), "items": _items(),
-        "normalized_attempts": [row], "latest": [row],
+        "normalized_attempts": [row],
         "root": str(tmp_path), "attempted_at": NOW,
     }
     new_quizzes.write_response_snapshot(COURSE, ASSIGNMENT, **kwargs)
@@ -311,7 +311,7 @@ def test_response_snapshot_does_not_downgrade_synced_quiz_metadata(tmp_path):
     row["new_quiz_items"][0]["prompt"] = "New prompt."
     new_quizzes.write_fetch_snapshot(
         COURSE, ASSIGNMENT, assignment=new_assignment, items=new_items,
-        normalized_attempts=[row], latest=[row], root=str(tmp_path), attempted_at=NOW,
+        normalized_attempts=[row], root=str(tmp_path), attempted_at=NOW,
     )
 
     document = new_quizzes.read_quiz(COURSE, ASSIGNMENT, root=str(tmp_path))
@@ -331,7 +331,7 @@ def test_malformed_item_join_and_unmatched_attempt_are_explicit(tmp_path):
     unmatched["new_quiz_join_error"] = "student_submission_missing"
     result = new_quizzes.write_response_snapshot(
         COURSE, ASSIGNMENT, assignment=_assignment(), items=_items(),
-        normalized_attempts=[malformed, unmatched], latest=[malformed],
+        normalized_attempts=[malformed, unmatched],
         root=str(tmp_path), attempted_at=NOW,
     )
     assert result["state"] == "incomplete"

@@ -65,7 +65,7 @@ def _generate_printable(model: dict, *, palette_key: str, public_tag: str | None
             model, palette_key=palette_key, public_tag=public_tag,
             tracked=tracked, attachment_labels=attachment_labels,
         )
-        html_to_pdf(printable_html, "", str(output))
+        html_to_pdf(printable_html, str(output))
         if not output.is_file():
             raise RuntimeError("PDF renderer did not create an output file")
         return {

@@ -45,10 +45,6 @@ def render_html(printdoc: PrintDoc, *, variant: str, tier: str | None = None) ->
     )
 
 
-def default_css_path() -> str:
-    return str(_CSS_PATH)
-
-
 def _alpha(index: int) -> str:
     return chr(65 + int(index))
 

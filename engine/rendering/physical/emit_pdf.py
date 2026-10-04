@@ -12,12 +12,12 @@ import shutil
 from pathlib import Path
 
 
-def html_to_pdf(html: str, css_path: str, out_path: str) -> str:
+def html_to_pdf(html: str, out_path: str) -> str:
     """Render HTML to a print-final PDF with headless Microsoft Edge.
 
     Playwright is imported lazily so importing the engine never requires the
-    browser stack. ``css_path`` is accepted for signature compatibility; the HTML
-    already inlines the print CSS, so Edge needs no external stylesheet.
+    browser stack. The HTML already inlines the print CSS, so Edge needs no
+    external stylesheet.
     """
 
     try:

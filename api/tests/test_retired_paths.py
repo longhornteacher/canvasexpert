@@ -166,7 +166,6 @@ RETIRED_PATHS = (
     ("api/webui/static/pages/calendar.css", "(none)", "Retire the school calendar, bell schedules, and the late-work sweep"),
     ("api/webui/static/gradebook/sweep.js", "(none)", "Retire the school calendar, bell schedules, and the late-work sweep"),
     ("api/webui/templates/calendar.html", "(none)", "Retire the school calendar, bell schedules, and the late-work sweep"),
-    ("api/default_docs/Calendars", "(none)", "Retire the school calendar, bell schedules, and the late-work sweep"),
     ("api/default_docs/AI Authoring/Author an Academic Calendar.txt", "(none)", "Retire the school calendar, bell schedules, and the late-work sweep"),
     ("docs/contracts/canonical-school-calendar-contract.md", "(none)", "Retire the school calendar, bell schedules, and the late-work sweep"),
     ("api/diagnose_newquizzes.py", "(none)", "Retire the hand-run New Quizzes auth diagnostic"),
@@ -191,13 +190,60 @@ RETIRED_PATHS = (
     ("api/operation_ledger/adapters/missing_fill.py", "(none)", "Retire the Canvas Expert missing-work sweep; Canvas owns its missing-submission policy"),
     ("api/tests/test_missing_sweep.py", "(none)", "Retire the Canvas Expert missing-work sweep and its tests"),
     ("api/tests/test_missing_sweep_operation.py", "(none)", "Retire the Canvas Expert missing-work sweep and its tests"),
+    ("api/routine_runtime.py", "(none)", "Retire scheduled routines; the host agent owns recurring work"),
+    ("api/routine_reads.py", "(none)", "Retire scheduled routines; the host agent owns recurring work"),
+    ("api/webui/routine_coordinator.py", "(none)", "Retire scheduled routines; the host agent owns recurring work"),
+    ("api/custom_routines", "(none)", "Retire scheduled routines and the custom Python loader"),
+    ("api/webui/routes/routines.py", "(none)", "Retire the routines control page and endpoints"),
+    ("api/webui/templates/routines.html", "(none)", "Retire the routines control page"),
+    ("api/webui/templates/_routines_panel.html", "(none)", "Retire the routines home panel"),
+    ("api/dailywriting", "(none)", "Retire private writing-history records"),
+    ("api/webui/routes/dailywriting.py", "(none)", "Retire private writing-history routes"),
+    ("api/learning_objectives.py", "(none)", "Retire the separate learning-objectives workflow"),
+    ("api/default_docs/AI Authoring/Author a Learning Objective.txt", "(none)", "Retire the separate learning-objectives workflow"),
+    ("api/tests/test_durable_identity_invariant.py", "(none)", "Retire the Writing Record identity invariant with its storage feature"),
+    ("api/pseudonym_rename.py", "(none)", "Pseudonym assignments are permanent"),
+    ("api/powergrader/oral_reading.py", "(none)", "Retire the unsupported oral-reading scoring branch"),
+    ("api/powergrader/blind_first.py", "(none)", "Retire the unused blind-first review mode"),
+    ("api/webui/mirror_reads.py", "(none)", "Retire duplicate mirror read wrappers"),
+    ("api/webui/profiles.py", "(none)", "Retire unused profile persistence module"),
+    ("engine/rendering/canvas", "(none)", "Retire unused Canvas package export chain"),
+    ("engine/validation/validator.py", "(none)", "Retire unused offline validation chain"),
+    ("engine/validation/rules", "(none)", "Retire unused validation rules"),
+    ("engine/validation/fixers", "(none)", "Retire unused validation fixers"),
+    ("engine/parsing/text_parser.py", "(none)", "Retire the legacy plain-text quiz format"),
+    ("engine/parsing/parser_protocol.py", "(none)", "Retire the unused text-parser protocol"),
+    ("engine/packagers/canvas_handler.py", "(none)", "Retire unused Canvas package export chain"),
+    ("engine/packagers/packager.py", "(none)", "Retire unused Canvas package export chain"),
+    ("docs/contracts/oral-reading-evidence-contract.md", "(none)", "Retire oral-reading evidence contract"),
+    ("docs/reference/writing-record-module-map.md", "(none)", "Retire writing-record module reference"),
+    ("docs/guides/canvasexpert-agent-capabilities.md", "(none)", "START HERE and MCP guide are the current agent capability references"),
+    ("docs/guides/cs-project-authoring.md", "(none)", "Retire the superseded CS project authoring guide"),
+    ("docs/mcp-capability-probe-brief.md", "(none)", "Retire the completed MCP capability probe brief"),
+    ("docs/reference/authoring-contract-drift.md", "(none)", "Move the remaining Accelerate finding into the current differentiation reference"),
+    ("docs/reference/operation-ledger-design.md", "(none)", "Merge operation-ledger design into its current module map"),
+    ("docs/guides/Holidays.csv", "(none)", "Keep calendar defaults in one canonical source"),
 )
+
+
+def _contains_retired_product_content(path: Path) -> bool:
+    """Ignore interpreter caches left by running tests in retired packages."""
+    if path.is_file():
+        return True
+    if not path.is_dir():
+        return False
+    for child in path.iterdir():
+        if child.name == "__pycache__":
+            continue
+        if _contains_retired_product_content(child):
+            return True
+    return False
 
 
 def test_retired_paths_are_absent():
     present = []
     for relative, retired_by, subject in RETIRED_PATHS:
-        if (REPO_ROOT / relative).exists():
+        if _contains_retired_product_content(REPO_ROOT / relative):
             origin = (
                 f"retired by {retired_by}"
                 if retired_by != "(none)"

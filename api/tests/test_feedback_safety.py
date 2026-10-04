@@ -1,7 +1,7 @@
 """Offline tests for the outbound PII safety scan (the red/green send gate)."""
 import os
 
-from api import feedback_pipeline as fp
+from api import feedback_artifacts as fp
 from api import feedback_safety as safety
 from api.feedback_vault import Vault
 from api.nq_report import parse_student_analysis_file

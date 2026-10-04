@@ -968,7 +968,7 @@ def test_submit_refuses_a_superseded_record_before_any_validation(monkeypatch, t
     _attach_bundle(stale, tmp_path, _fake_safe_bundle(people, items=1))
     _bind_session_store(monkeypatch, {"stale-session": stale})
 
-    from api import feedback_pipeline as fp
+    from api import feedback_results as fp
     monkeypatch.setattr(fp, "validate_results",
                         lambda *_a, **_kw: pytest.fail("validation must not run"))
 

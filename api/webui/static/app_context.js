@@ -2,7 +2,6 @@
   "use strict";
 
   var STORAGE_KEY = "canvasExpert.context.v1";
-  var LEGACY_KEY = "canvasExpert.push.coursePicker.v1";
   var listeners = [];
   var state = { focusedCourse: null, targetCourses: [] };
 
@@ -44,13 +43,6 @@
       state.targetCourses = courses(saved.targetCourses);
       return;
     }
-    var legacy = readJson(LEGACY_KEY);
-    if (!legacy || typeof legacy !== "object") return;
-    state.focusedCourse = course({ id: legacy.focusedId, name: "" });
-    state.targetCourses = courses((legacy.selectedIds || []).map(function (id) {
-      return { id: id, name: "" };
-    }));
-    persist();
   }
 
   function persist() {

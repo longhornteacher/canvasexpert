@@ -13,10 +13,7 @@ Every ``course_id`` tool gates on ``config.active_courses()`` — the same
 Current-course scope the web UI uses. ``list_courses``, ``discover_scoring_work``,
 ``list_feedback_contracts``, ``get_authoring_contract``, ``get_product_guide`` and ``list_staged_content``
 are the only tools with no ``course_id`` and no student data, so they skip both
-the course gate and the outbound safety gate. ``get_writing_history`` breaks that
-pairing on purpose: it has no ``course_id`` either (the daily-writing store has
-no course concept), but it is student data, so it still runs the identity vault
-and the outbound safety gate.
+the course gate and the outbound safety gate.
 
 Mirror reads, by design: get_roster, get_submissions, and
 get_gradebook_snapshot serve from the local CanvasMirror (fast, consistent, and
@@ -24,10 +21,7 @@ through the pseudonym gate) and report an error rather than fall back to a live
 Canvas fetch when it isn't fresh enough. The agent then calls refresh_mirror
 itself and reads again; assignment-scoped scoring preparation invokes the same
 Canvas Expert sync engine privately before reading its mirror data. The
-preparation path returns no Canvas data directly, so Canvas Expert stays the
-only thing that talks to Canvas. get_writing_history
-is not mirror-backed (the daily-writing store is not Canvas data at all), so
-no staleness refusal applies to it."""
+preparation path returns no Canvas data directly, so Canvas Expert stays the only thing that talks to Canvas."""
 from __future__ import annotations
 
 import os
@@ -37,9 +31,9 @@ import json
 import math
 import re
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from api import attempts_grant, content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, grading_policy, gradebook_queries, learning_objectives, live_verify, operational_log, roster_context, roster_service, sis_grade_bridge
+from api import attempts_grant, content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, grading_policy, live_verify, operational_log, roster_context, roster_service, sis_grade_bridge
 from api.operation_ledger import claims as operation_claims
 from api.operation_ledger.adapters import forge_files
 from api.operation_ledger import executor as operation_executor
@@ -55,38 +49,16 @@ from api import feedback_safety, feedback_vault
 from api import score_curves, score_ledger
 from api.course_catalog import read_catalog
 from api import runtime_paths
-from api.mirror import queries as mirror_queries  # compatibility test seam
-from api.dailywriting import projection as dailywriting_projection
-from api.dailywriting.store.identity import IdentityError
-from api.dailywriting.store.repo import Repository as DailyWritingRepository
-from api.dailywriting.store.repo import StoreError as DailyWritingStoreError
 
 from . import contract, pseudonym
 
 # Compatibility seams retained for existing route-style tests; the bound
 # implementations all live in root-level shared use-case modules.
-_assignment = gradebook_queries.assignment
-_assignment_submissions = gradebook_queries.assignment_submissions
-_fetch_sections = roster_service.fetch_sections
-_ORIGINAL_ASSIGNMENT = _assignment
-_ORIGINAL_ASSIGNMENT_SUBMISSIONS = _assignment_submissions
-_ORIGINAL_FETCH_SECTIONS = _fetch_sections
-_ORIGINAL_PSEUDONYM_FETCH_STUDENTS = pseudonym._fetch_students
-_ORIGINAL_ROSTER_FETCH_STUDENTS = roster_service.fetch_students
-_ORIGINAL_ROSTER_FETCH_SECTIONS = roster_service.fetch_sections
-
 # Bound seams for the assistant-invokable refresh tool, so tests can point
 # these at a fake coordinator without starting the real background workers.
 _enqueue_sync = mirror_service.enqueue_sync
 _wait_for_plan = mirror_service.wait_for_plan
 
-# Bound so tests can point get_writing_history at a tmp_path store with a
-# fixture MappingResolver instead of the real workspace + identity vault
-# (same reason _vault_factory exists). `pseudonym.gate` is bound too: the
-# tool's own parameter is named `pseudonym` (locked by the brief, matching
-# the read pattern), which would otherwise shadow the `pseudonym` module
-# inside that one function.
-_dailywriting_repository_factory = DailyWritingRepository.default
 _pseudonym_gate = pseudonym.gate
 
 
@@ -197,11 +169,6 @@ _NEXT_STEPS = {
         "confirmation, then call apply_attempts_grant with operation_id, batch_id, and "
         "review_digest unchanged. Apply only on the teacher's direct instruction."
     ),
-    "preview_learning_objective": (
-        "Summarize the preview and get teacher confirmation, then call "
-        "apply_learning_objective with course_id, preview, preview_digest, and "
-        "current_revision as expected_revision."
-    ),
     "preview_roster_student_change": (
         "Summarize the change and get teacher confirmation, then call "
         "apply_roster_student_change with course_id, preview, preview_digest, and "
@@ -257,7 +224,7 @@ def _freshness_attention(envelope: dict) -> dict | None:
 
 _STUDENT_RESULT_KEYS = {
     "pseudonym", "roster", "submissions", "students", "student",
-    "writing_history", "attempts", "submission_history",
+    "attempts", "submission_history",
     "extra_time", "monitored", "classroom_profile",
 }
 
@@ -493,35 +460,13 @@ def _truncate_text(text: str, max_chars: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Fetch-seam detection.
-#
-# Mirror-only reads: the student-data tools never call live Canvas, so
-# there is no fetch cache to protect here anymore. ``_cache_safe`` survives
-# purely as the seam guard the mirror-first helpers below use to refuse
-# serving mirror data out from under a test that has monkeypatched one of
-# these fetchers for an unrelated purpose.
-# ---------------------------------------------------------------------------
-
-
-def _cache_safe() -> bool:
-    """True only when every roster fetch seam is the real implementation."""
-    return (
-        pseudonym._fetch_students is _ORIGINAL_PSEUDONYM_FETCH_STUDENTS
-        and roster_service.fetch_students is _ORIGINAL_ROSTER_FETCH_STUDENTS
-        and _fetch_sections is _ORIGINAL_FETCH_SECTIONS
-        and roster_service.fetch_sections is _ORIGINAL_ROSTER_FETCH_SECTIONS
-    )
-
-
-# ---------------------------------------------------------------------------
 # Mirror-only reads.
 #
 # The student-data tools serve ONLY from the local CanvasMirror, never live
 # Canvas: instant, offline-tolerant, zero Canvas round trips, and the AI's
 # path to Canvas always stays indirect (through Canvas Expert's own sync
 # engine, never a direct relay). When the mirror isn't fresh enough to serve
-# (or a test seam is patched — the seam guard refuses rather than silently
-# reading disk out from under it), these helpers return None so the caller
+# these helpers return None so the caller
 # refuses instead of fetching live. Mirror-only payloads are labeled
 # source="mirror" + synced_at; a caller that joins private local context must
 # label that boundary explicitly, so staleness is visible and never silent.
@@ -529,8 +474,6 @@ def _cache_safe() -> bool:
 
 def _mirror_roster_doc(course_id: str):
     """The typed roster scope and section labels, without a serve-age cutoff."""
-    if not _cache_safe():
-        return None
     roster = read_service.private_roster(
         course_id, max_age_hours=None)
     if roster["state"] not in {"current", "stale"}:
@@ -545,11 +488,6 @@ def _mirror_roster_doc(course_id: str):
 
 def _mirror_submission_bundle(course_id: str, assignment_id: str):
     """Read one assignment from typed local scopes and return its shared age."""
-    if not _cache_safe():
-        return None, None
-    if (_assignment is not _ORIGINAL_ASSIGNMENT
-            or _assignment_submissions is not _ORIGINAL_ASSIGNMENT_SUBMISSIONS):
-        return None, None
     roster = read_service.private_roster(course_id, max_age_hours=None)
     assignments = read_service.private_assignments(course_id, max_age_hours=None)
     submissions = read_service.private_submissions(course_id, max_age_hours=None)
@@ -601,7 +539,7 @@ class _VaultUnavailable(Exception):
     """Raised when the identity vault directory cannot be resolved."""
 
 
-def _default_vault() -> feedback_vault.Vault:
+def _default_vault():
     """Mirror ``api/webui/routes/names.py::_vault`` — the one global identity
     vault, keyed by Canvas user id.
 
@@ -663,7 +601,7 @@ def _course_gate_check(course_id: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 _MCP_ROSTER_PATCH_KEYS = {
-    "pseudonym", "regenerate_pseudonym", "extra_time", "monitored",
+    "extra_time", "monitored",
     "classroom_profile", "add_nicknames",
 }
 _MCP_ROSTER_CLEAR_KEYS = {"extra_time", "monitored", "classroom_profile"}
@@ -778,8 +716,6 @@ def preview_roster_student_change(course_id: str, pseudonym: str, patch: dict) -
     for key, value in patch.items():
         if key == "add_nicknames":
             after[key] = list(value)
-        elif key == "regenerate_pseudonym":
-            after[key] = bool(value)
         else:
             after[key] = value
     preview = {"pseudonym": before["pseudonym"], "patch": patch,
@@ -1245,99 +1181,11 @@ def get_course_pages(course_id: str, full_text: bool = False,
     return result
 
 
-def preview_learning_objective(course_id: str, objective: str,
-                               effective_start: str, effective_end: str,
-                               source_refs: list, replaces: str = None) -> dict:
-    """Build the exact reviewed objective preview; never writes or calls Canvas."""
-    gate_error = _course_gate_check(course_id)
-    if gate_error:
-        return {"ok": False, "error": gate_error}
-    try:
-        read_result = read_catalog(course_id)
-        catalog = read_result.get("catalog") if isinstance(read_result, dict) else None
-        if not isinstance(catalog, dict):
-            raise ValueError("No local course catalog found for this course. Refresh the catalog first.")
-        document = learning_objectives.read_document()
-        result = learning_objectives.build_preview(
-            course_id=str(course_id), catalog=catalog, document=document,
-            objective=objective, effective_start=effective_start,
-            effective_end=effective_end, source_refs=source_refs, replaces=replaces,
-        )
-        return _with_next("preview_learning_objective", {"ok": True, **result})
-    except (OSError, TypeError, ValueError) as error:
-        return {"ok": False, "error": str(error)}
-
-
-def apply_learning_objective(course_id: str, preview: dict,
-                             preview_digest: str, expected_revision: int) -> dict:
-    """Apply only the exact current preview after all concurrency checks."""
-    gate_error = _course_gate_check(course_id)
-    if gate_error:
-        return {"ok": False, "error": gate_error}
-    try:
-        read_result = read_catalog(course_id)
-        catalog = read_result.get("catalog") if isinstance(read_result, dict) else None
-        if not isinstance(catalog, dict):
-            raise ValueError("No local course catalog found for this course. Refresh the catalog first.")
-        document = learning_objectives.read_document()
-        written = learning_objectives.apply_preview(
-            course_id=str(course_id), preview=preview,
-            preview_digest_value=preview_digest,
-            expected_revision=expected_revision, catalog=catalog,
-            document=document,
-        )
-        return {"ok": True, "revision": written["revision"],
-                "course_id": str(course_id)}
-    except (OSError, TypeError, ValueError) as error:
-        return {"ok": False, "error": str(error)}
-
-
-def list_learning_objectives(course_id: str) -> dict:
-    """List the reviewed objectives for a Current course without student data."""
-    gate_error = _course_gate_check(course_id)
-    if gate_error:
-        return {"ok": False, "error": gate_error}
-    try:
-        document = learning_objectives.read_document()
-        rows = []
-        for entry in document["objectives"].get(str(course_id), []):
-            rows.append([
-                entry["id"], entry["objective"], entry["effective_start"],
-                entry["effective_end"], [ref["title"] for ref in entry["source_refs"]],
-                entry["authored_at"],
-            ])
-        return {"ok": True, "course_id": str(course_id),
-                "revision": document["revision"],
-                "objectives": {"columns": [
-                    "id", "objective", "effective_start", "effective_end",
-                    "source_titles", "authored_at",
-                ], "rows": rows}}
-    except (OSError, TypeError, ValueError) as error:
-        return {"ok": False, "error": str(error)}
-
-
-def delete_learning_objective(course_id: str, entry_id: str, expected_revision: int) -> dict:
-    """Delete one reviewed objective with an explicit revision guard."""
-    gate_error = _course_gate_check(course_id)
-    if gate_error:
-        return {"ok": False, "error": gate_error}
-    try:
-        written = learning_objectives.delete_entry(
-            course_id=str(course_id), entry_id=entry_id,
-            expected_revision=expected_revision,
-        )
-        return {"ok": True, "course_id": str(course_id), "revision": written["revision"]}
-    except (OSError, TypeError, ValueError) as error:
-        return {"ok": False, "error": str(error)}
-
-
 _CONTRACT_FILES = {
     "quiz": "Author a Quiz (QuizForge).txt",
     "assignment": "Author an Assignment (AssignmentForge).txt",
     "page": "Author a Page (PageForge).txt",
-    "learning_objective": "Author a Learning Objective.txt",
 }
-_DIRECT_WRITE_CONTRACT_KINDS = frozenset({"learning_objective"})
 _STAGED_CONTRACT_KINDS = ("quiz", "assignment", "page")
 
 # Product knowledge the tool surface does not imply. An assistant that only
@@ -1426,16 +1274,9 @@ _TOOL_GROUPS = {
         "preview_sis_grade_bridge_reconciliation",
         "apply_sis_grade_bridge",
     ),
-    "Learning Objectives": (
-        "list_learning_objectives",
-        "preview_learning_objective",
-        "apply_learning_objective",
-        "delete_learning_objective",
-    ),
     # Current submissions remain freshness-gated; retained history is explicitly
     # historical and remains available after current projection pruning.
     "Writing Timeline": ("get_submissions", "get_submission_history"),
-    "Writing Record": ("get_writing_history",),
     "Students": (
         "get_roster",
         "get_roster_student_settings",
@@ -1496,8 +1337,6 @@ _GUIDE_FILES = {
              "summary": "Complete CanvasAgent guide, Appendices A through F."},
     "writing_timeline": {"file": "Writing Timeline (tracked assignments).txt",
                          "summary": "Tracked-assignment timeline behavior and coverage."},
-    "writing_record": {"file": "Writing Record (longitudinal writing history).txt",
-                       "summary": "Longitudinal writing evidence and current limits."},
     "tools": {"generated": _build_tool_inventory,
               "summary": "All MCP tools grouped by teacher-facing job."},
 }
@@ -1601,10 +1440,9 @@ def _staging_appendix(kind: str) -> str:
 def get_authoring_contract(kind: str) -> dict:
     """Return one canonical Forge authoring contract.
 
-    Contracts come from ``api/default_docs/AI Authoring/``. The Forge kinds
-    receive the staging appendix; the kinds in
-    ``_DIRECT_WRITE_CONTRACT_KINDS`` have no review queue and are returned
-    verbatim. No course_id, student data, vault, or safety gate applies.
+    Contracts come from ``api/default_docs/AI Authoring/``. Forge kinds
+    receive the staging appendix. No course_id, student data, vault, or safety
+    gate applies.
 
     For AssignmentForge: also read api/default_docs/AI Authoring/Author an Assignment
     (AssignmentForge).txt for authoring workflows, differentiation, supports,
@@ -1621,11 +1459,6 @@ def get_authoring_contract(kind: str) -> dict:
     contract_text, error = _read_authoring_doc(filename, f"{kind} authoring contract")
     if error:
         return {"ok": False, "error": error}
-
-    # These kinds have no staging/review queue. They write directly to the
-    # teacher's local workspace, or through the Calendar preview/apply pair.
-    if kind in _DIRECT_WRITE_CONTRACT_KINDS:
-        return {"ok": True, "kind": kind, "contract": contract_text}
 
     return {"ok": True, "kind": kind,
             "contract": contract_text + _staging_appendix(kind)}
@@ -2209,76 +2042,6 @@ def get_submission_history(course_id: str, assignment_id: str,
 # shorter than this. Two years keeps the default call cheap and bounded rather
 # than scanning from date.min, while being generous enough that "since"/"until"
 # only need to be passed when someone actually wants to narrow the window.
-_DEFAULT_HISTORY_LOOKBACK_DAYS = 730
-
-
-def get_writing_history(pseudonym: str, since: str = "", until: str = "",
-                        include_text: bool = False,
-                        max_text_chars: int = _DEFAULT_MAX_TEXT_CHARS) -> dict:
-    """One student's Writing Record evidence across time, pseudonym-first:
-    dated submissions, assignment context, word counts, segment attribution,
-    and structural flags. Writing Record does not score, coach, or judge work.
-    Read from the private per-student store
-    (``api/dailywriting``), never from a course or the CanvasMirror -- there
-    is no ``course_id`` here because the store has no course concept and
-    nothing to refresh, but the identity vault and the outbound safety gate
-    still apply: this is the first tool to carry student data with no
-    ``course_id`` gate.
-
-    No judgment is computed here; the assistant and teacher may evaluate the
-    evidence later if they choose.
-    ``since``/``until`` are ``YYYY-MM-DD`` dates (both default to a two-year
-    lookback from today). ``include_text=False`` (the default) omits every
-    span quoted from student writing; ``include_text=True`` includes them
-    trimmed to ``max_text_chars`` (0 = full), trimmed BEFORE the gate scans
-    them. The assignment prompt is teacher-authored, not student data, and is
-    always included."""
-    vault, vault_err = _open_vault()
-    if vault_err:
-        return {"ok": False, "error": vault_err}
-
-    try:
-        until_date = date.fromisoformat(until) if until else date.today()
-        since_date = (date.fromisoformat(since) if since else
-                      until_date - timedelta(days=_DEFAULT_HISTORY_LOOKBACK_DAYS))
-    except ValueError as error:
-        return {"ok": False,
-                "error": f"since/until must be YYYY-MM-DD dates: {error}"}
-    if since_date > until_date:
-        return {"ok": False, "error": "since is after until"}
-
-    try:
-        repository = _dailywriting_repository_factory()
-    except DailyWritingStoreError as error:
-        return {"ok": False, "error": str(error)}
-
-    try:
-        submissions = repository.submissions_in_window(
-            pseudonym, since_date, until_date)
-        reps = {}
-        for submission in submissions:
-            if submission.rep_id not in reps:
-                reps[submission.rep_id] = repository.read_rep(submission.rep_id)
-    except IdentityError:
-        return {
-            "ok": False,
-            "error": (f"'{pseudonym}' is not a known pseudonym in the "
-                      "identity vault; sync the roster for this student's "
-                      "section in the CanvasExpert web UI, then retry."),
-        }
-
-    payload = dailywriting_projection.build_history_payload(
-        pseudonym_id=pseudonym,
-        since=since_date,
-        until=until_date,
-        submissions=submissions,
-        reps=reps,
-        include_text=include_text,
-        max_text_chars=max_text_chars,
-    )
-    return _pseudonym_gate(payload, vault)
-
-
 def get_gradebook_snapshot(course_id: str) -> dict:
     """Whole-course grading snapshot, pseudonymized: per-assignment stats
     (``title`` instead of ``name``, no ``html_url``) and per-student stats
@@ -2852,23 +2615,7 @@ def _is_current_scoring_session(session: dict) -> bool:
     from api.powergrader import session_store
 
     session_id = str(session.get("session_id") or "")
-    if session_store.is_current_session(session_id):
-        return True
-    # Focused callers may inject an in-memory record without creating the
-    # corresponding private file. Real duplicate records always have a disk
-    # summary, so this compatibility fallback cannot bypass supersession.
-    if str(session.get("status") or "") == "superseded":
-        return False
-    try:
-        summaries = session_store.list_session_summaries()
-        has_scope = any(
-            str(row.get("course_id") or "") == str(session.get("course_id") or "")
-            and str(row.get("assignment_id") or "") == str(session.get("assignment_id") or "")
-            for row in summaries
-        )
-        return not has_scope
-    except Exception:
-        return False
+    return session_store.is_current_session(session_id)
 
 
 def _session_mirror_changed(session: dict) -> dict:
@@ -3458,7 +3205,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
     The caller reads the assignment's posting policy before taking the scope
     lock and passes it in. No real identity is returned, including on failure.
     """
-    from api import feedback_pipeline as fp
+    from api import feedback_results as feedback
     from api.powergrader import scoring_packet as sp, session_store
 
     # The caller holds the scope lock from the first authoritative currentness
@@ -3503,18 +3250,18 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
     vault, vault_error = _open_vault()
     if vault_error:
         return {"ok": False, "code": "identity_unavailable", "error": "The private identity vault is unavailable."}
-    verdict = fp.validate_results(results, safe_bundle, vault)
+    verdict = feedback.validate_results(results, safe_bundle, vault)
     if not verdict.get("ok"):
         return pseudonym.gate({
             "ok": False, "code": "invalid_results",
             "error": "Results must match the supplied pseudonyms and item ids and contain valid feedback.",
             "validation": _result_validation(verdict, results, safe_bundle, vault)}, vault)
 
-    rendered = fp.render_results(
+    rendered = feedback.render_results(
         results, bundle=safe_bundle, grade_mode=grade_mode,
     )
     try:
-        rows = fp.reidentify(rendered, vault)
+        rows = feedback.reidentify(rendered, vault)
     except Exception:
         return pseudonym.gate({
             "ok": False, "code": "invalid_results",
@@ -3535,8 +3282,8 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
         if label:
             names[str(entry.get("canvas_id"))] = label
             every_pseudonym.append(label)
-    by_uid = fp.merge_rows_by_uid(rows)
-    item_by_uid = fp.item_rows_by_uid(rows)
+    by_uid = feedback.merge_rows_by_uid(rows)
+    item_by_uid = feedback.item_rows_by_uid(rows)
     previous_grade_mode = str(session.get("grade_mode") or "post_score")
     mode_feedback_updates = {}
     if previous_grade_mode != grade_mode:
@@ -3556,9 +3303,9 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                 "canvas_id": user_id,
                 "item_id": item.get("item_id", ""),
                 "score": item.get("score"),
-                "feedback": fp.item_feedback_for_mode(item, grade_mode),
+                "feedback": feedback.item_feedback_for_mode(item, grade_mode),
             } for item in prior_items]
-            rebuilt = fp.merge_rows_by_uid(prior_rows).get(user_id, {})
+            rebuilt = feedback.merge_rows_by_uid(prior_rows).get(user_id, {})
             mode_feedback_updates[user_id] = {
                 "ai_feedback": rebuilt.get("feedback", ""),
                 "ai_item_results": prior_items,

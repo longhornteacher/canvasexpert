@@ -178,7 +178,7 @@ def _pin_mcp_freshness(monkeypatch, now):
     monkeypatch.setattr(freshness_policy, "datetime", FixedDateTime)
     monkeypatch.setattr(store, "datetime", FixedDateTime)
     monkeypatch.setattr(grading_policy, "load_no_school_dates", lambda root=None: [])
-    monkeypatch.setattr(tools.mirror_queries, "_serve_max_age_hours", lambda: 6.0)
+    monkeypatch.setattr(queries, "_serve_max_age_hours", lambda: 6.0)
 
 
 def _assert_mcp_freshness_results(monkeypatch, tmp_path, *, age_minutes, within_policy):
@@ -211,19 +211,10 @@ def test_mcp_r3_past_policy_window_asks_teacher_without_student_rows(monkeypatch
 def test_mcp_r3_within_policy_serves_past_mirror_cutoff(monkeypatch, tmp_path):
     roster, submissions = _assert_mcp_freshness_results(
         monkeypatch, tmp_path, age_minutes=480, within_policy=True)
-    assert 480 > tools.mirror_queries._serve_max_age_hours() * 60
+    assert 480 > queries._serve_max_age_hours() * 60
     assert roster["ok"] is True
     assert submissions["ok"] is True
     assert roster["freshness"]["age_minutes"] == 480
     assert submissions["freshness"]["age_minutes"] == 480
     assert roster["roster"]["rows"]
     assert submissions["submissions"]["rows"]
-
-
-def test_mcp_seamed_tests_bypass_the_mirror(monkeypatch, tmp_path):
-    _mcp_setup(monkeypatch, tmp_path)
-    _populate(str(tmp_path))
-    from api.mcp_server import pseudonym
-    monkeypatch.setattr(pseudonym, "_fetch_students",
-                        lambda course_id: (USERS, None))
-    assert tools._mirror_roster_doc(COURSE) is None  # seam guard wins

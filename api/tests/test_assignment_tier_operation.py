@@ -171,7 +171,7 @@ def _build(monkeypatch, authoring_data=None, **request_overrides):
     from pathlib import Path
     from api.operation_ledger.adapters import assignment as assignment_adapter
 
-    def fake_pdf(_html, _css, out_path):
+    def fake_pdf(_html, out_path):
         Path(out_path).write_bytes(b"%PDF test printable")
         return out_path
 

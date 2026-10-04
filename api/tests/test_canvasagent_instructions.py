@@ -452,6 +452,41 @@ def test_retires_an_unmodified_copy(tmp_path):
     assert not target.exists()
 
 
+def test_nested_retired_seed_is_removed_but_hand_edit_survives(tmp_path):
+    """Nested references use the same hash-safe retirement rule as root files."""
+    name = "Reference/QF_REF_Stimulus_Formatting.md"
+    target = tmp_path / "Reference" / "QF_REF_Stimulus_Formatting.md"
+    target.parent.mkdir()
+    target.write_text("old shipped reference", encoding="utf-8")
+    known = ai_ta._shipped_hash(target.read_bytes())
+    original = ai_ta.RETIRED_FILES
+    try:
+        ai_ta.RETIRED_FILES = {name: frozenset({known})}
+        assert ai_ta._retire_superseded(str(tmp_path)) == [str(target)]
+        target.write_text("teacher edit", encoding="utf-8")
+        assert ai_ta._retire_superseded(str(tmp_path)) == []
+    finally:
+        ai_ta.RETIRED_FILES = original
+    assert target.read_text(encoding="utf-8") == "teacher edit"
+
+
+def test_changed_authoring_seeds_record_the_pre_batch_hashes():
+    """Stale shipped copies update, while current and hand-edited copies do not."""
+    changed = (
+        "Author an Assignment (AssignmentForge).txt",
+        "Author a Page (PageForge).txt",
+        "Author a Quiz (QuizForge).txt",
+        "Reference/QF_REF_Stimulus_Formatting.md",
+        "Author a Learning Objective.txt",
+    )
+    for relative in changed:
+        assert relative in ai_ta.RETIRED_FILES
+        shipped = os.path.join(ai_ta.DEFAULT_AI_TA_DIR, relative)
+        if os.path.isfile(shipped):
+            with open(shipped, "rb") as stream:
+                assert ai_ta._shipped_hash(stream.read()) not in ai_ta.RETIRED_FILES[relative]
+
+
 def test_leaves_a_teacher_edited_copy_alone(tmp_path):
     """The module promises never to clobber an edit. That must hold here too."""
     name = next(iter(ai_ta.RETIRED_FILES))

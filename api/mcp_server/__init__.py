@@ -11,9 +11,6 @@ Every student-data tool pseudonymizes real Canvas identity through the
 existing identity vault (``api/feedback_vault.py``) and runs the outbound
 safety gate (``api/feedback_safety.py``) before a result is returned. Real
 names, Canvas IDs, and SIS IDs never leave this machine. Nothing here logs
-tool arguments or results. ``get_writing_history`` is the one exception to
-"student data implies a course_id": it reads the private per-student daily
-writing store (``api/dailywriting``) rather than a Canvas course, but still
-runs the same identity vault and outbound safety gate as every other
-student-data tool.
+tool arguments or results. Student-data tools use the same identity vault
+and outbound safety gate.
 """

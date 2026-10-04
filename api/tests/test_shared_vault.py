@@ -71,11 +71,18 @@ def test_assignment_is_deterministic_after_journal_sync(tmp_path, monkeypatch):
     first = _shared_vault(tmp_path)
     assigned = first.get_or_assign("synthetic-id-2", "Synthetic Learner")
     first.save()
+    journal = tmp_path / "_Shared" / "vault" / "journal.MACHINE-A.jsonl"
+    original_events = journal.read_bytes()
+    events = [json.loads(line) for line in original_events.splitlines()]
+    assignment = next(event for event in events if event["op"] == "assign")
+    assert assignment["pokemon"] == assigned
 
     monkeypatch.setattr(local_runtime, "machine_id", lambda: "MACHINE-B")
     second = _shared_vault(tmp_path)
-
     assert second.get_or_assign("synthetic-id-2", "Synthetic Learner") == assigned
+    second.save()
+
+    assert journal.read_bytes() == original_events
 
 
 def test_cross_machine_assignment_collision_is_provisional_and_refused(tmp_path, monkeypatch):

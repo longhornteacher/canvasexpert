@@ -17,7 +17,6 @@ import shutil
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR = os.path.dirname(MODULE_DIR)
-REPO_ROOT = os.path.dirname(API_DIR)
 DEFAULT_DOCS_DIR = os.path.join(API_DIR, "default_docs")
 DEFAULT_AI_TA_DIR = os.path.join(DEFAULT_DOCS_DIR, "AI Authoring")
 
@@ -44,6 +43,25 @@ DEFAULT_AI_TA_DIR = os.path.join(DEFAULT_DOCS_DIR, "AI Authoring")
 # Listing the CURRENT shipped hash would delete and re-seed forever, which
 # test_a_retired_name_that_still_ships_cannot_churn guards against.
 RETIRED_FILES = {
+    # Same-name authoring/reference updates and the retired objectives
+    # contract; replace only old shipped bytes and preserve teacher edits. The
+    # reference entry is nested under Reference/.
+    "Author an Assignment (AssignmentForge).txt": frozenset({
+        "9194737963ee24d8de9e65990bd2aa9f58eb88abffde4c5643cacaf0a2daca7e",
+    }),
+    "Author a Page (PageForge).txt": frozenset({
+        "deafeb6f8f4d6be6dc3324f278099155e1863ec45676218ebb4ae95163830d53",
+    }),
+    "Author a Quiz (QuizForge).txt": frozenset({
+        "5f74c61040b83f5b3f43243adf5d424ab2c9037a14fa40d7f9232ca4d99fc181",
+    }),
+    "Reference/QF_REF_Stimulus_Formatting.md": frozenset({
+        "8a33159cd3565e7b96a10b7196974a00a1d0c55e621d5681d9205835846297bf",
+    }),
+    # Learning Objectives authoring contract was retired and no longer ships.
+    "Author a Learning Objective.txt": frozenset({
+        "4cc0d2265f8fc2411b40fb57800f9c701b82cb16bcf2c8ef12c58687d9bdc5a6",
+    }),
     # Superseded by "START HERE - CanvasAgent.txt".
     "START HERE - Canvas Expert.txt": frozenset({
         "d7b59318f61d733380349846b948858a98ad06aed969ba15f2b8eeceea5d6eed",
@@ -64,6 +82,8 @@ RETIRED_FILES = {
     # Same-name updates. Teachers are told to hand this file to an AI, so a
     # stale copy answers setup questions wrongly rather than harmlessly.
     "START HERE - CanvasAgent.txt": frozenset({
+        # Before routines, writing history, and learning objectives were retired.
+        "9ec17496bab7b21bec1f18d6b1aca3f1b1a55fda4789bd7905bdea149446f9f2",
         # Before the local-first discovery and stage-then-explicit-apply workflow.
         "bd3fd6da937207228b588fff12b1705beec4fa62412f035c33f5886d87a95377",
         # First release, before the procedure-first rewrite.
@@ -146,7 +166,7 @@ def _retire_superseded(target_dir):
     """Delete superseded seeded files the teacher has not modified."""
     removed = []
     for name, shipped_hashes in RETIRED_FILES.items():
-        path = os.path.join(target_dir, name)
+        path = os.path.join(target_dir, os.path.normpath(name))
         if not os.path.isfile(path):
             continue
         try:

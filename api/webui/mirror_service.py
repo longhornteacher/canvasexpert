@@ -422,14 +422,11 @@ def refresh_work_findings() -> None:
         operational_log.emit("mirror.work_findings_refresh", "failed", error_class=type(exc))
 
 
-def notify_course_changed(course_id, *, delay_seconds: float = NOTIFY_DELAY_SECONDS,
-                          canvas_get_all_complete=None):
+def notify_course_changed(course_id, *, delay_seconds: float = NOTIFY_DELAY_SECONDS):
     """Write-through hook for a narrow post-write submission refresh.
 
     The ordinary heartbeat still owns the full delta pass.  This delayed,
     fire-and-forget hook must not imply structure or New Quiz freshness.
-    ``canvas_get_all_complete`` remains an accepted compatibility seam for
-    existing callers, but targeted submission refresh does not use it.
     """
 
     def _run():

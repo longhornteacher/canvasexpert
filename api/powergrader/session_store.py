@@ -131,7 +131,7 @@ def remembered_result(session: dict, pseudonym: str, item_id: str,
 
 
 def _preparation_state_path(course_id, assignment_id) -> str | None:
-    d = pg_dir()
+    d = workspace.powergrader_preparation_dir()
     if not d:
         return None
     return os.path.join(d, f"prep-{scope_digest(course_id, assignment_id)}.json")
@@ -144,6 +144,7 @@ def save_preparation_state(course_id, assignment_id, *, scoring_guidance: str,
     path = _preparation_state_path(course_id, assignment_id)
     if path and (str(scoring_guidance or "").strip()
                  or str(feedback_contract_id or "").strip()):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         atomic_write_json(Path(path), {
             "scoring_guidance": str(scoring_guidance).strip(),
             "scoring_guidance_provenance": str(scoring_guidance_provenance or "").strip().casefold(),
@@ -240,7 +241,7 @@ class _ScopeLock:
 
     def __enter__(self):
         self._local_lock.acquire()
-        d = pg_dir()
+        d = workspace.powergrader_root()
         if d:
             self._interprocess = interprocess_lock(
                 runtime_paths.local_app_dir() / "locks" / f"pg-scope-{self._key}.lock")
@@ -260,14 +261,6 @@ class _ScopeLock:
 def scope_lock(course_id, assignment_id):
     """Serialize one exact course/assignment scope across threads and processes."""
     return _ScopeLock(course_id, assignment_id)
-
-
-def pg_dir() -> str | None:
-    d = workspace.powergrader_sessions_dir()
-    if not d:
-        return None
-    os.makedirs(d, exist_ok=True)
-    return d
 
 
 def _read_json(path: str) -> dict | None:

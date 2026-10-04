@@ -176,10 +176,6 @@ bridge score is prepared and applied through that reviewed operation. Canvas Exp
 never starts SIS sync; report bridge results and send the teacher to Canvas Live for
 review and teacher-owned Canvas Grade Sync. This is separate from AI scoring.
 
-Learning Objectives. Reviewed, revision-protected per-course objectives grounded in
-current modules, assignments, and pages; a changed source marks one for review rather
-than silently rewriting it.
-
 Writing Timeline. For a tracked assignment, Canvas Expert can add limited
 revision-history observations from a submitted Word document to the private SAFE
 scoring evidence. It is evidence, not a score or likelihood, and never "pasted",
@@ -192,15 +188,10 @@ included. The teacher chooses per assignment: ask which one they want, do not in
 it. Details and handout steps are in the "Writing Timeline (tracked assignments)"
 file beside this one, or get_product_guide(topic="writing_timeline").
 
-Writing Record stores dated coaching evidence privately; it does not score or judge.
-
 Students. Rosters, accommodations, private pseudonyms, and classroom notes, with
 printable per-student conference reports.
 
 Gradebook tools. Reviewed score curves and extra-time accommodations preview before apply.
-
-Routines. Small jobs that run locally on a schedule or at app launch: download new
-submissions and keep a running report of what still needs grading.
 
 Speed. A local copy of course data serves most screens, so CanvasExpert stays usable
 when Canvas or school wifi is slow, and it always shows how current that copy is.
@@ -259,8 +250,7 @@ Reading
     "troubleshooting" selects one Appendix A-F section;
     topic="full" returns the whole CanvasAgent file. Every response lists all
     available topics.
-    topic="writing_timeline" for tracked and not-tracked assignments,
-    topic="writing_record" for the longitudinal writing history.
+    topic="writing_timeline" for tracked and not-tracked assignments.
   * get_modules, get_course_assignments, and get_course_pages read a local
     catalog on disk, never live Canvas. If the catalog looks empty or stale, call
     refresh_course_structure(course_id) yourself, then retry.
@@ -270,9 +260,6 @@ Reading
     refuses, call refresh_mirror(course_id) yourself, then retry that read once.
     Skip the refresh when the data is within policy, and tell the teacher when a
     refresh brought in new or resubmitted work.
-  * get_writing_history(pseudonym) reads a separate private per-student writing
-    record some teachers keep. It takes no course_id, and it exists to coach a
-    writer over time rather than to grade one assignment.
   * list_staged_content(kind) confirms a draft actually landed. Use it instead
     of staging a second copy when you are unsure.
   * Prefer narrow reads. Ask for specific pseudonyms, or pass
@@ -289,10 +276,6 @@ preview before applying it.
 If a tool refuses because a revision or digest is stale, something changed
 under you: read again rather than forcing it.
 
-  * Learning objectives. list_learning_objectives(course_id) reads them;
-    preview_learning_objective and apply_learning_objective add or replace one,
-    grounded in real module, assignment, or page records; delete_learning_objective
-    removes one.
   * Roster settings. get_roster_student_settings, then
     preview_roster_student_change and apply_roster_student_change, or
     clear_roster_student_field to clear one. These are mostly the teacher's
