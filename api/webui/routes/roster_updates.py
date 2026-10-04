@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from api import feedback_vault, pseudonym_rename
 
 def update_student(
     course_id: str,
@@ -47,12 +46,6 @@ def update_student(
                 return {"ok": False, "error": f"{key} must be a list of strings."}
             nickname_values[key] = data[key]
 
-    if "pseudonym" in data:
-        p = data["pseudonym"]
-        if not isinstance(p, str) or not p.strip():
-            return {"ok": False, "error": "pseudonym must be a non-empty string."}
-    if "regenerate_pseudonym" in data and not isinstance(data["regenerate_pseudonym"], bool):
-        return {"ok": False, "error": "regenerate_pseudonym must be a boolean."}
 
     classroom_profile = None
     if "classroom_profile" in data and data["classroom_profile"] is not None:
@@ -79,30 +72,11 @@ def update_student(
 
     vault = vault_factory()
 
-    renaming = "pseudonym" in data or bool(data.get("regenerate_pseudonym"))
-    old_pseudonym = pseudonym_rename.current_pseudonym(vault, user_id) if renaming else ""
-    try:
-        with vault.transaction():
-            if "nicknames" in nickname_values:
-                vault.set_nicknames(user_id, nickname_values["nicknames"])
-            if "add_nicknames" in nickname_values:
-                vault.add_nicknames(user_id, nickname_values["add_nicknames"])
-
-            if "pseudonym" in data:
-                vault.set_pseudonym(user_id, data["pseudonym"])
-
-            if data.get("regenerate_pseudonym"):
-                vault.regenerate_pseudonym(user_id)
-    except (feedback_vault.PseudonymCollisionError, feedback_vault.InvalidPseudonymError) as exc:
-        # transaction() only saves on the success path, so a refused rename
-        # persists nothing, including any nickname change in the same patch.
-        return {"ok": False, "error": str(exc)}
-
-    if renaming:
-        incomplete = pseudonym_rename.rewrite_writing_spans(
-            old_pseudonym, pseudonym_rename.current_pseudonym(vault, user_id))
-        if incomplete:
-            return {"ok": False, "error": incomplete}
+    with vault.transaction():
+        if "nicknames" in nickname_values:
+            vault.set_nicknames(user_id, nickname_values["nicknames"])
+        if "add_nicknames" in nickname_values:
+            vault.add_nicknames(user_id, nickname_values["add_nicknames"])
 
     if extra_time is not None:
         et = extra_time
@@ -134,8 +108,6 @@ def update_student(
         )
 
     result = {"ok": True}
-    if renaming:
-        result["pseudonym"] = pseudonym_rename.current_pseudonym(vault, user_id)
     return result
 
 

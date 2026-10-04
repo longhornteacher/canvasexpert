@@ -118,7 +118,6 @@
     for (var i = 0; i < filteredStudents.length; i++) {
       var s = filteredStudents[i];
       var nnVal = esc((s.nicknames || []).join(", "));
-      var pseudoVal = esc(s.pseudonym || "");
       var noteVal = esc((s.monitored && s.monitored.note) || "");
       var status = rowStatus(s.warnings);
 
@@ -127,7 +126,7 @@
         '<td class="roster-col-name"><span class="roster-v2-name">' + esc(s.display_name || s.name) + "</span></td>" +
         '<td class="roster-col-classroom-profile">' + classroomProfileEditor(s.classroom_profile, s.id) + "</td>" +
         '<td class="roster-col-nicknames"><input type="text" class="roster-v2-input roster-v2-nicknames" value="' + nnVal + '" placeholder="nicknames" data-id="' + esc(s.id) + '"></td>' +
-        '<td class="roster-col-pseudo"><span class="roster-v2-pseudo-row"><input type="text" class="roster-v2-input roster-v2-pseudo" value="' + pseudoVal + '" placeholder="pseudonym" data-id="' + esc(s.id) + '" data-field="pseudo"><button type="button" class="roster-v2-regen" data-id="' + esc(s.id) + '" title="Regenerate">&#x21bb;</button></span></td>' +
+        '<td class="roster-col-pseudo"><span class="roster-v2-pseudo">' + esc(s.pseudonym || "") + '</span></td>' +
         '<td class="roster-col-extratime"><label class="roster-v2-et"><input type="checkbox" class="roster-v2-et-cb" data-id="' + esc(s.id) + '"' + (s.extra_time.enabled ? " checked" : "") + ">" +
         (s.extra_time.enabled ? ('<input type="number" class="roster-v2-et-days" value="' + (s.extra_time.days || 0) + '" min="0" max="30" data-id="' + esc(s.id) + '">') : '<input type="number" class="roster-v2-et-days" value="0" min="0" max="30" data-id="' + esc(s.id) + '" hidden>') +
         "</label></td>" +

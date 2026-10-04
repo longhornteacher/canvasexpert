@@ -5,7 +5,7 @@ export. These teacher-only endpoints touch the PII vault in the private
 M365-synced workspace. Split out of routes/feedback.py
 — distinct surface, its own `names_router`.
 
-Roster sync, nicknames, pseudonym set/regenerate, and collision detection are
+Roster sync and nickname management are
 owned by the Roster Console (`GET /api/roster`, `POST /api/roster/student`,
 see `roster.py` and `roster_updates.py`) and its MCP adapter; the equivalent
 Name Manager routes were dead (zero production callers) and were deleted

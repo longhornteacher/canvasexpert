@@ -1,34 +1,14 @@
-"""Pseudonym vault v3 -- the real<->pseudonym map for feedback tools.
+"""Shared pseudonym rules used by the append-only Identity Vault.
 
-The single most sensitive artifact in the app: it is the only thing that can
-re-identify pseudonymized work. It lives in the synced workspace
-(`_System/Identity Vault/`), NEVER in the repo, and is NEVER transmitted
-anywhere.
-
-Keyed on the Canvas user id (stable, present in the Student Analysis CSV `ID`
-column), so a student keeps the same opaque pseudonym forever -- across CSVs,
-sources, and years.
-
-v3 pseudonyms are one Pokemon species name drawn from the reviewed registry at
-`api/data/pseudonym_words.json`.
-See `docs/contracts/pseudonym-contract.md` for the full contract. This is a
-pre-launch clean break: an on-disk document that is not schema_version 3, or
-that still carries a retired `pseudo_first`/`pseudo_last` component field,
-fails closed rather than being migrated or dual-read.
-
-Pure stdlib; offline-testable.
+Production storage lives in ``api.shared_vault``. This module contains the
+reviewed word registry and identity projection helpers, and never reads or
+writes vault files.
 """
-import fnmatch
 import hashlib
 import json
 import os
 import re
-import socket
-from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
-
-from api.storage_support import atomic_write_json, interprocess_lock
 
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 _REGISTRY_PATH = os.path.join(_MODULE_DIR, "data", "pseudonym_words.json")
@@ -36,35 +16,12 @@ _REGISTRY_CATEGORIES = ("pokemon",)
 _MIN_REGISTRY_WORDS = 256
 _WORD_RE = re.compile(r"^[A-Z][a-z]+$")
 
-SCHEMA_VERSION = 3
-
-
-def machine_id() -> str:
-    """Return the local machine label used to annotate private vault writes."""
-    override = str(os.environ.get("CANVAS_EXPERT_MACHINE_ID") or "").strip()
-    if override:
-        return override
-    for value in (os.environ.get("COMPUTERNAME"), os.environ.get("HOSTNAME"), socket.gethostname()):
-        label = str(value or "").strip()
-        if label:
-            return label
-    return "local-machine"
-
-
-class PseudonymCollisionError(ValueError):
-    """A pseudonym is already held by a different student."""
-
-
-class InvalidPseudonymError(ValueError):
-    """A supplied pseudonym value is not one available registry word."""
-
-
 class PseudonymRegistryError(RuntimeError):
     """The reviewed pseudonym registry is missing or structurally invalid."""
 
 
 class VaultSchemaError(ValueError):
-    """The on-disk Identity Vault document is not a valid schema-v3 vault."""
+    """The shared Identity Vault seed or journal is structurally invalid."""
 
 
 def _load_registry() -> tuple[list[str], dict[str, str]]:
@@ -75,7 +32,7 @@ def _load_registry() -> tuple[list[str], dict[str, str]]:
     `PseudonymRegistryError` at import time rather than falling back to a
     placeholder or numbered word. Returns (words, category_by_lower); the
     category map exists only so this loader can prove each word appears in
-    exactly one category once, and is not otherwise used by `Vault`.
+    exactly one category once, and is not otherwise used by the shared vault.
     """
     try:
         with open(_REGISTRY_PATH, encoding="utf-8") as f:
@@ -149,9 +106,9 @@ def registry_runway(words_assigned: int) -> dict:
     """Words total/assigned/remaining and whether the registry is running low.
 
     Pure and I/O-free: `words_assigned` is the caller's own count of
-    currently-held pseudonyms (a `Vault` passes `len(self)`), so this stays
+    currently-held pseudonyms (a shared vault passes `len(self)`), so this stays
     testable without a real vault file and callers who already know their
-    count do not need to construct a `Vault` just to ask this question.
+    count do not need to construct a vault just to ask this question.
     `low_runway` flips to True once `words_remaining` drops to or below
     `_LOW_RUNWAY_FRACTION` of `words_total`. This is a forecast, not a
     failure: `PseudonymRegistryError` from `_select_available_word` remains
@@ -170,120 +127,12 @@ def registry_runway(words_assigned: int) -> dict:
     }
 
 
-class Vault:
-    def __init__(self, path: str):
-        self.path = path
-        self._by_id = {}          # canvas_id(str) -> {pseudonym, real_name, sis_id,
-                                  #                    nicknames, first_seen}
-        self._by_pseudo = {}      # pseudonym -> canvas_id(str)
-        self.conflict_files: list[str] = []
-        self._load()
+class IdentityVault:
+    """Shared identity operations used by the production append-only vault."""
 
-    def _load(self):
-        data = {}
-        if os.path.exists(self.path):
-            with open(self.path, encoding="utf-8") as f:
-                data = json.load(f)
-            self._validate_document_shape(data)
-        self._apply_document(data)
-        self.conflict_files = self._scan_conflicts()
-
-    @staticmethod
-    def _validate_document_shape(data: dict) -> None:
-        """Fail closed on any vault document that predates schema v3.
-
-        This is the pre-launch clean break: no migration, no dual-read, no
-        silent rewrite. A present document must declare `schema_version: 3`
-        and must not carry a retired `pseudo_first`/`pseudo_last` field on
-        any entry. Moving the offending file aside is a deliberate,
-        recoverable operator action -- never something this code does.
-        """
-        if not isinstance(data, dict):
-            raise VaultSchemaError("Identity Vault file is not a JSON object.")
-        if data.get("schema_version") != SCHEMA_VERSION:
-            raise VaultSchemaError(
-                "Identity Vault schema_version is missing or unsupported "
-                f"(expected {SCHEMA_VERSION}). This is a pre-launch clean "
-                "break: move the existing vault file aside to start a fresh one."
-            )
-        raw_entries = data.get("by_canvas_id", {})
-        if not isinstance(raw_entries, dict):
-            raise VaultSchemaError("Identity Vault by_canvas_id must be an object.")
-        for entry in raw_entries.values():
-            if isinstance(entry, dict) and ("pseudo_first" in entry or "pseudo_last" in entry):
-                raise VaultSchemaError(
-                    "Identity Vault entry still carries a retired pseudo_first/"
-                    "pseudo_last field from the two-part pseudonym scheme."
-                )
-
-    def _scan_conflicts(self) -> list[str]:
-        """OneDrive can fork this file across machines, naming copies like
-        ``vault-DESKTOP123.json`` or ``vault (1).json``. Find any such
-        artifact beside the canonical file (never the file itself or its
-        ``.lock`` companion) without touching or merging them."""
-        directory = os.path.dirname(self.path) or "."
-        if not os.path.isdir(directory):
-            return []
-        canonical = os.path.basename(self.path)
-        lock_name = canonical + ".lock"
-        found = []
-        for entry in sorted(os.listdir(directory)):
-            if entry in (canonical, lock_name):
-                continue
-            if fnmatch.fnmatch(entry, "vault*.json"):
-                found.append(entry)
-        return found
-
-    def conflicts(self) -> list[str]:
-        """Basenames of OneDrive conflict-copy artifacts found beside this
-        vault at last load. Empty means no fork detected."""
-        return list(self.conflict_files)
-
-    def _apply_document(self, data: dict):
-        """Replace in-memory maps with one freshly loaded document."""
-        raw_entries = data.get("by_canvas_id", {}) if isinstance(data, dict) else {}
-        self._by_id = raw_entries if isinstance(raw_entries, dict) else {}
-        self._by_pseudo = {
-            v["pseudonym"]: cid
-            for cid, v in self._by_id.items()
-            if isinstance(v, dict) and v.get("pseudonym")
-        }
-
-    def _lock_path(self) -> Path:
-        path = Path(self.path)
-        return path.with_name(path.name + ".lock")
-
-    def _save_unlocked(self):
-        atomic_write_json(Path(self.path), {
-            "schema_version": SCHEMA_VERSION,
-            "by_canvas_id": self._by_id,
-            "written_by": machine_id(),
-            "written_at": datetime.now().isoformat(timespec="seconds"),
-            "entry_count": len(self._by_id),
-        })
-
-    @contextmanager
-    def transaction(self):
-        """Reload, mutate, and atomically save this vault under one lock."""
-        with interprocess_lock(self._lock_path()):
-            self._load()
-            try:
-                yield self
-            except Exception:
-                raise
-            else:
-                self._save_unlocked()
-
-    def save(self):
-        with interprocess_lock(self._lock_path()):
-            self._save_unlocked()
-
-    def _used_pseudonym_tokens(self, exclude: str = "") -> set:
-        """Case-folded tokens of every pseudonym currently held, optionally
-        excluding one pseudonym (so `regenerate_pseudonym` can replace a
-        student's own word without treating it as "already taken")."""
-        excluded = exclude.lower()
-        return {p.lower() for p in self._by_pseudo if p.lower() != excluded}
+    def _used_pseudonym_tokens(self) -> set:
+        """Case-folded tokens of every pseudonym currently held."""
+        return {p.lower() for p in self._by_pseudo}
 
     def _select_available_word(self, banned: set, stable_key: str = "") -> str:
         """Select a registry word by deterministic hash-and-probe.
@@ -308,28 +157,13 @@ class Vault:
             "assigned or collides with a current vault identity."
         )
 
-    @staticmethod
-    def _roster_tokens(roster_names: set | None) -> set:
-        tokens: set = set()
-        if roster_names:
-            for name in roster_names:
-                tokens.update(t.lower() for t in str(name).split())
-        return tokens
-
-    def get_or_assign(self, canvas_id, real_name="", sis_id="",
-                      roster_names: set | None = None) -> str:
+    def get_or_assign(self, canvas_id, real_name="", sis_id="") -> str:
         """Return the stable pseudonym for this student, assigning one
         available registry word on first sight. Backfills name/sis if they
-        were unknown before. If `roster_names` is provided, the assigned
-        word will avoid colliding with any real roster token. Does not
-        auto-save."""
+        were unknown before. Does not auto-save."""
         cid = str(canvas_id)
         entry = self._by_id.get(cid)
         if entry is None:
-            # `roster_names` remains accepted for source compatibility, but
-            # intentionally does not participate in assignment.  A caller
-            # may only have a partial roster; the shared vault is the one
-            # authoritative source for identity-token collisions.
             banned = self._used_pseudonym_tokens() | self._vault_identity_tokens()
             if real_name:
                 banned |= {token.lower() for token in str(real_name).split()}
@@ -417,68 +251,6 @@ class Vault:
                 seen.add(ns.lower())
                 merged.append(ns)
         entry["nicknames"] = sorted(merged)
-
-    def set_pseudonym(self, canvas_id, value: str):
-        """Manual override from the UI/MCP. Caller must call save().
-
-        `value` must be exactly one word already present in the registry
-        (matched case-insensitively; the canonical registry casing is what
-        gets stored). Raises `InvalidPseudonymError` for a non-string,
-        blank, multiword, or out-of-registry value, and
-        `PseudonymCollisionError` if a different student already holds it.
-        Both checks run before any mutation, so a refused rename leaves the
-        vault untouched without depending on the transaction to roll back.
-        """
-        cid = str(canvas_id)
-        entry = self._by_id.get(cid)
-        if entry is None:
-            return
-        canonical = _canonical_registry_word(value)
-        if canonical is None:
-            raise InvalidPseudonymError(
-                "pseudonym must be exactly one word from the reviewed registry."
-            )
-        holder = self._canvas_id_holding(canonical)
-        if holder is not None and holder != cid:
-            raise PseudonymCollisionError(
-                f"The pseudonym '{canonical}' already belongs to another "
-                "student. Choose a different one."
-            )
-        old_pseudo = entry.get("pseudonym", "")
-        entry["pseudonym"] = canonical
-        self._by_pseudo.pop(old_pseudo, None)
-        self._by_pseudo[canonical] = cid
-
-    def _canvas_id_holding(self, pseudonym: str):
-        """The canvas_id already using this pseudonym, or None.
-
-        Case-insensitive, so a rename that only changes capitalization is
-        recognized as the same student rather than read as a collision.
-        """
-        wanted = str(pseudonym or "").strip().lower()
-        if not wanted:
-            return None
-        for existing, cid in self._by_pseudo.items():
-            if str(existing).strip().lower() == wanted:
-                return cid
-        return None
-
-    def regenerate_pseudonym(self, canvas_id, roster_names: set | None = None):
-        """Assign a new available registry word, collision-checked, and
-        guaranteed different from the current one. Caller must call save()."""
-        cid = str(canvas_id)
-        entry = self._by_id.get(cid)
-        if entry is None:
-            return
-        old_pseudo = entry.get("pseudonym", "")
-        banned = self._used_pseudonym_tokens(exclude=old_pseudo) | self._roster_tokens(roster_names)
-        # Also ban the student's own current word so regenerate always hands
-        # back something different.
-        banned.add(old_pseudo.lower())
-        new_pseudonym = self._select_available_word(banned, f"{cid}:regenerate:{old_pseudo}")
-        entry["pseudonym"] = new_pseudonym
-        self._by_pseudo.pop(old_pseudo, None)
-        self._by_pseudo[new_pseudonym] = cid
 
     def reverse(self, pseudonym: str):
         """Pseudonym -> {canvas_id, real_name, sis_id} or None."""

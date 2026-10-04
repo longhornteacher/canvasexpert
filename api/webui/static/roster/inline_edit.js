@@ -50,14 +50,7 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (data.ok) {
-            if (key === "regenerate_pseudonym" && data.pseudonym) {
-              updateLocalStudent(userId, "pseudonym", data.pseudonym);
-              var row = tableBody.querySelector('tr[data-id="' + userId + '"]');
-              var pseudonymInput = row && row.querySelector(".roster-v2-pseudo");
-              if (pseudonymInput) pseudonymInput.value = data.pseudonym;
-            } else {
-              updateLocalStudent(userId, key, value);
-            }
+            updateLocalStudent(userId, key, value);
             roster.setRowStatus(userId, "saved locally", "roster-v2-status-ok");
           } else {
             var apiMsg = data.error || "Save failed.";
@@ -84,8 +77,6 @@
 
     if (key === "nicknames") {
       s.nicknames = value;
-    } else if (key === "pseudonym") {
-      s.pseudonym = value;
     } else if (key === "extra_time") {
       s.extra_time = { enabled: !!value.enabled, days: value.days || 0 };
     } else if (key === "monitored") {
@@ -155,21 +146,6 @@
         var id = el.dataset.id;
         var val = el.value.split(",").map(function (n) { return n.trim(); }).filter(Boolean);
         saveField(id, "nicknames", val);
-      });
-    });
-
-    tableBody.querySelectorAll(".roster-v2-pseudo").forEach(function (el) {
-      el.addEventListener("change", function () {
-        var id = el.dataset.id;
-        saveField(id, "pseudonym", el.value.trim());
-      });
-    });
-
-    tableBody.querySelectorAll(".roster-v2-regen").forEach(function (el) {
-      el.addEventListener("click", function () {
-        var id = el.dataset.id;
-        roster.setRowStatus(id, "saving...", "roster-v2-status-saving");
-        saveField(id, "regenerate_pseudonym", true);
       });
     });
 

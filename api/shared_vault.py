@@ -23,10 +23,6 @@ class PseudonymProvisionalError(RuntimeError):
     """A cross-machine collision must be resolved before scoring this student."""
 
 
-class PermanentPseudonymError(ValueError):
-    """An existing student-to-Pokémon assignment is immutable."""
-
-
 def _recorded_pseudonym(value: object) -> str | None:
     """A pseudonym already recorded in the seed or a journal (R1: permanent).
 
@@ -45,7 +41,7 @@ def _recorded_pseudonym(value: object) -> str | None:
     return candidate
 
 
-class SharedVault(feedback_vault.Vault):
+class SharedVault(feedback_vault.IdentityVault):
     """API-compatible vault facade whose shared writes are append-only."""
 
     def __init__(self, directory, *, retired_vault_path=None, workspace_root=None,
@@ -60,7 +56,10 @@ class SharedVault(feedback_vault.Vault):
         self._pending_k: dict[str, int] = {}
         self._events: list[dict] = []
         self._baseline_by_id: dict = {}
-        super().__init__(str(self.directory / "vault.json"))
+        self._by_id = {}
+        self._by_pseudo = {}
+        self.conflict_files: list[str] = []
+        self._load()
 
     def _ensure_seed(self) -> dict:
         legacy_storage_reappeared(self.retired_vault_path)
@@ -240,7 +239,7 @@ class SharedVault(feedback_vault.Vault):
             is_provisional = bool(current.get("provisional"))
             if new_pokemon and new_pokemon != old_pokemon:
                 if old_pokemon and not was_provisional:
-                    raise PermanentPseudonymError("An existing student pseudonym cannot be changed.")
+                    raise ValueError("An existing student pseudonym cannot be changed.")
                 if is_provisional:
                     continue
                 k = self._pending_k.get(str(canvas_id), self._max_k.get(str(canvas_id), -1) + 1)
@@ -261,7 +260,7 @@ class SharedVault(feedback_vault.Vault):
         with interprocess_lock(self._lock_path()):
             self._save_changes()
 
-    def get_or_assign(self, canvas_id, real_name="", sis_id="", roster_names=None) -> str:
+    def get_or_assign(self, canvas_id, real_name="", sis_id="") -> str:
         cid = str(canvas_id)
         entry = self._by_id.get(cid)
         if entry is None:
@@ -302,34 +301,12 @@ class SharedVault(feedback_vault.Vault):
                 return
         raise feedback_vault.PseudonymRegistryError("The pseudonym registry is exhausted.")
 
-    def resolve_provisional(self, canvas_id) -> str:
-        cid = str(canvas_id)
-        if cid not in self._provisional_ids:
-            return str((self._by_id.get(cid) or {}).get("pseudonym") or "")
-        entry = self._by_id[cid]
-        old = str(entry.get("pseudonym") or "")
-        if old:
-            entry["provisional"] = False
-            self._provisional_ids.remove(cid)
-            self._assign_hmac(cid, entry)
-        return str(entry.get("pseudonym") or "")
-
     def is_provisional(self, canvas_id) -> bool:
         return str(canvas_id) in self._provisional_ids
 
     def require_stable(self, canvas_id) -> None:
         if self.is_provisional(canvas_id):
             raise PseudonymProvisionalError("pseudonym_provisional")
-
-    def set_pseudonym(self, canvas_id, value: str):
-        cid = str(canvas_id)
-        entry = self._by_id.get(cid)
-        if entry is not None and str(entry.get("pseudonym") or "").casefold() == str(value or "").casefold():
-            return
-        raise PermanentPseudonymError("Existing student-to-Pokémon mappings are permanent.")
-
-    def regenerate_pseudonym(self, canvas_id, roster_names=None):
-        raise PermanentPseudonymError("Existing student-to-Pokémon mappings are permanent.")
 
     def conflicts(self) -> list[str]:
         return list(self.conflict_files)

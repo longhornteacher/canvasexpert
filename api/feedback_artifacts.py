@@ -3,7 +3,7 @@ import json
 import os
 
 from api.nq_report import constructed_responses, html_to_text
-from api.feedback_vault import Vault
+from api.feedback_vault import IdentityVault
 from api import feedback_scrub
 from api.mirror import new_quizzes
 from api.powergrader import student_attachments, writing_timeline
@@ -28,7 +28,7 @@ def _attachment_meta(attachment: dict) -> dict:
     return {k: attachment.get(k) for k in allowed if k in attachment}
 
 
-def pseudonymize(parsed: dict, vault: Vault, quiz_title: str) -> dict:
+def pseudonymize(parsed: dict, vault: IdentityVault, quiz_title: str) -> dict:
     """Build an LLM-safe bundle: one entry per student (by pseudonym) with their
     constructed (written) responses only — no names, ids, or sections. Mutates the
     vault (assigns pseudonyms); caller wraps the operation in a vault transaction."""
@@ -110,7 +110,7 @@ def _new_quiz_ai_response(item: dict) -> dict | None:
     }
 
 
-def pseudonymize_submissions(submissions: list, vault: Vault,
+def pseudonymize_submissions(submissions: list, vault: IdentityVault,
                               assignment_title: str) -> dict:
     """Build an LLM-safe bundle from Canvas API submissions (assignments path).
 
@@ -177,15 +177,6 @@ def pseudonymize_submissions(submissions: list, vault: Vault,
         if existing is None or (entry["submitted_at"] or "") > (existing.get("_submitted_at") or ""):
             by_student[uid] = {**entry, "_submitted_at": entry["submitted_at"]}
 
-    # Roster tokens for collision-safe fake-name assignment: a fake name must not
-    # match any real first/last token in this batch (otherwise the scrub's chained
-    # replacement can cross-link students). The Name Manager roster sync does this
-    # too; we repeat it here so the guided flow is correct even without a prior sync.
-    roster_tokens: set = set()
-    for entry in by_student.values():
-        for t in (entry.get("real_name") or "").split():
-            roster_tokens.add(t.lower())
-
     students = []
     for uid, entry in by_student.items():
         if "responses" in entry and not entry["responses"]:
@@ -195,8 +186,7 @@ def pseudonymize_submissions(submissions: list, vault: Vault,
         require_stable = getattr(vault, "require_stable", None)
         if require_stable is not None:
             require_stable(uid)
-        pseudo = vault.get_or_assign(uid, entry["real_name"], entry["sis_id"],
-                                     roster_names=roster_tokens)
+        pseudo = vault.get_or_assign(uid, entry["real_name"], entry["sis_id"])
         responses = entry.get("responses") or [{
             "item_id":  entry["item_id"],
             "prompt":   entry["prompt"],
@@ -217,7 +207,7 @@ def pseudonymize_submissions(submissions: list, vault: Vault,
             "review_required": True, "note": REVIEW_NOTE, "students": students}
 
 
-def _scrub_bundle(bundle: dict, vault: Vault,
+def _scrub_bundle(bundle: dict, vault: IdentityVault,
                   protected: set[str] | None = None) -> dict:
     """Deep-scrub every text field in a bundle. Returns a new bundle dict
     with prompts and responses scrubbed."""

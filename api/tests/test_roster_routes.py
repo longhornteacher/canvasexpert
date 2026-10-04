@@ -7,7 +7,6 @@ import pytest
 from api.webui.server import app
 from api.platform_services import config
 from api import feedback_vault
-from api.feedback_vault import Vault
 import api.webui.routes.roster as roster_routes
 
 client = TestClient(app)
@@ -39,13 +38,6 @@ class FakeVault:
     def set_nicknames(self, canvas_id, nicknames):
         row = self.rows.setdefault(str(canvas_id), {"canvas_id": str(canvas_id)})
         row["nicknames"] = nicknames
-
-    def set_pseudonym(self, canvas_id, value):
-        row = self.rows.setdefault(str(canvas_id), {"canvas_id": str(canvas_id)})
-        row["pseudonym"] = value
-
-    def regenerate_pseudonym(self, canvas_id):
-        self.set_pseudonym(canvas_id, _WORDS[1])
 
     def save(self):
         self.saved = True
@@ -458,7 +450,7 @@ def test_roster_student_validates_nicknames_type():
     assert "list" in data.get("error", "").lower()
 
 
-def test_roster_student_validates_pseudonym_shape():
+def test_roster_student_rejects_retired_pseudonym_fields():
     resp = client.post("/api/roster/student", data={
         "course_id": "1", "user_id": "101",
         "patch": '{"pseudonym": {"bad": "shape"}}'
@@ -466,70 +458,8 @@ def test_roster_student_validates_pseudonym_shape():
     assert resp.status_code == 200
     data = resp.json()
     assert data.get("ok") is False
-    assert "string" in data.get("error", "").lower()
-
-
-def _real_vault_pair(monkeypatch, tmp_path):
-    """Two students in a real (not fake-doubled) Vault, wired onto the route,
-    for the pseudonym patch Contract test below -- the deeper registry and
-    collision checks only exist on the real `Vault`, not `FakeVault`."""
-    vault = Vault(str(tmp_path / "vault.json"))
-    with vault.transaction():
-        first = vault.get_or_assign("101", "Ada Lovelace", "SIS-101")
-        second = vault.get_or_assign("102", "Alan Turing", "SIS-102")
-    monkeypatch.setattr(roster_routes, "_vault", lambda: vault)
-    monkeypatch.setattr(roster_routes, "_fetch_students", lambda course_id: ([], "No token saved."))
-    monkeypatch.setattr(roster_routes, "_fetch_sections", lambda course_id: {})
-    return vault, first, second
-
-
-@pytest.mark.parametrize("patch_value,accepted", [
-    ("VALID", True),
-    ("", False),
-    ("   ", False),
-    ("Two Words", False),
-    (123, False),
-    ("Notarealregistryword", False),
-    ("COLLIDING", False),
-])
-def test_roster_student_pseudonym_patch_boundary(monkeypatch, tmp_path, patch_value, accepted):
-    """Contract: the Roster route's pseudonym patch accepts exactly one
-    available registry word and refuses blank, multiword, non-string,
-    out-of-registry, and colliding values without a partial write."""
-    vault, first, second = _real_vault_pair(monkeypatch, tmp_path)
-    if patch_value == "VALID":
-        patch_value = next(w for w in _WORDS if w not in (first, second))
-    elif patch_value == "COLLIDING":
-        patch_value = second  # already held by canvas_id 102
-
-    resp = client.post("/api/roster/student", data={
-        "course_id": "1", "user_id": "101",
-        "patch": json.dumps({"pseudonym": patch_value}),
-    })
-    data = resp.json()
-    reloaded = Vault(str(tmp_path / "vault.json"))
-
-    if accepted:
-        assert data["ok"] is True
-        assert reloaded.get_or_assign("101") == patch_value
-    else:
-        assert data["ok"] is False
-        assert reloaded.get_or_assign("101") == first, "a rejected value must not mutate the vault"
-
-
-def test_roster_student_regeneration_returns_new_unused_pseudonym(monkeypatch, tmp_path):
-    vault, first, second = _real_vault_pair(monkeypatch, tmp_path)
-
-    resp = client.post("/api/roster/student", data={
-        "course_id": "1", "user_id": "101",
-        "patch": json.dumps({"regenerate_pseudonym": True}),
-    })
-
-    data = resp.json()
-    reloaded = Vault(str(tmp_path / "vault.json"))
-    assert data["ok"] is True
-    assert data["pseudonym"] == reloaded.get_or_assign("101")
-    assert data["pseudonym"] not in {first, second}
+    assert data.get("ok") is False
+    assert "unknown" in data.get("error", "").lower()
 
 
 def test_roster_student_saves_and_clears_classroom_profile(monkeypatch, isolated_roster):

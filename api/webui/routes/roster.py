@@ -28,7 +28,7 @@ from .roster_helpers import _as_int, _value_name
 router = APIRouter(prefix="/api/roster", tags=["roster"])
 
 ALLOWED_STUDENT_PATCH_KEYS = {
-    "nicknames", "pseudonym", "regenerate_pseudonym",
+    "nicknames",
     "extra_time", "monitored", "classroom_profile",
 }
 
@@ -267,7 +267,7 @@ def roster_student_update(
 ):
     """Update one student's roster settings.
 
-    Accepted patch fields: nicknames, pseudonym, regenerate_pseudonym,
+    Accepted patch fields: nicknames,
     extra_time, monitored, classroom_profile.
     """
     return JSONResponse(roster_updates.update_student(

@@ -105,19 +105,13 @@ def upsert_roster(vault, users: list[dict]) -> None:
             name = user.get("name") or user.get("sortable_name") or ""
             remember_identity(canvas_id, name, str(user.get("sis_user_id") or ""))
 
-    roster_tokens: set = set()
-    for user in users or []:
-        for source in (user.get("name"), user.get("sortable_name"), user.get("short_name")):
-            for token in (source or "").split():
-                roster_tokens.add(token.lower())
-
     for user in users or []:
         canvas_id = str(user.get("id", ""))
         if not canvas_id:
             continue
         name = user.get("name") or user.get("sortable_name") or ""
         sis_id = str(user.get("sis_user_id") or "")
-        vault.get_or_assign(canvas_id, name, sis_id, roster_names=roster_tokens)
+        vault.get_or_assign(canvas_id, name, sis_id)
         short_name = (user.get("short_name") or "").strip()
         name_tokens = {token.lower() for token in name.split()}
         if (short_name and short_name.lower() != name.lower()

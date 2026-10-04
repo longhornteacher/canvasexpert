@@ -2,7 +2,7 @@
 import json
 import re
 
-from api.feedback_vault import Vault
+from api.feedback_vault import IdentityVault
 from api.feedback_contract import CONTRACT_VERSION
 
 def _format_number(value) -> str | None:
@@ -172,7 +172,7 @@ def parse_results(text: str) -> list:
     return data if isinstance(data, list) else []
 
 
-def validate_results(results, bundle: dict = None, vault: Vault = None,
+def validate_results(results, bundle: dict = None, vault: IdentityVault = None,
                      *, contract_version: str = CONTRACT_VERSION) -> dict:
     """Validate scoring output against the Feedback Scoring Contract (v2).
 
@@ -296,7 +296,7 @@ def validate_results(results, bundle: dict = None, vault: Vault = None,
             "fields": sorted(fields)}
 
 
-def reidentify(results: list, vault: Vault) -> list:
+def reidentify(results: list, vault: IdentityVault) -> list:
     """Map pseudonymous results to private ids without editing authored feedback."""
     out = []
     for r in results:
