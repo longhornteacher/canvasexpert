@@ -165,7 +165,7 @@ def bridge_harness(tmp_path, monkeypatch):
     monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
     monkeypatch.setattr(canvas_client, "canvas_get_all_complete", fake.get_all_complete)
     monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
-    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed", lambda _course: None)
+    monkeypatch.setattr("api.mirror.service.notify_course_changed", lambda _course: None)
     return fake
 
 
@@ -387,7 +387,7 @@ def test_reconcile_preview_apply_links_a_two_theme_family(tmp_path, monkeypatch)
     monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
     monkeypatch.setattr(canvas_client, "canvas_get_all_complete", fake.get_all_complete)
     monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
-    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed", lambda _course: None)
+    monkeypatch.setattr("api.mirror.service.notify_course_changed", lambda _course: None)
 
     matrix = sis_grade_bridge.reconcile_sis_grade_bridges("course-1")
     row = next(item for item in matrix["matrix"] if item["family_title"] == "Two Theme SCRs")
@@ -473,7 +473,7 @@ def test_two_link_only_repairs_previewed_together_both_apply(tmp_path, monkeypat
     monkeypatch.setattr(canvas_client, "canvas_get", fake.get)
     monkeypatch.setattr(canvas_client, "canvas_get_all_complete", fake.get_all_complete)
     monkeypatch.setattr(canvas_client, "_canvas_send", fake.send)
-    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed", lambda _course: None)
+    monkeypatch.setattr("api.mirror.service.notify_course_changed", lambda _course: None)
     invalidate_calls = []
     monkeypatch.setattr(
         course_catalog, "invalidate_scope",

@@ -1,5 +1,5 @@
 """Tests for PageForge parsing and author-HTML validation."""
-from api.webui import pf
+from api import pf
 
 
 

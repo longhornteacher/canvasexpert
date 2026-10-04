@@ -10,7 +10,7 @@ from starlette.background import BackgroundTask
 
 from api import __version__, ai_clients, connections, runtime_paths
 from api.shared_storage import LegacyStorageReappearedError, reappeared_legacy_storage
-from .. import mirror_service
+from api.mirror import service as mirror_service
 from ..local_request_guard import csrf_token
 from ..deps import templates
 

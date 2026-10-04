@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from api.webui import ai_ta
+from api import ai_authoring as ai_ta
 
 
 AGENT_NAME = "START HERE - CanvasAgent.txt"

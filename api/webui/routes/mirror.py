@@ -5,7 +5,7 @@ from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import JSONResponse
 
 from api.shared_storage import LegacyStorageReappearedError, reappeared_legacy_storage
-from .. import mirror_service
+from api.mirror import service as mirror_service
 
 router = APIRouter(tags=["mirror"])
 

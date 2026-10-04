@@ -15,7 +15,7 @@ from api import runtime_paths
 from api.platform_services import canvas_client
 from api.platform_services.config import _io as config_io
 from api.platform_services import workspace as workspace_owner
-from api.webui.attachment_validation import ALLOWED_ATTACHMENT_EXTENSIONS
+from api.attachment_validation import ALLOWED_ATTACHMENT_EXTENSIONS
 from .adapter_support import ensure_step, replace_step
 from .. import models
 

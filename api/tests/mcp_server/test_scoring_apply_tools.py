@@ -293,7 +293,7 @@ def test_curve_stage_apply_ledger_and_ledger_driven_revert(monkeypatch, tmp_path
         return dict(live), None
     monkeypatch.setattr(canvas_client, "canvas_get", canvas_get)
     monkeypatch.setattr(canvas_client, "_canvas_send", canvas_put)
-    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed", lambda _course: None)
+    monkeypatch.setattr("api.mirror.service.notify_course_changed", lambda _course: None)
     preview = grade_adjustment.preview_grade_adjustment("course-1", "assignment-1",
         {"kind": "revert_rule", "rule_id": rule["rule_id"]})
     assert preview["ok"] is True

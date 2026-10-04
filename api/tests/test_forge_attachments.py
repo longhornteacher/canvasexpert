@@ -12,8 +12,8 @@ from api.operation_ledger.adapters import forge_files
 from api.operation_ledger.adapters import assignment_whole
 from api.platform_services import canvas_client
 from api import runtime_paths
-from api.webui import af, pf
-from api.webui.attachment_validation import ALLOWED_ATTACHMENT_EXTENSIONS
+from api import af, pf
+from api.attachment_validation import ALLOWED_ATTACHMENT_EXTENSIONS
 
 
 class FakeResponse:

@@ -50,7 +50,7 @@ def _mirror_settings_context() -> dict:
         "mirror_courses": [], "mirror_serve_max_age_hours": 6,
     }
     try:
-        from .. import mirror_service
+        from api.mirror import service as mirror_service
         from api.mirror import store as mirror_store
         status = mirror_service.status()
         now = mirror_store.now_iso()

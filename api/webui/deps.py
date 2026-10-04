@@ -1,141 +1,21 @@
-"""Shared stable paths, call-time workspace facades, and templates.
-
-Sits BELOW the routers in the import graph: server.py and every future
-routes/*.py import from here, and this module imports nothing from them. Stable
-application paths remain available here; workspace-derived paths are delegated
-to ``runtime_paths`` at call time.
-"""
-import glob as _glob
+"""Console-local templates and response helpers."""
 import json as _json
 import os
 import time
+
+from fastapi.templating import Jinja2Templates
+
+from api import __version__, runtime_paths
+
+WEBUI_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMP_DIR = str(runtime_paths.temp_dir())
+
+templates = Jinja2Templates(directory=os.path.join(WEBUI_DIR, "templates"))
+templates.env.globals["asset_v"] = str(int(time.time()))
+templates.env.globals["app_version"] = __version__
 
 
 def _sse(lines):
     """Encode an iterable of strings as Server-Sent Events."""
     for line in lines:
         yield f"data: {_json.dumps(line)}\n\n"
-
-from fastapi.templating import Jinja2Templates
-
-from api import __version__, runtime_paths
-from api.platform_services import workspace
-
-WEBUI_DIR = os.path.dirname(os.path.abspath(__file__))
-API_DIR   = os.path.dirname(WEBUI_DIR)
-REPO_ROOT = os.path.dirname(API_DIR)
-
-# Stable compatibility facade; workspace-derived paths remain call-time only.
-TEMP_DIR = str(runtime_paths.temp_dir())
-
-templates = Jinja2Templates(directory=os.path.join(WEBUI_DIR, "templates"))
-# Cache-bust static assets on every server restart so UI updates land without
-# a hard refresh.
-templates.env.globals["asset_v"] = str(int(time.time()))
-templates.env.globals["app_version"] = __version__
-
-
-# --------------------------------------------------------------------------
-# File-listing helpers (pure; resolve workspace folders at call time)
-# --------------------------------------------------------------------------
-
-def _list_txt_files(folders):
-    """One entry per unique file across `folders`, labeled by its own file
-    name. A file's folder is a repo-relative path when its folder happens to
-    be inside the repo and the teacher's synced workspace otherwise, so a
-    path-based label reads as noise (or worse, a raw local folder path) for
-    the common case of an out-of-repo Library folder. Disambiguate with the
-    parent folder name only when two files share a basename (feature-freeze
-    hardening initiative, D1)."""
-    found = []
-    seen = set()
-    for folder in folders:
-        if not folder or not os.path.isdir(folder):
-            continue
-        for path in sorted(_glob.glob(os.path.join(folder, "*.txt"))):
-            abspath = os.path.abspath(path)
-            if abspath in seen:
-                continue
-            seen.add(abspath)
-            found.append({
-                "path": abspath,
-                "_name": os.path.basename(path),
-                "_parent": os.path.basename(os.path.dirname(abspath)),
-            })
-    name_counts: dict[str, int] = {}
-    for entry in found:
-        name_counts[entry["_name"]] = name_counts.get(entry["_name"], 0) + 1
-    for entry in found:
-        name = entry.pop("_name")
-        parent = entry.pop("_parent")
-        entry["label"] = f"{name} ({parent})" if name_counts[name] > 1 else name
-    return found
-
-
-def list_quiz_files():
-    return _list_txt_files(runtime_paths.content_folders("quiz"))
-
-
-def list_assignment_files():
-    return _list_txt_files(runtime_paths.content_folders("assignment"))
-
-
-def list_page_files():
-    return _list_txt_files(runtime_paths.content_folders("page"))
-
-
-def _inbox_marker_size(marker_path: str):
-    """Parse a `<name>.txt.done` marker's decimal byte-length payload.
-
-    Returns None (skip) for a missing file, unreadable file, or any content
-    that isn't a plain non-negative integer.
-    """
-    try:
-        with open(marker_path, encoding="utf-8") as f:
-            text = f.read().strip()
-    except OSError:
-        return None
-    if not text.isdigit():
-        return None
-    return int(text)
-
-
-def list_inbox_files(kind: str):
-    """Assistant-staged drafts from the per-kind Inbox, marker-gated.
-
-    A dropped `<name>.txt` is only listed once its sibling `<name>.txt.done`
-    marker exists and the decimal byte count parsed from it equals the
-    actual size of `<name>.txt` -- this guards against listing a draft that
-    is still half-synced by OneDrive. The `.done` markers themselves are
-    never returned.
-
-    Same {label, path} shape as the other list_*_files helpers, plus
-    "source": "inbox" so the push tabs can badge these distinctly from the
-    teacher's own library files (Slice D).
-    """
-    folder = runtime_paths.inbox_folder(kind)
-    if not folder or not os.path.isdir(folder):
-        return []
-    found = []
-    for path in sorted(_glob.glob(os.path.join(str(folder), "*.txt"))):
-        expected = _inbox_marker_size(path + ".done")
-        if expected is None:
-            continue
-        try:
-            actual = os.path.getsize(path)
-        except OSError:
-            continue
-        if expected != actual:
-            continue
-        abspath = os.path.abspath(path)
-        # The Inbox lives in the teacher's synced workspace, not the repo, so
-        # (like _list_txt_files) a repo-relative label would climb out through
-        # "..\..\Documents\OneDrive - ..." and show the teacher a path instead
-        # of a draft name. The panel heading and the push tab already say where
-        # these came from, so the file name is the whole useful label.
-        found.append({
-            "label": os.path.basename(path),
-            "path": abspath,
-            "source": "inbox",
-        })
-    return found

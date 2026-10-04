@@ -29,7 +29,7 @@ from .adapter_support import (
 )
 from api.platform_services import canvas_client, config
 from api.student_text import normalize_author_model, normalize_student_text
-from api.webui import af
+from api import af
 
 
 KIND = "content.assignment"

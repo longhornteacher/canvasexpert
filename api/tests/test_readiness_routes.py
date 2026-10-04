@@ -1,6 +1,6 @@
 """Contract tests for process-local readiness probes and redacted results."""
 
-from api.webui import readiness
+from api import readiness
 from api.webui.routes.readiness import post_readiness_probe
 
 

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from .. import readiness
+from api import readiness
 
 
 router = APIRouter(tags=["readiness"])

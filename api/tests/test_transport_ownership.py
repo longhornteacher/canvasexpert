@@ -46,7 +46,7 @@ ALLOWED_DIRECT_HTTP = {
     # File-upload second leg (Canvas-issued storage URL; owned in the mutation contract)
     "api/operation_ledger/adapters/assignment_whole.py",
     # Deliberate live reads / fallbacks (tracked; not accidental)
-    "api/webui/routes/courses.py",       # group/membership reads feeding Canvas group writes (design law 5.7)
+    "api/mirror/service.py",             # group/membership reads feeding Canvas group writes (design law 5.7)
     "api/webui/routes/settings.py",      # token validation + OpenRouter connectivity checks
 }
 

@@ -444,7 +444,7 @@ class GradeAdjustmentAdapter:
             except Exception:
                 pass
             try:
-                from api.webui import mirror_service
+                from api.mirror import service as mirror_service
                 mirror_service.notify_course_changed(target["course_id"])
             except Exception as exc:
                 operational_log.emit("mirror.notify_course_changed", "failed",

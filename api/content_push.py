@@ -28,7 +28,7 @@ from api.operation_ledger.adapters.assignment_update import KIND as ASSIGNMENT_U
 from api.operation_ledger.adapters.page import KIND as PAGE_KIND
 from api.operation_ledger.adapters.quiz import KIND as QUIZ_KIND
 from api.platform_services import config
-from api.webui import deps
+from api import staged_content
 
 # Teacher-facing kind -> ledger operation kind. These are the three kinds that
 # have an Inbox and an authoring contract; they stay in step with
@@ -78,7 +78,7 @@ def _resolve_staged_draft(kind: str, label: str) -> tuple[str | None, str | None
     wanted = str(label or "").strip()
     if not wanted:
         return None, "label is required; call list_staged_content for the staged labels"
-    entries = deps.list_inbox_files(kind)
+    entries = staged_content.list_inbox_files(kind)
     if not entries:
         return None, (
             f"no {kind} draft is staged for review; stage the draft first "

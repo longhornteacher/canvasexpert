@@ -1,7 +1,7 @@
 """Context helpers for PowerGrader — vault, source materials, and shared context."""
 
 from api.identity_vault_service import open_vault
-from api.webui import source_materials
+from api import source_materials
 
 
 def vault():

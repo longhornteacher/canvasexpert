@@ -6,7 +6,7 @@ import json
 
 from api.mirror import store
 from api.platform_services import workspace
-from api.webui.routes import courses
+from api.mirror import service as courses
 
 
 COURSE = "555001"

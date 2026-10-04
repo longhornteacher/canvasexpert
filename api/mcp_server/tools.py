@@ -42,9 +42,9 @@ from api.powergrader import scoring_discovery, scoring_local
 from api.mirror import read_service
 from api.mirror import store as mirror_store
 from api.platform_services import config, workspace
-from api.webui import mirror_service
-from api.webui.deps import REPO_ROOT
-from api.webui import deps
+from api.mirror import service as mirror_service
+from api import runtime_paths, staged_content
+REPO_ROOT = runtime_paths.REPO_ROOT
 from api import feedback_safety, feedback_vault
 from api import score_curves, score_ledger
 from api.course_catalog import read_catalog
@@ -1334,7 +1334,7 @@ def get_product_guide(topic: str = "") -> dict:
 def list_staged_content(kind: str = "") -> dict:
     """Drafts an assistant has already staged in the per-kind Inbox, so it can
     confirm a drop landed and avoid losing track or duplicating it. Reuses
-    ``webui.deps.list_inbox_files`` (the Slice C marker gate) as-is. Pass one
+    ``api.staged_content.list_inbox_files`` (the marker gate) as-is. Pass one
     of quiz/assignment/page to narrow to that kind, or omit for all three.
     No course_id, no student data — no course gate, no vault, no safety
     gate. Only each draft's label (name) is returned, never its absolute
@@ -1353,7 +1353,7 @@ def list_staged_content(kind: str = "") -> dict:
     rows = [
         {"kind": k, "label": entry["label"]}
         for k in kinds
-        for entry in deps.list_inbox_files(k)
+        for entry in staged_content.list_inbox_files(k)
     ]
     return {"ok": True, "staged": _tabulate(rows, _STAGED_CONTENT_COLUMNS)}
 

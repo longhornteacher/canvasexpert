@@ -7,7 +7,7 @@ from pathlib import Path
 
 from api import __version__, ai_clients, diagnostics, runtime_paths
 from api.mcp_server.contract import TOOL_SCHEMA_VERSION
-from api.webui import readiness
+from api import readiness
 
 
 __all__ = ["connection_context", "generic_stdio_config", "build_claude_mcpb"]

@@ -21,7 +21,7 @@ from api.nq_report import html_to_text
 from api.operation_ledger.adapters import forge_files, assignment_whole
 from api.platform_services import canvas_client
 from api.powergrader import assignment_refresh, scoring_local, session_store
-from api.webui import source_materials
+from api import source_materials
 from api.shared_work import SharedWorkStore, WorkItemNotFound
 from api.work_registry.providers import home_attention
 

@@ -113,7 +113,7 @@ def test_live_score_or_excused_change_skips_one_entry_and_writes_the_other(
     context = FakeContext()
     monkeypatch.setattr(canvas_client, "canvas_get", canvas.get)
     monkeypatch.setattr(canvas_client, "_canvas_send", canvas.send)
-    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed",
+    monkeypatch.setattr("api.mirror.service.notify_course_changed",
                         lambda _course: None)
 
     result = adapter.execute(payload, target, {}, {}, context)
@@ -141,7 +141,7 @@ def test_flat_bump_apply_receipt_and_revert_preview_are_digest_protected(
     monkeypatch.setattr(grade_adjustment, "_vault", lambda: vault)
     monkeypatch.setattr(canvas_client, "canvas_get", canvas.get)
     monkeypatch.setattr(canvas_client, "_canvas_send", canvas.send)
-    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed",
+    monkeypatch.setattr("api.mirror.service.notify_course_changed",
                         lambda _course: None)
 
     def mirror_baseline(payload, target):
@@ -222,7 +222,7 @@ def test_assignment_change_between_preview_and_apply_blocks_with_no_grade_write(
     monkeypatch.setattr(grade_adjustment, "_vault", lambda: FakeVault())
     monkeypatch.setattr(canvas_client, "canvas_get", canvas.get)
     monkeypatch.setattr(canvas_client, "_canvas_send", canvas.send)
-    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed",
+    monkeypatch.setattr("api.mirror.service.notify_course_changed",
                         lambda _course: None)
     monkeypatch.setattr(
         adapter_module, "_mirror_baseline",
@@ -292,7 +292,7 @@ def test_curve_computes_from_and_verifies_against_entered_score(monkeypatch):
     monkeypatch.setattr(grade_adjustment, "_vault", lambda: vault)
     monkeypatch.setattr(canvas_client, "canvas_get", get)
     monkeypatch.setattr(canvas_client, "_canvas_send", send)
-    monkeypatch.setattr("api.webui.mirror_service.notify_course_changed",
+    monkeypatch.setattr("api.mirror.service.notify_course_changed",
                         lambda _course: None)
 
     def mirror_baseline(payload, target):

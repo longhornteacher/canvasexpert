@@ -8,7 +8,7 @@ import pytest
 from api import runtime_paths
 from api.mirror import store
 from api.platform_services import canvas_client, workspace
-from api.webui import mirror_service
+from api.mirror import service as mirror_service
 
 
 @pytest.fixture

@@ -23,7 +23,7 @@ from .adapter_support import (
 )
 from api.platform_services import canvas_client, config
 from api.student_text import normalize_author_model, normalize_student_text
-from api.webui import pf
+from api import pf
 
 
 KIND = "content.page"

@@ -12,7 +12,7 @@ import hashlib
 import json
 
 from api import feedback_artifacts, feedback_contract
-from api.webui import source_materials
+from api import source_materials
 
 
 # Ceiling for one page of packet JSON. Response rows are segmented and pages

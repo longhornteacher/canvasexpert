@@ -767,7 +767,7 @@ def test_every_guide_stays_pastable_plain_text():
 
 def test_list_staged_content_one_kind_lists_label_only(monkeypatch, _rows):
     monkeypatch.setattr(
-        tools.deps, "list_inbox_files",
+        tools.staged_content, "list_inbox_files",
         lambda kind: [{"label": "Inbox/Quizzes/draft1.txt",
                        "path": "C:/abs/Inbox/Quizzes/draft1.txt", "source": "inbox"}]
         if kind == "quiz" else [],
@@ -783,7 +783,7 @@ def test_list_staged_content_one_kind_lists_label_only(monkeypatch, _rows):
 
 
 def test_list_staged_content_empty_inbox_returns_empty_table(monkeypatch):
-    monkeypatch.setattr(tools.deps, "list_inbox_files", lambda kind: [])
+    monkeypatch.setattr(tools.staged_content, "list_inbox_files", lambda kind: [])
     result = tools.list_staged_content("quiz")
     assert result["ok"] is True
     assert result["staged"] == {"columns": ["kind", "label"], "rows": []}
@@ -793,7 +793,7 @@ def test_list_staged_content_omitting_kind_aggregates_across_kinds(monkeypatch, 
     def _fake_list(kind):
         return [{"label": f"{kind}-draft.txt", "path": f"/abs/{kind}", "source": "inbox"}]
 
-    monkeypatch.setattr(tools.deps, "list_inbox_files", _fake_list)
+    monkeypatch.setattr(tools.staged_content, "list_inbox_files", _fake_list)
     result = tools.list_staged_content()
     assert result["ok"] is True
     assert _rows(result["staged"]) == [

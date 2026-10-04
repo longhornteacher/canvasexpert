@@ -642,7 +642,7 @@ class SisGradeBridgeAdapter:
             except Exception:
                 pass
             try:
-                from api.webui import mirror_service
+                from api.mirror import service as mirror_service
                 mirror_service.notify_course_changed(course_id)
             except Exception as exc:
                 operational_log.emit(

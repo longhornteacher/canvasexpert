@@ -1,6 +1,6 @@
 import pytest
 
-from api.webui.attachment_validation import validate_attachments
+from api.attachment_validation import validate_attachments
 
 
 @pytest.mark.parametrize("entries, valid", [

@@ -1,7 +1,7 @@
 """Coverage for Slice C of author-and-stage: per-kind Inbox drop folders.
 
 ``runtime_paths.inbox_folder(kind)`` resolves and ensures the workspace's
-``Inbox/<Kind>`` folder; ``webui.deps.list_inbox_files(kind)`` lists drafts
+``Inbox/<Kind>`` folder; ``staged_content.list_inbox_files(kind)`` lists drafts
 from it, gated on a sibling ``<name>.txt.done`` marker whose contents are the
 exact decimal byte length of ``<name>.txt``. Neither touches the teacher's
 own library folders/listing (``content_folders`` / ``list_*_files``), which
@@ -15,7 +15,7 @@ import pytest
 
 from api import runtime_paths
 from api.platform_services import workspace
-from api.webui import deps
+from api import staged_content as deps
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +80,7 @@ def test_inbox_folder_rejects_unknown_kind():
 
 
 # --------------------------------------------------------------------------
-# webui.deps.list_inbox_files
+# staged_content.list_inbox_files
 # --------------------------------------------------------------------------
 
 def test_list_inbox_files_empty_inbox_returns_empty_list():

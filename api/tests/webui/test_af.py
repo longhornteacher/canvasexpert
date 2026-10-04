@@ -1,7 +1,7 @@
 """Tests for AssignmentForge 2.0 parsing and validation."""
 import pytest
 
-from api.webui import af
+from api import af
 
 VALID_ASSIGNMENT = """<ASSIGNMENTFORGE_JSON>
 {

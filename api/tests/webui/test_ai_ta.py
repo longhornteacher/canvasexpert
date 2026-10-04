@@ -1,4 +1,4 @@
-from api.webui import ai_ta
+from api import ai_authoring as ai_ta
 
 
 def test_build_library_writes_expected_files(tmp_path):

@@ -253,7 +253,7 @@ def test_a_label_matching_two_drafts_is_refused_rather_than_guessed(
     """Two drafts differing only by case cannot coexist on Windows, so this
     stubs the listing rather than the filesystem: the guard has to hold on a
     case-sensitive machine too."""
-    monkeypatch.setattr(content_push.deps, "list_inbox_files", lambda _kind: [
+    monkeypatch.setattr(content_push.staged_content, "list_inbox_files", lambda _kind: [
         {"label": "Welcome Letter.txt", "path": r"C:\a\Welcome Letter.txt"},
         {"label": "welcome letter.txt", "path": r"C:\a\welcome letter.txt"},
     ])
@@ -880,7 +880,7 @@ def test_the_staging_appendix_offers_the_push_without_replacing_the_push_tab():
 def test_stage_content_writes_a_draft_the_marker_gate_accepts(_workspace):
     """The whole point: what stage_content writes must be immediately listable,
     which means the .done marker has to match the file's real byte size."""
-    from api.webui import deps
+    from api import staged_content as deps
 
     result = content_push.stage_content(
         "page", "Photosynthesis intro", "<PAGEFORGE_JSON>{}</PAGEFORGE_JSON>")
@@ -961,7 +961,7 @@ def test_push_content_live_stages_then_lands_in_one_call(_adapter, monkeypatch):
     assert result["staged_label"] == "Cell cycle.txt"
     # The draft is still on disk afterwards: staging is the artifact of record,
     # not a step the live push skips.
-    from api.webui import deps
+    from api import staged_content as deps
     assert [e["label"] for e in deps.list_inbox_files("page")] == ["Cell cycle.txt"]
     # And it went through a real freeze, not straight to the adapter.
     assert landed["coords"][0] and landed["coords"][2]
@@ -994,7 +994,7 @@ def test_push_content_live_leaves_the_draft_staged_when_the_push_fails(_adapter)
     assert result["ok"] is False
     assert result["staged_label"] == "orphan.txt"
     assert "staged" in result["note"]
-    from api.webui import deps
+    from api import staged_content as deps
     assert [e["label"] for e in deps.list_inbox_files("page")] == ["orphan.txt"]
 
 

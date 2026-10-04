@@ -14,6 +14,11 @@ from pathlib import Path
 _API_ROOT = Path(__file__).resolve().parent
 _APP_ROOT = _API_ROOT.parent
 
+# Stable source-tree locations for code that needs bundled application files.
+# Workspace-derived paths remain call-time values below.
+API_DIR = str(_API_ROOT)
+REPO_ROOT = str(_APP_ROOT)
+
 
 def local_app_dir() -> Path:
     """Machine-local, per-user application data directory for Canvas Expert.
@@ -150,7 +155,7 @@ def inbox_folder(kind: str) -> Path | None:
     Distinct from the teacher's own content folders returned by
     ``content_folders`` (Library/Quizzes, Assignments, Library/Pages): this is
     a separate, marker-gated pickup surface -- see
-    ``webui.deps.list_inbox_files``. Not included in ``content_folders``'s
+    ``staged_content.list_inbox_files``. Not included in ``content_folders``'s
     plain glob, since that glob has no marker gate and would surface a
     half-synced drop.
 

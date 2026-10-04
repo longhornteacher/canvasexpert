@@ -280,7 +280,7 @@ def _classic_hub_problems(data):
         return ['differentiation must be "hub" when a QuizForge file carries tiers.']
     if "tiers" not in data:
         return ['differentiation "hub" requires tiers.']
-    from api.webui import af  # lazy: keeps the CLI validator free of app imports
+    from api import af  # lazy: keeps the CLI validator free of app imports
 
     problems = []
     af._validate_tiers(tiers, problems, style="hub")

@@ -5,7 +5,7 @@ from urllib.parse import quote
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from ..deps import REPO_ROOT
+from api.runtime_paths import REPO_ROOT
 
 router = APIRouter(tags=["library"])
 _CONTRACTS = {

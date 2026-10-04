@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 
 from api.platform_services import workspace
-from api.webui.source_material_extractors import collapse_ws, decode_bytes
+from api.source_material_extractors import collapse_ws, decode_bytes
 from api.powergrader import writing_timeline
 
 
