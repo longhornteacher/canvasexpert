@@ -319,7 +319,7 @@ def _resolve_attachment(filename, vault):
 
 def _attachment_unchanged(record):
     try:
-        return (forge_files.verify_private_record_path(record, attachments=True)
+        return (forge_files.verify_private_record_path(record)
                 and record["label"] == ATTACHMENT_LABEL
                 and record["filename"] == record["file"]
                 and Path(record["path"]).stat().st_size == record["size_bytes"]

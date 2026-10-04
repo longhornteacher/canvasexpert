@@ -5,10 +5,8 @@ This is the shared non-HTTP boundary used by MCP, and it mirrors
 Ledger adapters, while this module resolves one staged draft, freezes one
 operation against one Current course, and shapes only course-only results.
 
-The teacher's own push tabs stay exactly as they are. Both routes prepare the
-same adapter payload, freeze the same batch, and apply through the same
-executor, so a draft landed from the chat and a draft landed from the web UI
-are the same write with the same drift checks, claims, and receipts.
+The agent prepares and previews a frozen operation, then applies it through the
+existing executor. The console only exposes recovery and receipts.
 
 The draft must already be staged in the per-kind To Review Inbox
 (``runtime_paths.inbox_folder``). Only a draft's label crosses this boundary,
@@ -33,7 +31,7 @@ from api.platform_services import config
 from api.webui import deps
 
 # Teacher-facing kind -> ledger operation kind. These are the three kinds that
-# have an Inbox, an authoring contract, and a push tab; they stay in step with
+# have an Inbox and an authoring contract; they stay in step with
 # ``mcp_server.tools._STAGED_CONTRACT_KINDS``.
 _LEDGER_KINDS = {
     "quiz": QUIZ_KIND,
@@ -179,7 +177,7 @@ def preview_content_push(
     """Freeze one staged draft into a persisted, digest-protected review.
 
     Makes no Canvas write. Reads Canvas only to capture the baseline the apply
-    step drift-checks against, exactly as the push tab's prepare step does.
+    step drift-checks against through the shared operation adapter.
     """
     course_key = str(course_id or "").strip()
     content_kind = str(kind or "").strip()

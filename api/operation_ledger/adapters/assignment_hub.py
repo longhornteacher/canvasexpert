@@ -11,7 +11,7 @@ from api.platform_services import canvas_client
 
 
 def execute(payload, target, context, *, ordered_steps, whole_execute,
-            upload_course_file, find_assignment_group, read_modules, prepare_description):
+            find_assignment_group, read_modules):
     course_id = target["course_id"]
     steps = ordered_steps(target)
     pages, failure = tier_pages.run_pages(
@@ -21,9 +21,8 @@ def execute(payload, target, context, *, ordered_steps, whole_execute,
     if failure: return failure
     whole_payload = {**payload, "description": description, "tiers": None, "hub": False}
     result = whole_execute(whole_payload, {**target, "steps": ordered_steps({"steps": steps})}, context,
-                           ordered_steps=ordered_steps, upload_course_file=upload_course_file,
-                           find_assignment_group=find_assignment_group, read_modules=read_modules,
-                           prepare_description=prepare_description)
+                           ordered_steps=ordered_steps,
+                           find_assignment_group=find_assignment_group, read_modules=read_modules)
     if result.get("state") not in {"applied", "skipped"}:
         return result
     assignment_id = result.get("returned_object_id")

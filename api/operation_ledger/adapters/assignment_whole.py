@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import mimetypes
 import hashlib
-import os
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 import re
@@ -24,9 +23,7 @@ from .adapter_support import (
     ensure_step,
 )
 from .module_placement import attach_assignment_type_module_item
-from api import operational_log
 from api.platform_services import canvas_client
-from api.platform_services import config
 from api.student_text import normalize_student_text
 
 
@@ -36,10 +33,8 @@ def execute(
     context,
     *,
     ordered_steps,
-    upload_course_file,
     find_assignment_group,
     read_modules,
-    prepare_description,
 ) -> dict:
     course_id = target["course_id"]
     name = normalize_student_text(payload.get("name", "Untitled assignment"))
@@ -66,9 +61,7 @@ def execute(
             steps=steps,
             context=context,
             ordered_steps=ordered_steps,
-            upload_course_file=upload_course_file,
             find_assignment_group=find_assignment_group,
-            prepare_description=prepare_description,
         )
         if result is not None:
             return result
@@ -147,18 +140,9 @@ def _create_assignment(
     steps: list[dict],
     context,
     ordered_steps,
-    upload_course_file,
     find_assignment_group,
-    prepare_description,
 ) -> tuple[str | None, str | None, dict | None]:
     description = str(payload.get("description") or "")
-    description, upload_failure = prepare_description(
-        payload=payload, course_id=course_id, steps=steps, context=context,
-    )
-    steps[:] = ordered_steps({"steps": steps})
-    if upload_failure is not None:
-        return None, None, upload_failure
-
     assignment_data = {"name": name, "submission_types": payload.get("submission_types", ["online_text_entry"])}
     if description:
         assignment_data["description"] = description
@@ -232,7 +216,7 @@ def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
     assignment_id = target.get("returned_object_id") or step.get("returned_object_id")
     has_marker = any(
         step.get("outbound_started_at")
-        and not str(step.get("step_key", "")).startswith(("upload_attachment:", "upload_printable"))
+        and not str(step.get("step_key", "")).startswith("upload_attachment:")
         for step in steps
     )
 
@@ -311,56 +295,17 @@ def reconcile(payload: dict, target: dict, *, ordered_steps) -> dict:
     return {"state": "pending", "returned_object_id": assignment_id}
 
 
-def validate_printable_pdf(pdf_path: str, *, allowed_roots=None) -> tuple:
-    if not pdf_path:
-        return None, "printable file is required"
-    candidate = os.path.realpath(pdf_path)
-    if not os.path.isfile(candidate):
-        return None, "printable PDF not found"
-    if Path(candidate).suffix.lower() != ".pdf":
-        return None, "printable attachment must be a PDF"
-    roots = allowed_printable_roots() if allowed_roots is None else allowed_roots()
-    for root in roots:
-        try:
-            if os.path.commonpath([candidate, root]) == root:
-                return Path(candidate), None
-        except ValueError:
-            continue
-    return None, "printable PDF is outside Canvas Expert export folders"
+def upload_course_file(course_id: str, file_path: Path, *, folder):
+    """Upload an attachment confined to the configured private source folder."""
+    from . import forge_files
 
-
-def allowed_printable_roots():
-    from api import runtime_paths
-
-    roots = []
-    try:
-        roots.append(os.path.realpath(runtime_paths.printables_dir()))
-    except Exception as exc:
-        operational_log.emit("operation_ledger.printable_root_resolve", "failed", error_class=type(exc))
-    try:
-        workspace_path = config.get_workspace_path()
-        if workspace_path:
-            roots.append(os.path.realpath(workspace_path))
-    except Exception as exc:
-        operational_log.emit("operation_ledger.printable_root_resolve", "failed", error_class=type(exc))
-    return roots
-
-
-def upload_course_file(course_id: str, pdf_path: Path, *, allowed_roots=None,
-                       folder="Canvas Expert Printables", validate_pdf=True):
-    if validate_pdf:
-        source, error = validate_printable_pdf(str(pdf_path), allowed_roots=allowed_roots)
-        if error:
-            return None, error
-    else:
-        source = Path(pdf_path).resolve()
-        if not source.is_file():
-            return None, "upload file is missing"
-        roots = allowed_printable_roots() if allowed_roots is None else allowed_roots()
-        if not _path_below_roots(source, roots):
-            return None, "upload file is outside approved workspace folders"
+    source = Path(file_path).resolve()
+    if not source.is_file():
+        return None, "upload file is missing"
+    if not forge_files.verify_private_record_path({"path": str(source), "file": source.name}):
+        return None, "upload file is outside approved attachment folders"
     filename = source.name
-    content_type = mimetypes.guess_type(filename)[0] or "application/pdf"
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     init_payload = {
         "name": filename,
         "size": source.stat().st_size,
@@ -422,17 +367,6 @@ def upload_initialized_file(init, source: Path, *, filename: str, content_type: 
     if response.headers.get("Location"):
         return _complete_canvas_file_upload(response.headers["Location"])
     return None, "Canvas file upload returned no file id"
-
-
-def _path_below_roots(path: Path, roots) -> bool:
-    candidate = os.path.realpath(path)
-    for root in roots:
-        try:
-            if os.path.commonpath([candidate, os.path.realpath(root)]) == os.path.realpath(root):
-                return True
-        except ValueError:
-            continue
-    return False
 
 
 def _complete_canvas_file_upload(location: str):

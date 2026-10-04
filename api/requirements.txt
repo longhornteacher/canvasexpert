@@ -23,13 +23,9 @@ uvicorn>=0.29,<1
 jinja2>=3.1,<4
 keyring>=24.0
 python-multipart>=0.0.9
-python-docx>=1.2.0      # DOCX generation for Student Reports (already used by the engine)
-Pillow>=10.0            # embed photos/images into portfolio DOCX (python-docx add_picture)
+python-docx>=1.2.0      # extract text and embedded media from DOCX submissions/source materials
+Pillow>=10.0            # validate embedded submission images
 pypdf>=4.0             # extract text from PDF assignment uploads (lazy-imported)
-# Physical paper render layer (local-only; lazy-imported). PDF engine = installed
-# Microsoft Edge via Playwright over WeasyPrint (needed GTK/Pango).
-playwright>=1.40        # html -> PDF via the system Microsoft Edge install
-pypandoc-binary>=1.13   # html -> DOCX; bundles the Pandoc binary (no system install / PATH)
 
 # Tests only — Starlette's TestClient (used by api/tests/test_*_routes.py) needs httpx.
 # Pinned to the 0.x line that matches the Starlette pin above (Starlette 1.x switched to httpx2).
@@ -44,6 +40,3 @@ mcp>=1.12,<2
 # normalizes every timestamp to Central and must not fall back to UTC, which would
 # make an evening writing session read as overnight work.
 tzdata>=2024.1
-
-# Local-only read-aloud transcription.  Weights are downloaded only by the
-# explicit PowerGrader setup control, never while starting a grading session.

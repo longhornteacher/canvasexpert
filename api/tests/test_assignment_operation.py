@@ -95,6 +95,8 @@ def test_payload_build_from_file(tmp_path, monkeypatch):
     assert payload["allowed_extensions"] == ["pdf", "docx"]
     assert payload["published"] is False
     assert payload["post_to_sis"] is False
+    assert "printables" not in payload
+    assert "Printable:" not in payload["description"]
 
 
 def test_hub_payload_renders_one_whole_class_assignment_and_support_pages(monkeypatch):
@@ -107,10 +109,11 @@ def test_hub_payload_renders_one_whole_class_assignment_and_support_pages(monkey
                 "differentiation": "hub",
                 "tiers": [{"label": "Support", "supports": {"word_bank": ["claim"]}}]}
     monkeypatch.setattr(assignment_module.af, "parse_file", lambda _path: (authored, []))
-    monkeypatch.setattr(assignment_module, "_generate_printable", lambda *a, **k: {"available": False})
     monkeypatch.setattr(config, "get_tier_tags", lambda: {"Support": "Silver"})
     payload = AssignmentAdapter().build_payload({"path": "synthetic.json"})
     assert payload["hub"] is True
+    assert "printables" not in payload
+    assert "Printable:" not in payload["description"]
     assert "Shared directions" in payload["description"]
     assert "{{ce-tier-page:0}}" in payload["description"]
     assert payload["tiers"][0]["title"] == "Hub - Silver"

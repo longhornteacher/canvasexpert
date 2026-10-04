@@ -47,9 +47,10 @@ class FakeContext:
 
 
 def test_upload_course_file_uploads_in_configured_folder(monkeypatch, tmp_path):
-    pdf = tmp_path / "Water Cycle - Core - Printable.pdf"
+    pdf = tmp_path / "To Review" / "Attachments" / "Teacher handout.pdf"
+    pdf.parent.mkdir(parents=True, exist_ok=True)
     pdf.write_bytes(b"%PDF")
-    monkeypatch.setattr(assignment_adapter, "_allowed_printable_roots", lambda: [str(tmp_path)])
+    monkeypatch.setattr(runtime_paths, "workspace_root", lambda: tmp_path)
     calls = {"send": [], "upload": []}
 
     def fake_canvas_send(method, path, payload, timeout=30):
@@ -62,18 +63,19 @@ def test_upload_course_file_uploads_in_configured_folder(monkeypatch, tmp_path):
 
     monkeypatch.setattr(assignment_adapter.canvas_client, "_canvas_send", fake_canvas_send)
     monkeypatch.setattr(assignment_adapter.requests, "post", fake_upload)
-    result, error = assignment_adapter._upload_course_file("42", pdf)
+    result, error = assignment_adapter._upload_course_file("42", pdf, folder="Canvas Expert Attachments")
 
     assert error is None
     assert result["id"] == 55
-    assert calls["send"][0][2]["parent_folder_path"] == "Canvas Expert Printables"
+    assert calls["send"][0][2]["parent_folder_path"] == "Canvas Expert Attachments"
     assert calls["upload"] == [("https://upload.invalid", {"key": "abc"}, pdf.name, False)]
 
 
 def test_upload_completion_redirect_uses_only_validated_canvas_path(monkeypatch, tmp_path):
-    pdf = tmp_path / "teacher-handout.pdf"
+    pdf = tmp_path / "To Review" / "Attachments" / "teacher-handout.pdf"
+    pdf.parent.mkdir(parents=True, exist_ok=True)
     pdf.write_bytes(b"%PDF")
-    monkeypatch.setattr(assignment_adapter, "_allowed_printable_roots", lambda: [str(tmp_path)])
+    monkeypatch.setattr(runtime_paths, "workspace_root", lambda: tmp_path)
     monkeypatch.setattr(canvas_client, "canvas_headers", lambda: ({"Authorization": "Bearer token"}, "https://canvas.invalid"))
     calls = {"upload": [], "get": []}
     monkeypatch.setattr(canvas_client, "_canvas_send", lambda *_a, **_k: (
@@ -89,7 +91,7 @@ def test_upload_completion_redirect_uses_only_validated_canvas_path(monkeypatch,
 
     monkeypatch.setattr(assignment_adapter.requests, "post", fake_upload)
     monkeypatch.setattr(canvas_client, "canvas_get", fake_get)
-    result, error = assignment_adapter._upload_course_file("42", pdf)
+    result, error = assignment_adapter._upload_course_file("42", pdf, folder="Canvas Expert Attachments")
     assert error is None
     assert result["id"] == 73
     assert calls == {
@@ -99,9 +101,10 @@ def test_upload_completion_redirect_uses_only_validated_canvas_path(monkeypatch,
 
 
 def test_upload_completion_rejects_external_origin(monkeypatch, tmp_path):
-    pdf = tmp_path / "teacher-handout.pdf"
+    pdf = tmp_path / "To Review" / "Attachments" / "teacher-handout.pdf"
+    pdf.parent.mkdir(parents=True, exist_ok=True)
     pdf.write_bytes(b"%PDF")
-    monkeypatch.setattr(assignment_adapter, "_allowed_printable_roots", lambda: [str(tmp_path)])
+    monkeypatch.setattr(runtime_paths, "workspace_root", lambda: tmp_path)
     monkeypatch.setattr(canvas_client, "canvas_headers", lambda: ({"Authorization": "Bearer token"}, "https://canvas.invalid"))
     monkeypatch.setattr(canvas_client, "_canvas_send", lambda *_a, **_k: (
         {"upload_url": "https://signed-upload.invalid", "upload_params": {}}, None))
@@ -109,21 +112,22 @@ def test_upload_completion_rejects_external_origin(monkeypatch, tmp_path):
         status_code=302, headers={"Location": "https://steal.invalid/api/v1/files/73"}))
     gets = []
     monkeypatch.setattr(canvas_client, "canvas_get", lambda *a, **k: gets.append(a) or (None, "unexpected"))
-    result, error = assignment_adapter._upload_course_file("42", pdf)
+    result, error = assignment_adapter._upload_course_file("42", pdf, folder="Canvas Expert Attachments")
     assert result is None
     assert "outside the configured Canvas origin" in error
     assert gets == []
 
 
 def test_upload_failure_is_reported_without_adopting_an_old_file(monkeypatch, tmp_path):
-    pdf = tmp_path / "notes.pdf"
+    pdf = tmp_path / "To Review" / "Attachments" / "notes.pdf"
+    pdf.parent.mkdir(parents=True, exist_ok=True)
     pdf.write_bytes(b"%PDF")
-    monkeypatch.setattr(assignment_adapter, "_allowed_printable_roots", lambda: [str(tmp_path)])
+    monkeypatch.setattr(runtime_paths, "workspace_root", lambda: tmp_path)
     monkeypatch.setattr(assignment_adapter.canvas_client, "_canvas_send", lambda *_a, **_k: (
         {"upload_url": "https://upload.invalid", "upload_params": {}}, None))
     monkeypatch.setattr(assignment_adapter.requests, "post", lambda *_a, **_k: FakeResponse(
         status_code=500, text="upload failed"))
-    result, error = assignment_adapter._upload_course_file("42", pdf)
+    result, error = assignment_adapter._upload_course_file("42", pdf, folder="Canvas Expert Attachments")
     assert result is None
     assert "HTTP 500" in error
 
@@ -319,7 +323,7 @@ def test_upload_success_without_id_is_attention_and_never_resends(monkeypatch, t
     assert len([event for event in context.events if event[0] == "before"]) == 1
 
 
-def test_assignment_attachment_and_printable_apply_then_resume(monkeypatch, tmp_path):
+def test_assignment_attachment_apply_then_resume(monkeypatch, tmp_path):
     workspace = tmp_path / "workspace"
     handout = tmp_path / "host-file" / "handout.pdf"
     handout.parent.mkdir(parents=True)
@@ -336,13 +340,9 @@ def test_assignment_attachment_and_printable_apply_then_resume(monkeypatch, tmp_
         "attachments": [{"file": "handout.pdf", "label": "Read the handout"}],
     }, []))
 
-    def fake_pdf(_html, out_path):
-        Path(out_path).write_bytes(b"%PDF synthetic")
-        return out_path
-
     uploads = []
 
-    def fake_upload(_course, path, *, folder="Canvas Expert Printables"):
+    def fake_upload(_course, path, *, folder="Canvas Expert Attachments"):
         file_id = str(71 + len(uploads))
         uploads.append((folder, Path(path).name, file_id))
         return {"id": file_id}, None
@@ -358,7 +358,6 @@ def test_assignment_attachment_and_printable_apply_then_resume(monkeypatch, tmp_
             return {"id": 90, "html_url": "https://canvas.invalid/assignments/90"}, None
         raise AssertionError(path)
 
-    monkeypatch.setattr(assignment_adapter, "html_to_pdf", fake_pdf)
     monkeypatch.setattr(assignment_adapter, "_upload_course_file", fake_upload)
     monkeypatch.setattr(assignment_adapter, "_get_course_file", lambda _course, file_id: ({"id": file_id}, None))
     monkeypatch.setattr(canvas_client, "_canvas_send", fake_send)
@@ -367,20 +366,19 @@ def test_assignment_attachment_and_printable_apply_then_resume(monkeypatch, tmp_
     adapter = assignment_adapter.AssignmentAdapter()
     payload = adapter.build_payload({"path": "synthetic.assignmentforge.json"})
     review = adapter.freeze_review(payload, {"course_id": "42"}, {})
-    assert review["printables"][0]["sha256"] == payload["printables"][0]["sha256"]
-    assert "path" not in review["printables"][0]
+    assert "printables" not in payload and "printables" not in review
     context = FakeContext()
     first = adapter.execute(payload, {"course_id": "42", "steps": []}, {}, {}, context)
     assert first["state"] == "applied"
-    assert [row[0] for row in uploads] == ["Canvas Expert Attachments", "Canvas Expert Printables"]
+    assert [row[0] for row in uploads] == ["Canvas Expert Attachments"]
     description = sent[0][2]["assignment"]["description"]
-    assert "Read the handout" in description and "Printable:" in description
-    assert "/files/71/download" in description and "/files/72/download" in description
+    assert "Read the handout" in description and "Printable:" not in description
+    assert "/files/71/download" in description
     assert "{{ce:" not in description
 
     again = adapter.execute(payload, {"course_id": "42", "steps": copy.deepcopy(first["steps"])}, {}, {}, FakeContext())
     assert again["state"] == "applied"
-    assert len(uploads) == 2 and len(sent) == 1
+    assert len(uploads) == 1 and len(sent) == 1
 
 
 def test_page_attachment_apply_then_resume(monkeypatch, tmp_path):

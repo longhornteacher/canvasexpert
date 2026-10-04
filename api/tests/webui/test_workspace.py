@@ -53,8 +53,10 @@ def test_ensure_workspace_creates_and_seeds_authoring_library(tmp_path, monkeypa
     assert (root / "Assignments" / "_Shared").is_dir()
     assert not (root / "Library" / "Assignments").exists()
     assert not (root / "Library" / "Rubrics").exists()
-    for folder in ["Printables", "Canvas Uploads", "To Review", "Student Work", "For AI", "_System"]:
+    for folder in ["Canvas Uploads", "To Review", "Student Work", "For AI", "_System"]:
         assert (root / folder).is_dir()
+    assert not (root / "Printables").exists()
+    assert not (root / "Student Work" / "Reports").exists()
     for retired in ("Identity Vault", "Canvas Catalog", "Canvas Mirror"):
         assert not (root / "_System" / retired).exists()
 

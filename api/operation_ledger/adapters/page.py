@@ -546,21 +546,14 @@ def _attachment_review_row(row):
 
 
 def _upload_course_file(course_id: str, file_path, *, folder):
-    from api import runtime_paths
     from . import assignment_whole
 
     assignment_whole.requests = requests
-    roots = [root for root in (runtime_paths.workspace_root(), runtime_paths.printables_dir()) if root]
-    return assignment_whole.upload_course_file(
-        course_id, file_path,
-        allowed_roots=lambda: roots,
-        folder=folder,
-        validate_pdf=False,
-    )
+    return assignment_whole.upload_course_file(course_id, file_path, folder=folder)
 
 
 def _frozen_file_matches(record: dict) -> bool:
-    if not forge_files.verify_private_record_path(record, attachments=True):
+    if not forge_files.verify_private_record_path(record):
         return False
     try:
         return forge_files.sha256_file(Path(record["path"])) == record.get("sha256")

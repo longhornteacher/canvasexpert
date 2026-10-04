@@ -11,9 +11,6 @@ from pathlib import Path
 import mimetypes
 
 from engine.rendering.forge.canvas_html import render_assignment, render_tier_page
-from engine.rendering.forge.printable import render_assignment_printable
-from engine.rendering.physical.emit_pdf import html_to_pdf
-from engine.utils.text_utils import safe_filename_component
 
 from .. import models
 from . import assignment_tiered, assignment_whole, assignment_hub, differentiated_bridge, tier_pages
@@ -47,42 +44,6 @@ def _render_model(data: dict) -> dict:
     return {key: normalize_author_model(data[key]) for key in _RENDER_FIELDS if key in data}
 
 
-def _generate_printable(model: dict, *, palette_key: str, public_tag: str | None,
-                        tier: str | None, tracked: bool, attachment_labels: list[str], sub_folder: str,
-                        filename: str) -> dict:
-    from api import runtime_paths
-
-    try:
-        root = Path(runtime_paths.printables_dir()).resolve()
-        output_dir = (root / sub_folder).resolve()
-        output_dir.relative_to(root)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output = (output_dir / filename).resolve()
-        output.relative_to(root)
-        # A stale artifact at the canonical name must never survive a failed render.
-        output.unlink(missing_ok=True)
-        printable_html = render_assignment_printable(
-            model, palette_key=palette_key, public_tag=public_tag,
-            tracked=tracked, attachment_labels=attachment_labels,
-        )
-        html_to_pdf(printable_html, str(output))
-        if not output.is_file():
-            raise RuntimeError("PDF renderer did not create an output file")
-        return {
-            "available": True, "path": str(output), "filename": filename,
-            "sha256": forge_files.sha256_file(output),
-            "palette_key": palette_key, "tier": tier,
-            "tag": public_tag, "label": public_tag, "public_tag": public_tag,
-        }
-    except Exception:
-        return {
-            "available": False, "filename": filename,
-            "palette_key": palette_key, "tier": tier,
-            "tag": public_tag, "label": public_tag, "public_tag": public_tag,
-            "warning": "printable_unavailable",
-        }
-
-
 class AssignmentAdapter:
     kind = KIND
 
@@ -111,16 +72,9 @@ class AssignmentAdapter:
         model["title"] = name
         assignment_group = str(prepare_request.get("assignment_group_name") or "").strip()
         sub_fields = af.submission_fields(data)
-        tracked = (
-            sub_fields.get("submission_types") == ["online_upload"]
-            and sub_fields.get("allowed_extensions") == ["docx"]
-        )
-        external_tool = sub_fields.get("submission_types") == ["external_tool"]
-        title_part = safe_filename_component(name)
         tiers = []
         hub = data.get("differentiation") == "hub"
         hub_description = None
-        printables = []
         if authored_tiers:
             tags = differentiated_bridge.resolve_public_tags(
                 [row["label"] for row in authored_tiers], minimum_tiers=1 if hub else 2
@@ -128,23 +82,12 @@ class AssignmentAdapter:
             base_title = differentiated_bridge.normalize_base_title(name)
             hub_slots = []
             if hub:
-                hub_printable = None
-                if not external_tool:
-                    hub_printable = _generate_printable(
-                        model, palette_key=tier_colors["untiered"], public_tag=None,
-                        tier=None, tracked=tracked,
-                        attachment_labels=[row["label"] for row in attachments],
-                        sub_folder=title_part, filename=f"{title_part} - Printable.pdf",
-                    )
-                    printables.append(hub_printable)
                 for index, resolved in enumerate(tags):
                     hub_slots.append({"tag": resolved["tag"], "palette_key": tier_colors[resolved["tier"]],
                                      "href": f"{{{{ce-tier-page:{index}}}}}"})
                 description = render_assignment(
                     model, palette_key=tier_colors["untiered"], tier=None, public_tag=None,
                     assignment_group=assignment_group,
-                    printable_link=(forge_files.link_slot("printable", 0)
-                                    if hub_printable and hub_printable["available"] else None),
                     attachment_slots=attachment_slots, tier_page_slots=hub_slots,
                 )
                 hub_description = description
@@ -167,18 +110,6 @@ class AssignmentAdapter:
                         tier_model[field] = normalize_author_model(authored[field])
                 if "supports" in authored:
                     tier_model["tier_supports"] = normalize_author_model(authored["supports"])
-                printable = None
-                if not external_tool:
-                    tag_part = safe_filename_component(resolved["tag"])
-                    filename = f"{title_part} - {tag_part} - Printable.pdf"
-                    printable = _generate_printable(
-                        tier_model,
-                        palette_key=tier_colors[resolved["tier"]],
-                        public_tag=resolved["tag"], tier=resolved["tier"], tracked=tracked,
-                        attachment_labels=[row["label"] for row in attachments],
-                        sub_folder=title_part, filename=filename,
-                    )
-                    printables.append(printable)
                 tiers.append({
                     "label": resolved["tier"],
                     **resolved,
@@ -189,32 +120,17 @@ class AssignmentAdapter:
                         tier=resolved["tier"],
                         public_tag=resolved["tag"],
                         assignment_group=assignment_group,
-                        printable_link=(forge_files.link_slot("printable", len(printables) - 1)
-                                        if printable and printable["available"] else None),
                         attachment_slots=attachment_slots,
                     ),
-                    "printable": printable,
                 })
             description = hub_description if hub else tiers[0]["description"]
         else:
-            printable = None
-            if not external_tool:
-                filename = f"{title_part} - Printable.pdf"
-                printable = _generate_printable(
-                    model, palette_key=tier_colors["untiered"], public_tag=None,
-                    tier=None, tracked=tracked,
-                    attachment_labels=[row["label"] for row in attachments],
-                    sub_folder=title_part, filename=filename,
-                )
-                printables.append(printable)
             description = render_assignment(
                 model,
                 palette_key=tier_colors["untiered"],
                 tier=None,
                 public_tag="",
                 assignment_group=assignment_group,
-                printable_link=(forge_files.link_slot("printable", 0)
-                                if printable and printable["available"] else None),
                 attachment_slots=attachment_slots,
             )
 
@@ -228,7 +144,6 @@ class AssignmentAdapter:
             "post_to_sis": bool(prepare_request.get("post_to_sis")),
             "source_path": path,
             "attachments": attachments,
-            "printables": printables,
         }
         if tiers:
             payload["tiers"] = tiers
@@ -282,7 +197,6 @@ class AssignmentAdapter:
             "lock_at": payload.get("lock_at"),
             "assignment_group_name": payload.get("assignment_group_name"),
             "attachments": payload.get("attachments"),
-            "printables": payload.get("printables"),
             "module_name": payload.get("module_name"),
             "module_id": payload.get("module_id"),
             "create_module": payload.get("create_module"),
@@ -399,12 +313,7 @@ class AssignmentAdapter:
         for record in payload.get("attachments", []):
             if record.get("canvas_file_id"):
                 continue
-            if not _frozen_file_matches(record, attachments=True):
-                return True
-        for record in payload.get("printables", []):
-            if record.get("available") and (
-                not _frozen_file_matches(record, attachments=False)
-            ):
+            if not _frozen_file_matches(record):
                 return True
         if payload.get("tiers"):
             if baseline is None or "canvas_error" in baseline:
@@ -457,13 +366,6 @@ class AssignmentAdapter:
                         **({"size": row.get("size"), "updated_at": row.get("updated_at")}
                            if row.get("canvas_file_id") else {})}
                        for row in payload.get("attachments", [])]
-        printables = [{
-            "tier": row.get("tier"), "tag": row.get("tag"),
-            "label": row.get("label"), "public_tag": row.get("public_tag"),
-            "filename": row.get("filename"), "available": bool(row.get("available")),
-            "palette_key": row.get("palette_key"), "sha256": row.get("sha256"),
-            **({"warning": "printable_unavailable"} if row.get("warning") else {}),
-        } for row in payload.get("printables", [])]
         if payload.get("module_name") or payload.get("module_id") or payload.get("create_module"):
             dependencies.append({
                 "type": "module",
@@ -488,7 +390,6 @@ class AssignmentAdapter:
             "attachments": attachments,
             "warnings": ["attachment_not_student_visible" for row in payload.get("attachments", [])
                          if row.get("canvas_file") and not row.get("student_visible")],
-            "printables": printables,
         }
         if payload.get("hub"):
             review["hub"] = tier_pages.review_hub(
@@ -503,14 +404,6 @@ class AssignmentAdapter:
                     "public_tag": row.get("tag"),
                     "source_title": row.get("title"),
                     "description": row.get("description"),
-                    "printable": ({
-                        "available": bool((row.get("printable") or {}).get("available")),
-                        "filename": (row.get("printable") or {}).get("filename"),
-                        "public_tag": (row.get("printable") or {}).get("public_tag"),
-                        "palette_key": (row.get("printable") or {}).get("palette_key"),
-                        **({"warning": "printable_unavailable"}
-                           if (row.get("printable") or {}).get("warning") else {}),
-                    } if row.get("printable") else None),
                 } for row in payload["tiers"]],
                 "tier_warning": (
                     "Canvas will create one published, unrestricted source assignment per tier "
@@ -596,10 +489,8 @@ class AssignmentAdapter:
                 prepared_payload, target, context,
                 ordered_steps=_ordered_steps,
                 whole_execute=assignment_whole.execute,
-                upload_course_file=_upload_course_file,
                 find_assignment_group=_find_assignment_group,
                 read_modules=_read_modules,
-                prepare_description=_prepare_whole_printable,
             )
         if prepared_payload.get("tiers"):
             return assignment_tiered.execute(
@@ -609,25 +500,21 @@ class AssignmentAdapter:
                 context,
                 ordered_steps=_ordered_steps,
                 find_assignment_group=_find_assignment_group,
-                prepare_tier=_prepare_tier_printable,
             )
         return assignment_whole.execute(
             prepared_payload,
             target,
             context,
             ordered_steps=_ordered_steps,
-            upload_course_file=_upload_course_file,
             find_assignment_group=_find_assignment_group,
             read_modules=_read_modules,
-            prepare_description=_prepare_whole_printable,
         )
 
     # ── Reconciliation ───────────────────────────────────────────────────
 
     def reconcile(self, payload: dict, target: dict, baseline: dict) -> dict:
         file_steps = [step for step in target.get("steps", [])
-                      if str(step.get("step_key", "")).startswith(("upload_attachment:", "upload_printable:"))
-                      or step.get("step_key") == "upload_printable"]
+                      if str(step.get("step_key", "")).startswith("upload_attachment:")]
         for step in file_steps:
             file_id = step.get("returned_object_id")
             if not file_id:
@@ -681,78 +568,22 @@ def _find_assignment_group(course_id: str, name: str) -> int | None:
     return None
 
 
-def _allowed_printable_roots():
-    return assignment_whole.allowed_printable_roots()
-
-
-def _upload_course_file(course_id: str, pdf_path, *, folder="Canvas Expert Printables"):
+def _upload_course_file(course_id: str, file_path, *, folder):
     assignment_whole.requests = requests
-    return assignment_whole.upload_course_file(
-        course_id,
-        pdf_path,
-        allowed_roots=_allowed_printable_roots,
-        folder=folder,
-        validate_pdf=(folder == "Canvas Expert Printables" and Path(pdf_path).suffix.casefold() == ".pdf"),
-    )
+    return assignment_whole.upload_course_file(course_id, file_path, folder=folder)
 
 
 def _get_course_file(course_id: str, file_id: str):
     return canvas_client.canvas_get(f"/api/v1/courses/{course_id}/files/{file_id}")
 
 
-def _frozen_file_matches(record: dict, *, attachments: bool) -> bool:
-    if not forge_files.verify_private_record_path(record, attachments=attachments):
+def _frozen_file_matches(record: dict) -> bool:
+    if not forge_files.verify_private_record_path(record):
         return False
     try:
         return forge_files.sha256_file(Path(record["path"])) == record.get("sha256")
     except OSError:
         return False
-
-
-def _upload_printable(*, record, step_key, course_id, steps, context):
-    file_info, failure = forge_files.ensure_uploaded_file(
-        record={**record, "filename": record.get("filename"), "content_type": "application/pdf"},
-        step_key=step_key, folder="Canvas Expert Printables", course_id=course_id,
-        steps=steps, context=context, upload_file=_upload_course_file,
-        get_file=_get_course_file,
-    )
-    return file_info, failure
-
-
-def _prepare_whole_printable(*, payload, course_id, steps, context):
-    records = payload.get("printables", [])
-    if not records or not records[0].get("available"):
-        return payload.get("description", ""), None
-    record = records[0]
-    info, failure = _upload_printable(
-        record=record, step_key="upload_printable", course_id=course_id,
-        steps=steps, context=context,
-    )
-    if failure:
-        return None, _build_result(
-            failure["state"], steps=steps, error_code=failure.get("error_code"),
-            private_diagnostic=failure.get("private_diagnostic"),
-        )
-    return forge_files.bind_link_slots(payload["description"], "printable", [info]), None
-
-
-def _prepare_tier_printable(*, tier, tier_index, payload, course_id, steps, context):
-    record = tier.get("printable")
-    if not record or not record.get("available"):
-        return tier.get("description", ""), None
-    info, failure = _upload_printable(
-        record=record, step_key=f"upload_printable:{tier_index}",
-        course_id=course_id, steps=steps, context=context,
-    )
-    if failure:
-        return None, _build_result(
-            failure["state"], steps=steps, error_code=failure.get("error_code"),
-            private_diagnostic=failure.get("private_diagnostic"),
-        )
-    # Tier-local marker indexes are the printable list index in author order.
-    return forge_files.bind_link_slots(
-        tier["description"], "printable", [info], start_index=tier_index,
-    ), None
 
 
 def _ordered_steps(target: dict) -> list[dict]:
@@ -768,11 +599,6 @@ def _ordered_steps(target: dict) -> list[dict]:
             if key.startswith("upload_attachment:"):
                 suffix = key.rsplit(":", 1)[-1]
                 return (-3, int(suffix) if suffix.isdigit() else 999999, 0)
-            if key.startswith("upload_printable:"):
-                suffix = key.rsplit(":", 1)[-1]
-                return (int(suffix) if suffix.isdigit() else 999999, -1, 0)
-            if key == "upload_printable":
-                return (-2, 0, 0)
             prefix, _, suffix = key.partition(":")
             if prefix in {"create_tier_page", "restrict_tier_page", "assign_tier_page",
                           "clear_tier_page_assignment"}:
@@ -787,7 +613,6 @@ def _ordered_steps(target: dict) -> list[dict]:
                             "attach_module": 2}[key], 0)
             rank = {
                 "upload_attachment": -2,
-                "upload_printable": -1,
                 "create_tier_assignment": 0,
                 "restrict_assignment": 1,
                 "create_override": 2,
@@ -810,7 +635,7 @@ def _ordered_steps(target: dict) -> list[dict]:
         (key for key in existing if str(key).startswith("upload_attachment:")),
         key=lambda key: int(str(key).split(":")[-1]) if str(key).split(":")[-1].isdigit() else 999999,
     )
-    order = (*upload_steps, "upload_printable", "create_assignment", "create_module", "attach_module")
+    order = (*upload_steps, "create_assignment", "create_module", "attach_module")
     return [existing[key] for key in order if key in existing]
 
 

@@ -1,7 +1,7 @@
 """Unit tests for the shared filename sanitizer.
 
 safe_filename_component is the one canonical implementation; workspace.py,
-folder_creator.py, ai_ta.py, feedback_contract.py, and portfolio.py all
+ai_ta.py and feedback_contract.py all
 delegate to it instead of each reimplementing their own rules.
 """
 
@@ -38,14 +38,6 @@ class TestSafeFilenameComponent(unittest.TestCase):
     def test_truncates_to_max_len(self):
         result = safe_filename_component("x" * 200, max_len=10)
         self.assertEqual(result, "x" * 10)
-
-
-def test_folder_creator_preserves_spaces():
-    """folder_creator.sanitize_filename delegates to the shared helper."""
-    from engine.packaging.folder_creator import sanitize_filename
-
-    assert sanitize_filename("Chapter 5 Quiz") == "Chapter 5 Quiz"
-    assert sanitize_filename("") == ""
 
 
 if __name__ == "__main__":

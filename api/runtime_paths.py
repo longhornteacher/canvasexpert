@@ -105,10 +105,6 @@ def course_assignments_root(course_id: str, course_nickname: str = "") -> Path |
     return Path(value) if value else None
 
 
-def printables_dir() -> Path:
-    return workspace_folder("Printables") or (app_root() / "Finished_Exports" / "Printables")
-
-
 def canvas_uploads_dir() -> Path:
     return workspace_folder("Canvas Uploads") or (app_root() / "Finished_Exports" / "Canvas Uploads")
 
@@ -178,7 +174,7 @@ def inbox_folder(kind: str) -> Path | None:
 def ai_ta_dir() -> Path | None:
     """The teacher's seeded AI Authoring library folder, or None with no workspace.
 
-    Unlike printables_dir/canvas_uploads_dir, this has no app_root() fallback:
+    Unlike canvas_uploads_dir, this has no app_root() fallback:
     the AI Authoring library is seeded from api/default_docs/AI Authoring/, the
     single canonical source for these contracts, and falling back to the repo
     root would copy that canonical text into the source tree as a second copy.

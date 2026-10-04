@@ -1,5 +1,5 @@
 """Canonical workspace ownership: the single source of truth for the v3
-synced-workspace tree (``Assignments/``, ``Library/``, ``To Review/``, ``Printables/``,
+synced-workspace tree (``Assignments/``, ``Library/``, ``To Review/``,
 ``Canvas Uploads/``, ``Student Work/``, ``For AI/``, ``_System/``).
 
 The synced workspace is teacher-visible data.  Keep path construction here so
@@ -49,15 +49,12 @@ SHARED_ASSIGNMENTS_NAME = "_Shared"
 TO_REVIEW_NAME = "To Review"
 TO_REVIEW_SUBFOLDERS = ["Quizzes", "Assignments", "Pages"]
 
-# Outputs to print/photocopy vs. Canvas import packages -- the old flat
-# "Exports" split by teacher verb.
-PRINTABLES_NAME = "Printables"
+# Canvas import packages.
 CANVAS_UPLOADS_NAME = "Canvas Uploads"
 
 # Real-name student data. PRIVATE.
 STUDENT_WORK_NAME = "Student Work"
 SUBMISSIONS_NAME = "Submissions"
-STUDENT_WORK_REPORTS_NAME = "Reports"
 GRADING_KEYS_NAME = "Grading Keys"
 
 # Pseudonymized packets safe to hand to an external AI. No real names.
@@ -403,10 +400,6 @@ def to_review_folder(name, root=None):
     return os.path.join(base, name) if base else None
 
 
-def printables_root(root=None):
-    return _join_root(PRINTABLES_NAME, root)
-
-
 def canvas_uploads_root(root=None):
     return _join_root(CANVAS_UPLOADS_NAME, root)
 
@@ -418,11 +411,6 @@ def student_work_root(root=None):
 def submissions_root(root=None):
     base = student_work_root(root)
     return os.path.join(base, SUBMISSIONS_NAME) if base else None
-
-
-def student_work_reports_root(root=None):
-    base = student_work_root(root)
-    return os.path.join(base, STUDENT_WORK_REPORTS_NAME) if base else None
 
 
 def grading_keys_root(root=None):
@@ -765,7 +753,6 @@ def _seed_workspace_readme(root):
             "=======================\n\n"
             "Real names live only in Student Work/ -- it is PRIVATE.\n"
             "  Submissions/  downloaded evidence, by course\n"
-            "  Reports/      derived teacher reports, by student\n"
             "  Grading Keys/ who-is-who crosswalks + unscrubbed PowerGrader copies\n\n"
             "For AI/ is the pseudonymized counterpart -- safe to hand to an external AI.\n"
             "Review every file before sharing; pseudonyms do not guarantee anonymity and\n"
@@ -775,7 +762,6 @@ def _seed_workspace_readme(root):
             "Library/ holds reusable non-assignment material (quizzes, pages,\n"
             "calendars, source materials, AI Authoring instructions).\n\n"
             "To Review/ holds pending assistant drafts. Forge drafts wait for Canvas review and push.\n\n"
-            "Printables/ is for PDF/DOCX output to print or photocopy.\n"
             "Canvas Uploads/ holds QTI/.imscc import packages.\n\n"
             "_System/ contains PowerGrader state, audits, and archives; it is PRIVATE.\n"
         )
@@ -816,11 +802,11 @@ def ensure_workspace():
     for subfolder in TO_REVIEW_SUBFOLDERS:
         os.makedirs(os.path.join(root, TO_REVIEW_NAME, subfolder), exist_ok=True)
 
-    for canonical in (PRINTABLES_NAME, CANVAS_UPLOADS_NAME, FOR_AI_NAME):
+    for canonical in (CANVAS_UPLOADS_NAME, FOR_AI_NAME):
         os.makedirs(os.path.join(root, canonical), exist_ok=True)
 
     os.makedirs(os.path.join(root, STUDENT_WORK_NAME), exist_ok=True)
-    for subfolder in (SUBMISSIONS_NAME, STUDENT_WORK_REPORTS_NAME, GRADING_KEYS_NAME):
+    for subfolder in (SUBMISSIONS_NAME, GRADING_KEYS_NAME):
         os.makedirs(os.path.join(root, STUDENT_WORK_NAME, subfolder), exist_ok=True)
 
     for sub in SYSTEM_SUBFOLDERS:

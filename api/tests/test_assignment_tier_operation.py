@@ -127,7 +127,7 @@ class FakeCanvas:
         self.reads.append(path)
         if "/files/" in path:
             file_id = path.rsplit("/", 1)[-1]
-            return {"id": file_id, "display_name": "Printable"}, None
+            return {"id": file_id, "display_name": "Handout"}, None
         if "/modules/" in path and "/items/" in path:
             module_id, item_id = path.split("/modules/")[1].split("/items/")
             return copy.deepcopy(self.module_items.get((module_id, item_id))), None
@@ -168,22 +168,6 @@ def _authoring_data():
 
 
 def _build(monkeypatch, authoring_data=None, **request_overrides):
-    from pathlib import Path
-    from api.operation_ledger.adapters import assignment as assignment_adapter
-
-    def fake_pdf(_html, out_path):
-        Path(out_path).write_bytes(b"%PDF test printable")
-        return out_path
-
-    uploads = []
-
-    def fake_upload(course_id, file_path, *, folder="Canvas Expert Printables"):
-        file_id = str(len(uploads) + 1000)
-        uploads.append((course_id, Path(file_path).name, folder, file_id))
-        return {"id": file_id, "display_name": Path(file_path).name}, None
-
-    monkeypatch.setattr(assignment_adapter, "html_to_pdf", fake_pdf)
-    monkeypatch.setattr(assignment_adapter, "_upload_course_file", fake_upload)
     monkeypatch.setattr(
         "api.operation_ledger.adapters.assignment.af.parse_file",
         lambda _path: (authoring_data or _authoring_data(), []),
@@ -202,6 +186,8 @@ def _build(monkeypatch, authoring_data=None, **request_overrides):
 def test_prepare_ignores_deprecated_tier_targets(monkeypatch):
     payload = _build(monkeypatch, tier_targets=None)
     assert "tier_targets" not in payload
+    assert "printables" not in payload
+    assert all("printable" not in tier and "Printable:" not in tier["description"] for tier in payload["tiers"])
     assert all("group_name" not in tier for tier in payload["tiers"])
 
 

@@ -135,7 +135,7 @@ def render_tier_pages_line(tier_page_slots: list[dict], *, palette_key: str) -> 
 
 
 def render_assignment(model: dict, *, palette_key: str, tier: str | None, public_tag: str | None,
-                      assignment_group: str | None, printable_link: str | None,
+                      assignment_group: str | None,
                       attachment_slots: list[dict] | None = None,
                       tier_page_slots: list[dict] | None = None) -> str:
     """Render the §4 student-facing assignment description in its locked order."""
@@ -170,9 +170,6 @@ def render_assignment(model: dict, *, palette_key: str, tier: str | None, public
     if support_body:
         out.append(_details("Go further" if tier == "Accelerate" else "Supports", support_body, palette))
     out.append(_extras_html(model.get("extras"), palette))
-    if printable_link:
-        link = _e(printable_link)
-        out.append(f'<p style="margin:14px 0;padding:10px;background-color:{palette["tint"]}"><strong>Printable:</strong> <a href="{link}">{_e(title)} - Printable (PDF)</a></p>')
     if attachment_slots:
         links = " ".join(
             f'<a href="{_e(slot["href"])}">{_e(slot["label"])}</a>'

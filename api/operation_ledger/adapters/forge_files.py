@@ -274,25 +274,19 @@ def bind_link_slots(fragment: str, kind: str, file_infos: list[dict], *, start_i
     return result
 
 
-def verify_private_record_path(record: dict, *, attachments: bool) -> bool:
+def verify_private_record_path(record: dict) -> bool:
     """Keep a frozen path inside its configured private source folder."""
     try:
         candidate = Path(record["path"]).resolve(strict=True)
-        if attachments:
-            workspace = runtime_paths.workspace_root()
-            if not workspace:
-                return False
-            workspace_root = Path(workspace).resolve()
-            root = (workspace_root / "To Review" / "Attachments").resolve()
-            root.relative_to(workspace_root)
-            candidate.relative_to(root)
-            if candidate.name != record.get("file"):
-                return False
-        else:
-            root = Path(runtime_paths.printables_dir()).resolve()
-            candidate.relative_to(root)
-            if candidate.suffix.casefold() != ".pdf":
-                return False
+        workspace = runtime_paths.workspace_root()
+        if not workspace:
+            return False
+        workspace_root = Path(workspace).resolve()
+        root = (workspace_root / "To Review" / "Attachments").resolve()
+        root.relative_to(workspace_root)
+        candidate.relative_to(root)
+        if candidate.name != record.get("file"):
+            return False
         return candidate.is_file()
     except (OSError, ValueError, KeyError):
         return False
@@ -333,9 +327,8 @@ def ensure_uploaded_file(*, record: dict, step_key: str, folder: str,
         return None, {"state": "sent_unknown", "error_code": step["error_code"],
                       "private_diagnostic": step["private_diagnostic"]}
 
-    is_attachment = folder == "Canvas Expert Attachments"
     try:
-        path_is_confined = verify_private_record_path(record, attachments=is_attachment)
+        path_is_confined = verify_private_record_path(record)
         current_hash = sha256_file(Path(record["path"])) if path_is_confined else None
     except OSError:
         current_hash = None

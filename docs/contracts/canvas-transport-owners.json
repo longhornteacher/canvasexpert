@@ -209,7 +209,7 @@
         "none"
       ],
       "reconciliation": "none",
-      "reason": "File-upload init only. Spine 14.2 says uploads must never trigger a course-wide binary refresh; there is no evidence-record scope tracked for printable attachments, so 'none' here is the expected steady state, not a gap."
+      "reason": "File-upload init only. Spine 14.2 says uploads must never trigger a course-wide binary refresh; there is no evidence-record scope tracked for staged attachments, so 'none' here is the expected steady state, not a gap."
     },
     {
       "path": "api/operation_ledger/adapters/assignment_whole.py",

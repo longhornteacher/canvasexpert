@@ -325,9 +325,8 @@ def test_hub_push_creates_pages_for_supplied_tiers_and_substitutes_links(monkeyp
                ]}
     result = assignment_hub.execute(payload, {"course_id": "42", "steps": []}, Context(),
                                     ordered_steps=assignment_adapter._ordered_steps,
-                                    whole_execute=_whole_execute, upload_course_file=lambda *a, **k: None,
-                                    find_assignment_group=lambda *a: None, read_modules=lambda *a: ([], None),
-                                    prepare_description=lambda **k: (k["payload"]["description"], None))
+                                    whole_execute=_whole_execute,
+                                    find_assignment_group=lambda *a: None, read_modules=lambda *a: ([], None))
     assert result["state"] == "applied"
     keys = [s["step_key"] for s in result["steps"]]
     assert keys[:7] == ["create_tier_page:0", "restrict_tier_page:0", "assign_tier_page:0",
@@ -356,9 +355,8 @@ def test_resume_after_page_creation_reuses_exact_checkpoint_without_duplicate(mo
                    "title": "Hub - Red", "description": "<p>Frame</p>", "tag_status": "not_found"}]}
     result = assignment_hub.execute(payload, {"course_id": "42", "steps": ctx.steps}, ctx,
                                     ordered_steps=assignment_adapter._ordered_steps,
-                                    whole_execute=_whole_execute, upload_course_file=lambda *a, **k: None,
-                                    find_assignment_group=lambda *a: None, read_modules=lambda *a: ([], None),
-                                    prepare_description=lambda **k: (k["payload"]["description"], None))
+                                    whole_execute=_whole_execute,
+                                    find_assignment_group=lambda *a: None, read_modules=lambda *a: ([], None))
     assert result["state"] == "applied"
     assert len(fake.pages) == 1
     assert not any(method == "POST" and path.endswith("/pages") for method, path, _ in fake.sends)
