@@ -6,7 +6,6 @@ Routes: POST /settings/canvas
         POST /settings/courses/bookmark
         POST /settings/courses/{course_id}/remove
         POST /settings/courses/{course_id}/set-active
-        POST /settings/download-root
         POST /settings/test-connection
         GET/POST /api/tier-tags
         GET/POST /api/tier-colors
@@ -91,12 +90,6 @@ def remove_course(course_id: str):
 @router.post("/settings/courses/{course_id}/set-active")
 def set_course_active(course_id: str, active: str = Form(...)):
     config.set_course_active(course_id, active.lower() in ("true", "1", "yes"))
-    return JSONResponse({"ok": True})
-
-
-@router.post("/settings/download-root")
-def save_download_root(path: str = Form(...)):
-    config.set_download_root(path.strip())
     return JSONResponse({"ok": True})
 
 

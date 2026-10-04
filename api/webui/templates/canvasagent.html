@@ -72,6 +72,19 @@
     <a class="ce-btn" href="/settings#workspace-card">Review local settings</a>
   </section>
 
+  <div class="ce-agent-health-grid">
+    <section class="ce-panel ce-agent-component" id="operations-attention">
+      <h2>Operations needing attention</h2>
+      <ul class="ce-agent-history-list" data-operations-list></ul>
+      <p class="ce-hint" data-operations-status role="status">Loading…</p>
+    </section>
+    <section class="ce-panel ce-agent-component" id="recent-receipts">
+      <h2>Recent receipts</h2>
+      <ul class="ce-agent-history-list" data-receipts-list></ul>
+      <p class="ce-hint" data-receipts-status role="status">Loading…</p>
+    </section>
+  </div>
+
   <details class="ce-panel ce-agent-advanced">
     <summary>Advanced setup and instructions</summary>
     <section class="ce-agent-instructions">
@@ -84,7 +97,6 @@
         <form method="post" action="/api/connections/claude-package"><button type="submit" class="ce-btn">Download Claude package</button></form>
       </div>
       <p class="ce-agent-result" data-agent-result role="status" aria-live="polite"></p>
-      <a href="/ai-expert">More AI authoring files</a>
     </section>
     <section class="ce-agent-stdio">
       <h2>Other local MCP clients</h2>

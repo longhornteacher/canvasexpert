@@ -1,0 +1,9 @@
+.ce-names-panel { padding: var(--ce-space-5); min-width: 0; }
+.ce-names-panel + .ce-names-panel { margin-top: var(--ce-space-5); }
+.ce-names-table-wrap { overflow-x: auto; }
+.ce-names-fields { display: grid; gap: var(--ce-space-4); }
+.ce-names-fields fieldset { margin: 0; border: 1px solid var(--ce-rule); padding: var(--ce-space-3); }
+#names-protected-packs { display: flex; flex-wrap: wrap; gap: var(--ce-space-3); }
+#names-scrub-result { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ce-names-page .ce-rail__inner > .ce-btn { margin-top: var(--ce-space-3); }
+#names-safety-status { overflow-wrap: anywhere; }

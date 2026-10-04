@@ -15,8 +15,6 @@
   <link rel="stylesheet" href="/static/ui/components.css?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/ui/layouts.css?v={{ asset_v }}">
   {% endblock %}
-  <script src="/static/write_review.js?v={{ asset_v }}"></script>
-  <script src="/static/app_context.js?v={{ asset_v }}"></script>
   {% block head_extra %}{% endblock %}
 </head>
 <body class="{% if nav_section %}nav-section-{{ nav_section }} {% endif %}{% block body_class %}{% endblock %}">
@@ -37,19 +35,6 @@
       html.setAttribute('data-theme', dark ? 'dark' : 'light');
       try { localStorage.setItem('ce-theme', dark ? 'dark' : 'light'); } catch(e){}
       setTimeout(function(){ html.classList.remove('ce-transitioning'); }, 320);
-    });
-  })();
-  (function(){
-    var more = document.getElementById('ce-nav-more');
-    if (!more) return;
-    document.addEventListener('click', function(event){
-      if (more.open && !event.target.closest('#ce-nav-more')) more.open = false;
-    });
-    document.addEventListener('keydown', function(event){
-      if (event.key === 'Escape' && more.open) {
-        more.open = false;
-        more.querySelector('summary').focus();
-      }
     });
   })();
   // Keep direct hash links focused after a page renders.

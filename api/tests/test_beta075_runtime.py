@@ -10,7 +10,6 @@ def test_workspace_paths_are_resolved_at_call_time(tmp_path, monkeypatch):
     from api import runtime_paths
     from api.platform_services import config, workspace
     from api.webui import ai_ta, deps
-    from api.webui.routes import library
 
     roots = {"current": tmp_path / "one"}
     for label in ("one", "two"):
@@ -21,19 +20,13 @@ def test_workspace_paths_are_resolved_at_call_time(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(roots["current"]))
-    first_ai_ta = deps.list_ai_ta_files()
-    assert any(str(tmp_path / "one") in item["path"] for item in first_ai_ta)
-
+    assert runtime_paths.ai_ta_dir() == tmp_path / "one" / "Library" / "AI Authoring"
     roots["current"] = tmp_path / "two"
-    second_ai_ta = deps.list_ai_ta_files()
-    assert any(str(tmp_path / "two") in item["path"] for item in second_ai_ta)
-    assert all(str(tmp_path / "one") not in item["path"] for item in second_ai_ta)
+    assert runtime_paths.ai_ta_dir() == tmp_path / "two" / "Library" / "AI Authoring"
 
     built = ai_ta.build_library(runtime_paths.ai_ta_dir())
     assert all(Path(path).is_relative_to(tmp_path / "two") for path in built)
 
-    rebuilt = json.loads(library.api_ai_ta_rebuild().body)
-    assert rebuilt["ok"] is True
     assert not hasattr(config, "RUBRIC_" + "FOLDERS")
 
     cwd = tmp_path / "unrelated-cwd"

@@ -91,12 +91,13 @@ def test_unlinked_panels_sit_next_to_the_panel_that_covers_them():
 
 
 def test_differentiation_tag_copy_matches_family_delivery():
-    source = SETTINGS.read_text(encoding="utf-8")
+    source = " ".join(SETTINGS.read_text(encoding="utf-8").split())
     for phrase in (
         "required when used",
         "appends",
         "no-submission bridge",
-        "only family item in the selected module",
+        "Sources go in the selected module",
+        "the unsuffixed no-submission bridge stays in the gradebook",
         "Canvas Live",
         "Canvas Grade Sync",
     ):

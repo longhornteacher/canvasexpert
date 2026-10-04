@@ -1,13 +1,4 @@
-"""HTML page routes for Canvas Expert.
-
-One APIRouter for retained page routes and the /api/open-path utility POST.
-Imported by server.py via app.include_router(router).
-
-Routes: GET /ai-expert, /course, /course-expert, /roster, /settings
-        POST /api/open-path
-"""
-import glob
-import json
+"""Retained Names and Settings pages, plus local file reveal."""
 import os
 import subprocess
 import sys
@@ -17,14 +8,9 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from api.platform_services import config, workspace
 from engine.rendering.forge.palette import PALETTES
-from .. import deps
-from api import operational_log, runtime_paths
+from api import operational_log
 from ..local_request_guard import csrf_token
-from ..deps import (
-    API_DIR, REPO_ROOT, templates,
-    list_ai_ta_files, list_assignment_files,
-    list_page_files, list_quiz_files,
-)
+from ..deps import templates
 
 router = APIRouter(tags=["pages"])
 
@@ -33,83 +19,12 @@ router = APIRouter(tags=["pages"])
 # Page routes
 # --------------------------------------------------------------------------
 
-@router.get("/course-expert", response_class=HTMLResponse)
-def course_expert_page(request: Request):
-    skills = list_ai_ta_files()
-    return templates.TemplateResponse(request, "course_expert.html", {
-        **_push_base_ctx(request),
-        "quiz_files":       list_quiz_files(),
-        "assignment_files": list_assignment_files(),
-        "page_files":       list_page_files(),
-        "authoring_skills": {
-            "quiz":       _authoring_skill(skills, "Author a Quiz"),
-            "assignment": _authoring_skill(skills, "Author an Assignment"),
-            "page":       _authoring_skill(skills, "Author a Page"),
-        },
-    })
-
-
-def _authoring_skill(skills: list, prefix: str) -> str:
-    for f in skills:
-        if f["label"].startswith(prefix):
-            return f["label"]
-    return ""
-
-
-def _push_base_ctx(request: Request) -> dict:
-    return {
-        "nav_section":   "create",
-        "token_is_set":  config.token_is_set(),
-        "canvas_base":   config.get_canvas_base(),
+@router.get("/names", response_class=HTMLResponse)
+def names_page(request: Request):
+    return templates.TemplateResponse(request, "names.html", {
+        "nav_section": "names",
         "saved_courses": config.active_courses(),
-        "csrf_token":    csrf_token(),
-    }
-
-
-@router.get("/ai-expert", response_class=HTMLResponse)
-def ai_expert_page(request: Request):
-    ai_ta_files = list_ai_ta_files()
-    ai_ta_dir = runtime_paths.ai_ta_dir()
-    toolkit_dir = os.path.join(ai_ta_dir, "MagicSchool Toolkit") if ai_ta_dir else None
-    toolkit_files = []
-    if toolkit_dir and os.path.isdir(toolkit_dir):
-        canonical_toolkit_dir = os.path.join(REPO_ROOT, "api", "default_docs", "AI Authoring", "MagicSchool Toolkit")
-        toolkit_files = sorted(
-            os.path.basename(p)
-            for p in glob.glob(os.path.join(toolkit_dir, "*.txt"))
-            if os.path.isfile(os.path.join(canonical_toolkit_dir, os.path.basename(p)))
-        )
-    return templates.TemplateResponse(request, "ai_expert.html", {
-        "nav_section":    "help",
-        "token_is_set":   config.token_is_set(),
-        "ai_ta_files":    ai_ta_files,
-        "ai_ta_dir":      str(ai_ta_dir) if ai_ta_dir else "",
-        "toolkit_files":  toolkit_files,
-        "workspace_root": workspace.workspace_root(),
-    })
-
-
-@router.get("/roster", response_class=HTMLResponse)
-def roster_page(request: Request):
-    """Roster Console — unified student settings surface."""
-    return templates.TemplateResponse(request, "roster.html", {
-        "nav_section":   "manage",
-        "token_is_set":  config.token_is_set(),
-        "canvas_base":   config.get_canvas_base(),
-        "saved_courses": config.active_courses(),
-    })
-
-
-@router.get("/course", response_class=HTMLResponse)
-def course_page(request: Request, course_id: str = ""):
-    """Detailed Course Info page — roster, groups, modules, assignments."""
-    return templates.TemplateResponse(request, "course.html", {
-        "nav_section":    "manage",
-        "token_is_set":   config.token_is_set(),
-        "canvas_base":    config.get_canvas_base(),
-        "saved_courses":  config.active_courses(),
-        "selected_id":    course_id,
-        "history":        recent_pushes(),
+        "csrf_token": csrf_token(),
     })
 
 
@@ -166,7 +81,6 @@ def _mirror_settings_context() -> dict:
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
     root = workspace.workspace_root()
-    ai_authoring_folder = workspace.library_folder("AI Authoring")
     saved_courses = config.saved_courses()
     return templates.TemplateResponse(request, "settings.html", {
         **_mirror_settings_context(),
@@ -177,18 +91,15 @@ def settings_page(request: Request):
         "current_courses": [course for course in saved_courses if course.get("active", True)],
         "previous_courses": [course for course in saved_courses if not course.get("active", True)],
         "base_default":  config.CANVAS_BASE_DEFAULT,
-        "download_root": config.get_download_root(),
-        "ai_ta_dir":     str(runtime_paths.ai_ta_dir() or ""),
         "workspace_root": root,
         "workspace_files": [
-            {"name": "Library / AI Authoring", "path": ai_authoring_folder},
+            {"name": "Library / AI Authoring", "path": workspace.library_folder("AI Authoring")},
             {"name": "Library / Feedback Contracts", "path": workspace.library_folder("Feedback Contracts")},
             {"name": "Library / Quizzes", "path": workspace.library_folder("Quizzes")},
             {"name": "Assignments", "path": workspace.assignments_root()},
             {"name": "Library / Pages", "path": workspace.library_folder("Pages")},
             {"name": "Library / Source Materials", "path": workspace.library_folder("Source Materials")},
             {"name": "To Review", "path": workspace.to_review_root()},
-            {"name": "Printables", "path": workspace.printables_root()},
             {"name": "Canvas Uploads", "path": workspace.canvas_uploads_root()},
             {"name": "Student Work (PRIVATE)", "path": workspace.student_work_root()},
             {"name": "For AI (review before sharing)", "path": workspace.for_ai_root()},
@@ -219,9 +130,7 @@ def _open_in_os(path):
 
 def _allowed_open_roots():
     """Real paths the open-path endpoint may reveal — app-known roots only."""
-    candidates = [config.get_download_root(),
-                  config.get_student_reports_root(), workspace.workspace_root(),
-                  os.path.join(REPO_ROOT, "Finished_Exports")]
+    candidates = [workspace.workspace_root()]
     roots = []
     for r in candidates:
         if not r:
@@ -269,16 +178,3 @@ def api_open_path(path: str = Form(...)):
         return JSONResponse({"ok": True})
     except Exception:
         return JSONResponse({"ok": False, "error": "Could not open the file or folder."})
-
-
-# --------------------------------------------------------------------------
-# Page-private helpers
-# --------------------------------------------------------------------------
-
-def recent_pushes(limit=10):
-    p = os.path.join(API_DIR, ".experiment_state.json")
-    if not os.path.exists(p):
-        return []
-    with open(p, encoding="utf-8") as f:
-        state = json.load(f)
-    return list(reversed(state.get("quizzes", [])))[:limit]

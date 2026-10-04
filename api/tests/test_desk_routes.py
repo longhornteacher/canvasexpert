@@ -172,6 +172,6 @@ def test_student_reports_compatibility_routes_are_retired(monkeypatch):
     create = client.get("/course-expert?tab=students", follow_redirects=False)
     old_page = client.get("/students/reports", follow_redirects=False)
 
-    assert create.status_code == 200
+    assert create.status_code == 404
     assert "Location" not in create.headers
     assert old_page.status_code == 404

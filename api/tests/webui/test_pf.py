@@ -1,19 +1,7 @@
-"""Tests for PageForge's parse_file/parse/validate contract.
-
-Also covers /api/temp-upload (routes/push_validation.py): the shared upload
-endpoint behind every Forge file picker (quiz, assignment, page, rubric).
-That route's binary-file guard is the earlier, cheaper half of the same fix;
-pf.parse_file's own guard below is the later half, for a bad file that
-reaches disk some other way (Inbox drop, a hand-edited Library file, ...).
-"""
-from fastapi.testclient import TestClient
-
+"""Tests for PageForge parsing and author-HTML validation."""
 from api.webui import pf
-from api.webui.routes import push_validation
-from api.webui.server import app
 
 
-client = TestClient(app)
 
 VALID_PAGE = """<PAGEFORGE_JSON>
 {
@@ -83,37 +71,3 @@ def test_freeform_page_allows_inline_style_with_responsive_width_law():
     assert any("body: width must be 100%" in p for p in pf.validate(data))
     data.update(overview="<p>Not allowed in freeform.</p>")
     assert any("forbids overview" in p for p in pf.validate(data))
-
-
-def test_temp_upload_rejects_a_docx_upload_with_a_readable_error(monkeypatch, tmp_path, _make_zip):
-    monkeypatch.setattr(push_validation, "TEMP_DIR", str(tmp_path / "upload-temp"))
-    zip_path = tmp_path / "src.docx"
-    zip_bytes = _make_zip(zip_path, DOCX_FILES)
-
-    r = client.post(
-        "/api/temp-upload",
-        files={"file": (
-            "essay.docx", zip_bytes,
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )},
-    )
-
-    assert r.status_code == 200
-    data = r.json()
-    assert data["ok"] is False
-    assert "Word document" in data["error"]
-    assert "paste the JSON directly" in data["error"]
-
-
-def test_temp_upload_still_accepts_a_plain_text_file(monkeypatch, tmp_path):
-    monkeypatch.setattr(push_validation, "TEMP_DIR", str(tmp_path / "upload-temp"))
-
-    r = client.post(
-        "/api/temp-upload",
-        files={"file": ("page.txt", VALID_PAGE.encode("utf-8"), "text/plain")},
-    )
-
-    assert r.status_code == 200
-    data = r.json()
-    assert data["ok"] is True
-    assert data["path"]

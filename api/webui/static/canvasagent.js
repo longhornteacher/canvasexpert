@@ -425,5 +425,90 @@
       .finally(function () { refreshButton.disabled = false; });
   });
 
+  var operationsList = document.querySelector("[data-operations-list]");
+  var operationsStatus = document.querySelector("[data-operations-status]");
+  var receiptsList = document.querySelector("[data-receipts-list]");
+  var receiptsStatus = document.querySelector("[data-receipts-status]");
+  function receiptLink(receipt, label) {
+    var link = document.createElement("a");
+    link.href = "/receipts/" + encodeURIComponent(receipt.receipt_id);
+    link.textContent = label || "Receipt";
+    return link;
+  }
+  function operationLabel(operation) {
+    return (operation.kind || "Operation").replace(/\./g, " ") + " · " + (operation.status || "unknown");
+  }
+  function loadRecovery() {
+    return Promise.all([
+      fetch("/api/operations").then(responseJson),
+      fetch("/api/receipts").then(responseJson),
+    ]).then(function (results) {
+      var operationResponse = results[0], receiptResponse = results[1];
+      var receiptItems = receiptResponse.body.receipts || [];
+      receiptsList.replaceChildren();
+      operationsList.replaceChildren();
+      if (!receiptResponse.response.ok || receiptResponse.body.ok === false) {
+        say(receiptsStatus, "Receipts could not be loaded.");
+      } else {
+        receiptItems.slice(0, 5).forEach(function (receipt) {
+          var item = document.createElement("li");
+          item.appendChild(receiptLink(receipt, operationLabel(receipt)));
+          var time = document.createElement("time");
+          time.textContent = receipt.completed_at || receipt.attempted_at || "";
+          item.appendChild(time);
+          receiptsList.appendChild(item);
+        });
+        say(receiptsStatus, receiptItems.length ? "" : "No receipts yet.");
+      }
+      if (!operationResponse.response.ok || operationResponse.body.ok === false) {
+        say(operationsStatus, "Operations could not be loaded.");
+        return;
+      }
+      var pending = (operationResponse.body.operations || []).filter(function (operation) {
+        return ["attention", "partial", "failed", "applying"].indexOf(operation.status) !== -1;
+      });
+      pending.forEach(function (operation) {
+        var item = document.createElement("li");
+        var label = document.createElement("span");
+        label.textContent = operationLabel(operation);
+        item.appendChild(label);
+        var retry = document.createElement("button");
+        retry.className = "ce-btn";
+        retry.type = "button";
+        retry.textContent = "Retry";
+        retry.dataset.retryOperation = operation.operation_id;
+        item.appendChild(retry);
+        var receipt = receiptItems.find(function (entry) {
+          return entry.subject_type === "operation" && entry.subject_id === operation.operation_id;
+        });
+        if (receipt) item.appendChild(receiptLink(receipt));
+        else {
+          var empty = document.createElement("span");
+          empty.textContent = receiptResponse.response.ok ? "No receipt yet" : "Receipt unavailable";
+          item.appendChild(empty);
+        }
+        operationsList.appendChild(item);
+      });
+      say(operationsStatus, pending.length ? "" : "No operations need attention.");
+    }).catch(function () {
+      say(operationsStatus, "Operations could not be loaded.");
+      say(receiptsStatus, "Receipts could not be loaded.");
+    });
+  }
+  if (operationsList) operationsList.addEventListener("click", function (event) {
+    var button = event.target.closest("[data-retry-operation]");
+    if (!button) return;
+    button.disabled = true;
+    say(operationsStatus, "Retrying…");
+    var token = document.querySelector('meta[name="canvasexpert-csrf-token"]');
+    fetch("/api/operations/" + encodeURIComponent(button.dataset.retryOperation) + "/retry", {
+      method: "POST", headers: { "X-CanvasExpert-CSRF": token ? token.content : "" },
+    }).then(responseJson).then(function (result) {
+      if (!result.response.ok || result.body.ok === false) throw new Error(result.body.error || "Retry could not be completed.");
+      return loadRecovery();
+    }).catch(function (error) { say(operationsStatus, error.message || "Retry could not be completed."); })
+      .finally(function () { button.disabled = false; });
+  });
+  loadRecovery();
   refreshAll();
 })();

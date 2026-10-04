@@ -1,57 +1,35 @@
-"""Local web UI for Canvas Expert (the live/token half of the platform).
-
-QuizForge is one tool that plugs into this platform; UnitForge and future
-forge tools will plug in alongside it.
-
-One Canvas token (stored in the OS keychain, set once on the Settings page)
-covers all of the teacher's courses. The teacher picks which course to target
-from a live dropdown (or from their saved bookmarks) on the dashboard — no
-more separate "profiles" for each class.
-
-QuizForge plans are built locally and live delivery uses the reviewed
-Operation Ledger path.
-"""
+"""Local setup, readiness, private names, recovery, and receipts console."""
 import os
 import threading
 import traceback
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, FileResponse, PlainTextResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
-from api import operational_log, student_packet
+from api import operational_log
 from api.mirror import coordinator as _mirror_coordinator
 from api.operation_ledger import recovery as _operation_ledger_recovery
 
 from api.platform_services import config
-from . import af, ai_ta, pf
+from . import ai_ta
 from api.platform_services import workspace
 from api import runtime_paths
-from api.platform_services.canvas_client import canvas_headers, canvas_get, canvas_get_all, _canvas_send
 
-from .deps import (
-    WEBUI_DIR, API_DIR, REPO_ROOT,
-    templates,
-    list_quiz_files, list_assignment_files, list_page_files,
-    list_ai_ta_files,
-)
+from .deps import WEBUI_DIR
 
 from .routes.courses import router as _courses_router
 from .routes.names import names_router as _names_router
 from .routes.library import router as _library_router
 from .routes.onboarding import router as _onboarding_router
 from .routes.pages import router as _pages_router
-from .routes.push import router as _push_router
 from .routes.reports import router as _reports_router
-from .routes.roster import router as _roster_router
 from .routes.settings import router as _settings_router
 from .routes.readiness import router as _readiness_router
 from .routes.receipts import router as _receipts_router
 from .routes.connections import router as _connections_router
 from .routes.support import router as _support_router
-from .routes.work import router as _work_router
 from .routes.operations import router as _operations_router
 from .routes.mirror import router as _mirror_router
 from .routes.updates import router as _updates_router
@@ -110,29 +88,14 @@ async def _lifespan(app):
             heartbeat_service().release_all()
 
 
-app = FastAPI(title="Canvas Expert", lifespan=_lifespan)
+app = FastAPI(title="Canvas Expert", lifespan=_lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", _StaticFiles(directory=os.path.join(WEBUI_DIR, "static")), name="static")
 
-# ── Onboarding gate ──────────────────────────────────────────────────────
-# If Canvas URL or token is not yet configured, redirect HTML page requests
-# to the /welcome wizard. Never gate API/static endpoints or the wizard itself.
-
-_ALLOWLIST_PREFIXES = ("/welcome", "/settings", "/static", "/api", "/openapi.json", "/docs", "/redoc")
-
-
 @app.middleware("http")
-async def _onboarding_gate(request: Request, call_next):
-    # The interval covers routing, response construction, and every local API
-    # request.  Background Canvas GET workers inspect this shared gate before
-    # each physical request and cooperatively yield to the teacher.
+async def _foreground_gate(request: Request, call_next):
+    # Yield background Canvas reads while the teacher uses the console.
     with _mirror_coordinator.foreground_interval():
-        if not config.token_is_set() or not config.get_canvas_base():
-            path = request.url.path
-            wants_html = "text/html" in request.headers.get("accept", "")
-            allowlisted = path == "/" or any(path.startswith(p) for p in _ALLOWLIST_PREFIXES)
-            if wants_html and not allowlisted:
-                from fastapi.responses import RedirectResponse
-                return RedirectResponse(url="/welcome", status_code=303)
         return await call_next(request)
 
 
@@ -169,15 +132,12 @@ app.include_router(_courses_router)
 app.include_router(_names_router)
 app.include_router(_library_router)
 app.include_router(_pages_router)
-app.include_router(_push_router)
 app.include_router(_reports_router)
-app.include_router(_roster_router)
 app.include_router(_settings_router)
 app.include_router(_readiness_router)
 app.include_router(_receipts_router)
 app.include_router(_connections_router)
 app.include_router(_support_router)
-app.include_router(_work_router)
 app.include_router(_operations_router)
 app.include_router(_mirror_router)
 app.include_router(_updates_router)

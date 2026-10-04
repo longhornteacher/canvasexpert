@@ -25,8 +25,8 @@ def receipt_page(request: Request, receipt_id: str):
     target_count = summary.get("target_count")
     target_count = target_count if isinstance(target_count, int) and target_count >= 0 else 0
     subject = str(summary.get("subject_id") or "")
-    action_url = "/course-expert#ce-operations-list" if summary["subject_type"] == "operation" else "/"
-    action_label = "Open operation ledger" if summary["subject_type"] == "operation" else "Back to Canvas Expert"
+    action_url = "/#operations-attention" if summary["subject_type"] == "operation" else "/"
+    action_label = "Open operation recovery" if summary["subject_type"] == "operation" else "Back to Canvas Expert"
     timestamp = summary.get("completed_at") or summary.get("attempted_at") or ""
     return templates.TemplateResponse(
         request, "receipt.html",

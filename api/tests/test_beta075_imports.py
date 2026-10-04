@@ -75,7 +75,6 @@ for name in (
     "api.qf_ui",
     "api.mcp_server.__main__",
     "api.mcp_server.server",
-    "api.webui.routes.push_validation",
     "api.qf_pusher",
     "api.validate_qf",
 ):
@@ -137,7 +136,7 @@ for filename, names in owners.items():
     route_paths = {route.path for route in app.routes}
     assert "/api/activity" not in route_paths
     assert "/api/routines" not in route_paths
-    assert "/api/work" in route_paths
+    assert "/api/work" not in route_paths
     assert "/api/receipts" in route_paths
     assert "/api/operations" in route_paths
 

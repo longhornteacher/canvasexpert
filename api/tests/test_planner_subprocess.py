@@ -2,7 +2,6 @@
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from api import qf_pusher, transform
 from api.operation_ledger.adapters.quiz import _build_plan
@@ -86,50 +85,3 @@ def test_direct_adapter_planner_uses_last_error_line_and_200_character_cap(monke
         _build_plan("quiz.txt", {})
 
     assert str(excinfo.value) == "planner failed: " + "x" * 200
-
-
-def test_quiz_preview_returns_summary_without_canvas_configuration():
-    from api.webui.server import app
-
-    response = TestClient(app).post("/api/push/preview", data={
-        "course_id": "101", "path": str(QUIZ_FIXTURE), "settings": "{}",
-    })
-
-    assert response.status_code == 200
-    result = response.json()
-    assert result["ok"] is True
-    assert "Title: " in result["output"]
-    assert "Engine: New Quiz" in result["output"]
-    assert "Questions: " in result["output"]
-    assert "Points: " in result["output"]
-    assert "Settings: default settings" in result["output"]
-
-
-def test_quiz_preview_reports_malformed_settings_in_existing_response_shape():
-    from api.webui.server import app
-
-    response = TestClient(app).post("/api/push/preview", data={
-        "course_id": "101", "path": str(QUIZ_FIXTURE), "settings": "{",
-    })
-
-    assert response.status_code == 200
-    assert response.json() == {"ok": False, "output": "plan error: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"}
-
-
-def test_quiz_preview_reports_malformed_quiz_with_authored_error_text(tmp_path):
-    from api.webui.server import app
-
-    path = _write_quiz(tmp_path, {
-        "version": "3.0-json", "title": "Missing points",
-        "items": [{"id": "q1", "type": "TF", "prompt": "True?", "answer": True}],
-        "rationales": [],
-    })
-    response = TestClient(app).post("/api/push/preview", data={
-        "course_id": "101", "path": str(path), "settings": "{}",
-    })
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "ok": False,
-        "output": "plan error: TF item q1 needs an explicit finite, nonnegative points value.",
-    }

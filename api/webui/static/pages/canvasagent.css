@@ -51,3 +51,8 @@
   .ce-agent-privacy { grid-template-columns: minmax(0, 1fr); }
   .ce-agent-privacy .ce-agent-heading { grid-column: auto; }
 }
+
+.ce-agent-history-list { display: grid; gap: var(--ce-space-3); list-style: none; padding: 0; }
+.ce-agent-history-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ce-space-2); overflow-wrap: anywhere; }
+.ce-agent-history-list li > span:first-child { flex: 1; }
+.ce-agent-history-list time { width: 100%; color: var(--ce-ink-muted); }

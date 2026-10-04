@@ -15,14 +15,13 @@ def _configure_fictional(monkeypatch):
     monkeypatch.setattr(pages.config, "get_workspace_path", lambda: "")
     monkeypatch.setattr(pages.config, "active_courses", lambda: courses)
     monkeypatch.setattr(pages.config, "saved_courses", lambda: courses)
-    monkeypatch.setattr(pages.config, "get_download_root", lambda: "")
     monkeypatch.setattr(pages.config, "get_tier_tags", lambda: {
         "Support": "", "Core": "", "Accelerate": "",
     })
     monkeypatch.setattr(pages.workspace, "workspace_root", lambda: None)
     monkeypatch.setattr(pages.workspace, "onedrive_root", lambda: "Fictional")
     for name in (
-        "folder", "library_folder", "to_review_root", "printables_root",
+        "folder", "library_folder", "to_review_root",
         "canvas_uploads_root", "student_work_root", "for_ai_root", "system_root",
     ):
         monkeypatch.setattr(pages.workspace, name, lambda *args, **kwargs: "")
@@ -44,10 +43,6 @@ def _configure_fictional(monkeypatch):
         "ok": True, "enabled": True, "workspace_configured": True,
         "serve_max_age_hours": 6, "courses": [], "vault_conflict": [],
     })
-    monkeypatch.setattr(pages, "list_ai_ta_files", lambda: [])
-    monkeypatch.setattr(pages, "list_quiz_files", lambda: [])
-    monkeypatch.setattr(pages, "list_assignment_files", lambda: [])
-    monkeypatch.setattr(pages, "list_page_files", lambda: [])
 
 
 def test_retained_console_routes_render_and_receipts_remain_available(monkeypatch):
@@ -63,14 +58,14 @@ def test_retained_console_routes_render_and_receipts_remain_available(monkeypatc
     # home, and durable receipt surfaces retained by the local control console.
     routes = {
         "/": ("canvasagent.html", "workspace", "full", 0),
-        "/roster": ("roster.html", "workspace", "left-main", 1),
+        "/names": ("names.html", "workspace", "left-main", 1),
         "/settings": ("settings.html", "workspace", "left-main", 1),
         "/welcome": ("welcome.html", "wizard", "", 0),
         "/receipts/{receipt_id}": ("receipt.html", "document", "standard", 0),
     }
     urls = {
         "/": "/",
-        "/roster": "/roster",
+        "/names": "/names",
         "/settings": "/settings",
         "/welcome": "/welcome",
         "/receipts/{receipt_id}": "/receipts/presentation-receipt",

@@ -2,15 +2,9 @@
 .ce-app-header .brand { display: inline-flex; align-items: center; gap: var(--ce-space-2); color: inherit; font-family: var(--ce-font-display); font-size: 17px; font-weight: 750; text-decoration: none; }
 .ce-app-header .brand-logo { width: 27px; height: 27px; }
 .ce-app-nav { display: flex; flex-wrap: nowrap; gap: 2px; min-width: 0; }
-.ce-app-nav a, .ce-nav-more summary { padding: 7px 9px; border-radius: var(--ce-radius); color: var(--ce-ink-muted); font-size: 13px; font-weight: 650; line-height: 1.2; text-decoration: none; white-space: nowrap; }
-.ce-app-nav a:hover, .ce-nav-more summary:hover { background: var(--ce-accent-canvas-soft); color: var(--ce-ink); }
+.ce-app-nav a { padding: 7px 9px; border-radius: var(--ce-radius); color: var(--ce-ink-muted); font-size: 13px; font-weight: 650; line-height: 1.2; text-decoration: none; white-space: nowrap; }
+.ce-app-nav a:hover { background: var(--ce-accent-canvas-soft); color: var(--ce-ink); }
 .ce-app-nav .ce-app-nav--active { box-shadow: inset 0 -2px 0 var(--ce-accent-canvas); color: var(--ce-accent-canvas); }
-.ce-nav-more { position: relative; }
-.ce-nav-more summary { list-style: none; cursor: pointer; }
-.ce-nav-more summary::-webkit-details-marker { display: none; }
-.ce-nav-more__caret { margin-left: var(--ce-space-1); }
-.ce-nav-more__pop { position: absolute; z-index: 20; left: 0; min-width: 150px; margin-top: var(--ce-space-1); padding: var(--ce-space-2); border: 1px solid var(--ce-rule-strong); background: var(--ce-surface-raised); }
-.ce-nav-more__pop a { display: block; }
 .ce-app-header .ce-status-strip { display: flex; align-items: center; justify-content: flex-end; gap: var(--ce-space-2); min-width: 0; color: var(--ce-ink-muted); font-size: 11px; }
 .ce-app-header .ce-status-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .ce-app-header .ce-readiness-label { font-family: var(--ce-font-mono); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }

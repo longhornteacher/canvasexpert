@@ -1,8 +1,7 @@
 """Onboarding wizard routes — first-run setup for Canvas Expert.
 
 These routes drive the stepped welcome flow (workspace → Canvas URL → API token
-→ optional calendars) for brand-new users. Once configured, the gate in server.py
-redirects unconfigured users here.
+→ optional calendars) for brand-new users. The wizard remains available from Settings.
 
 Routes: GET  /welcome
         POST /welcome/workspace
@@ -90,7 +89,7 @@ def set_workspace(path: str = Form(...)):
         "root": root,
         "subfolders": [
             workspace.LIBRARY_NAME, workspace.TO_REVIEW_NAME,
-            workspace.PRINTABLES_NAME, workspace.CANVAS_UPLOADS_NAME,
+            workspace.CANVAS_UPLOADS_NAME,
             workspace.STUDENT_WORK_NAME, workspace.FOR_AI_NAME,
         ],
     })
