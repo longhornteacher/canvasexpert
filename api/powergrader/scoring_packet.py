@@ -71,7 +71,7 @@ def validate_safe_bundle(bundle: object) -> dict:
             if not item_id or item_id in item_ids:
                 return {"ok": False, "code": "packet_invalid", "reason": "item_identity_invalid"}
             item_ids.add(item_id)
-            if "response" not in response and "oral_reading" not in response:
+            if "response" not in response:
                 return {"ok": False, "code": "packet_invalid", "reason": "response_text_missing"}
     return {"ok": True, "student_count": len(students)}
 
@@ -364,8 +364,6 @@ def build_packet(
                 }
             raw_text = response.get("response") or ""
             text = str(raw_text)
-            oral_text = feedback_artifacts.oral_reading_text(response.get("oral_reading"))
-            text = "\n\n".join(part for part in (text, oral_text) if part)
             if not text.strip():
                 held += 1
                 if pseudonym not in held_pseudonyms:

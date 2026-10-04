@@ -239,16 +239,3 @@ def test_stored_ai_banner_is_removed_from_the_sent_payload():
         "submission": {"posted_grade": "4"},
         "comment": {"text_comment": "Good."},
     }
-
-
-def test_grade_mutation_saves_the_teacher_edit():
-    session = _session()
-    saved = []
-    result, _ = session_actions.save_grade(
-        "session-1", user_id="user-1", teacher_score="5", teacher_feedback="Updated",
-        status="approved", load_session=lambda _: session,
-        save_session=lambda value: saved.append(copy.deepcopy(value)),
-    )
-    assert result["ok"] is True
-    assert saved[0]["students"][0]["teacher_score"] == 5.0
-    assert saved[0]["students"][0]["teacher_feedback"] == "Updated"

@@ -336,28 +336,6 @@ def test_build_packet_drops_media():
     assert "media" not in payload_json
 
 
-def test_build_packet_projects_safe_oral_reading_as_text_without_media_transport_fields():
-    bundle = _fake_safe_bundle([{"pseudonym": "Pikachu"}], items=1)
-    bundle["students"][0]["responses"][0]["response"] = ""
-    bundle["students"][0]["responses"][0]["oral_reading"] = {
-        "version": "1.0", "status": "needs_review", "evidence_digest": "e" * 64,
-        "passage_digest": "p" * 64, "passage": "read this passage", "transcript": "read this passage",
-        "metrics": {"accuracy": 1.0, "wcpm": 90}, "uncertainty": ["low_confidence"],
-        "difference_candidates": [{"kind": "substitution", "expected": "read", "observed": "reed"}],
-        "candidate_counts_only": True,
-    }
-
-    result = scoring_packet.build_packet(session=_fake_session("s1", "c1"), safe_bundle=bundle, include_context=True)
-
-    payload = json.dumps(result)
-    assert result["total"] == 1
-    assert "Oral-reading evidence" in result["students"][0]["text"]
-    assert "All counts below are candidates" in result["students"][0]["text"]
-    assert "pronunciation" in result["contract"]
-    for forbidden in ("canonical_path", "word_events", "audio/", "http://", "https://"):
-        assert forbidden not in payload
-
-
 def test_build_packet_counts_each_held_response_once():
     """A media-only response is one held response, not two.
 

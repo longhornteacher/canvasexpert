@@ -100,13 +100,13 @@ def test_settings_transactions_preserve_interleaved_nested_updates(tmp_path, mon
 
 
 def test_session_transactions_preserve_interleaved_updates(tmp_path, monkeypatch):
-    from api import storage_support
     from api.powergrader import session_store
     from api.platform_services import workspace
 
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
     session_id = "sentinel-session"
-    session_store.save_session({"session_id": session_id, "students": []})
+    session_store.save_session({"session_id": session_id, "students": [],
+                                "storage_model": "shared_work.v1"})
     barrier = threading.Barrier(2)
 
     def session_writer(key, value):
@@ -126,16 +126,3 @@ def test_session_transactions_preserve_interleaved_updates(tmp_path, monkeypatch
         thread.join(10)
     session = session_store.load_session(session_id)
     assert session["marker_a"] == "A" and session["marker_b"] == "B"
-
-    session_path = Path(session_store.session_path(session_id))
-    session_bytes = session_path.read_bytes()
-
-    def fail_replace(*_args, **_kwargs):
-        raise OSError("sentinel replace failure")
-
-    monkeypatch.setattr(storage_support.os, "replace", fail_replace)
-    try:
-        session_store.save_session({"session_id": session_id, "broken": True})
-    except OSError:
-        pass
-    assert session_path.read_bytes() == session_bytes

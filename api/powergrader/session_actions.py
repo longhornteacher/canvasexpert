@@ -23,7 +23,6 @@ from api import grading_policy
 from api import score_ledger
 from api.feedback_results import _format_number
 from api.powergrader import attribution
-from api.powergrader import blind_first
 from api.powergrader import session_store
 from api.student_text import normalize_student_text
 
@@ -317,48 +316,6 @@ def _path(session: dict, user_id: str) -> str:
         f"/api/v1/courses/{session['course_id']}/assignments/{session['assignment_id']}"
         f"/submissions/{user_id}"
     )
-
-
-@_session_locked
-def save_grade(
-    session_id: str,
-    *,
-    user_id: str,
-    teacher_score: str,
-    teacher_feedback: str,
-    status: str,
-    load_session,
-    save_session,
-) -> tuple[dict, int]:
-    """Save one student's grade into a session."""
-    session = load_session(session_id)
-    if not session:
-        return {"ok": False, "error": "Session not found."}, 404
-
-    score_val = None
-    if teacher_score.strip():
-        try:
-            score_val = float(teacher_score.strip())
-        except ValueError:
-            return {"ok": False, "error": "Invalid score value."}, 200
-
-    for student in session["students"]:
-        if student["user_id"] == user_id:
-            student["teacher_score"] = score_val
-            student["teacher_feedback"] = teacher_feedback.strip()
-            resolved = status if status in ("approved", "skipped", "pending") else "approved"
-            student["status"] = resolved
-            # A teacher who scores and approves without ever revealing has produced
-            # the cleanest blind datapoint there is; record it before it is lost.
-            # Unlocked call: we already hold this session's lock.
-            blind_first.record_implicit_blind(
-                session, student, score_val, student["teacher_feedback"], resolved,
-            )
-            save_session(session)
-            approved = sum(1 for item in session["students"] if item.get("status") == "approved")
-            return {"ok": True, "approved": approved}, 200
-
-    return {"ok": False, "error": "Student not found in session."}, 200
 
 
 @_session_locked

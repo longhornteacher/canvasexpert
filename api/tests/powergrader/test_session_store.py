@@ -32,6 +32,7 @@ def _session(session_id, *, course="c1", assignment="a1", status="ready",
         "created": created,
         "status": status,
         "mode": "packet",
+        "storage_model": "shared_work.v1",
         "students": students if students is not None else [
             {"user_id": "u1", "status": "pending", "posted": False},
         ],
@@ -51,8 +52,6 @@ def test_activating_a_new_preparation_supersedes_the_earlier_actionable_one(stor
     assert older["status"] == "superseded"
     assert older["superseded_by_session_id"] == "new"
     assert older["superseded_at"]
-    # Supersede, never delete: the older record and its bundle stay on disk.
-    assert store.session_path("old") is not None
     assert store.is_current_session("new") is True
     assert store.is_current_session("old") is False
 
@@ -212,8 +211,8 @@ def test_current_actionable_sessions_returns_one_row_per_scope(store):
     assert [row["session_id"] for row in rows] == ["new"]
     assert set(rows[0]) == {
         "session_id", "session_kind", "assignment_name", "course_id",
-        "assignment_id", "created", "status", "mode", "mode_label",
-        "total", "approved", "posted",
+            "assignment_id", "created", "status", "mode", "mode_label",
+            "total", "approved", "posted", "work_item",
     }
 
 
@@ -339,7 +338,6 @@ def test_new_scoring_sessions_are_shared_leased_and_revision_independent(store, 
 
     summary = store.get_work_item("shared-session")
     assert summary["holder"] == "LAPTOP-TEST"
-    assert not Path(store.session_path("shared-session")).exists()
     assert store.load_session("shared-session")["storage_model"] == "shared_work.v1"
 
     with store.session_lock("shared-session"):

@@ -571,7 +571,6 @@ def ingest_ordinary_attachments(
             records.append(meta)
         submission["attachments"] = records
         # New sessions must never depend on the retired extension-only lane.
-        submission.pop("code_files", None)
     return submissions
 
 
@@ -664,30 +663,3 @@ def ingest_media_recordings(
             )
         records.append(record)
     return submissions
-
-
-def enrich_with_code_files(subs):
-    """Deprecated compatibility reader for old callers and old sessions.
-
-    Production PowerGrader start, late catch-up, and scheduled autoscore flows
-    use ``ingest_ordinary_attachments`` instead and do not populate ``code_files``.
-    """
-    hdrs, _ = canvas_headers()
-    if not hdrs:
-        return
-    sess = requests.Session()
-    sess.headers.update(hdrs)
-    for submission in subs or []:
-        files = []
-        for attachment in (submission.get("attachments") or []):
-            path = attachment.get("local_path")
-            if not path or not os.path.isfile(workspace.extended_path(path)):
-                continue
-            try:
-                with open(workspace.extended_path(path), encoding="utf-8") as fh:
-                    text = fh.read()
-            except (OSError, UnicodeError):
-                continue
-            files.append({"filename": attachment.get("filename", ""), "text": text})
-        if files:
-            submission["code_files"] = files

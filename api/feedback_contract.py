@@ -72,7 +72,6 @@ def scoring_output_contract(
         "feedback by itself; the teacher decides. Keep integrity concerns out of "
         "`feedback`, which the student reads.",
         "Use the full score range; `possible` gives each item's maximum.",
-        "When a response includes `oral_reading`, use only the supplied passage, transcript, metrics, uncertainty, and candidate differences.",
         "Do not infer pronunciation, expression, prosody, identity, disability, effort, or diagnosis; low ASR confidence is not a reading error.",
     ]
     return {

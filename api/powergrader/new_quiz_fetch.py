@@ -146,7 +146,7 @@ def _file_placeholder(filename: str, item_id: str, attempt) -> dict:
 def _core_snapshot(core: dict) -> dict:
     """Keep the private Canvas snapshot while dropping URL-bearing upload data."""
     return {key: value for key, value in core.items()
-            if key not in {"attachments", "code_files"}}
+            if key != "attachments"}
 
 
 def _safe_report_identity(row: dict) -> dict:

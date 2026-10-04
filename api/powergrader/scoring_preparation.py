@@ -632,12 +632,10 @@ def prepare_scoring_session(
             "scored_user_ids": [], "generated_user_ids": [],
         }, evidence_manifest=mirror_result.get("manifest_path"),
         evidence_status=mirror_result.get("status", "mirror"),
-        oral_reading_passage={"enabled": False}, session_kind=SCORING_SESSION_KIND,
+        session_kind=SCORING_SESSION_KIND,
     )
     session["status"] = "ready"
     # New sessions use shared immutable snapshots and a cross-device lease.
-    # Legacy in-flight records remain readable/writable in their existing
-    # store until they reach a terminal state.
     session["storage_model"] = "shared_work.v1"
     session["assignment"] = {"points_possible": points_possible}
     session["writing_timeline_tracked"] = writing_timeline_tracked
@@ -1016,7 +1014,7 @@ def refresh_scoring_session(
                       retryable=True)
     scorable = {
         str(s.get("pseudonym")) for s in merged.get("students") or []
-        if any(str(r.get("response") or "").strip() or r.get("oral_reading")
+        if any(str(r.get("response") or "").strip()
                for r in s.get("responses") or [])
     }
     return {

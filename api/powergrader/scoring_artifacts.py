@@ -16,7 +16,6 @@ from api.feedback_artifacts import (
     _prepare_attachment_safe_bundle,
     _scrub_bundle,
     _shared_context_blob,
-    oral_reading_text,
     pseudonymize_submissions,
 )
 
@@ -90,7 +89,6 @@ def build_scoring_artifacts(
         for student in safe.get("students", []):
             blob = " ".join(
                 " ".join((response.get("prompt") or "", response.get("response") or ""))
-                + " " + oral_reading_text(response.get("oral_reading"))
                 for response in student.get("responses", [])
             )
             survivors = feedback_scrub.verify_clean(blob, vault)
@@ -132,7 +130,6 @@ def build_scoring_artifacts(
         attachment_only_count = sum(
             1 for row in submitted
             if not (row.get("body") or "").strip()
-            and not row.get("code_files")
             and any(not a.get("ai_eligible") or a.get("download_status") != "downloaded"
                     for a in (row.get("attachments") or []))
         )
@@ -141,7 +138,7 @@ def build_scoring_artifacts(
             who = vault.reverse(str(hold.get("pseudonym") or ""))
             if who and who.get("canvas_id"):
                 failures[str(who["canvas_id"])] = {
-                    "code": "media_oral_reading_hold",
+                    "code": "media_review_hold",
                     "message": str(hold.get("message") or "Media evidence requires teacher review."),
                 }
         return {

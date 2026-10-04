@@ -1,4 +1,4 @@
-"""PowerGrader session storage under ``_System/PowerGrader/Sessions``.
+"""PowerGrader session lifecycle over the shared work store.
 
 This module is also the single lifecycle owner for assignment-scoped Scoring
 Sessions: it resolves the deterministic current session for one exact
@@ -94,12 +94,13 @@ def session_staleness(session: dict, *, mirror_revision=None,
                       submission_snapshot=None) -> dict:
     """Compare a session's frozen inputs with a newly usable local snapshot."""
     expected_revision = session.get("mirror_revision")
-    self_contained = session.get("storage_model") == "shared_work.v1"
-    if not self_contained and mirror_revision is not None and expected_revision not in (None, ""):
+    if (session.get("storage_model") != "shared_work.v1"
+            and mirror_revision is not None and expected_revision not in (None, "")):
         if str(mirror_revision) != str(expected_revision):
             return {"stale": True, "code": "session_stale", "reason": "mirror_revision_changed"}
     expected_snapshot = session.get("submission_snapshot")
-    if not self_contained and submission_snapshot is not None and expected_snapshot not in (None, ""):
+    if (session.get("storage_model") != "shared_work.v1"
+            and submission_snapshot is not None and expected_snapshot not in (None, "")):
         actual = (submission_snapshot if isinstance(submission_snapshot, str)
                   else eligible_submission_snapshot_digest(submission_snapshot))
         if str(actual) != str(expected_snapshot):
@@ -269,15 +270,6 @@ def pg_dir() -> str | None:
     return d
 
 
-def session_path(session_id: str) -> str | None:
-    d = pg_dir()
-    if not d:
-        return None
-    # Guard against path traversal
-    safe_id = "".join(c for c in session_id if c.isalnum() or c == "-")
-    return os.path.join(d, f"{safe_id}_session.json")
-
-
 def _read_json(path: str) -> dict | None:
     try:
         with open(path, encoding="utf-8") as f:
@@ -301,9 +293,6 @@ def load_session(session_id: str) -> dict | None:
 
 
 def _load_session_unlocked(session_id: str) -> dict | None:
-    path = session_path(session_id)
-    if path and os.path.isfile(path):
-        return _read_json(path)
     try:
         session = SharedWorkStore().load_snapshot(session_id)
     except WorkItemNotFound:
@@ -320,18 +309,13 @@ def _load_session_unlocked(session_id: str) -> dict | None:
 def save_session(session: dict):
     session_id = session["session_id"]
     with session_lock(session_id):
-        path = session_path(session_id)
-        if session.get("storage_model") == "shared_work.v1":
-            store = SharedWorkStore()
-            store.save_snapshot(
-                session_id, session, kind="scoring_session",
-                course_id=session.get("course_id", ""),
-                assignment_id=session.get("assignment_id", ""),
-                label=session.get("assignment_name", ""),
-            )
-            return
-        if path:
-            atomic_write_json(Path(path), session)
+        store = SharedWorkStore()
+        store.save_snapshot(
+            session_id, session, kind="scoring_session",
+            course_id=session.get("course_id", ""),
+            assignment_id=session.get("assignment_id", ""),
+            label=session.get("assignment_name", ""),
+        )
 
 
 def list_work_items() -> list[dict]:
@@ -364,15 +348,6 @@ def list_session_summaries() -> list[dict]:
     """Build a summary list of all saved sessions, newest first."""
     sessions = []
     seen_ids = set()
-    for path in _session_paths():
-        s = _read_json(path)
-        if not s:
-            continue
-        sid = str(s.get("session_id") or "")
-        if sid in seen_ids:
-            continue
-        seen_ids.add(sid)
-        sessions.append(_summary(s))
     try:
         shared = SharedWorkStore()
         for item in shared.list_items(kind="scoring_session"):
@@ -395,14 +370,6 @@ def list_session_summaries() -> list[dict]:
         pass
     sessions.sort(key=lambda x: x.get("created") or "", reverse=True)
     return sessions
-
-
-def _session_paths() -> list[str]:
-    d = pg_dir()
-    if not d or not os.path.isdir(d):
-        return []
-    return [os.path.join(d, name) for name in sorted(os.listdir(d))
-            if name.endswith("_session.json")]
 
 
 def _same_scope(session: dict, course_id, assignment_id) -> bool:

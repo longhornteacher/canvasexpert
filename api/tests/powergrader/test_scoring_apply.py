@@ -281,19 +281,7 @@ def test_skipping_everything_refuses_rather_than_pushing_nothing():
 # ── Approval ────────────────────────────────────────────────────────────────
 
 
-def test_approve_rows_copies_staged_values_without_a_blind_datapoint(monkeypatch):
-    """LAW: approving from chat is not a blind-first observation.
-
-    save_student records an implicit blind datapoint because a teacher who
-    scores without revealing the AI suggestion is the cleanest one there is.
-    Copying the AI's own score is the opposite, and recording it as blind would
-    quietly corrupt that record.
-    """
-    from api.powergrader import blind_first
-
-    recorded = []
-    monkeypatch.setattr(blind_first, "record_implicit_blind",
-                        lambda *a, **k: recorded.append(a))
+def test_approve_rows_copies_staged_values():
     session = _session()
 
     scoring_apply.approve_rows(session, ["9001"])
@@ -302,7 +290,6 @@ def test_approve_rows_copies_staged_values_without_a_blind_datapoint(monkeypatch
     assert session["students"][0]["teacher_feedback"] == "Clear evidence."
     assert session["students"][0]["status"] == "approved"
     assert session["students"][1].get("status") is None, "untouched row was approved"
-    assert recorded == []
 
 
 def test_approve_rows_does_not_overwrite_a_teacher_edit():

@@ -555,10 +555,7 @@ def resolve_answers(plan: dict, answers: dict | None) -> dict:
 def approve_rows(session: dict, user_ids) -> None:
     """Copy staged AI values into the teacher fields and approve.
 
-    Deliberately not ``session_actions.save_grade``: that records an implicit
-    blind-first datapoint, which is only meaningful when a teacher scored
-    without seeing the AI suggestion. Copying the AI's own score is the
-    opposite, and recording it as blind would quietly corrupt that record.
+    This copies the staged scoring values into the private session for review.
     """
     wanted = {str(uid) for uid in user_ids}
     for student in session.get("students", []):

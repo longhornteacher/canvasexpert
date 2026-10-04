@@ -4,7 +4,6 @@ from datetime import datetime
 
 from api.powergrader.student_attachments import eligibility_decision
 from api.powergrader import media_recordings
-from api.powergrader import oral_reading
 from api.mirror.attempt_text import digest as attempt_text_digest
 from api.powergrader.attempt_history import summarize as summarize_attempt_history
 
@@ -13,10 +12,6 @@ def _attachment_metadata(attachment: dict) -> dict:
     """Persist review metadata only; never persist a Canvas/signed URL."""
     if attachment.get("media_recording"):
         metadata = media_recordings.review_metadata(attachment)
-        report = attachment.get("oral_reading")
-        if isinstance(report, dict):
-            metadata["oral_reading"] = oral_reading.review_projection(report)
-            metadata["oral_reading_private"] = report
         return metadata
     allowed = (
         "filename", "display_name", "local_path", "declared_size", "actual_size",
@@ -64,10 +59,6 @@ def build_students(
             for a in (s.get("attachments") or [])
             if a.get("filename") or a.get("display_name")
         ]
-        code_files = [
-            {"filename": cf.get("filename", ""), "text": cf.get("text", "")}
-            for cf in (s.get("code_files") or [])
-        ]
         new_quiz_items = []
         for item in (s.get("new_quiz_items") or []):
             new_quiz_items.append({
@@ -103,7 +94,6 @@ def build_students(
             "analysis_unavailable": "" if has_media_recording else "",
             "new_quiz_files_error": s.get("new_quiz_files_error"),
             "speedgrader_required": requires_speedgrader,
-            "code_files":    code_files,
             "current_score": s.get("score"),
             "submission_baseline": {
                 "attempt": s.get("attempt"),
@@ -280,7 +270,6 @@ def build_session(
     late_watch: dict | None = None,
     evidence_manifest: str | None = None,
     evidence_status: str = "unknown",
-    oral_reading_passage: dict | None = None,
     session_kind: str = "",
 ) -> dict:
     """Build the session dictionary ready to save."""
@@ -302,7 +291,6 @@ def build_session(
         "late_watch":      late_watch,
         "evidence_manifest": evidence_manifest,
         "evidence_status": evidence_status,
-        "oral_reading_passage": oral_reading_passage or {},
         "students":        students or [],
         "push_log":        [],
     }
