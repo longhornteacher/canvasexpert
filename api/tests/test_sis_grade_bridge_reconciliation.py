@@ -694,7 +694,7 @@ def test_catalog_not_current_is_its_own_answer_contract(monkeypatch, entry_point
         "sections": {"assignments": "stale"},
         "error": "The local course catalog is not current.",
         "next": (
-            "Refresh this course's structure with refresh_course_structure, "
+            "Refresh this course's structure with refresh_mirror(structure_only=true), "
             "then retry."
         ),
     }

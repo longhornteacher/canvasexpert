@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 
-TOOL_SCHEMA_VERSION = 76
+TOOL_SCHEMA_VERSION = 77
 _SCHEMA_DIR = Path(__file__).resolve().parent
 
 

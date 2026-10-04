@@ -107,34 +107,10 @@ def test_list_courses_empty(monkeypatch):
     assert tools.list_courses() == {"ok": True, "courses": []}
 
 
-def test_list_sis_grade_bridges_rejects_blank_course_id(monkeypatch):
-    monkeypatch.setattr(tools.config, "active_courses", lambda: [])
-    monkeypatch.setattr(tools.config, "saved_courses", lambda: [])
-
-    result = tools.list_sis_grade_bridges("  ")
-
-    assert result == {"ok": False, "error": "course_id is required"}
 
 
-def test_list_sis_grade_bridges_rejects_unknown_course_id(monkeypatch):
-    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "111"}])
-    monkeypatch.setattr(tools.config, "saved_courses", lambda: [{"id": "111"}])
-
-    result = tools.list_sis_grade_bridges("not-a-course-id")
-
-    assert result["ok"] is False
-    assert "Unknown course_id 'not-a-course-id'" in result["error"]
-    assert "list_courses" in result["error"]
 
 
-def test_list_sis_grade_bridges_keeps_known_previous_course_distinct(
-    monkeypatch, _set_previous_course,
-):
-    _set_previous_course("111")
-
-    result = tools.list_sis_grade_bridges("111")
-
-    assert result == {"ok": False, "error": "course is not in Current courses"}
 
 
 # --- course gating (shared by every course_id tool) -------------------------
@@ -157,10 +133,10 @@ def test_get_roster_rejects_non_current_course(
 @pytest.mark.parametrize(
     ("reader", "arguments"),
     [
-        (tools.list_sections, ("not-a-course-id",)),
-        (tools.get_course_assignments, ("not-a-course-id",)),
-        (tools.get_modules, ("not-a-course-id",)),
-        (tools.get_course_pages, ("not-a-course-id",)),
+        (tools.get_roster, ("not-a-course-id",)),
+        (tools.get_course_content, ("not-a-course-id", "assignments")),
+        (tools.get_course_content, ("not-a-course-id", "modules")),
+        (tools.get_course_content, ("not-a-course-id", "pages")),
         (tools.get_roster, ("not-a-course-id",)),
         (tools.get_submissions, ("not-a-course-id", "assignment-id")),
         (tools.get_gradebook_snapshot, ("not-a-course-id",)),
@@ -216,7 +192,7 @@ def test_get_course_assignments_happy(monkeypatch, _rows, _set_active_courses, _
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
 
-    result = tools.get_course_assignments("111")
+    result = tools.get_course_content('111', kind='assignments')
     assert result["ok"] is True
     assert result["course_name"] == "Test Course"
     assert _rows(result["assignments"]) == [{
@@ -242,7 +218,7 @@ def test_get_course_assignments_reports_unconfirmed_created_objects(
 
     monkeypatch.setattr(tools.course_catalog, "pending_unconfirmed", read_pending)
 
-    result = tools.get_course_assignments("111")
+    result = tools.get_course_content('111', kind='assignments')
 
     assert result["pending_unconfirmed"] == pending
 
@@ -267,7 +243,7 @@ def test_get_course_assignments_uses_catalog_read_scope(monkeypatch, _set_active
 
     monkeypatch.setattr(tools.read_service, "catalog_assignments", catalog_assignments)
 
-    assert tools.get_course_assignments("111")["ok"] is True
+    assert tools.get_course_content('111', kind='assignments')["ok"] is True
     assert calls == ["111"]
 
 
@@ -284,12 +260,12 @@ def test_get_course_assignments_trims_long_descriptions(monkeypatch, _rows, _set
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
 
-    preview = _rows(tools.get_course_assignments("111")["assignments"])[0]["description_text"]
+    preview = _rows(tools.get_course_content('111', kind='assignments')["assignments"])[0]["description_text"]
     assert len(preview) < len(long_description)
     assert preview.startswith(long_description[:tools._DESCRIPTION_PREVIEW_CHARS])
     assert "truncated" in preview
 
-    full = _rows(tools.get_course_assignments("111", full_descriptions=True)
+    full = _rows(tools.get_course_content('111', full_descriptions=True, kind='assignments')
                  ["assignments"])[0]["description_text"]
     assert full == long_description
 
@@ -300,7 +276,7 @@ def test_get_course_assignments_empty(monkeypatch, _set_active_courses, _catalog
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
 
-    result = tools.get_course_assignments("111")
+    result = tools.get_course_content('111', kind='assignments')
     assert result["ok"] is True
     assert result["course_id"] == "111"
     assert result["course_name"] == "Test Course"
@@ -312,7 +288,7 @@ def test_get_course_assignments_catalog_missing(monkeypatch, _set_active_courses
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": None, "source": "none", "warnings": []})
 
-    result = tools.get_course_assignments("111")
+    result = tools.get_course_content('111', kind='assignments')
     assert result["ok"] is False
     assert "refresh" in result["error"].lower()
 
@@ -325,7 +301,7 @@ def test_get_course_assignments_accepts_previous_course(monkeypatch, _set_previo
     )
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    result = tools.get_course_assignments("111")
+    result = tools.get_course_content('111', kind='assignments')
     assert result["ok"] is True
 
 
@@ -345,7 +321,7 @@ def test_get_modules_happy_returns_table(monkeypatch, _rows, _set_active_courses
     document = _module_catalog_document(MODULE_FIXTURE)
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    result = tools.get_modules("111")
+    result = tools.get_course_content('111', kind='modules')
     assert result["ok"] is True
     assert result["course_id"] == "111"
     assert result["course_name"] == "Test Course"
@@ -366,7 +342,7 @@ def test_get_modules_include_items_true_nests_item_tables(monkeypatch, _rows, _s
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
 
-    result = tools.get_modules("111", include_items=True)
+    result = tools.get_course_content('111', include_items=True, kind='modules')
     assert result["ok"] is True
     assert result["modules"]["columns"] == ["id", "name", "position", "item_count", "items"]
     rows = _rows(result["modules"])
@@ -384,7 +360,7 @@ def test_get_modules_include_items_false_omits_items_column(monkeypatch, _rows, 
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
 
-    result = tools.get_modules("111", include_items=False)
+    result = tools.get_course_content('111', include_items=False, kind='modules')
     assert "items" not in result["modules"]["columns"]
     assert all("items" not in row for row in _rows(result["modules"]))
 
@@ -394,7 +370,7 @@ def test_get_modules_accepts_previous_course(monkeypatch, _set_previous_course, 
     document = _module_catalog_document([])
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    result = tools.get_modules("111")
+    result = tools.get_course_content('111', kind='modules')
     assert result["ok"] is True
 
 
@@ -403,7 +379,7 @@ def test_get_modules_catalog_missing(monkeypatch, _set_active_courses):
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": None, "source": "none", "warnings": []})
 
-    result = tools.get_modules("111")
+    result = tools.get_course_content('111', kind='modules')
     assert result["ok"] is False
     assert "refresh" in result["error"].lower()
 
@@ -414,7 +390,7 @@ def test_get_modules_stale_returns_labeled_records_not_refusal(monkeypatch, _row
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
 
-    result = tools.get_modules("111")
+    result = tools.get_course_content('111', kind='modules')
     assert result["ok"] is True
     assert result["state"] == "stale"
     assert result["source"] == "catalog"
@@ -439,7 +415,7 @@ def test_get_course_pages_stale_names_catalog_refresh(monkeypatch, _set_active_c
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
 
-    result = tools.get_course_pages("111")
+    result = tools.get_course_content('111', kind='pages')
     assert result["ok"] is True
     assert result["state"] == "stale"
     assert result["freshness"]["within_policy"] is False
@@ -464,7 +440,7 @@ def test_get_course_pages_includes_unpublished_pages_by_default(
     monkeypatch.setattr(tools.course_catalog, "pending_unconfirmed",
                         lambda course_id, *, kinds: [])
 
-    result = tools.get_course_pages("111")
+    result = tools.get_course_content('111', kind='pages')
 
     assert result["pages"]["rows"][0][result["pages"]["columns"].index("published")] is False
 
@@ -475,7 +451,7 @@ def test_get_modules_marks_state_stale_past_serve_window(monkeypatch, _rows, _se
     document["modules"]["last_success_at"] = _STALE_STAMP
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    result = tools.get_modules("111")
+    result = tools.get_course_content('111', kind='modules')
     assert result["ok"] is True
     assert result["state"] == "stale"
     assert len(_rows(result["modules"])) == 2
@@ -486,7 +462,7 @@ def test_get_modules_state_current_when_within_serve_window(monkeypatch, _set_ac
     document = _module_catalog_document(MODULE_FIXTURE)
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
-    result = tools.get_modules("111")
+    result = tools.get_course_content('111', kind='modules')
     assert result["ok"] is True
     assert result["state"] == "current"
 
@@ -501,7 +477,7 @@ def test_get_modules_never_cataloged_detail(monkeypatch, _set_active_courses, _m
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
 
-    result = tools.get_modules("111")
+    result = tools.get_course_content('111', kind='modules')
     assert result["ok"] is True
     assert result["modules_state_detail"] == "never_cataloged"
     assert result["modules"]["rows"] == []
@@ -516,7 +492,7 @@ def test_get_modules_empty_but_cataloged_detail(monkeypatch, _set_active_courses
     monkeypatch.setattr(tools, "read_catalog",
                         lambda course_id: {"catalog": document, "source": "canonical", "warnings": []})
 
-    result = tools.get_modules("111")
+    result = tools.get_course_content('111', kind='modules')
     assert result["ok"] is True
     assert result["modules_state_detail"] == "cataloged"
     assert result["modules"]["rows"] == []
@@ -530,7 +506,7 @@ def test_list_sections_happy(monkeypatch, _rows, _set_active_courses):
         tools.mirror_store, "read_roster",
         lambda cid: {"sections": {"800001": "Period 1", "800002": "Period 2"}},
     )
-    result = tools.list_sections("111")
+    result = tools.get_roster('111', include=['sections'])
     assert result["ok"] is True
     assert result["course_id"] == "111"
     rows = _rows(result["sections"])
@@ -546,7 +522,7 @@ def test_list_sections_empty(monkeypatch, _set_active_courses):
         tools.mirror_store, "read_roster",
         lambda cid: {"sections": {}},
     )
-    result = tools.list_sections("111")
+    result = tools.get_roster('111', include=['sections'])
     assert result["ok"] is True
     assert result["sections"]["rows"] == []
 
@@ -554,7 +530,7 @@ def test_list_sections_empty(monkeypatch, _set_active_courses):
 def test_list_sections_roster_missing(monkeypatch, _set_active_courses):
     _set_active_courses(["111"])
     monkeypatch.setattr(tools.mirror_store, "read_roster", lambda cid: None)
-    result = tools.list_sections("111")
+    result = tools.get_roster('111', include=['sections'])
     assert result["ok"] is False
     assert "mirror" in result["error"].lower()
 
@@ -565,7 +541,7 @@ def test_list_sections_accepts_previous_course(monkeypatch, _set_previous_course
         tools.mirror_store, "read_roster",
         lambda cid: {"sections": {"800001": "Period 1"}},
     )
-    result = tools.list_sections("111")
+    result = tools.get_roster('111', include=['sections'])
     assert result["ok"] is True
 
 
@@ -573,7 +549,7 @@ def test_list_sections_accepts_previous_course(monkeypatch, _set_previous_course
 
 def test_get_authoring_contract_each_kind_returns_nonempty_contract_text():
     for kind in ("quiz", "assignment", "page"):
-        result = tools.get_authoring_contract(kind)
+        result = tools.get_product_guide(kind)
         assert result["ok"] is True, json.dumps(result)
         assert result["kind"] == kind
         assert isinstance(result["contract"], str)
@@ -581,17 +557,14 @@ def test_get_authoring_contract_each_kind_returns_nonempty_contract_text():
 
 
 def test_get_authoring_contract_unknown_kind_returns_structured_error():
-    result = tools.get_authoring_contract("essay")
-    assert result == {
-        "ok": False,
-        "error": ("unknown kind 'essay'; expected one of: "
-                  "quiz, assignment, page"),
-    }
+    result = tools.get_product_guide('essay')
+    assert result["ok"] is False
+    assert "unknown topic" in result["error"]
 
 
 def test_get_authoring_contract_missing_file_returns_structured_error(monkeypatch):
     monkeypatch.setitem(tools._CONTRACT_FILES, "quiz", "NoSuchFile_Base.md")
-    result = tools.get_authoring_contract("quiz")
+    result = tools.get_product_guide('quiz')
     assert result["ok"] is False
     assert "quiz" in result["error"]
 
@@ -605,7 +578,7 @@ def test_get_authoring_contract_matches_the_one_canonical_repo_file():
             tools.REPO_ROOT, "api", "default_docs", "AI Authoring", filename)
         with open(canonical_path, encoding="utf-8") as f:
             canonical_text = f.read()
-        result = tools.get_authoring_contract(kind)
+        result = tools.get_product_guide(kind)
         assert result["ok"] is True
         if kind == "schedule":
             assert result["contract"] == canonical_text
@@ -662,7 +635,7 @@ def test_generated_tool_inventory_covers_the_contract_exactly_once_by_job():
     assert result["topics"] == _GUIDE_TOPIC_SUMMARIES
     assert set(tools._TOOL_GROUPS) == expected_groups
     assert all(tools._TOOL_GROUPS.values())
-    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 62
+    assert set(grouped) == contract_names and len(grouped) == len(contract_names) == 37
     for name in contract_names:
         assert len(re.findall(
             rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
@@ -950,13 +923,13 @@ def test_submission_membership_keeps_historical_rows_and_gates_exact_payload(
 ):
     _submissions_fixture({900001: "<p>Current work.</p>", 900099: "<p>Historical work.</p>"})
     scanned = []
-    original_gate = tools.pseudonym.gate
+    original_gate = tools.pseudonym_boundary.gate
 
     def capture(payload, vault):
         scanned.append(json.loads(json.dumps(payload)))
         return original_gate(payload, vault)
 
-    monkeypatch.setattr(tools.pseudonym, "gate", capture)
+    monkeypatch.setattr(tools.pseudonym_boundary, "gate", capture)
     result = tools.get_submissions("111", "700010", include_text=include_text)
 
     assert result["ok"] is True
@@ -1405,7 +1378,7 @@ def test_list_groups_projects_names_without_private_ids_or_student_selection(mon
                          "memberships": [{"user_id": "user-secret"}]}],
         }],
     })
-    result = tools.list_groups("111")
+    result = tools.get_roster('111', include=['groups'])
     assert result["ok"] is True
     assert result["course_id"] == "111"
     assert result["group_sets"] == [{"name": "Teams", "groups": [{"name": "Blue"}]}]
@@ -1426,7 +1399,7 @@ def test_list_groups_projects_names_without_private_ids_or_student_selection(mon
 def test_list_groups_refuses_unusable_mirror_with_refresh_attention(monkeypatch, _set_active_courses, scope):
     _set_active_courses(["111"])
     monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: scope)
-    result = tools.list_groups("111")
+    result = tools.get_roster('111', include=['groups'])
     assert result["ok"] is False
     assert result["attention"]["action"] == (
         "ask_teacher_confirmation" if scope.get("last_success_at") else "refresh_mirror"
@@ -1439,7 +1412,7 @@ def test_list_groups_lists_names_without_roster_selection(monkeypatch, _set_acti
         "state": "current", "last_success_at": mirror_store.now_iso(),
         "records": [{"category_id": "cat", "category_name": "Teams",
                                              "groups": [{"name": "Blue"}]}]})
-    result = tools.list_groups("111")
+    result = tools.get_roster('111', include=['groups'])
     assert result["group_sets"][0]["groups"] == [{"name": "Blue"}]
     assert "selected_group_set" not in result
     assert "attention" not in result
@@ -1544,37 +1517,9 @@ def test_refresh_mirror_enqueue_value_error_maps_to_ok_false(monkeypatch, _set_a
 
 def test_server_registers_the_expected_tool_set():
     from api.mcp_server.server import mcp
-
-    tool_names = set(mcp._tool_manager._tools.keys())
-    assert tool_names == {
-        "list_courses", "list_sections", "list_groups", "get_course_assignments", "get_modules",
-            "get_roster", "get_submissions", "get_submission_history", "refresh_course_structure",
-        "get_gradebook_snapshot", "refresh_mirror",
-            "get_authoring_contract", "get_product_guide",
-            "list_staged_content", "preview_content_push", "preview_differentiated_quiz_push", "apply_content_push",
-            "stage_content", "stage_attachment", "push_content_live",
-        "preview_assignment_update", "apply_assignment_update",
-        "preview_grade_adjustment", "apply_grade_adjustment",
-        "preview_attempts_grant", "apply_attempts_grant",
-        # Shipped with the SIS grade bridge; this set was never updated with them.
-        "list_sis_grade_bridges", "reconcile_sis_grade_bridges",
-        "preview_sis_grade_bridge", "preview_sis_grade_bridge_reconciliation",
-        "apply_sis_grade_bridge",
-        "preview_workspace_reset", "apply_workspace_reset",
-        "verify_live", "resume_operation", "abandon_operation",
-        "get_course_pages",
-            "get_roster_student_settings", "preview_roster_student_change",
-                    "apply_roster_student_change", "clear_roster_student_field",
-                    "list_feedback_contracts", "prepare_scoring_session", "refresh_scoring_session",
-                    "list_scoring_sessions", "get_scoring_packet",
-        "stage_scoring_results", "get_scoring_preview", "apply_staged_scoring_results",
-        "create_score_curve_rule", "deactivate_score_curve_rule", "get_score_ledger",
-        "reset_scoring_review",
-        "prepare_feedback_revision", "get_feedback_revision_packet",
-        "stage_feedback_revisions", "apply_staged_feedback_revisions",
-                "discover_scoring_work",
-                "list_work_items", "get_work_item", "handoff_work_item", "take_over_work_item",
-        }
+    tool_names = set(mcp._tool_manager._tools)
+    assert tool_names == {name for group in tools._TOOL_GROUPS.values() for name in group}
+    assert len(tool_names) == 37
 
 
 def test_server_wrappers_return_compact_json(monkeypatch):

@@ -9,7 +9,7 @@ The public flow is MCP `discover_scoring_work` -> teacher direction ->
 write authorization. The first review is the agent's own preview of the staged
 scores and comments; Canvas Live is the record and the place for later edits.
 The agent refreshes the mirror and the session itself (`refresh_mirror`,
-`refresh_course_structure`, `refresh_scoring_session`) when data is outside policy.
+`refresh_mirror(course_id, structure_only=true)`, `refresh_scoring_session`) when data is outside policy.
 
 ## Current ownership
 

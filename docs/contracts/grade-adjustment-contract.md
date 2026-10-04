@@ -78,7 +78,7 @@ Rows whose new score equals the current score produce no entry.
 
 ## 5. Apply
 
-- `apply_grade_adjustment(operation_id, batch_id, review_digest)` runs through the
+- `apply_operation(operation_id, batch_id, review_digest)` runs through the
   Operation Ledger executor. The review digest must match.
 - Assignment check, live, once per apply: if `grading_type` or `points_possible`
   changed since preview, the whole target is blocked with `drift_detected`.
@@ -107,7 +107,7 @@ never overwritten. A revert operation is itself revertible like any other.
 ## 7. Authorization
 
 The agent may propose any adjustment. Only the teacher's explicit approval of the
-specific preview authorizes `apply_grade_adjustment`, the same way the other apply
+specific preview authorizes `apply_operation`, the same way the other apply
 tools work. An approval covers that one operation and nothing broader.
 
 ## 8. Other callers

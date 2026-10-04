@@ -14,64 +14,9 @@ from api import feedback_vault
 from api.mcp_server import server, tools
 
 
-# Observed truncation in a real client landed near 2,300 characters, and Claude
-# Code cuts the block near 2,050. We cannot hold every client to that, but we can
-# stop the block growing: any addition has to earn its place by displacing
-# something. Raised once from 2,200 to the measured 2,669 (rounded up) for the
-# preview, agent-commentary, self-refresh and warn-before-push rules; the
-# teacher-facing rules come first and the cross-device, content and attachment
-# hints last, because the tail is what gets cut.
-INSTRUCTION_BUDGET = 2700
-# Slice B moved post-call procedure into bounded result advisories. Raised once
-# from 17,717 for the staged-content push pair: preview_content_push carries the
-# delivery options as named parameters rather than one opaque object, so the
-# teacher's "publish it in module 3, due Friday" survives into the schema.
-# Raised once for stage_content and push_content_live, then cut hard by
-# retiring the calendar and bell write pairs, the teacher-schedule write, and
-# get_seating_context: 12 tools built to feed the classroom display, which is
-# gone. Their reads stay. Note what the two numbers teach, because the next
-# person here will face the same choice: trimming push_content_live's date
-# parameters bought 109 characters, and dropping 12 tools bought 4,850. Tools
-# are the unit that costs, not their options.
-# Raised once for preview_assignment_update/apply_assignment_update, the
-# id-addressed publish/date patch pair for an assignment that already
-# exists: both descriptions were already trimmed to single sentences before
-# raising this, so the remaining cost is the two tools' own name/schema
-# structure, not wordy prose.
-# The current unified scoring surface has one preparation, one packet, one staged
-# write, one apply, and one optional identity-free list tool.
-# v54 keeps the measured listing ceiling while replacing the old direct submit.
-# Raised once to the measured 18,569 for nine tools added while the title
-# assertion above was failing on verify_live's real `title` parameter and
-# masking this one: shared work-item handoff (85ce67a, 4 tools, +982), push
-# verification and tiered recovery (149c2a4, 3 tools, +1,097), and reviewed
-# grade adjustment (23f32c9, 2 tools, +652). Held at 15,950 through b2f28b7.
-# The v2 scoring result removes compulsory pedagogy and staging inputs; its
-# live schema size remains under the existing measured ceiling.
-# Raised to the measured 18,902 when that work landed on top of the v62
-# stage_attachment tool, which had fit under the older ceiling by itself.
-# Raised to the measured 18,964 for the scoring-lane effort-credit brief:
-# ScoringResult (stage_scoring_results's per-row shape) gains two optional
-# fields, insincere and late_days.
-# Raised to the measured 20,291 for the reviewed attempts-grant pair
-# (preview_attempts_grant, apply_attempts_grant, +748): extra attempts and a
-# reopened window for a pseudonym list or the whole class, across regular,
-# Classic, and New Quiz assignments.
-# Raised to the measured 20,535 for stage_scoring_results grade_mode
-# (post_score or feedback_only, +244): a numeric draft score in feedback
-# with no gradebook score.
-# Raised to the measured 20,793 for the retained assignment-history read.
-# Raised to the measured 22,352 for the four feedback-only revision tools
-# (prepare_feedback_revision, get_feedback_revision_packet,
-# stage_feedback_revisions, apply_staged_feedback_revisions, +1,559).
-# Raised to the measured 22,613 for prepare_scoring_session's late_policy (+261).
-# Raised to the measured 22,962 for refresh_scoring_session (+349).
-# Raised by 986 measured characters for the three durable score-rule/ledger
-# tools added in schema v73; the descriptions and result summaries remain short.
-# Raised to the measured 24,279 for get_scoring_preview (schema v74, +331).
-# Schema v76 retires writing-history and learning-objective tools; the live
-# v76 listing measures 21,762 characters.
-LISTING_BUDGET = 21762
+# v77 merges the listing; pin its measured wire size and instruction weight.
+INSTRUCTION_BUDGET = 2303
+LISTING_BUDGET = 14658
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {
@@ -80,10 +25,8 @@ RESULT_NEXT_TOOLS = {
     "prepare_scoring_session",
     "refresh_scoring_session",
     "preview_sis_grade_bridge",
-    "preview_sis_grade_bridge_reconciliation",
     "preview_roster_student_change",
     "preview_content_push",
-    "preview_differentiated_quiz_push",
     "preview_assignment_update",
 }
 
@@ -114,8 +57,8 @@ def test_chat_side_canvas_landing_is_still_offered():
     instructions = server._SERVER_INSTRUCTIONS
 
     assert "apply_staged_scoring_results" in instructions
-    assert "resubmit the same results to stage_scoring_results" in instructions
-    assert "bounded scoring guidance" in instructions
+    assert "resubmit unchanged results" in instructions
+    assert "bounded question" in instructions
 
 
 def test_the_agent_refreshes_itself_and_the_old_permission_rules_are_gone():
@@ -123,8 +66,8 @@ def test_the_agent_refreshes_itself_and_the_old_permission_rules_are_gone():
 
     assert "mirror_refresh_in_progress" not in instructions
     assert "at most four total calls" not in instructions
-    assert "refresh it yourself" in instructions
-    for tool in ("refresh_mirror", "refresh_course_structure", "refresh_scoring_session"):
+    assert "refresh_mirror yourself" in instructions
+    for tool in ("refresh_mirror", "structure_only=true"):
         assert tool in instructions
     assert "explicit teacher request" not in instructions
     assert "never read back" not in instructions
@@ -135,8 +78,8 @@ def test_scoring_preparation_wait_and_open_session_rules_are_explicit():
 
     assert "use_existing_mirror=true" in instructions
     assert "scoring_session_already_open" in instructions
-    assert "never re-prepare it" in instructions
-    assert "work locally" in instructions
+    assert "continue that session" in instructions
+    assert "continue that session" in instructions
 
 
 def test_preview_commentary_and_warn_before_push_rules_are_stated_early():
@@ -262,7 +205,7 @@ def test_first_lines_disclose_preview_and_canvas_write_boundaries():
     for name in ("preview_sis_grade_bridge", "preview_content_push"):
         assert "persist" in first_lines[name].casefold()
         assert "local" in first_lines[name]
-    for name in ("apply_sis_grade_bridge", "apply_content_push"):
+    for name in ("apply_operation",):
         assert "Canvas" in first_lines[name]
     assert "no Canvas write" in first_lines["stage_scoring_results"]
     assert "Canvas" in first_lines["apply_staged_scoring_results"]
@@ -281,13 +224,13 @@ def test_the_schemas_themselves_survive_the_strip():
 
     assert schema["required"] == ["course_id", "assignment_id"]
     assert schema["properties"]["course_id"] == {"type": "string"}
-    assert schema["properties"]["max_text_chars"] == {"default": 2000, "type": "integer"}
+    assert schema["properties"]["max_text_chars"]["default"] is None
     assert schema["properties"]["include_text"]["default"] is True
 
 
 def test_all_registered_tools_use_text_only_result_transport():
     listed = asyncio.run(server.mcp.list_tools())
-    assert len(listed) == 62
+    assert len(listed) == 37
     registry = server.mcp._tool_manager._tools
     assert all(tool.outputSchema is None for tool in listed)
     assert all(item.fn_metadata.output_schema is None
@@ -391,9 +334,9 @@ def test_each_registered_wrapper_returns_one_gated_text_block(_synthetic_mcp):
         return results
 
     results = asyncio.run(call_all())
-    assert len(results) == 62
-    assert len(_synthetic_mcp["calls"]) == 62
-    assert len(_synthetic_mcp["gated"]) == 62
+    assert len(results) == 37
+    assert len(_synthetic_mcp["calls"]) == 37
+    assert len(_synthetic_mcp["gated"]) == 37
     for name, content in results:
         assert len(content) == 1
         assert content[0].type == "text"

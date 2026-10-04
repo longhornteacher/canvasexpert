@@ -44,7 +44,7 @@ def test_stage_scoring_results_schema_names_the_canvas_score_row():
     result = (schema.get("$defs") or {}).get("ScoringResult") or {}
     properties = result.get("properties") or {}
 
-    assert schema["properties"]["results"]["items"] == {"$ref": "#/$defs/ScoringResult"}
+    assert schema["properties"]["results"]["items"] == {"anyOf": [{"$ref": "#/$defs/ScoringResult"}, {"$ref": "#/$defs/RevisionResult"}]}
     assert set(result.get("required") or []) == {
         "pseudonym", "item_id", "score", "feedback",
     }

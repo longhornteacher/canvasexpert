@@ -60,6 +60,6 @@ remains outstanding; use unpublished `[TEST]` items and the smoke path in §6b.
 - `PageAdapter.build_payload` silently drops `module_id` and `create_module`, which
   `content_push._KIND_OPTIONS["page"]` accepts. That contradicts the rule that unsupported
   options are refused, not dropped.
-- `preview_assignment_update` and `apply_assignment_update` would write description HTML
+- `preview_assignment_update` and `apply_operation` would write description HTML
   outside the renderer. This needs a later decision: re-render from a 2.0 payload, or
   restrict edits to fields that don't bypass the look.

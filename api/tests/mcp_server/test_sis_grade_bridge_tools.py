@@ -11,10 +11,6 @@ from api.platform_services import config
 
 def test_plain_tools_delegate_to_shared_use_case(monkeypatch):
     monkeypatch.setattr(
-        tools.sis_grade_bridge, "list_sis_grade_bridges",
-        lambda course_id: {"ok": True, "course_id": course_id, "bridges": []},
-    )
-    monkeypatch.setattr(
         tools.sis_grade_bridge, "preview_sis_grade_bridge",
         lambda course_id, title: {"ok": True, "course_id": course_id, "title": title},
     )
@@ -24,11 +20,11 @@ def test_plain_tools_delegate_to_shared_use_case(monkeypatch):
             "ok": True, "coordinates": [operation_id, batch_id, digest]
         },
     )
-    assert tools.list_sis_grade_bridges("course-x")["course_id"] == "course-x"
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {"kind": tools.sis_grade_bridge.KIND})
     preview = tools.preview_sis_grade_bridge("course-x", "Invented")
     assert preview["title"] == "Invented"
     assert preview["next"] == tools._NEXT_STEPS["preview_sis_grade_bridge"]
-    assert tools.apply_sis_grade_bridge("op", "batch", "digest")["coordinates"] == [
+    assert tools.apply_operation('op', 'batch', 'digest')["coordinates"] == [
         "op", "batch", "digest"
     ]
 

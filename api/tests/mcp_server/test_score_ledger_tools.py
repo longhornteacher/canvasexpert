@@ -26,8 +26,7 @@ def test_rule_tools_are_local_and_history_discloses_recorded_only_coverage(
     vault.save()
     monkeypatch.setattr(tools, "_vault_factory", lambda: vault)
 
-    created = tools.create_score_curve_rule(
-        "course-1", {"model": "gap_close", "fraction": 0.3}, "assignment-1")
+    created = tools.set_score_curve_rule('course-1', {'model': 'gap_close', 'fraction': 0.3}, 'assignment-1')
     assert created["ok"] is True
     assert created["rule"]["preview"]["entered_score"] == 67
     empty = tools.get_score_ledger("course-1", "assignment-1")
@@ -55,7 +54,7 @@ def test_rule_tools_are_local_and_history_discloses_recorded_only_coverage(
     assert tools.get_score_ledger("course-1", "assignment-1", pseudonyms="Nobody")[
         "first_recorded_at"] is None
 
-    deactivated = tools.deactivate_score_curve_rule("course-1", created["rule"]["rule_id"])
+    deactivated = tools.set_score_curve_rule('course-1', rule_id=created['rule']['rule_id'], active=False)
     assert deactivated["ok"] is True
     assert any(event["action"] == "deactivate"
                for event in score_ledger.list_rule_events("course-1", root=tmp_path))

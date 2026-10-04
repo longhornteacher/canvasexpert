@@ -41,12 +41,12 @@ without lowering an above-points input. Default rounding is final-value decimal
 half-up to a whole point; `53 + .30*(100-53) = 67.1 -> 67` is disclosed in preview.
 Only enumerated formula models execute; never evaluate expression strings.
 
-`create_score_curve_rule(course_id, formula, assignment_id="")` creates a local
+`set_score_curve_rule(course_id, formula, assignment_id=null)` creates a local
 standing rule only, with rule_id, scope (assignment if id supplied, otherwise
 course), created_by=`teacher`, created_at, device, formula and preview math.
 No Canvas calls occur. One active rule per exact scope; creating a second active
 rule refuses. An assignment rule takes precedence over a course rule; never
-stack curves. `deactivate_score_curve_rule(course_id, rule_id)` appends a local
+stack curves. `set_score_curve_rule(course_id, rule_id=rule_id, active=false)` appends a local
 deactivation, reports affected assignment scopes, and writes no Canvas grades.
 
 Standing rules are resolved and frozen at stage. Stage exposes raw, the
@@ -56,7 +56,7 @@ payload and generated comment participate in the digest. Changing/deactivating
 an effective rule invalidates an unposted frozen stage rather than silently
 altering its bytes. Feedback-only/comment-only rows never apply a score rule.
 
-Existing preview_grade_adjustment/apply_grade_adjustment remain the only curve
+Existing `preview_grade_adjustment` and `apply_operation` remain the only curve
 grade-write/revert surface, assignment-scoped even for a shared course rule.
 The adjustment accepts `kind: rule, rule_id, baseline_basis: raw | entered`.
 Rule-id previews require an explicit basis; raw requires recorded raw evidence

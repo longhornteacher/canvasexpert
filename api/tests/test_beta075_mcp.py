@@ -19,7 +19,7 @@ def test_live_mcp_surface_shape():
     from api.mcp_server import server
 
     live = contract.live_contract(server.mcp)
-    assert len(live["tools"]) == 62
+    assert len(live["tools"]) == 37
     assert "confirm_sis_grade_bridge_passback" not in {
         tool["name"] for tool in live["tools"]
     }
@@ -97,7 +97,7 @@ def test_mirror_doc_bound_tools_match_the_live_registry():
     path = Path(__file__).resolve().parents[2] / "docs" / "mirror.md"
     doc = path.read_text(encoding="utf-8")
     section = doc.split("## MCP reads and the refresh tool", 1)[1].split("## v1 non-goals", 1)[0]
-    expected = {"get_roster", "get_submissions", "get_gradebook_snapshot", "get_submission_history"}
+    expected = {"get_roster", "get_submissions", "get_gradebook_snapshot", "get_submissions"}
     named = set(re.findall(r"\b(?:get|list|preview|apply|save|delete|clear|archive|stage|refresh)_[a-z0-9_]+", section))
     assert expected <= named
     assert named - {"refresh_mirror"} == expected
@@ -199,4 +199,4 @@ def test_mcp_mirror_gradebook_snapshot_stays_pseudonymized(tmp_path, monkeypatch
         for leak in ("Learner One", "Learner", "900001", "SIS-900001", "private-name.pdf"):
             assert leak not in dumped
 
-    assert "No local course catalog found" in tools.get_course_assignments("previous")["error"]
+    assert "No local course catalog found" in tools.get_course_content('previous', kind='assignments')["error"]

@@ -135,7 +135,7 @@ unchanged.
 
 `agent_commentary` is where the agent says what it found and how strong it thinks the
 evidence is, in plain words, citing what it relied on (`writing_timeline`,
-`evidence.overlap`, `get_submission_history`, or its own checks
+`evidence.overlap`, `get_submissions(history=true, ...)`, or its own checks
 such as a web search for distinctive phrases). Canvas Expert passes it through as written.
 It does not change the score or the student-facing feedback by itself; the teacher
 decides. Integrity concerns stay out of `feedback`, which the student reads, and an
@@ -174,9 +174,12 @@ object, including `posted_grade`, `late_policy_status`, and
 in the rendered feedback; it does not null or discard the structured numeric score.
 ## Session consumption and write safety
 
-Feedback-only reopening is a separate ordinary-assignment lane:
-`prepare_feedback_revision` -> `get_feedback_revision_packet` ->
-`stage_feedback_revisions` -> `apply_staged_feedback_revisions`. Its immutable
+Feedback reopening uses the scoring tools with
+`prepare_scoring_session(course_id, assignment_id, mode="feedback_revision")` ->
+`get_scoring_packet` -> `stage_scoring_results` -> `get_scoring_preview` ->
+`apply_staged_scoring_results`. Preparation returns the existing revision work
+item's id as `scoring_session_id`; it stays owned by the private revision service,
+with unambiguous session identity across the two stores. Its immutable
 packet carries complete scrubbed response/staff feedback, existing finite score,
 pseudonym, validated comment creation timestamp (or blank), and an opaque comment key. Transport-size or privacy blockers withhold
 complete text rather than truncating it. Staff authorship is proved privately by
@@ -184,10 +187,12 @@ course-filtered active teacher/TA enrollment during a deliberate comment mirror
 refresh; student/unknown-role comments are excluded. Missing stored comment IDs
 require an explicit fresh comment acquisition, never inference or migration.
 
-Revision rows contain exactly `{pseudonym, comment_key, feedback}`. This lane
+Revision rows contain exactly `{pseudonym, comment_key, feedback}` in `results`. This mode
 accepts concise teacher-controlled plain text and does not invoke the ordinary
 grading feedback renderer. Stage validates all selected rows without Canvas I/O;
-the frozen digest covers exact private endpoint coordinates and feedback. Apply
+the frozen digest covers exact private endpoint coordinates and feedback.
+`get_scoring_preview` projects each current comment and exact replacement, plus
+the staged attachment filename, for the teacher's review before apply. Apply
 uses the existing Submission Comments PUT endpoint with only `{"comment": text}`;
 it cannot send grade, status, or late-policy fields. Without an attachment it
 never appends a new comment.
@@ -209,7 +214,12 @@ stage, or apply. Deliberate `refresh_mirror(..., include_comments=true)` opts in
 the full comment-bearing acquisition/staff-proof scope; its default stays unchanged.
 Shared work ownership and
 the existing assignment scope lock apply; original evidence and prior runs remain
-in append-only private snapshots/history. The existing scoring lane is unchanged.
+in append-only private snapshots/history. The ordinary `mode="score"` lane is unchanged.
+Revision mode refuses late-policy, scoring-guidance, and feedback-contract preparation
+options and scoring-only stage options. `refresh_scoring_session` and
+`reset_scoring_review` refuse revision sessions explicitly. This mode edits existing
+comments; `grade_mode="feedback_only"` in a score session instead creates draft-score
+comments. Neither mode sends grade fields.
 
 One exact course-and-assignment scope has at most one actionable Scoring Session. Before starting
 another full scoring refresh, preparation checks that exact scope. When a usable actionable

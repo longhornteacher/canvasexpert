@@ -248,7 +248,7 @@
         "catalog.pages"
       ],
       "reconciliation": "invalidate",
-      "reason": "Creates a Canvas page, which the v3 catalog projects as its own pages scope (read by the get_course_pages MCP tool and the web UI). The central operation-ledger post-apply hook invalidates catalog.pages after the confirmed operation succeeds, unconditionally for content.page; it additionally invalidates catalog.modules only when the payload carries a module placement."
+      "reason": "Creates a Canvas page, which the v3 catalog projects as its own pages scope (read by the get_course_content(kind=\"pages\", ...) MCP tool and the web UI). The central operation-ledger post-apply hook invalidates catalog.pages after the confirmed operation succeeds, unconditionally for content.page; it additionally invalidates catalog.modules only when the payload carries a module placement."
     },
     {
       "path": "api/operation_ledger/adapters/page.py",

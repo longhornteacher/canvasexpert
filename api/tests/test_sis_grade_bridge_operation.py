@@ -1,3 +1,4 @@
+from api.mcp_server import tools as mcp_tools
 """Mirror-first laws for differentiated-family grade bridge operations."""
 
 import copy
@@ -173,7 +174,7 @@ def _preview():
 
 
 def _apply(preview):
-    return sis_grade_bridge.apply_sis_grade_bridge(
+    return mcp_tools.apply_operation(
         preview["operation_id"], preview["batch_id"], preview["review_digest"]
     )
 
@@ -210,7 +211,7 @@ def test_stale_local_mirror_refuses_without_live_fallback(bridge_harness, monkey
         "sections": {"assignments": "stale"},
         "error": "The local course catalog is not current.",
         "next": (
-            "Refresh this course's structure with refresh_course_structure, "
+            "Refresh this course's structure with refresh_mirror(structure_only=true), "
             "then retry."
         ),
     }
@@ -237,7 +238,7 @@ def test_apply_with_non_current_catalog_blocks_as_catalog_not_current_not_drift(
     assert target["error_code"] == "catalog_not_current"
     assert target["error_code"] != "drift_detected"
     assert target["next"] == (
-        "Refresh this course's structure with refresh_course_structure, "
+        "Refresh this course's structure with refresh_mirror(structure_only=true), "
         "then retry."
     )
 
@@ -399,7 +400,7 @@ def test_reconcile_preview_apply_links_a_two_theme_family(tmp_path, monkeypatch)
     )
     assert preview["ok"] is True
 
-    result = sis_grade_bridge.apply_sis_grade_bridge(
+    result = mcp_tools.apply_operation(
         preview["operation_id"], preview["batch_id"], preview["review_digest"]
     )
     assert result["ok"] is True
@@ -488,10 +489,10 @@ def test_two_link_only_repairs_previewed_together_both_apply(tmp_path, monkeypat
     assert preview_a["ok"] is True
     assert preview_b["ok"] is True
 
-    result_a = sis_grade_bridge.apply_sis_grade_bridge(
+    result_a = mcp_tools.apply_operation(
         preview_a["operation_id"], preview_a["batch_id"], preview_a["review_digest"]
     )
-    result_b = sis_grade_bridge.apply_sis_grade_bridge(
+    result_b = mcp_tools.apply_operation(
         preview_b["operation_id"], preview_b["batch_id"], preview_b["review_digest"]
     )
 

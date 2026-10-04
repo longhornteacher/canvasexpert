@@ -1,6 +1,8 @@
 """Operation Ledger laws and one complete synthetic grade-adjustment example."""
 from __future__ import annotations
 
+from api.mcp_server import tools as mcp_tools
+
 import copy
 from contextlib import contextmanager
 
@@ -165,7 +167,7 @@ def test_flat_bump_apply_receipt_and_revert_preview_are_digest_protected(
         {"kind": "rule", "model": "flat_bump", "settings": {"bump": 2}},
     )
     assert preview["ok"] is True
-    applied = grade_adjustment.apply_grade_adjustment(
+    applied = mcp_tools.apply_operation(
         preview["operation_id"], preview["batch_id"], preview["review_digest"])
     assert applied["ok"] is True
     assert applied["counts"] == {
@@ -177,7 +179,7 @@ def test_flat_bump_apply_receipt_and_revert_preview_are_digest_protected(
     assert {row["outcome"] for row in detail["targets"][0]["failed_items"]} == {"done"}
     assert len(grade_adjustment.report_adjustments()) == 1
 
-    already = grade_adjustment.apply_grade_adjustment(
+    already = mcp_tools.apply_operation(
         preview["operation_id"], preview["batch_id"], preview["review_digest"])
     assert already["status"] == "already_applied"
     assert len(canvas.puts) == 2
@@ -191,7 +193,7 @@ def test_flat_bump_apply_receipt_and_revert_preview_are_digest_protected(
         {"pseudonym": "Eevee", "before": 10, "after": 8},
         {"pseudonym": "Pikachu", "before": 7, "after": 5},
     ]
-    reverted = grade_adjustment.apply_grade_adjustment(
+    reverted = mcp_tools.apply_operation(
         revert_preview["operation_id"], revert_preview["batch_id"],
         revert_preview["review_digest"])
     assert reverted["ok"] is True
@@ -244,7 +246,7 @@ def test_assignment_change_between_preview_and_apply_blocks_with_no_grade_write(
     assert preview["ok"] is True
 
     canvas.assignment.update(live_change)
-    applied = grade_adjustment.apply_grade_adjustment(
+    applied = mcp_tools.apply_operation(
         preview["operation_id"], preview["batch_id"], preview["review_digest"])
 
     target = operations.get_operation(preview["operation_id"])["targets"][0]
@@ -319,7 +321,7 @@ def test_curve_computes_from_and_verifies_against_entered_score(monkeypatch):
         {"pseudonym": "Pikachu", "before": 80, "after": 85},
     ]
 
-    applied = grade_adjustment.apply_grade_adjustment(
+    applied = mcp_tools.apply_operation(
         preview["operation_id"], preview["batch_id"], preview["review_digest"])
 
     assert applied["ok"] is True

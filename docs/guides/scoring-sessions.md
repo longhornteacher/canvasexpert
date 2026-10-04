@@ -19,7 +19,7 @@ refresh. The result is student-free and includes one freshness row per course:
 below, meaning a refresh is due).
 
 The agent keeps the mirror current itself. When a freshness row is outside policy
-it calls `refresh_mirror(course_id)` (or `refresh_course_structure(course_id)` for
+it calls `refresh_mirror(course_id)` (or `refresh_mirror(course_id, structure_only=true)` for
 the catalog) and carries on, with no teacher permission needed. A refresh costs only
 time, so it skips the refresh when the data is within policy, and it tells the
 teacher when a refresh brought in new or resubmitted work. The teacher can still
@@ -179,8 +179,8 @@ are no real names in it and no Canvas Expert preview page. To change a score, da
 or comment on an unposted row, the teacher says so in conversation and the agent stages
 the changed results again, then previews again. A previously verified numeric-score push
 in the current session can also be corrected through this same stage, preview, and
-explicit go. Use the existing feedback-revision tools for comment-only or feedback-only
-pushes. The correction
+explicit go. Use `prepare_scoring_session(mode="feedback_revision", ...)` to edit
+comments from earlier comment-only or feedback-only pushes. The correction
 preview shows prior values; unchanged feedback is omitted from the Canvas write, while
 changed feedback is sent as a new comment. An identical restage says the result was
 already pushed, and a `sent_unknown` row remains blocked. A verified correction reports
@@ -193,7 +193,8 @@ says to push. Canvas Live is the record afterward. A previously verified numeric
 row still in the current session can be corrected through review; later edits happen in
 Canvas Live.
 
-The same habit covers every Canvas write (`apply_*` tools and `push_content_live`).
+The same habit covers every Canvas write (`apply_operation`, scoring and roster applies,
+and `push_content_live`).
 Before the call, the agent says what will change and any warnings, then waits for
 the teacher's go. One go can cover the several rows or assignments the teacher
 selected.
@@ -212,7 +213,7 @@ it:
   item share 25 or more words outside the shared prompt text. It names the other
   pseudonym, the shared word count, and short samples. This is plain text
   matching, so it shows what is shared and not why;
-- `get_submission_history` for retained earlier attempts;
+- `get_submissions(course_id, assignment_id, history=true)` for retained earlier attempts;
 - the agent's own checks, such as a web search for distinctive phrases or a
   reading-level comparison.
 
@@ -254,24 +255,35 @@ teacher when the refresh brought in new or resubmitted work.
 - With nothing new, the result is `changed: false` and the session only records
   the current mirror, so reads resume.
 
-## Feedback-only reopening
+## Feedback revision mode
 
-Already graded ordinary assignments can be reopened for **feedback only** with
-`prepare_feedback_revision(course_id, assignment_id)`. Read every page through
-`get_feedback_revision_packet(work_id)`: it includes the existing numeric score,
+Already graded ordinary assignments can be reopened to edit existing feedback with
+`prepare_scoring_session(course_id, assignment_id, mode="feedback_revision")`.
+Preparation returns a `scoring_session_id` for the private revision work item.
+Read every page through `get_scoring_packet(scoring_session_id)`: it includes the existing numeric score,
 complete scrubbed response, staff feedback, validated creation timestamps, and opaque comment keys. Scores are
 context only. Held and excluded counts must be reported; oversized complete text
 returns `feedback_packet_too_large`, rather than silently omitting text.
 
 Stage selected `{pseudonym, comment_key, feedback}` rows with
-`stage_feedback_revisions(work_id, expected_packet_digest, revisions, attachment_file=null)`. Feedback
+`stage_scoring_results(scoring_session_id, results, expected_packet_digest,
+attachment_file=null)`. Feedback
 is teacher-controlled concise plain text, without the ordinary grading renderer's
 Glows/Grows or extra-credit requirements. Report selected and untouched counts.
-On direct teacher instruction, call
-`apply_staged_feedback_revisions(work_id, expected_stage_digest)` to edit those
+Call `get_scoring_preview(scoring_session_id)` and follow every page before asking
+for a push. Show each current comment, its exact replacement, and the attachment
+filename when selected. On direct teacher instruction, call
+`apply_staged_scoring_results(scoring_session_id, expected_stage_digest)` to edit those
 existing comments. It sends only comment text and preserves scores and gradebook
 status by omission, so it has no score to check and reads nothing back.
 Repeat apply returns durable outcomes without resending accepted or rejected rows.
+
+This session mode differs from `grade_mode="feedback_only"` in an ordinary score
+session: revision edits an existing comment, while feedback-only scoring posts a
+new comment containing a draft score. Revision preparation refuses late-policy,
+scoring-guidance, and feedback-contract options. Scoring-only stage options,
+`refresh_scoring_session`, and `reset_scoring_review` also refuse revision sessions
+with a clear code; they never silently drop options or change scores.
 
 To attach a teacher-selected reference document, first use `stage_attachment`
 and pass its exact staged filename as `attachment_file`. The stage freezes its

@@ -125,44 +125,6 @@ def _current_course(course_id: str) -> bool:
     }
 
 
-def list_sis_grade_bridges(course_id: str) -> dict:
-    course_key = str(course_id or "").strip()
-    if not course_key:
-        return {"ok": False, "error": "course_id is required"}
-    saved_ids = {
-        str(course.get("id") or "").strip()
-        for course in [*(config.saved_courses() or []), *(config.active_courses() or [])]
-        if str(course.get("id") or "").strip()
-    }
-    if course_key not in saved_ids:
-        return {
-            "ok": False,
-            "error": (
-                f"Unknown course_id '{course_key}'; call list_courses and use a "
-                "returned course_id."
-            ),
-        }
-    if not _current_course(course_key):
-        return {"ok": False, "error": "course is not in Current courses"}
-    try:
-        records = config.list_sis_grade_bridges(course_key)
-    except Exception:
-        return {"ok": False, "error": "bridge family links could not be read"}
-    return {
-        "ok": True,
-        "course_id": course_key,
-        "bridges": [
-            {
-                "family_title": record.get("family_title"),
-                "source_count": len(record.get("source_assignment_ids") or []),
-                "bridge_assignment_id": record.get("bridge_assignment_id"),
-                "registered": True,
-            }
-            for record in records
-        ],
-    }
-
-
 class _CatalogNotCurrentError(ValueError):
     """The local course catalog is not current (AC2).
 
@@ -223,7 +185,7 @@ def _catalog_not_current_refusal(sections: dict[str, str]) -> dict:
         "sections": dict(sections),
         "error": "The local course catalog is not current.",
         "next": (
-            "Refresh this course's structure with refresh_course_structure, "
+            "Refresh this course's structure with refresh_mirror(structure_only=true), "
             "then retry."
         ),
     }
@@ -995,7 +957,6 @@ def _result_projection(operation_key: str, result: dict, fallback: dict) -> dict
 
 
 __all__ = [
-    "list_sis_grade_bridges",
     "reconcile_sis_grade_bridges",
     "preview_sis_grade_bridge_reconciliation",
     "preview_sis_grade_bridge",

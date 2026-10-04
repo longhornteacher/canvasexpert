@@ -32,6 +32,13 @@ match. The secret itself stays in each computer's Windows Credential Manager.
 3. Let OneDrive finish syncing `_Shared/` before opening Canvas Expert on the other computer.
 4. Refresh CanvasMirror separately on each computer; its cache is local to that computer.
 
+To transfer resumable work, find it with `list_work_items()` and inspect one item
+with `list_work_items(work_id=...)`. On the current computer, call
+`transfer_work_item(work_id, action="hand_off")` to release its lease, let
+OneDrive finish syncing, then call `transfer_work_item(work_id, action="take_over")`
+on the other computer. A stale lease requires an explicit confirmed takeover with
+`confirm_stale=true`; orphaned events and sync conflicts remain visible.
+
 If the **Local workspace & privacy** card reports a shared-store conflict, stop student-data
 work and resolve the listed conflict in Canvas Expert before retrying. Do not merge or delete
 conflict copies by hand.

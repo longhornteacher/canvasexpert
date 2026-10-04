@@ -19,7 +19,9 @@ The runtime supports:
   assignment-bounded SAFE packet and writes the reviewed score/mark and authored plain-text
   comment to Canvas once. The teacher reviews the result in Canvas Live.
 - **MCP server:** local pseudonymized reads, guarded writes, and Scoring Sessions
-- **Feedback revisions:** reopen already graded ordinary assignment comments for
+- **Feedback revisions:** `prepare_scoring_session(mode="feedback_revision", ...)`
+  reopens already graded ordinary assignment comments through the same packet,
+  stage, preview, and apply tools used for scoring, for
   concise teacher-controlled feedback while preserving scores. The private owner
   `powergrader/feedback_revision.py` uses `platform_services.canvas_client._canvas_send`
   only for a PUT to the existing Submission Comments endpoint with `{"comment": text}`.
@@ -32,6 +34,11 @@ The runtime supports:
   and staff proof; the default refresh remains unchanged.
   See `docs/guides/scoring-sessions.md` for prepare/read/stage/apply and blocker recovery.
 - **Download** — submission bundles by assignment or by student
+
+Ledger-backed content, assignment, grade, attempt, and SIS bridge operations use
+`apply_operation` after the teacher reviews the frozen preview. Authoring contracts
+are topics in `get_product_guide`; course assignments, pages, and modules are kinds
+in `get_course_content`. Inapplicable options are refused explicitly.
 
 Local-only, never served. See `AGENTS.md` Firm rules.
 
@@ -166,8 +173,8 @@ changed bridge grades in Canvas Live. The teacher reviews there and owns Canvas 
   answers its own GET. `verify_live` takes the assignment id for `kind: "quiz"`.
   A classic file may also declare `differentiation: "hub"` with `tiers` (supports only):
   one restricted page per tier, tag-assigned like the AssignmentForge Hub, linked from the
-  quiz description. Push it with `preview_content_push`; `preview_differentiated_quiz_push`
-  refuses it. Canvas Expert cannot score classic quiz writing yet; the teacher grades it in SpeedGrader.
+  quiz description. Push it with `preview_content_push`; the `variants` family mode
+  refuses classic quizzes. Canvas Expert cannot score classic quiz writing yet; the teacher grades it in SpeedGrader.
 - **Differentiated family**: two or more files with the same unsuffixed base title and
   canonical `metadata.variant` tier create exact `Base - <configured tag>` quizzes. Each
 source is published, group-only, omitted from the final grade, and SIS-disabled. One

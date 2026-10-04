@@ -51,7 +51,7 @@ def feedback_revision_work(tmp_path, monkeypatch):
     monkeypatch.setattr(fr.canvas_client, "canvas_get", lambda *_a, **_kw: pytest.fail("No Canvas GET allowed"))
 
     def prepare(**kwargs):
-        return tools.prepare_feedback_revision("111", "700010", **kwargs)
+        return tools.prepare_scoring_session('111', '700010', **kwargs, mode='feedback_revision')
 
     def revisions(packet, take=None):
         return [{"pseudonym": r["pseudonym"], "comment_key": r["comment_key"],

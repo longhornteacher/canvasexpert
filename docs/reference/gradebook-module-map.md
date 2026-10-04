@@ -47,7 +47,7 @@ attention.
 ## Verified Canvas facts: attempts and reopening (2026-09-30)
 
 Canvas Expert grants attempts and reopens an assignment for selected students (or the
-whole class) through `preview_attempts_grant` and `apply_attempts_grant`. These facts were
+whole class) through `preview_attempts_grant` and `apply_operation`. These facts were
 verified with a teacher token on the Test Student, using probe objects that were deleted
 afterward, unless marked otherwise.
 

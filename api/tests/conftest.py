@@ -1,3 +1,4 @@
+from api.mcp_server import tools as mcp_tools
 """Session-wide safety net: no test may touch this machine's real
 config.json, profiles.json, or OneDrive-synced workspace.
 
@@ -429,7 +430,7 @@ def attempts_world(monkeypatch):
                 ATTEMPTS_COURSE, ATTEMPTS_ASSIGNMENT, grant)
 
         def apply(reviewed):
-            return attempts_grant.apply_attempts_grant(
+            return mcp_tools.apply_operation(
                 reviewed["operation_id"], reviewed["batch_id"], reviewed["review_digest"])
 
         return SimpleNamespace(canvas=canvas, vault=vault, preview=preview, apply=apply,

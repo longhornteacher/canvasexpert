@@ -25,7 +25,7 @@ For the agent:
   next, and go through the pseudonym gate on the way out; and Canvas Expert stays the
   only thing that holds the token and talks to Canvas. When a read is outside the
   freshness policy, the tool says so (a stale or missing mirror returns a clear error),
-  and the agent refreshes it itself (`refresh_mirror`, `refresh_course_structure`, or
+  and the agent refreshes it itself (`refresh_mirror`, `refresh_mirror(course_id, structure_only=true)`, or
   `refresh_scoring_session`) and reads again, without asking the teacher first. Data
   already within policy needs no refresh, and skipping one saves time. Staleness is
   still reported honestly in every read. See "MCP reads and the refresh tool" below.
@@ -57,7 +57,7 @@ For the agent:
    refreshes it without asking the teacher: `refresh_mirror` triggers Canvas
    Expert's own sync engine (the same coordinator behind "Sync now") and
    reports a freshness status rather than Canvas data;
-   `refresh_course_structure` refreshes a course's module structure; and
+   `refresh_mirror(course_id, structure_only=true)` refreshes a course's module structure; and
    `refresh_scoring_session` brings late or resubmitted work from the mirror
    into an open Scoring Session. The agent skips a refresh when the data is
    already within policy, because a refresh costs time.
@@ -331,7 +331,7 @@ thing that talks to Canvas: the agent asks it to sync, then reads whatever
 Canvas Expert wrote to disk. When the data is already within policy, the agent
 skips the refresh, because it only costs time.
 
-`get_submission_history` reads the durable local archive independently of
+`get_submissions(history=true, ...)` reads the durable local archive independently of
 projection freshness and membership. It returns bounded, scrubbed observations
 with `coverage: observed_only`; it never refreshes Canvas or returns raw files.
 Approved text/DOCX originals may contribute scrubbed text; PDF and other

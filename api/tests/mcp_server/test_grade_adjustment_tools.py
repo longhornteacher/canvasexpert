@@ -10,15 +10,15 @@ def test_grade_adjustment_tools_are_registered_with_the_versioned_shape():
     schema = contract.load_contract()
     by_name = {item["name"]: item for item in schema["tools"]}
 
-    assert {"preview_grade_adjustment", "apply_grade_adjustment"} <= set(by_name)
+    assert {"preview_grade_adjustment", "apply_operation"} <= set(by_name)
     assert by_name["preview_grade_adjustment"]["required"] == [
         "course_id", "assignment_id", "adjustment",
     ]
-    assert by_name["apply_grade_adjustment"]["required"] == [
+    assert by_name["apply_operation"]["required"] == [
         "operation_id", "batch_id", "review_digest",
     ]
     live_names = set(server.mcp._tool_manager._tools)
-    assert {"preview_grade_adjustment", "apply_grade_adjustment"} <= live_names
+    assert {"preview_grade_adjustment", "apply_operation"} <= live_names
 
 
 def test_preview_wrapper_keeps_pseudonyms_and_adds_bounded_next_step(monkeypatch):
@@ -38,7 +38,7 @@ def test_preview_wrapper_keeps_pseudonyms_and_adds_bounded_next_step(monkeypatch
 
     assert result["ok"] is True
     assert result["preview"]["changed"][0]["pseudonym"] == "Pikachu"
-    assert "apply_grade_adjustment" in result["next"]
+    assert "apply_operation" in result["next"]
     assert "student-1" not in json.dumps(result)
 
 
@@ -53,7 +53,8 @@ def test_server_apply_wrapper_is_thin_and_serializes_compactly(monkeypatch):
     )
     monkeypatch.setattr(tools, "final_response_gate", lambda payload: payload)
 
-    wire = server.apply_grade_adjustment("op-synthetic", "batch-synthetic", "digest-synthetic")
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {"kind": "gradebook.grade_adjustment"})
+    wire = server.apply_operation('op-synthetic', 'batch-synthetic', 'digest-synthetic')
     result = json.loads(wire)
 
     assert result["ok"] is True

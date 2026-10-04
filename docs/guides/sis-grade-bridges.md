@@ -81,11 +81,10 @@ postconditions for the writes. Bridge operations do not repair or rearrange modu
 
 | Tool | Purpose |
 |---|---|
-| `list_sis_grade_bridges(course_id)` | List student-free family links for one Current course. |
-| `reconcile_sis_grade_bridges(course_id)` | Discover differentiated families from the current local sync/mirror and return a student-free bridge matrix. |
-| `preview_sis_grade_bridge_reconciliation(course_id, family_title, source_assignment_ids?, bridge_assignment_id?)` | Turn one discovered or agent-proposed grouping into a reviewed bridge-only operation. |
+| `reconcile_sis_grade_bridges(course_id)` | Discover differentiated families and saved links from the current local sync/mirror and return a student-free bridge matrix. |
+| `preview_sis_grade_bridge(course_id, family_title, reconcile=true, source_assignment_ids?, bridge_assignment_id?)` | Turn one discovered or agent-proposed grouping into a reviewed bridge-only operation. Source and bridge ids are accepted only with `reconcile=true`. |
 | `preview_sis_grade_bridge(course_id, family_title)` | Read the exact linked family from the local sync/mirror and freeze the score projection review. |
-| `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | After teacher approval, push the unchanged reviewed scores to the exact linked bridge. |
+| `apply_operation(operation_id, batch_id, review_digest)` | After teacher approval, push the unchanged reviewed bridge operation through its existing owner. |
 
 Grade projection is available only after the exact family link exists. Calling projection
 for an unlinked family returns typed guidance to run reconciliation. Missing local data is a

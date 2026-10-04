@@ -39,6 +39,13 @@ The local stdio MCP server is the primary agent-facing interface. MCP tool
 contracts, refusal behavior, privacy rules, session lifecycles, digests, and
 receipts are product contracts even though the server is local.
 
+Merged tools dispatch to the existing owner for each mode or kind and preserve
+its result shape and refusal codes. Options that do not apply are refused clearly,
+never ignored. Ledger-backed actions apply through `apply_operation` after review;
+scoring and feedback revision use the scoring-session tools, with
+`mode="score"` or `mode="feedback_revision"` at preparation. Their stores,
+write safeguards, and receipts remain independently owned.
+
 Tool results should be semantic and host-neutral:
 
 - structured data and stable field meanings;

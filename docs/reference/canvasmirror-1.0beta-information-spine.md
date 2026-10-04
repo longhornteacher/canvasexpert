@@ -335,7 +335,7 @@ teacher-selected object or write workflow. “Deferred” means do not add merel
 | Attachment/file bytes | Focused only | Canonical private evidence owner | PowerGrader, explicit open/download, portfolios | Never background-prefetch all files |
 | Assignment overrides | Focused/live | Command or focused report owner | Extensions, differentiation, write preflight | Do not globally mirror override trees for 1.0 beta |
 | Page/module item stubs | Required through modules | Student-free catalog | Course structure/navigation | Title/type/content ID only |
-| Page bodies | Required since 2026-08-01 | Student-free catalog `pages` scope | `get_course_pages` MCP course context, retained control-console course-catalog route | Normalized plain text only; every URL rewritten to `[link]` |
+| Page bodies | Required since 2026-08-01 | Student-free catalog `pages` scope | `get_course_content(kind="pages", ...)` MCP course context, retained control-console course-catalog route | Normalized plain text only; every URL rewritten to `[link]` |
 | Classic Quiz questions and detailed responses | Live/focused or Canvas-native | PowerGrader/SpeedGrader boundary | Grading | No broad mirror in 1.0 beta |
 | Teacher/TA/observer directory | Deferred/minimal classification only | None unless a current consumer proves need | Comment authorship edge cases | Do not mirror emails for convenience |
 | Student email and avatars | Live explicit action or remove consumer | No default persistence | Course Info edge case | Privacy cost exceeds routine value |
@@ -357,7 +357,7 @@ signed URLs, or arbitrary page fields. Pages existing in Canvas was explicitly n
 enough on its own.
 
 **That bar was met and the scope was added on 2026-08-01.** The named consumer is AI course
-context: the `get_course_pages` MCP tool serves page text to an assistant, with `full_text`
+context: the `get_course_content(kind="pages", ...)` MCP tool serves page text to an assistant, with `full_text`
 for complete bodies. The v3 catalog carries a `pages` scope alongside assignments, modules,
 and assignment groups, acquired with `include[]=body` and normalized by `course_catalog`
 before anything is written to disk. Each of the original conditions holds in the code:

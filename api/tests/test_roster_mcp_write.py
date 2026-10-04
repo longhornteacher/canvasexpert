@@ -55,7 +55,7 @@ def _assert_private(result, pseudo):
 def test_roster_settings_never_return_identity_or_stored_nickname(monkeypatch, tmp_path):
     path, pseudo = _setup(monkeypatch, tmp_path)
 
-    result = tools.get_roster_student_settings("course-1", pseudo)
+    result = tools.get_roster('course-1', pseudo)
     dumped = json.dumps(result)
     assert result["ok"] is True
     assert result["pseudonym"] == pseudo
@@ -68,7 +68,7 @@ def test_roster_settings_never_return_identity_or_stored_nickname(monkeypatch, t
 
 def test_get_preview_apply_and_clear_are_gated_and_private(monkeypatch, tmp_path):
     path, pseudo = _setup(monkeypatch, tmp_path)
-    got = tools.get_roster_student_settings("course-1", pseudo)
+    got = tools.get_roster('course-1', pseudo)
     _assert_private(got, pseudo)
     assert "nicknames" not in got["settings"]
 
@@ -87,8 +87,8 @@ def test_get_preview_apply_and_clear_are_gated_and_private(monkeypatch, tmp_path
         "course-1", preview["preview"], preview["preview_digest"],
         preview["settings_digest"])
     _assert_private(applied, pseudo)
-    cleared = tools.clear_roster_student_field(
-        "course-1", pseudo, "extra_time", applied["settings_digest"])
+    clear = tools.preview_roster_student_change("course-1", pseudo, {"extra_time": None})
+    cleared = tools.apply_roster_student_change("course-1", clear["preview"], clear["preview_digest"], applied["settings_digest"])
     _assert_private(cleared, pseudo)
     assert Vault(path).entries()[0]["nicknames"] == ["Sam", "Sammy"]
 
@@ -108,8 +108,7 @@ def test_add_nicknames_is_additive_and_clear_rejects_both_nickname_keys(monkeypa
     saved = Vault(path)
     assert saved.entries()[0]["nicknames"] == ["Sam", "Sammy"]
     for field in ("nicknames", "add_nicknames"):
-        rejected = tools.clear_roster_student_field(
-            "course-1", pseudo, field, applied["settings_digest"])
+        rejected = tools.preview_roster_student_change("course-1", pseudo, {field: None})
         assert rejected["ok"] is False
 
 
@@ -118,7 +117,7 @@ def test_mcp_add_nicknames_never_calls_replacing_vault_method(monkeypatch, tmp_p
     def forbidden(*args, **kwargs):
         raise AssertionError("MCP must use add_nicknames, never set_nicknames")
     monkeypatch.setattr(Vault, "set_nicknames", forbidden)
-    current = tools.get_roster_student_settings("course-1", pseudo)
+    current = tools.get_roster('course-1', pseudo)
     preview = tools.preview_roster_student_change(
         "course-1", pseudo, {"add_nicknames": ["Sammy"]})
     applied = tools.apply_roster_student_change(
@@ -129,7 +128,7 @@ def test_mcp_add_nicknames_never_calls_replacing_vault_method(monkeypatch, tmp_p
 
 def test_hidden_nickname_change_invalidates_settings_digest(monkeypatch, tmp_path):
     path, pseudo = _setup(monkeypatch, tmp_path)
-    current = tools.get_roster_student_settings("course-1", pseudo)
+    current = tools.get_roster('course-1', pseudo)
     changed = Vault(path)
     with changed.transaction():
         changed.add_nicknames(USER["id"], ["Sammy"])
@@ -146,7 +145,7 @@ def test_stale_preview_digest_and_settings_digest_never_write(monkeypatch, tmp_p
     _, pseudo = _setup(monkeypatch, tmp_path)
     preview = tools.preview_roster_student_change(
         "course-1", pseudo, {"extra_time": {"enabled": True, "days": 1}})
-    before = tools.get_roster_student_settings("course-1", pseudo)
+    before = tools.get_roster('course-1', pseudo)
     writes = []
     monkeypatch.setattr(tools, "_apply_roster_update",
                         lambda *args: writes.append(args) or {"ok": True})
@@ -159,7 +158,7 @@ def test_stale_preview_digest_and_settings_digest_never_write(monkeypatch, tmp_p
     assert bad_preview["ok"] is False
     assert bad_settings["ok"] is False
     assert writes == []
-    assert tools.get_roster_student_settings("course-1", pseudo)["settings_digest"] == before["settings_digest"]
+    assert tools.get_roster('course-1', pseudo)["settings_digest"] == before["settings_digest"]
 
 
 def test_adapter_itself_refuses_the_replacing_nickname_key(monkeypatch, tmp_path):

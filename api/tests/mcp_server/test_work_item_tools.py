@@ -23,7 +23,7 @@ def test_mcp_work_item_tools_hide_session_body_and_fence_writes(tmp_path, monkey
 
     monkeypatch.setattr(local_runtime, "machine_id", lambda: "DESKTOP-TEST")
     listed = tools.list_work_items()
-    item = tools.get_work_item("shared-session")
+    item = tools.list_work_items('shared-session')
     assert listed["ok"] is True
     assert item["ok"] is True
     serialized = json.dumps({"listed": listed, "item": item})

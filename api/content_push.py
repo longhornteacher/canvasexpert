@@ -84,7 +84,7 @@ def _resolve_staged_draft(kind: str, label: str) -> tuple[str | None, str | None
     if not entries:
         return None, (
             f"no {kind} draft is staged for review; stage the draft first "
-            "(see get_authoring_contract) and then push it"
+            "(see get_product_guide) and then push it"
         )
 
     for candidates in (

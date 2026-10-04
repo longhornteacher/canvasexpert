@@ -60,82 +60,57 @@ authoring guidance, call the relevant product guide or authoring contract:
 
 ## Tools
 
-Tool schema version 76 (62 tools).
+Tool schema version 77 (37 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|
-| `list_courses` | First call for every saved course (Current + Previous) and the `course_id` used by course-scoped tools | No |
-| `list_sis_grade_bridges(course_id)` | Configured whole-course SIS bridges for a Current `course_id` returned by `list_courses` | No |
-| `reconcile_sis_grade_bridges(course_id)` | Discovers differentiated families from the current local sync/mirror and returns a student-free bridge matrix | No |
-| `preview_sis_grade_bridge(course_id, family_title)` | Persists a mirror-backed, digest-protected score projection review for one exact linked differentiated family | No |
-| `preview_sis_grade_bridge_reconciliation(course_id, family_title, source_assignment_ids?, bridge_assignment_id?)` | Persists a reviewed bridge-only repair; optionally proposes an exact grouping when title discovery did not find the family | No |
-| `apply_sis_grade_bridge(operation_id, batch_id, review_digest)` | After approval, pushes the unchanged reviewed scores to the exact linked bridge through the Operation Ledger | No |
-| `reset_scoring_review(scoring_session_id)` | Reopens the current local scoring review without changing its packet or history | No |
-| `list_sections(course_id)` | Saved section values from the local mirror | No |
-| `get_course_assignments(course_id, full_descriptions=false)` | Disk-only catalog assignments; descriptions are previews unless `full_descriptions=true`; reports aged unconfirmed CE writes | No |
-| `get_modules(course_id, include_items=false)` | Disk-only catalog modules; set `include_items=true` to include their items; reports aged unconfirmed CE writes | No |
-| `refresh_course_structure(course_id)` | Coordinator-backed refresh of all four student-free catalog sections; reports each section's state and the oldest successful read, with no Canvas rows | No |
-| `get_course_pages(course_id, full_text=false, include_unpublished=true)` | Normalized pages from the Current course's local v3 catalog, including unpublished pages by default; set `full_text=true` for complete bodies or `include_unpublished=false` to filter; reports aged unconfirmed CE writes | No |
-| `get_authoring_contract(kind)` | Canonical authoring contract for Forge (`quiz`, `assignment`, `page`) from `api/default_docs/AI Authoring/` | No |
-| `get_product_guide(topic="")` | CanvasExpert product knowledge; omit `topic` for the overview, use the annotated topic map to choose detail, or select `tools` for the complete generated inventory | No |
-| `stage_content(kind, label, content)` | Writes one authored draft and its `.done` marker into the per-kind review Inbox; refuses an existing label rather than overwriting | No |
-| `stage_attachment(source_path)` | Copies a host-supplied regular file into the private Forge attachment inbox; returns only its file name and size | No |
-| `list_staged_content(kind="")` | Drafts in the local review Inbox; pass `kind` to filter or omit it for all drafts | No |
-| `preview_content_push(course_id, kind, label, published=None, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=None)` | Persists a local frozen review of one staged draft for one Current course; AssignmentForge style is explicit: Bridge creates unrestricted tier sources and the shared bridge, while Hub creates a whole-class assignment and restricted support pages; existing module IDs are exact, while module creation is explicit. A QuizForge file that declares `quiz_engine: "classic"` freezes one whole-class Classic Quiz (it may hold `ESSAY` and `FILEUPLOAD` items, and, with `differentiation: "hub"`, links restricted tier pages); the review names `quiz_engine`, `writing_item_count`, and a teacher note that Canvas Expert cannot score classic quiz writing yet, and a Hub review carries the same `hub` block as AssignmentForge | No |
-| `list_groups(course_id)` | Current-course group-set and group names from the fresh local mirror; no memberships or Canvas IDs | No |
-| `preview_differentiated_quiz_push(course_id, variants, published=false, module_name="", module_id="", create_module=false, assignment_group_name="", due_at="", unlock_at="", lock_at="", post_to_sis=false)` | Persists a frozen review for one staged New Quiz QuizForge family; each variant contains only its staged `label`, dates are optional, and sources attach unrestricted to the selected module while the gradebook-only bridge does not. A classic quiz file is refused: classic quizzes differentiate with Hub through `preview_content_push` | No |
-| `apply_content_push(operation_id, batch_id, review_digest)` | Creates the exact frozen draft in Canvas through the Operation Ledger; same claims, drift check, and receipt as the push tab | No |
-| `push_content_live(course_id, kind, label, content, published=None, module_name="", module_id="", create_module=false, assignment_group_name="", post_to_sis=None)` | The route for a teacher who asked for content in Canvas; stages the draft, freezes and drift-checks it internally, then creates it. Tiered delivery uses the reviewed family path; carries no dates: use the preview pair for those | No |
-| `preview_assignment_update(course_id, assignment_id, published=None, due_at="", unlock_at="", lock_at="")` | Persists a local frozen field-diff review against one existing Canvas assignment named by id, read live from Canvas; refuses with no Canvas call when no field is supplied | No |
-| `apply_assignment_update(operation_id, batch_id, review_digest)` | Writes only the frozen published/due_at/unlock_at/lock_at patch to Canvas through the Operation Ledger; blocked as `drift_detected` rather than overwritten if the assignment changed since preview | No |
-| `get_roster(course_id)` | Current mirror roster as stable one-word stand-ins and section names | Yes, pseudonymized |
-| `get_roster_student_settings(course_id, pseudonym)` | Safe local settings projection; stored nicknames are omitted | Yes, pseudonymized |
-| `preview_roster_student_change(course_id, pseudonym, patch)` | Digest-protected pseudonym-first settings preview; `next` carries the confirm-then-apply handoff | Yes, pseudonymized |
-| `apply_roster_student_change(course_id, preview, preview_digest, expected_settings_digest)` | Applies the unchanged preview of local roster settings | Yes, pseudonymized |
-| `clear_roster_student_field(course_id, pseudonym, field, expected_settings_digest)` | Direct digest-protected clear for supported local settings; nickname fields are rejected | Yes, pseudonymized |
-| `get_submissions(course_id, assignment_id, include_text=true, pseudonyms="", max_text_chars=2000)` | Mirror submissions including historical rows; current_enrollment marks same-mirror roster membership; optional pseudonym narrowing and bounded text | Yes, pseudonymized |
-| `get_submission_history(course_id, assignment_id, pseudonyms="", include_text=true, max_text_chars=12000, offset=0, limit=50)` | Paginated, scrubbed observations from the private retained archive; URL-free text provenance and consistency/conflict flags; observed-only coverage, no freshness or enrollment claim; original files stay local | Yes, pseudonymized |
-| `get_gradebook_snapshot(course_id)` | Current-course pseudonymized gradebook snapshot from the local mirror, including assignment-level `ungraded` and `partially_scored` counts from Canvas workflow state; exact saved family links label each bridge and differentiated source with its partner IDs | Yes, pseudonymized |
-| `preview_grade_adjustment(course_id, assignment_id, adjustment)` | Mirror-backed, pseudonymized before/after review for a points-based adjustment, including rule-based raw/entered baselines and ledger-linked `revert_rule` previews | Yes, pseudonymized |
-| `apply_grade_adjustment(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grade adjustment with live per-student checks, score readback, durable outcome evidence, and a receipt | Yes, pseudonymized |
-| `preview_attempts_grant(course_id, assignment_id, grant)` | Pseudonymized review of extra attempts and/or a reopened window for an exact pseudonym list or the whole class on a regular online, Classic Quiz, or New Quiz assignment; classified from one live read with base dates, each student's live before value is frozen, and `attention` names `window_locked`, `new_quiz_unverified`, and `grades_unchanged`. Never infers students from scores | Yes, pseudonymized |
-| `apply_attempts_grant(operation_id, batch_id, review_digest)` | Applies the unchanged reviewed grant through the Operation Ledger, one checkpointed write per step and a live re-read before each (an extension is set to before + N only while the live value is still the frozen before); returns each pseudonym as granted, skipped, or failed with its before value. Apply only on the teacher's direct instruction | Yes, pseudonymized |
-| `refresh_mirror(course_id, include_comments=false)` | Sync a saved course's mirror when a read is outside policy (the agent calls it itself; skip it when data is within policy), report status and the successful pass's aggregate `canvas_external_count` (including zero), then retry the read | No, returns a sync status, never course data |
-| `list_feedback_contracts()` | List teacher-authored judgment and feedback-shape contracts available in the private workspace; returns ids, summaries, and projected sizes only | No |
-| `discover_scoring_work()` | Read every Current course locally and return student-free assignment, freshness, and attention tables; no refresh, preparation, or Canvas write | No |
-| `preview_workspace_reset()` | Dry-runs the explicitly authorized local cleanup and reports classified paths, counts, and refusals | No |
-| `apply_workspace_reset(preview_digest)` | Applies only an unchanged, non-refused workspace cleanup preview and returns a local receipt | No |
-| `verify_live(course_id, kind, id="", title="")` | The one Live Canvas read an agent makes after a push: confirms one `assignment`/`page`/`quiz` by exact id or exact title. One Canvas call, or two only when `module_ids` isn't already on the object; writes nothing | No |
-| `resume_operation(operation_id)` | Continues one existing, teacher-approved operation from its last recorded step through the same executor retry path; refuses an operation that already applied, was abandoned, or is held by another attempt | No |
-| `abandon_operation(operation_id)` | Marks one existing, teacher-approved operation abandoned with no Canvas call; blocks later `resume_operation`/apply and returns a `repair_plan` of what was already created from recorded steps | No |
-| `prepare_scoring_session(course_id, assignment_id, scoring_guidance="", use_existing_mirror=false, scoring_guidance_provenance="", feedback_contract_id="", late_policy="")` | Prepare one exact assignment from current local mirror projections; empty `late_policy` keeps the existing setting or defaults to `apply` (first-meaningful-attempt days, no question); explicit `ask` asks about known late rows, while `waive` sets them to none; incomplete history always needs per-row days or an explicit waive | No |
-| `refresh_scoring_session(scoring_session_id, use_existing_mirror=false, replace_resubmitted=false)` | Append late-arriving and (optionally) replace resubmitted unposted work in an open session from the local mirror only; the agent calls it without asking and tells the teacher what it brought in; staged and posted rows are preserved; returns pseudonyms, `packet_digest`, and `first_new_offset` | Yes, pseudonymized |
-| `list_scoring_sessions()` | Identity-free assignment-scoped summaries for current courses | No |
-| `list_work_items()` | Shared work-item holders, sync progress, and orphan counts without private session contents | No |
-| `get_work_item(work_id)` | One shared work item's holder and sync status | No |
-| `handoff_work_item(work_id)` | Release this device's lease so another device can resume after sync | No |
-| `take_over_work_item(work_id, confirm_stale=false)` | Acquire a released item after sync, or explicitly confirm takeover after a stale lease | No |
-| `get_scoring_packet(scoring_session_id, offset=0, limit=10, include_context=true)` | SAFE scoring packet with `prior_entered`, `attempt_count`, `first_attempt_at`, `latest_attempt_at`, `posted_attempt`, and attempt-text consistency | Yes, pseudonymized |
-| `create_score_curve_rule(course_id, formula, assignment_id="")` | Create an immutable local `gap_close` curve rule with a deterministic preview; course rules can be excluded per assignment without deactivating the course rule | No |
-| `deactivate_score_curve_rule(course_id, rule_id)` | Append a lifecycle event deactivating a local score curve rule; no Canvas grades change | No |
-| `get_score_ledger(course_id, assignment_id, pseudonyms="", offset=0, limit=50)` | Read paginated, pseudonymized recorded-only score events with complete scrubbed feedback and opaque device provenance; at most 100 events and 40,000 serialized characters per page | Yes, pseudonymized |
-| `stage_scoring_results(scoring_session_id, results, expected_packet_digest, review_digest="", answers=None, grade_mode="post_score")` | Validate results and optional `insincere`/`late_days`, freeze entered-score math, and stage new scores or corrections to previously verified numeric-score pushes in the current session; use feedback-revision tools for comment-only or feedback-only changes | Yes, pseudonymized |
-| `get_scoring_preview(scoring_session_id, offset=0, limit=25)` | Read projected Canvas payloads with `late: {decision, days, basis, first_attempt_at, latest_attempt_at}`, correction details, and warnings including `late_days_set`, `late_none`, `late_waived`, `late_days_unknown`, `late_box_reset`, and `correction_of_pushed_row` | Yes, pseudonymized |
-| `apply_staged_scoring_results(scoring_session_id, expected_stage_digest, idempotency_key="")` | Post only the unchanged private stage after the teacher says to push; reads back every posted numeric score once, preserves unknown/mismatch outcomes, and returns the stored result without I/O on repeat | Yes, pseudonymized |
-| `prepare_feedback_revision(course_id, assignment_id, use_existing_mirror=false)` | Reopen a graded ordinary assignment for feedback-only revision from the local mirror; scores are preserved and never sent | No |
-| `get_feedback_revision_packet(work_id, offset=0, limit=10)` | Complete scrubbed responses, existing staff feedback, and opaque comment keys; scores are context only | Yes, pseudonymized |
-| `stage_feedback_revisions(work_id, expected_packet_digest, revisions, attachment_file=null)` | Freeze `{pseudonym, comment_key, feedback}` rows and an optional exact staged attachment filename; never calls Canvas | Yes, pseudonymized |
-| `apply_staged_feedback_revisions(work_id, expected_stage_digest)` | On direct teacher instruction, edit only the frozen comments (plus one optional attachment per student) with durable receipts and no grade fields, read-back, or blind retry | Yes, pseudonymized |
+| `list_courses` | Call list_courses first to get the course_id used by course-scoped tools. | No |
+| `reconcile_sis_grade_bridges` | Discover differentiated bridge families and return a student-free status matrix. | No |
+| `preview_sis_grade_bridge` | Persist a local SIS bridge projection or reconciliation review. | No |
+| `preview_grade_adjustment` | Prepare a pseudonymized existing-grade adjustment for teacher review. | Yes, pseudonymized where applicable |
+| `preview_attempts_grant` | Prepare a pseudonymized extra-attempts or reopen grant for review; no Canvas write. | Yes, pseudonymized where applicable |
+| `get_roster` | Read stand-ins, selected sections/groups, or one pseudonym's local settings. | Yes, pseudonymized where applicable |
+| `preview_roster_student_change` | Preview a validated pseudonym-first roster settings change without writing. | Yes, pseudonymized where applicable |
+| `apply_roster_student_change` | Apply an unchanged preview of a local roster settings change. | Yes, pseudonymized where applicable |
+| `get_submissions` | Read pseudonymized submissions or paginated retained history from local stores. | Yes, pseudonymized where applicable |
+| `get_score_ledger` | Read bounded pseudonymized score evidence from the private local archive. | Yes, pseudonymized where applicable |
+| `get_gradebook_snapshot` | Read Current-course assignment grading counts and pseudonymized students. | Yes, pseudonymized where applicable |
+| `get_product_guide` | Read CanvasExpert's product guide; omit topic for the overview. | No |
+| `list_staged_content` | List drafts currently staged in the teacher's local review Inbox. | No |
+| `preview_content_push` | Persist a local review of one staged draft or differentiated quiz variants. | No |
+| `preview_assignment_update` | Freeze a publish/date patch for one existing Canvas assignment by id, refused with no Canvas call if no field is supplied. | No |
+| `stage_content` | Stage one completed Forge envelope in the teacher's review Inbox; no Canvas write. | No |
+| `stage_attachment` | Stage a local Forge attachment. | No |
+| `push_content_live` | Stage and create one authored draft in Canvas; dates use the preview pair. | No |
+| `verify_live` | The one cheap Live check an agent makes after a push, by exact id or exact title. | No |
+| `resume_operation` | Resume a teacher-approved operation from its last recorded step; not a new write. | No |
+| `abandon_operation` | Mark one existing, teacher-approved operation abandoned; makes no Canvas call. | No |
+| `refresh_mirror` | Refresh a saved course mirror, or its catalog with structure_only. | No |
+| `list_feedback_contracts` | List teacher feedback contracts. | No |
+| `discover_scoring_work` | Discover grading work without preparing or writing. | No |
+| `prepare_scoring_session` | Prepare a local scoring or feedback_revision session for one exact assignment. | No |
+| `refresh_scoring_session` | Add late or resubmitted mirror work to an open Scoring Session; tell the teacher what it added. | Yes, pseudonymized where applicable |
+| `list_scoring_sessions` | List identity-free Scoring Session summaries. | No |
+| `list_work_items` | Read shared work holders and sync status, or one work_id detail. | No |
+| `get_scoring_packet` | Read one SAFE packet page for scoring or existing-comment revision. | Yes, pseudonymized where applicable |
+| `stage_scoring_results` | Freeze scoring results or comment revisions locally; no Canvas write. | Yes, pseudonymized where applicable |
+| `get_scoring_preview` | Read a page of the staged review exactly as Canvas will receive it, with warnings. | Yes, pseudonymized where applicable |
+| `apply_staged_scoring_results` | Post the unchanged private stage to Canvas after direct teacher instruction. | Yes, pseudonymized where applicable |
+| `reset_scoring_review` | Reopen the current local scoring review. | No |
+| `apply_operation` | Write the exact frozen operation to Canvas through its existing owner. | Yes, pseudonymized where applicable |
+| `get_course_content` | Read local catalog assignments, pages or modules with kind-specific options. | No |
+| `transfer_work_item` | Take over or hand off one shared work lease after sync. | No |
+| `set_score_curve_rule` | Create or deactivate a local score curve rule without changing Canvas grades. | No |
 
-`get_course_assignments` and `get_modules` only read the local course catalog written by
+`get_course_content(kind="assignments")` and `get_course_content(kind="modules")` only read the local course catalog written by
 the CanvasExpert runtime/control console — neither ever falls back to a live Canvas call.
-If the catalog hasn't been refreshed yet, call `refresh_course_structure` first, then retry. Unlike the mirror
-tools below, `get_modules` returns whatever module records
+If the catalog hasn't been refreshed yet, call `refresh_mirror(structure_only=true)` first, then retry. Unlike the mirror
+tools below, `get_course_content(kind="modules")` returns whatever module records
 the catalog holds, labeled with `source`, `synced_at`, and `state`; stale scope is not write-authoritative.
 
 The staged-content push tools land authored content in Canvas. Authoring still stages
 first, always: the envelope and its `.done` marker go into the per-kind To Review Inbox,
-exactly as `get_authoring_contract` describes, and the draft appears in the matching push
+exactly as `get_product_guide` describes, and the draft appears in the matching push
 tab. What changed is who performs that step. `stage_content` lets the assistant stage the
 draft itself, so a client with no file access can reach the Inbox, and the teacher no
 longer hand-drops a file in the middle of a request they already made.
@@ -151,7 +126,7 @@ prepared for their review gets `stage_content` and stops there, with the draft w
 the push tab. A draft that stages but fails to push is left staged on purpose, so the
 teacher can read what was authored.
 
-Group discovery is mirror-only: `list_groups` returns only group-set and group names
+Group discovery is mirror-only: `get_roster(include=["groups"])` returns only group-set and group names
 and the Roster-selected set, and refuses with `refresh_mirror` when the private group
 snapshot is stale or missing. Differentiated quiz preview is the separate write path:
 it resolves staged labels, captures a fresh private Canvas baseline through the
@@ -174,7 +149,7 @@ The live push carries no due, unlock, or lock dates. Scheduling stays on
 lands, and every parameter is paid for in the tool listing of every session. Dated
 content goes `stage_content`, then the preview pair. `preview_content_push` names the draft by the label
 `list_staged_content` returns, builds the same adapter payload the push tab builds,
-captures the Canvas baseline, and persists one frozen operation; `apply_content_push`
+captures the Canvas baseline, and persists one frozen operation; `apply_operation`
 takes only the three coordinates that preview returned and runs the same Operation Ledger
 apply, so a draft landed from chat and a draft landed from the web UI are the same write
 with the same claim, drift check, per-step checkpoints, and receipt. One draft, one
@@ -184,7 +159,7 @@ than overwritten. Delivery options are per kind, and naming one a kind cannot ca
 refused rather than dropped. Whole-class drafts stay unpublished unless `published=true`;
 differentiated family delivery uses its explicit reviewed publication and verification path.
 
-`preview_assignment_update`/`apply_assignment_update` is a separate, narrower write pair
+`preview_assignment_update`/`apply_operation` is a separate, narrower write pair
 for an assignment that already exists: there is no draft and no label, only a Canvas
 `assignment_id` the caller supplies. Only `published` and the three schedule dates can
 change; `description`, points, and assignment group are never read or resent, so nothing
@@ -230,11 +205,11 @@ resolved through the existing identity/pseudonym service) per family; any mix of
 scored states across the sources and the bridge is held for the teacher, never guessed.
 
 A non-current local catalog is its own plain-text answer, not a failure and not reported
-Canvas drift: `reconcile_sis_grade_bridges`, `preview_sis_grade_bridge_reconciliation`, and
+Canvas drift: `reconcile_sis_grade_bridges`, `preview_sis_grade_bridge(reconcile=true)`, and
 apply (when the catalog goes stale between preview and apply) all return
 `{"code": "catalog_not_current", "blocking": true, "sections": {<scope>: <state>}, "error":
 "The local course catalog is not current.", "next": <refresh instruction>}`. This shape is
-plain text any MCP host can act on directly: the agent runs `refresh_course_structure`
+plain text any MCP host can act on directly: the agent runs `refresh_mirror(structure_only=true)`
 itself and retries. A link-only repair (no live Canvas write) also never marks any local
 catalog scope stale.
 
@@ -243,7 +218,7 @@ workflow, automatic family creation, recurring updates, privacy boundaries, and 
 Attention recovery. The linked contract,
 not the guide, remains the normative behavior authority.
 
-`get_authoring_contract(kind)` takes no `course_id` and carries no student data, so it
+`get_product_guide(topic=kind)` takes no `course_id` and carries no student data, so it
 needs no course gate, no identity vault, and no safety scan. Forge kinds (`quiz`, `assignment`, `page`) read the same
 `api/default_docs/AI Authoring/` file the control console's `/api/download-contract` route serves,
 then receive the Forge-only staging appendix.
@@ -258,7 +233,7 @@ Topic matching trims surrounding whitespace and ignores case. The download route
 CanvasAgent bytes equal `topic="full"`; section topics are extracted from those same bytes.
 Results are text-only MCP content: the server returns one minified JSON text block and
 advertises no structured output schema or structured result. Same gate posture as
-`get_authoring_contract`: no `course_id`, no vault, no safety scan. The always-on server
+`get_product_guide`: no `course_id`, no vault, no safety scan. The always-on server
 instructions point here rather than restating any of it.
 
 `list_staged_content(kind="")` also takes no `course_id` and carries no student data, so
@@ -405,15 +380,15 @@ a live Canvas call. If the required mirror data is stale or missing, they return
 `{"ok": false, "error": "..."}` naming the problem; the agent calls `refresh_mirror(course_id)`
 itself and retries the same read once it reports `"synced"`.
 
-Stale `get_modules` and `get_course_pages` results name the Course Catalog refresh surface
+Stale `get_course_content(kind="modules")` and `get_course_content(kind="pages")` results name the Course Catalog refresh surface
 as their repair. `refresh_mirror` reports only its actual roster, assignments, and
 submissions scope; it does not refresh catalog modules or pages.
 
 The section, mirror, and Course Catalog reads named here reject an ID absent from
 `list_courses` before recommending a mirror or Course Catalog refresh. Student-data tools (`get_roster`, `get_submissions`, and
 `get_gradebook_snapshot`) are scoped to Current courses (`config.active_courses()`). The
-catalog reads (`list_sections`, `get_course_assignments`, and `get_modules`) and
-`refresh_mirror` accept any saved course, including Previous courses. `get_course_pages` is available for saved courses. Pseudonymized artifacts are
+catalog reads (`get_roster(include=["sections"])`, `get_course_content(kind="assignments")`, and `get_course_content(kind="modules")`) and
+`refresh_mirror` accept any saved course, including Previous courses. `get_course_content(kind="pages")` is available for saved courses. Pseudonymized artifacts are
 scrubbed, not anonymous: the pseudonym is stable, and student text still comes through as
 the student wrote it.
 
@@ -506,3 +481,31 @@ pseudonym you don't recognize from the real roster — that's the privacy bounda
 intended, not a bug. If the mirror hasn't synced this course yet, `get_gradebook_snapshot`
 (or `get_roster`/`get_submissions`) refuses instead — call `refresh_mirror` for that course
 and retry.
+
+Merged options are mode-specific. Inapplicable options return `inapplicable_option` before
+side effects. `get_course_content` accepts `full_descriptions` for assignments,
+`full_text`/`include_unpublished` for pages, and `include_items` for modules.
+`get_submissions(history=true)` reads retained observations with offset/limit and a default
+12,000-character text bound; ordinary reads default to 2,000 and refuse history paging.
+`get_roster(include=["sections","groups"])` selects safe structural projections; with
+`pseudonym` it returns private settings plus `expected_settings_digest`. Null values in a
+roster preview patch clear supported fields. Curve rules use `set_score_curve_rule` to create,
+or `rule_id` plus `active=false` to deactivate. Work leases use
+`transfer_work_item(action="take_over"|"hand_off")`.
+
+Feedback revision is `prepare_scoring_session(mode="feedback_revision")` followed by the
+same packet/stage/preview/apply tools. Revision ids use a distinct `feedback-` namespace.
+Rows are `{pseudonym, comment_key, feedback}`; `attachment_file` is revision-only. The preview
+shows `current_comment`, `new_comment`, and the frozen attachment name. Existing comments
+are edited without score fields, preserving the existing receipts and attachment flow.
+Scoring guidance, feedback contracts, late policy, review answers, grade mode and apply
+idempotency keys do not apply to revision sessions; refresh/reset review refuse them.
+
+Every registered tool call emits one local operations-log event: its tool name, timestamp,
+outcome (`ok`, `refused`, or `error`) and duration; errors may add only the class name. The
+existing log envelope includes app version. Arguments, result content, identifiers, names and
+pseudonyms are never logged. No refusal-code field is added to the log allowlist.
+
+Schema v77 wire pins: 37 tools, 14,658 characters for tools/list and 2,303 characters
+for server instructions (down from 21,762 and 2,667). The warn-before-push rule ends
+within the first 2,048 characters. These are wire measurements, not token promises.

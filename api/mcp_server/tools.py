@@ -11,7 +11,7 @@ monkeypatch them without touching the real Canvas API or identity vault
 
 Every ``course_id`` tool gates on ``config.active_courses()`` — the same
 Current-course scope the web UI uses. ``list_courses``, ``discover_scoring_work``,
-``list_feedback_contracts``, ``get_authoring_contract``, ``get_product_guide`` and ``list_staged_content``
+``list_feedback_contracts``, ``_authoring_contract``, ``get_product_guide`` and ``list_staged_content``
 are the only tools with no ``course_id`` and no student data, so they skip both
 the course gate and the outbound safety gate.
 
@@ -50,7 +50,7 @@ from api import score_curves, score_ledger
 from api.course_catalog import read_catalog
 from api import runtime_paths
 
-from . import contract, pseudonym
+from . import contract, pseudonym as pseudonym_boundary
 
 # Compatibility seams retained for existing route-style tests; the bound
 # implementations all live in root-level shared use-case modules.
@@ -59,7 +59,7 @@ from . import contract, pseudonym
 _enqueue_sync = mirror_service.enqueue_sync
 _wait_for_plan = mirror_service.wait_for_plan
 
-_pseudonym_gate = pseudonym.gate
+_pseudonym_gate = pseudonym_boundary.gate
 
 
 # ---------------------------------------------------------------------------
@@ -153,20 +153,16 @@ _NEXT_STEPS = {
     ),
     "preview_sis_grade_bridge": (
         "Summarize the aggregate review and get teacher confirmation, then call "
-        "apply_sis_grade_bridge with batch_id, operation_id, and review_digest unchanged."
-    ),
-    "preview_sis_grade_bridge_reconciliation": (
-        "Reconcile -> preview the exact family -> teacher confirms -> apply the unchanged "
-        "operation coordinates."
+        "apply_operation with batch_id, operation_id, and review_digest unchanged."
     ),
     "preview_grade_adjustment": (
         "Summarize the pseudonymized before/after review and get teacher confirmation, "
-        "then call apply_grade_adjustment with operation_id, batch_id, and review_digest "
+        "then call apply_operation with operation_id, batch_id, and review_digest "
         "unchanged."
     ),
     "preview_attempts_grant": (
         "Summarize the pseudonymized review and every attention item, and get teacher "
-        "confirmation, then call apply_attempts_grant with operation_id, batch_id, and "
+        "confirmation, then call apply_operation with operation_id, batch_id, and "
         "review_digest unchanged. Apply only on the teacher's direct instruction."
     ),
     "preview_roster_student_change": (
@@ -176,17 +172,12 @@ _NEXT_STEPS = {
     ),
     "preview_content_push": (
         "Tell the teacher what the preview says this will create and any warnings, "
-        "then wait for their go before calling apply_content_push with operation_id, "
+        "then wait for their go before calling apply_operation with operation_id, "
         "batch_id, and review_digest unchanged."
-    ),
-    "preview_differentiated_quiz_push": (
-        "Tell the teacher what the differentiated review says this will create and any "
-        "warnings, then wait for their go before calling apply_content_push with "
-        "operation_id, batch_id, and review_digest unchanged."
     ),
     "preview_assignment_update": (
         "Tell the teacher what the field diff says this will change and any warnings, "
-        "then wait for their go before calling apply_assignment_update with "
+        "then wait for their go before calling apply_operation with "
         "operation_id, batch_id, and review_digest unchanged."
     ),
 }
@@ -218,7 +209,7 @@ def _freshness_attention(envelope: dict) -> dict | None:
         "action": "ask_teacher_confirmation",
         "reason": ("This local Canvas snapshot is outside the configured freshness window. "
                    "Refresh it yourself (refresh_mirror for roster, submission and "
-                   "gradebook data, refresh_course_structure for catalog data), then read again."),
+                   "gradebook data, refresh_mirror(structure_only=true) for catalog data), then read again."),
     }
 
 
@@ -251,12 +242,10 @@ def final_response_gate(payload: dict) -> dict:
     vault, error = _open_vault()
     if error:
         return {"ok": False, "error": error}
-    return pseudonym.gate(payload, vault)
+    return pseudonym_boundary.gate(payload, vault)
 
 
-def list_sis_grade_bridges(course_id: str) -> dict:
-    """List student-free SIS grade-bridge family links for one Current course."""
-    return sis_grade_bridge.list_sis_grade_bridges(course_id)
+
 
 
 def reconcile_sis_grade_bridges(course_id: str) -> dict:
@@ -264,50 +253,25 @@ def reconcile_sis_grade_bridges(course_id: str) -> dict:
     return sis_grade_bridge.reconcile_sis_grade_bridges(course_id)
 
 
-def preview_sis_grade_bridge_reconciliation(
-    course_id: str,
-    family_title: str,
-    source_assignment_ids: list[str] | None = None,
-    bridge_assignment_id: str | None = None,
-) -> dict:
-    """Freeze a reviewed repair for one differentiated family.
-    Pass source_assignment_ids to propose a grouping that title-based discovery did not find; the teacher confirms the frozen review before any write."""
-    return _with_next(
-        "preview_sis_grade_bridge_reconciliation",
-        sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
-            course_id,
-            family_title,
-            source_assignment_ids=source_assignment_ids,
-            bridge_assignment_id=bridge_assignment_id,
-        ),
-    )
 
 
-def preview_sis_grade_bridge(course_id: str, family_title: str) -> dict:
-    """Prepare one exact family bridge and return only aggregate review facts."""
-    return _with_next(
-        "preview_sis_grade_bridge",
-        sis_grade_bridge.preview_sis_grade_bridge(course_id, family_title),
-    )
+
+def preview_sis_grade_bridge(course_id: str, family_title: str, reconcile: bool = False,
+                             bridge_assignment_id: str | None = None,
+                             source_assignment_ids: list[str] | None = None) -> dict:
+    """Persist one local bridge projection or reconciliation review."""
+    if not reconcile and (bridge_assignment_id is not None or source_assignment_ids is not None):
+        return _inapplicable("Bridge/source options require reconcile=true.")
+    if reconcile:
+        result = sis_grade_bridge.preview_sis_grade_bridge_reconciliation(
+            course_id, family_title, source_assignment_ids=source_assignment_ids,
+            bridge_assignment_id=bridge_assignment_id)
+    else:
+        result = sis_grade_bridge.preview_sis_grade_bridge(course_id, family_title)
+    return _with_next("preview_sis_grade_bridge", result)
 
 
-def apply_sis_grade_bridge(
-    operation_id: str, batch_id: str, review_digest: str
-) -> dict:
-    """Apply only the opaque, digest-protected SIS bridge review."""
-    result = sis_grade_bridge.apply_sis_grade_bridge(
-        operation_id, batch_id, review_digest
-    )
-    if result.get("bridge_assignment_id") and result.get("course_id"):
-        result = {
-            **result,
-            "verify_hint": [{
-                "course_id": result["course_id"],
-                "kind": "assignment",
-                "id": result["bridge_assignment_id"],
-            }],
-        }
-    return result
+
 
 
 def preview_grade_adjustment(course_id: str, assignment_id: str,
@@ -319,13 +283,7 @@ def preview_grade_adjustment(course_id: str, assignment_id: str,
     )
 
 
-def apply_grade_adjustment(
-    operation_id: str, batch_id: str, review_digest: str
-) -> dict:
-    """Apply only the opaque, digest-protected grade adjustment review."""
-    return grade_adjustment.apply_grade_adjustment(
-        operation_id, batch_id, review_digest
-    )
+
 
 
 def preview_attempts_grant(course_id: str, assignment_id: str, grant: dict) -> dict:
@@ -336,13 +294,7 @@ def preview_attempts_grant(course_id: str, assignment_id: str, grant: dict) -> d
     )
 
 
-def apply_attempts_grant(
-    operation_id: str, batch_id: str, review_digest: str
-) -> dict:
-    """Apply only the opaque, digest-protected attempts grant review."""
-    return attempts_grant.apply_attempts_grant(
-        operation_id, batch_id, review_digest
-    )
+
 
 
 def verify_live(course_id: str, kind: str, id: str = "", title: str = "") -> dict:
@@ -416,39 +368,13 @@ def abandon_operation(operation_id: str) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
-def _workspace_reset_digest(report: dict) -> str:
-    stable = copy.deepcopy(report) if isinstance(report, dict) else {}
-    stable.pop("mode", None)
-    stable.pop("status", None)
-    stable.pop("preview_digest", None)
-    stable.pop("receipt_id", None)
-    return hashlib.sha256(
-        json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    ).hexdigest()
 
 
-def preview_workspace_reset() -> dict:
-    """Dry-run the explicitly authorized local assignment/evidence reset."""
-    report = workspace.reset_workspace(apply=False)
-    report["preview_digest"] = _workspace_reset_digest(report)
-    return report
 
 
-def apply_workspace_reset(preview_digest: str) -> dict:
-    """Apply only an unchanged, non-refused workspace reset preview."""
-    report = workspace.reset_workspace(apply=False)
-    digest = _workspace_reset_digest(report)
-    if str(preview_digest or "") != digest:
-        return {"ok": False, "code": "reset_preview_changed",
-                "error": "The workspace reset preview changed. Run preview_workspace_reset again."}
-    if report.get("refused"):
-        return {"ok": False, "code": "reset_refused",
-                "error": "The workspace reset contains an unknown category; nothing was deleted.",
-                "refused": report.get("refused")}
-    applied = workspace.reset_workspace(apply=True)
-    applied["ok"] = applied.get("status") == "applied"
-    applied["receipt_id"] = f"workspace-reset-{digest[:24]}"
-    return applied
+
+
+
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
@@ -658,17 +584,24 @@ def _open_roster_student(course_id: str, requested: str):
         return None, _MIRROR_UNAVAILABLE_ROSTER_ERROR
     with _vault_transaction(vault):
         roster_service.upsert_roster(vault, mirror_doc["students"])
-        user_id = pseudonym.resolve_pseudonym(vault, mirror_doc["students"], requested)
+        user_id = pseudonym_boundary.resolve_pseudonym(vault, mirror_doc["students"], requested)
         if not user_id:
             return None, "No current local roster student matches that pseudonym."
         return {"vault": vault, "students": mirror_doc["students"], "user_id": user_id}, None
 
 
 def _gate_roster_result(payload: dict, vault) -> dict:
-    return pseudonym.gate(payload, vault)
+    return pseudonym_boundary.gate(payload, vault)
 
 
 def _validate_mcp_roster_patch(patch: object) -> tuple[dict | None, str | None]:
+    if isinstance(patch, dict):
+        patch = dict(patch)
+        for key,value in patch.items():
+            if value is None:
+                if key not in _MCP_ROSTER_CLEAR_KEYS:
+                    return None, "That roster field has no supported clear operation."
+                patch[key] = config.empty_classroom_profile() if key == "classroom_profile" else {"enabled": False}
     if not isinstance(patch, dict):
         return None, "patch must be an object."
     if "nicknames" in patch:
@@ -684,7 +617,7 @@ def _validate_mcp_roster_patch(patch: object) -> tuple[dict | None, str | None]:
     return patch, None
 
 
-def get_roster_student_settings(course_id: str, pseudonym: str) -> dict:
+def _roster_settings(course_id: str, pseudonym: str) -> dict:
     err = _course_gate_check(course_id)
     if err:
         return {"ok": False, "error": err}
@@ -765,31 +698,7 @@ def apply_roster_student_change(course_id: str, preview: dict,
                                 "settings_digest": _canonical_digest(fresh)}, vault)
 
 
-def clear_roster_student_field(course_id: str, pseudonym: str, field: str,
-                               expected_settings_digest: str) -> dict:
-    err = _course_gate_check(course_id)
-    if err:
-        return {"ok": False, "error": err}
-    if field in {"nicknames", "add_nicknames"}:
-        return {"ok": False, "error": f"{field} cannot be cleared through MCP."}
-    if field not in _MCP_ROSTER_CLEAR_KEYS:
-        return {"ok": False, "error": "That roster field has no supported direct clear operation."}
-    target, error = _open_roster_student(course_id, pseudonym)
-    if error:
-        return {"ok": False, "error": error}
-    vault, user_id = target["vault"], target["user_id"]
-    if _canonical_digest(_roster_full_record(course_id, user_id, vault)) != expected_settings_digest:
-        return {"ok": False, "error": "Settings changed since read; nothing was written."}
-    patch = {
-        "extra_time": {"enabled": False} if field == "extra_time" else None,
-        "monitored": {"enabled": False} if field == "monitored" else None,
-        "classroom_profile": config.empty_classroom_profile() if field == "classroom_profile" else None,
-    }
-    result = _apply_roster_update(course_id, vault, user_id, {field: patch[field]})
-    if not result.get("ok"):
-        return result
-    return _gate_roster_result({"pseudonym": vault.get_or_assign(user_id),
-                                "settings_digest": _canonical_digest(_roster_full_record(course_id, user_id, vault))}, vault)
+
 
 
 _VAULT_CONFLICT_ERROR = (
@@ -854,7 +763,7 @@ def list_courses() -> dict:
 _SECTION_COLUMNS = ("section_id", "section_name")
 
 
-def list_sections(course_id: str) -> dict:
+def _roster_sections(course_id: str) -> dict:
     """Section names from the local CanvasMirror roster (disk-only, no live
     Canvas fallback) for any saved course (Current or Previous). No student
     data — no vault, no safety gate. Returns
@@ -888,7 +797,7 @@ def list_sections(course_id: str) -> dict:
     return result
 
 
-def list_groups(course_id: str) -> dict:
+def _roster_groups(course_id: str) -> dict:
     """List current-course group-set and group names from the local mirror only.
 
     Memberships and Canvas identifiers are deliberately consumed here and never
@@ -915,7 +824,7 @@ def list_groups(course_id: str) -> dict:
                                      str(scope.get("last_success_at") or "")),
             "attention": {
                 "action": "refresh_mirror",
-                "reason": "Refresh the current course mirror, then retry list_groups.",
+                "reason": "Refresh the current course mirror, then retry get_roster(include=[groups]).",
             },
         }
     records = scope.get("records")
@@ -928,7 +837,7 @@ def list_groups(course_id: str) -> dict:
                                      str(scope.get("last_success_at") or "")),
             "attention": {
                 "action": "refresh_mirror",
-                "reason": "Refresh the current course mirror, then retry list_groups.",
+                "reason": "Refresh the current course mirror, then retry get_roster(include=[groups]).",
             },
         }
     freshness = _freshness("mirror", "groups", scope.get("state", "unavailable"),
@@ -947,7 +856,7 @@ def list_groups(course_id: str) -> dict:
             "state": "malformed",
             "freshness": _freshness("mirror", "groups", "malformed",
                                      str(scope.get("last_success_at") or "")),
-                "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry list_groups."},
+                "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry get_roster(include=[groups])."},
             }
         category_name = str(category.get("category_name") or "").strip()
         groups = category.get("groups")
@@ -958,7 +867,7 @@ def list_groups(course_id: str) -> dict:
                 "state": "malformed",
                 "freshness": _freshness("mirror", "groups", "malformed",
                                          str(scope.get("last_success_at") or "")),
-                "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry list_groups."},
+                "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry get_roster(include=[groups])."},
             }
         safe_groups = []
         for group in groups:
@@ -967,7 +876,7 @@ def list_groups(course_id: str) -> dict:
                     "ok": False,
                     "error": "The local Canvas group mirror is malformed.",
                     "state": "malformed",
-                    "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry list_groups."},
+                    "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry get_roster(include=[groups])."},
                 }
             safe_groups.append({"name": str(group["name"]).strip()})
         group_sets.append({"name": category_name, "groups": safe_groups})
@@ -976,9 +885,9 @@ def list_groups(course_id: str) -> dict:
     return result
 
 
-def get_course_assignments(course_id: str, full_descriptions: bool = False) -> dict:
+def _catalog_assignments(course_id: str, full_descriptions: bool = False) -> dict:
     """Assignment metadata from the local course catalog (disk-only, no live
-    Canvas fallback — call refresh_course_structure before using stale scope) for any
+    Canvas fallback — call _refresh_catalog before using stale scope) for any
     saved course (Current or Previous). No student data — no safety gate.
     Descriptions are trimmed to a preview unless ``full_descriptions`` is set;
     assignments go out as a {columns, rows} table."""
@@ -993,7 +902,7 @@ def get_course_assignments(course_id: str, full_descriptions: bool = False) -> d
         return {
             "ok": False,
             "error": ("No local course catalog found for this course. Refresh "
-                      "the catalog with refresh_course_structure, then try again."),
+                      "the catalog with refresh_mirror(structure_only=true), then try again."),
             "freshness": _freshness("catalog", "assignments", "unavailable", ""),
         }
 
@@ -1030,7 +939,7 @@ def get_course_assignments(course_id: str, full_descriptions: bool = False) -> d
     return result
 
 
-def get_modules(course_id: str, include_items: bool = False) -> dict:
+def _catalog_modules(course_id: str, include_items: bool = False) -> dict:
     """Module structure from the local course catalog (disk-only, no live
     Canvas fallback — refresh the catalog from the web UI first) for any
     saved course (Current or Previous). No student data — no vault, no safety
@@ -1118,12 +1027,12 @@ def get_modules(course_id: str, include_items: bool = False) -> dict:
     if attention and not known_pending_write:
         result["stale_note"] = (
             "Course Catalog module data is outside the configured freshness window. "
-            "Refresh it yourself with refresh_course_structure, then read again."
+            "Refresh it yourself with refresh_mirror(structure_only=true), then read again."
         )
     return result
 
 
-def get_course_pages(course_id: str, full_text: bool = False,
+def _catalog_pages(course_id: str, full_text: bool = False,
                      include_unpublished: bool = True) -> dict:
     """Page projection from the local v3 Catalog for the Current course.
 
@@ -1176,7 +1085,7 @@ def get_course_pages(course_id: str, full_text: bool = False,
         result["attention"] = attention
         result["stale_note"] = (
             "Course Catalog page data is outside the configured freshness window. "
-            "Refresh it yourself with refresh_course_structure, then read again."
+            "Refresh it yourself with refresh_mirror(structure_only=true), then read again."
         )
     return result
 
@@ -1195,95 +1104,15 @@ _STAGED_CONTRACT_KINDS = ("quiz", "assignment", "page")
 # same canonical files the web UI hands out for pasting into a chat-only
 # assistant, so connected and pasted assistants read one text, not two.
 _TOOL_GROUPS = {
-    # Appendix B has no named surface for discovery and catalog reads. This is
-    # the one deliberately plain exception to its teacher-facing vocabulary.
-    # refresh_mirror advances the same saved-course read layer.
-    "Course discovery and catalog": (
-        "list_courses",
-        "get_course_assignments",
-        "get_modules",
-        "get_course_pages",
-        "list_sections",
-        "list_groups",
-        "refresh_mirror",
-        "refresh_course_structure",
-    ),
-    "Shared work items": (
-        "list_work_items",
-        "get_work_item",
-        "handoff_work_item",
-        "take_over_work_item",
-    ),
-    "Create and Forge": (
-        # The product guide selects the workflow; the contract and staged list
-        # are the two authoring-specific artifacts that workflow reaches, and
-        # the push pair is where a staged draft becomes real Canvas content.
-        "get_product_guide",
-        "get_authoring_contract",
-        "stage_content",
-        "stage_attachment",
-        "list_staged_content",
-        "preview_content_push",
-        "preview_differentiated_quiz_push",
-        "apply_content_push",
-        "push_content_live",
-        # Publish/re-date an assignment that already exists, addressed by
-        # Canvas assignment_id -- a sibling write path, not staged content.
-        "preview_assignment_update",
-        "apply_assignment_update",
-        "preview_workspace_reset",
-        "apply_workspace_reset",
-    ),
-    "Push verification and recovery": (
-        # AC1/AC2/AC5/AC6: the one Live read after a push, and the tools that
-        # continue or abandon an already-approved, incomplete operation.
-        "verify_live",
-        "resume_operation",
-        "abandon_operation",
-    ),
-    "Scoring Sessions": (
-        "list_feedback_contracts",
-        "discover_scoring_work",
-        "prepare_scoring_session",
-        "refresh_scoring_session",
-        "list_scoring_sessions",
-        "get_scoring_packet",
-        "create_score_curve_rule",
-        "deactivate_score_curve_rule",
-        "get_score_ledger",
-        "stage_scoring_results",
-        "get_scoring_preview",
-        "apply_staged_scoring_results",
-        "reset_scoring_review",
-        "prepare_feedback_revision",
-        "get_feedback_revision_packet",
-        "stage_feedback_revisions",
-        "apply_staged_feedback_revisions",
-    ),
-    "Gradebook": (
-        "get_gradebook_snapshot",
-        "preview_grade_adjustment",
-        "apply_grade_adjustment",
-        "preview_attempts_grant",
-        "apply_attempts_grant",
-    ),
-    "SIS Grade Bridges": (
-        "list_sis_grade_bridges",
-        "reconcile_sis_grade_bridges",
-        "preview_sis_grade_bridge",
-        "preview_sis_grade_bridge_reconciliation",
-        "apply_sis_grade_bridge",
-    ),
-    # Current submissions remain freshness-gated; retained history is explicitly
-    # historical and remains available after current projection pruning.
-    "Writing Timeline": ("get_submissions", "get_submission_history"),
-    "Students": (
-        "get_roster",
-        "get_roster_student_settings",
-        "preview_roster_student_change",
-        "apply_roster_student_change",
-        "clear_roster_student_field",
-    ),
+    "Course discovery and catalog": ("list_courses", "get_course_content", "refresh_mirror"),
+    "Shared work items": ("list_work_items", "transfer_work_item"),
+    "Create and Forge": ("get_product_guide", "stage_content", "stage_attachment", "list_staged_content", "preview_content_push", "push_content_live", "preview_assignment_update"),
+    "Push verification and recovery": ("apply_operation", "verify_live", "resume_operation", "abandon_operation"),
+    "Scoring Sessions": ("list_feedback_contracts", "discover_scoring_work", "prepare_scoring_session", "refresh_scoring_session", "list_scoring_sessions", "get_scoring_packet", "set_score_curve_rule", "get_score_ledger", "stage_scoring_results", "get_scoring_preview", "apply_staged_scoring_results", "reset_scoring_review"),
+    "Gradebook": ("get_gradebook_snapshot", "preview_grade_adjustment", "preview_attempts_grant"),
+    "SIS Grade Bridges": ("reconcile_sis_grade_bridges", "preview_sis_grade_bridge"),
+    "Writing Timeline": ("get_submissions",),
+    "Students": ("get_roster", "preview_roster_student_change", "apply_roster_student_change"),
 }
 
 
@@ -1400,7 +1229,7 @@ def _staging_appendix(kind: str) -> str:
         "**Classic quizzes.** A quiz file may declare quiz_engine \"classic\" for writing "
         "inside the quiz or Hub supports on the quiz. Ask the teacher before choosing it; "
         "otherwise stay on New Quizzes. Push a classic file with preview_content_push and "
-        "apply_content_push (or push_content_live), never preview_differentiated_quiz_push, "
+        "apply_operation (or push_content_live), never the variants family mode, "
         "which refuses it. Canvas Expert cannot score classic quiz writing yet: the teacher "
         "grades it in SpeedGrader.\n\n"
     ) if kind == "quiz" else ""
@@ -1428,7 +1257,7 @@ def _staging_appendix(kind: str) -> str:
         "and push themselves.\n\n"
         "**For due, unlock or lock dates**, stage it, then walk the pair: "
         "preview_content_push with this kind and the draft's label carries "
-        "the dates, and apply_content_push with the three coordinates "
+        "the dates, and apply_operation with the three coordinates "
         "unchanged lands it.\n\n"
         f"{quiz_note}"
         f"The Inbox for this kind is `{where}`. You do not need to write there "
@@ -1437,7 +1266,7 @@ def _staging_appendix(kind: str) -> str:
     )
 
 
-def get_authoring_contract(kind: str) -> dict:
+def _authoring_contract(kind: str) -> dict:
     """Return one canonical Forge authoring contract.
 
     Contracts come from ``api/default_docs/AI Authoring/``. Forge kinds
@@ -1470,6 +1299,8 @@ def get_product_guide(topic: str = "") -> dict:
     The connected tool and the web UI download route share one source file for
     every topic. Appendix topics are extracted from that file so a correction
     cannot make the connected and pasted guidance disagree."""
+    requested_contract = str(topic or "").strip().lower()
+    if requested_contract in _CONTRACT_FILES: return _authoring_contract(requested_contract)
     requested = str(topic or "").strip().lower() or _DEFAULT_GUIDE_TOPIC
     source = _GUIDE_FILES.get(requested)
     if source is None:
@@ -1530,8 +1361,8 @@ def list_staged_content(kind: str = "") -> dict:
 
 def preview_content_push(
     course_id: str,
-    kind: str,
-    label: str,
+    kind: str = "quiz",
+    label: str = "",
     published: bool | None = None,
     module_name: str = "",
     assignment_group_name: str = "",
@@ -1541,6 +1372,7 @@ def preview_content_push(
     post_to_sis: bool | None = None,
     module_id: str = "",
     create_module: bool = False,
+    variants: list | None = None,
 ) -> dict:
     """Freeze one staged draft (quiz/assignment/page, by the label
     list_staged_content returns) into a persisted, digest-protected review for
@@ -1558,11 +1390,19 @@ def preview_content_push(
     unpublished unless published=true.
 
     Returns operation_id, batch_id, and review_digest (pass all three,
-    unchanged, to apply_content_push) plus the frozen preview: the course, the
+    unchanged, to apply_operation) plus the frozen preview: the course, the
     title, and whether an object of that name already exists in the course.
     No course_id, student data, vault, or safety gate applies -- authored
     content carries none.
     """
+    if variants is not None:
+        if kind != "quiz" or label: return _inapplicable("A differentiated family requires kind=quiz and no single label.")
+        return _with_next("preview_content_push", content_push.preview_differentiated_quiz_push(
+            course_id, variants, published=False if published is None else published,
+            module_name=module_name, assignment_group_name=assignment_group_name,
+            due_at=due_at, unlock_at=unlock_at, lock_at=lock_at,
+            post_to_sis=False if post_to_sis is None else post_to_sis,
+            module_id=module_id, create_module=create_module))
     return _with_next("preview_content_push", content_push.preview_content_push(
         course_id, kind, label,
         published=published, module_name=module_name,
@@ -1573,47 +1413,10 @@ def preview_content_push(
     ))
 
 
-def preview_differentiated_quiz_push(
-    course_id: str,
-    variants: list,
-    published: bool = False,
-    module_name: str = "",
-    assignment_group_name: str = "",
-    due_at: str = "",
-    unlock_at: str = "",
-    lock_at: str = "",
-    post_to_sis: bool = False, module_id: str = "", create_module: bool = False,
-) -> dict:
-    """Freeze several staged New Quiz QuizForge labels for unrestricted teacher-assigned tiers.
-
-    Legacy group fields in variant objects are ignored. A classic quiz file is refused:
-    classic quizzes differentiate with Hub through preview_content_push.
-    """
-    return _with_next("preview_differentiated_quiz_push", content_push.preview_differentiated_quiz_push(
-        course_id, variants, published=published, module_name=module_name,
-        assignment_group_name=assignment_group_name, due_at=due_at,
-        unlock_at=unlock_at, lock_at=lock_at, post_to_sis=post_to_sis,
-        module_id=module_id, create_module=create_module,
-    ))
 
 
-def apply_content_push(operation_id: str, batch_id: str, review_digest: str) -> dict:
-    """Create exactly what preview_content_push or
-    preview_differentiated_quiz_push froze in the Canvas course it froze it against.
 
-    Takes only the three opaque coordinates that preview returned, so nothing
-    here can reach another draft, course, or kind. Runs the same Operation
-    Ledger apply the teacher's own push tab runs -- one claim, a drift check
-    against the frozen baseline, per-step checkpoints, and a durable receipt --
-    so a draft landed from chat and one landed from the web UI are the same
-    write. A draft whose course changed under the frozen review is refused as
-    drift rather than overwritten.
 
-    Returns the operation status and, per target, the state and the Canvas URL
-    of what was created. Refuses cleanly, with no Canvas call, when the
-    coordinates do not match a frozen content review.
-    """
-    return content_push.apply_content_push(operation_id, batch_id, review_digest)
 
 
 def preview_assignment_update(
@@ -1642,16 +1445,7 @@ def preview_assignment_update(
     ))
 
 
-def apply_assignment_update(operation_id: str, batch_id: str, review_digest: str) -> dict:
-    """Write exactly what preview_assignment_update froze to Canvas.
 
-    Same coordinates contract as apply_content_push: the three opaque values
-    preview returned, nothing else. Runs the same Operation Ledger apply --
-    one claim, a drift check against the frozen updated_at, and a durable
-    receipt. Blocked as drift_detected, not overwritten, if the assignment
-    changed in Canvas since the preview.
-    """
-    return content_push.apply_assignment_update(operation_id, batch_id, review_digest)
 
 
 def stage_content(kind: str, label: str, content: str) -> dict:
@@ -1722,12 +1516,28 @@ _MIRROR_UNAVAILABLE_SNAPSHOT_ERROR = (
 )
 
 
-def get_roster(course_id: str) -> dict:
+def get_roster(course_id: str, pseudonym: str | None = None, include: list[str] | None = None) -> dict:
     """Current roster as a {columns, rows} table of (pseudonym,
     section_names), sorted by pseudonym. Served ONLY from the local
     CanvasMirror — never live Canvas; a stale or missing mirror is refused
     (call refresh_mirror first). Pseudonymized through the identity vault;
     gated by the outbound safety scan before tabulation."""
+    if include is not None and (not isinstance(include, list) or any(item not in ("sections", "groups") for item in include)):
+        return {"ok": False, "code": "invalid_roster_include", "error": "include accepts sections and/or groups."}
+    if pseudonym is not None:
+        if include is not None: return _inapplicable("include does not apply to student settings.")
+        result = _roster_settings(course_id, pseudonym)
+        if result.get("settings_digest"): result = {**result, "expected_settings_digest": result["settings_digest"]}
+        return result
+    if include:
+        include = list(dict.fromkeys(include))
+        projections = [_roster_sections(course_id) if name == "sections" else _roster_groups(course_id) for name in include]
+        for projection in projections:
+            if not projection.get("ok"): return projection
+        if len(projections) == 1: return projections[0]
+        return {"ok": True, "course_id": course_id,
+                **{key: value for projection in projections for key,value in projection.items() if key not in ("ok", "course_id", "freshness")},
+                "freshness": {name: projection.get("freshness") for name,projection in zip(include,projections)}}
     identity_error = _saved_course_gate_check(course_id)
     if identity_error:
         return {"ok": False, "error": identity_error}
@@ -1754,8 +1564,8 @@ def get_roster(course_id: str) -> dict:
     with _vault_transaction(vault):
         users = mirror_doc["students"]
         roster_service.upsert_roster(vault, users)
-        roster = pseudonym.pseudonymize_roster(vault, users, mirror_doc["sections"])
-        result = pseudonym.gate(
+        roster = pseudonym_boundary.pseudonymize_roster(vault, users, mirror_doc["sections"])
+        result = pseudonym_boundary.gate(
             {"roster": roster, "source": "mirror",
              "synced_at": mirror_doc["last_success_at"],
              "freshness": freshness}, vault)
@@ -1766,7 +1576,8 @@ def get_roster(course_id: str) -> dict:
 
 def get_submissions(course_id: str, assignment_id: str,
                     include_text: bool = True, pseudonyms: str = "",
-                    max_text_chars: int = _DEFAULT_MAX_TEXT_CHARS) -> dict:
+                    max_text_chars: int | None = None, history: bool = False,
+                    offset: int | None = None, limit: int | None = None) -> dict:
     """One assignment's submissions, pseudonymized and scrubbed, as
     ``{assignment: {...}, submissions: {columns, rows}}``. Served ONLY from
     the local CanvasMirror — never live Canvas; a stale or missing mirror is
@@ -1775,6 +1586,12 @@ def get_submissions(course_id: str, assignment_id: str,
     column; text is trimmed to ``max_text_chars`` (0 = full). Attachments are
     never included. Historical rows remain; ``current_enrollment`` marks
     membership in this bundle's mirror roster. Gated by the outbound safety scan."""
+    if history:
+        return _submission_history(course_id, assignment_id, pseudonyms, include_text,
+                                   12000 if max_text_chars is None else max_text_chars,
+                                   0 if offset is None else offset, 50 if limit is None else limit)
+    if offset is not None or limit is not None: return _inapplicable("offset and limit require history=true.")
+    max_text_chars = _DEFAULT_MAX_TEXT_CHARS if max_text_chars is None else max_text_chars
     identity_error = _saved_course_gate_check(course_id)
     if identity_error:
         return {"ok": False, "error": identity_error}
@@ -1807,7 +1624,7 @@ def get_submissions(course_id: str, assignment_id: str,
         roster_service.upsert_roster(vault, bundle["roster"])
         assignment, subs = bundle["assignment"], bundle["rows"]
 
-        rows = pseudonym.pseudonymize_submission_rows(vault, subs)
+        rows = pseudonym_boundary.pseudonymize_submission_rows(vault, subs)
         current_pseudonyms = {
             vault.get_or_assign(student["id"])
             for student in bundle["roster"] if student.get("id") is not None
@@ -1837,7 +1654,7 @@ def get_submissions(course_id: str, assignment_id: str,
             "synced_at": bundle["synced_at"],
             "freshness": freshness,
         }
-        result = pseudonym.gate(payload, vault)
+        result = pseudonym_boundary.gate(payload, vault)
     if result.get("ok"):
         columns = (_SUBMISSION_COLUMNS if include_text
                    else tuple(c for c in _SUBMISSION_COLUMNS if c != "text"))
@@ -1845,7 +1662,7 @@ def get_submissions(course_id: str, assignment_id: str,
     return result
 
 
-def get_submission_history(course_id: str, assignment_id: str,
+def _submission_history(course_id: str, assignment_id: str,
                           pseudonyms: str = "", include_text: bool = True,
                           max_text_chars: int = 12000,
                           offset: int = 0, limit: int = 50) -> dict:
@@ -2034,7 +1851,7 @@ def get_submission_history(course_id: str, assignment_id: str,
     }
     if page_end_reason:
         payload["page_end_reason"] = page_end_reason
-    return pseudonym.gate(payload, vault)
+    return pseudonym_boundary.gate(payload, vault)
 
 
 # A student's writing history has no session lookback of its own to borrow, and
@@ -2107,15 +1924,15 @@ def get_gradebook_snapshot(course_id: str) -> dict:
             {"id": row.get("user_id"), "name": row.get("name", "")}
             for row in students
         ])
-        payload["students"] = pseudonym.pseudonymize_gradebook_rows(vault, snapshot["students"])
-        result = pseudonym.gate(payload, vault)
+        payload["students"] = pseudonym_boundary.pseudonymize_gradebook_rows(vault, snapshot["students"])
+        result = pseudonym_boundary.gate(payload, vault)
     if result.get("ok"):
         result["assignments"] = _tabulate(result["assignments"], _GRADEBOOK_ASSIGNMENT_COLUMNS)
         result["students"] = _tabulate(result["students"], _GRADEBOOK_STUDENT_COLUMNS)
     return result
 
 
-def create_score_curve_rule(course_id: str, formula: dict,
+def _create_curve(course_id: str, formula: dict,
                             assignment_id: str = "") -> dict:
     """Create a local, immutable score curve rule; this makes no Canvas call."""
     error = _course_gate_check(str(course_id))
@@ -2132,7 +1949,7 @@ def create_score_curve_rule(course_id: str, formula: dict,
             ("rule_id", "scope", "assignment_id", "created_at", "formula", "preview")}}
 
 
-def deactivate_score_curve_rule(course_id: str, rule_id: str) -> dict:
+def _deactivate_curve(course_id: str, rule_id: str) -> dict:
     """Deactivate a local curve rule without changing Canvas grades."""
     error = _course_gate_check(str(course_id))
     if error:
@@ -2218,7 +2035,7 @@ def get_score_ledger(course_id: str, assignment_id: str, pseudonyms: str = "",
                "next_offset": offset + len(page) if offset + len(page) < total else None,
                "coverage": "recorded_only",
                "first_recorded_at": min((str(row.get("timestamp") or "") for row in safe_rows), default=None)}
-    return pseudonym.gate(payload, vault)
+    return pseudonym_boundary.gate(payload, vault)
 
 
 def list_feedback_contracts() -> dict:
@@ -2322,7 +2139,7 @@ def _refresh_identity(plan: dict) -> dict:
     return identity
 
 
-def refresh_mirror(course_id: str, include_comments: bool = False) -> dict:
+def refresh_mirror(course_id: str, include_comments: bool = False, structure_only: bool = False) -> dict:
     """Ask Canvas Expert to sync this course's local CanvasMirror from Canvas
     (a submissions delta plus a roster refresh), then report freshness — the
     response is a sync STATUS, never Canvas data. Call this after
@@ -2331,6 +2148,9 @@ def refresh_mirror(course_id: str, include_comments: bool = False) -> dict:
     roster, or submission data itself, so it needs no identity vault and no
     outbound safety scan. It accepts any saved course (Current or Previous)."""
 
+    if structure_only:
+        if include_comments: return _inapplicable("include_comments cannot be used with structure_only.")
+        return _refresh_catalog(course_id)
     try:
         scopes = ["course.feedback_refresh", "roster", "groups"] if include_comments else _REFRESH_SCOPES
         plan_id = _enqueue_sync(course_id, scopes)
@@ -2360,7 +2180,7 @@ def refresh_mirror(course_id: str, include_comments: bool = False) -> dict:
     return result
 
 
-def refresh_course_structure(course_id: str) -> dict:
+def _refresh_catalog(course_id: str) -> dict:
     """Refresh the student-free Course Catalog module structure via coordinator."""
     try:
         result = mirror_service.refresh_course_structure(
@@ -2488,10 +2308,15 @@ def prepare_scoring_session(course_id: str, assignment_id: str,
                             use_existing_mirror: bool = False,
                             scoring_guidance_provenance: str = "",
                             feedback_contract_id: str = "",
-                            late_policy: str = "") -> dict:
+                            late_policy: str = "", mode: str = "score") -> dict:
     """Prepare one exact assignment from the local CanvasMirror.
 
     The scoring contract on packet page 0 carries the Scoring Session workflow."""
+    if mode == "feedback_revision":
+        if scoring_guidance or scoring_guidance_provenance or feedback_contract_id or late_policy:
+            return _inapplicable("Revision mode does not accept guidance, contract or late_policy options.")
+        return _revision_result(_feedback_revision_call("prepare", course_id, assignment_id, use_existing_mirror=use_existing_mirror))
+    if mode != "score": return {"ok": False, "code": "invalid_scoring_mode", "error": "mode must be score or feedback_revision."}
     from api.powergrader import scoring_preparation, session_store
 
     course_key = str(course_id or "").strip()
@@ -2544,6 +2369,8 @@ def refresh_scoring_session(scoring_session_id: str, use_existing_mirror: bool =
     """Bring late or resubmitted mirror work into one open Scoring Session.
 
     Reads the local mirror only. Lock order matches staging: scope, then session."""
+    if _revision_session(scoring_session_id):
+        return {"ok": False, "code": "revision_session_unsupported", "error": "This action does not apply to revision sessions."}
     from api.powergrader import scoring_preparation, session_store
 
     lease_error = _scoring_work_lease_refusal(scoring_session_id)
@@ -2586,7 +2413,7 @@ def refresh_scoring_session(scoring_session_id: str, use_existing_mirror: bool =
     if vault_error:
         return {"ok": False, "code": "identity_unavailable",
                 "error": "The private identity vault is unavailable."}
-    return _with_next("refresh_scoring_session", pseudonym.gate(result, vault))
+    return _with_next("refresh_scoring_session", pseudonym_boundary.gate(result, vault))
 
 
 def _load_scoring_assignment_session(scoring_session_id: str) -> dict | None:
@@ -2702,24 +2529,16 @@ def _feedback_revision_call(operation, *args, **kwargs):
         return {"ok": False, "code": "feedback_revision_unavailable"}
 
 
-def prepare_feedback_revision(course_id: str, assignment_id: str,
-                              use_existing_mirror: bool = False) -> dict:
-    return _feedback_revision_call("prepare", course_id, assignment_id,
-                                   use_existing_mirror=use_existing_mirror)
 
 
-def get_feedback_revision_packet(work_id: str, offset: int = 0, limit: int = 10) -> dict:
-    return _feedback_revision_call("packet", work_id, offset, limit)
 
 
-def stage_feedback_revisions(work_id: str, expected_packet_digest: str, revisions: list,
-                             attachment_file: str | None = None) -> dict:
-    return _feedback_revision_call("stage", work_id, expected_packet_digest, revisions,
-                                   attachment_file=attachment_file)
 
 
-def apply_staged_feedback_revisions(work_id: str, expected_stage_digest: str) -> dict:
-    return _feedback_revision_call("apply", work_id, expected_stage_digest)
+
+
+
+
 
 
 def list_scoring_sessions() -> dict:
@@ -2772,15 +2591,17 @@ def _work_item_error(error) -> dict:
     if isinstance(error, WorkItemError):
         if error.code == "work_item_takeover_required":
             return {"ok": False, "code": error.code,
-                    "error": "This work item was released by another device. Check sync progress, then call take_over_work_item."}
+                    "error": "This work item was released by another device. Check sync progress, then call transfer_work_item(action=take_over)."}
         return {"ok": False, "code": error.code,
                 "error": "The shared work item is unavailable. Review Local workspace & privacy."}
     return {"ok": False, "code": "work_item_unavailable",
             "error": "The shared work item is unavailable. Review Local workspace & privacy."}
 
 
-def list_work_items() -> dict:
+def list_work_items(work_id: str | None = None) -> dict:
     """List shared work holders and sync state without session contents."""
+    if work_id is not None:
+        return _work_detail(work_id)
     from api.powergrader import session_store
     try:
         return {"ok": True, "work_items": session_store.list_work_items()}
@@ -2788,7 +2609,7 @@ def list_work_items() -> dict:
         return _work_item_error(error)
 
 
-def get_work_item(work_id: str) -> dict:
+def _work_detail(work_id: str) -> dict:
     """Read one shared work item's holder, lease, and sync progress."""
     from api.powergrader import session_store
     try:
@@ -2797,7 +2618,7 @@ def get_work_item(work_id: str) -> dict:
         return _work_item_error(error)
 
 
-def take_over_work_item(work_id: str, confirm_stale: bool = False) -> dict:
+def _take_over_work(work_id: str, confirm_stale: bool = False) -> dict:
     """Acquire a released item or explicitly confirm a stale-device takeover."""
     from api.powergrader import session_store
     try:
@@ -2807,7 +2628,7 @@ def take_over_work_item(work_id: str, confirm_stale: bool = False) -> dict:
         return _work_item_error(error)
 
 
-def handoff_work_item(work_id: str) -> dict:
+def _hand_off_work(work_id: str) -> dict:
     """Release this device's work lease before continuing on another device."""
     from api.powergrader import session_store
     try:
@@ -2826,7 +2647,7 @@ def _scoring_work_lease_refusal(scoring_session_id: str) -> dict | None:
 
 
 def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10,
-                       include_context: bool = True) -> dict:
+                       include_context: bool | None = None) -> dict:
     """Retrieve one page of student responses from a Scoring Session's SAFE bundle.
 
     Parameters:
@@ -2881,6 +2702,10 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
 
     Text-only (no media entries, no attachment filenames). Never raises.
     """
+    if _revision_session(scoring_session_id):
+        if include_context is not None: return _inapplicable("include_context does not apply to revision packets.")
+        return _revision_result(_feedback_revision_call("packet", scoring_session_id, offset, limit))
+    include_context = True if include_context is None else include_context
     from api.powergrader import scoring_packet as sp
 
     session = _load_scoring_assignment_session(scoring_session_id)
@@ -3039,7 +2864,7 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
 def stage_scoring_results(scoring_session_id: str, results: list,
                           expected_packet_digest: str, review_digest: str = "",
                           answers: dict | None = None,
-                          grade_mode: str | None = None) -> dict:
+                          grade_mode: str | None = None, attachment_file: str | None = None) -> dict:
     """Validate and freeze one exact scoring result set; no Canvas write.
 
     One {pseudonym, item_id, score, feedback} result per packet row, with an
@@ -3048,6 +2873,11 @@ def stage_scoring_results(scoring_session_id: str, results: list,
     answers filled in. One read of the assignment checks its posting policy for
     the preview warnings. A successful call stores the private write plan for a
     later apply."""
+    if _revision_session(scoring_session_id):
+        if review_digest or answers is not None or grade_mode is not None:
+            return _inapplicable("Revision stages do not accept review answers or grade_mode.")
+        return _revision_result(_feedback_revision_call("stage", scoring_session_id, expected_packet_digest, results, attachment_file=attachment_file))
+    if attachment_file is not None: return _inapplicable("attachment_file requires a revision session.")
     from api.powergrader import session_store
 
     if grade_mode is not None and grade_mode not in ("post_score", "feedback_only"):
@@ -3252,7 +3082,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
         return {"ok": False, "code": "identity_unavailable", "error": "The private identity vault is unavailable."}
     verdict = feedback.validate_results(results, safe_bundle, vault)
     if not verdict.get("ok"):
-        return pseudonym.gate({
+        return pseudonym_boundary.gate({
             "ok": False, "code": "invalid_results",
             "error": "Results must match the supplied pseudonyms and item ids and contain valid feedback.",
             "validation": _result_validation(verdict, results, safe_bundle, vault)}, vault)
@@ -3263,14 +3093,14 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
     try:
         rows = feedback.reidentify(rendered, vault)
     except Exception:
-        return pseudonym.gate({
+        return pseudonym_boundary.gate({
             "ok": False, "code": "invalid_results",
             "error": "Results could not be safely matched to this session.",
             "validation": _result_validation(verdict, results, safe_bundle, vault)}, vault)
     for index, row in enumerate(rows):
         row["pseudonym"] = str((rendered[index] or {}).get("pseudonym") or "")
     if any(not row.get("resolved") for row in rows):
-        return pseudonym.gate({
+        return pseudonym_boundary.gate({
             "ok": False, "code": "invalid_results",
             "error": "Every result must match a supplied pseudonym.",
             "validation": _result_validation(verdict, results, safe_bundle, vault)}, vault)
@@ -3389,7 +3219,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                     "warnings": [{"code": "late_days_unknown",
                                   "text": "Enter late_days for this row; do not infer it from the latest attempt."}],
                 })
-            return pseudonym.gate({
+            return pseudonym_boundary.gate({
                 "ok": True, "status": "needs_teacher_input",
                 "code": "late_days_unknown",
             "error": "Attempt history is incomplete. Refresh the course mirror and this scoring session, or provide late_days for the listed rows.",
@@ -3532,7 +3362,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                             _load_scoring_assignment_session(scoring_session_id) or {}):
                         return _session_superseded(scoring_session_id)
                     return _record_scoring_session_result(
-                        scoring_session_id, pseudonym.gate(response, vault),
+                        scoring_session_id, pseudonym_boundary.gate(response, vault),
                         grade_mode=grade_mode,
                         draft_updates=mode_feedback_updates)
             if str(review_digest) != str(plan.get("digest")):
@@ -3673,7 +3503,7 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
                 {"selected_user_ids": selected_ids, "answers": normalized_answers,
                  "skipped_user_ids": resolved.get("skipped") or []},
                 names, posting_policy), posting_policy)
-            return _with_next("stage_scoring_results", pseudonym.gate(response, vault))
+            return _with_next("stage_scoring_results", pseudonym_boundary.gate(response, vault))
 
     return {
         "ok": False,
@@ -3743,6 +3573,8 @@ def get_scoring_preview(scoring_session_id: str, offset: int = 0, limit: int = 2
     ``nothing_staged`` when no stage is open and ``preview_stale`` when the
     session no longer matches its stage digest (stage again).
     """
+    if _revision_session(scoring_session_id):
+        return _revision_result(_feedback_revision_call("preview", scoring_session_id, offset, limit))
     from api.powergrader import scoring_apply
 
     session = _load_scoring_assignment_session(scoring_session_id)
@@ -3810,13 +3642,16 @@ def get_scoring_preview(scoring_session_id: str, offset: int = 0, limit: int = 2
     }
     if offset + limit < len(rows):
         response["next_offset"] = offset + limit
-    return _with_next("get_scoring_preview", pseudonym.gate(response, vault))
+    return _with_next("get_scoring_preview", pseudonym_boundary.gate(response, vault))
 
 
 def apply_staged_scoring_results(scoring_session_id: str,
                                  expected_stage_digest: str,
                                  idempotency_key: str = "") -> dict:
     """Apply only the unchanged private stage after direct teacher instruction."""
+    if _revision_session(scoring_session_id):
+        if idempotency_key: return _inapplicable("idempotency_key does not apply to revision sessions.")
+        return _revision_result(_feedback_revision_call("apply", scoring_session_id, expected_stage_digest))
     from api.powergrader import session_store
 
     lease_error = _scoring_work_lease_refusal(scoring_session_id)
@@ -4012,6 +3847,8 @@ def _review_changed_response(plan: dict, names: dict, session: dict, *,
 
 def reset_scoring_review(scoring_session_id: str) -> dict:
     """Reopen the current local review without changing its packet or history."""
+    if _revision_session(scoring_session_id):
+        return {"ok": False, "code": "revision_session_unsupported", "error": "This action does not apply to revision sessions."}
     from api.powergrader import session_store
 
     lease_error = _scoring_work_lease_refusal(scoring_session_id)
@@ -4130,7 +3967,7 @@ def _scoring_apply_result(payload: dict, names: dict, vault, *, held_user_ids=()
         result.setdefault("code", "score_readback_mismatch")
         result["user_action"] = ("Review the late_not_honored rows in Canvas: the stored late "
                                  "status does not match the late days that were sent.")
-    return pseudonym.gate(result, vault)
+    return pseudonym_boundary.gate(result, vault)
 
 
 def _scoring_apply_safe(plan: dict, names: dict) -> dict:
@@ -4189,3 +4026,79 @@ def _persist_scoring_grade_mode(scoring_session_id: str, grade_mode: str,
                 target["ai_feedback"] = update.get("ai_feedback") or ""
                 target["ai_item_results"] = update.get("ai_item_results") or []
         session_store.save_session(session)
+
+
+def _inapplicable(message: str) -> dict:
+    return {"ok": False, "code": "inapplicable_option", "error": message}
+
+
+def apply_operation(operation_id: str, batch_id: str, review_digest: str) -> dict:
+    """Apply the exact reviewed operation through its existing write owner."""
+    operation = operation_operations.get_operation(str(operation_id or "").strip())
+    if operation is None:
+        return {"ok": False, "code": "operation_not_found", "error": "operation was not found"}
+    kind = operation.get("kind")
+    if kind in content_push._LEDGER_KINDS.values():
+        return content_push.apply_content_push(operation_id, batch_id, review_digest)
+    if kind == content_push.ASSIGNMENT_UPDATE_KIND:
+        return content_push.apply_assignment_update(operation_id, batch_id, review_digest)
+    if kind == grade_adjustment.KIND:
+        return grade_adjustment.apply_grade_adjustment(operation_id, batch_id, review_digest)
+    if kind == attempts_grant.KIND:
+        return attempts_grant.apply_attempts_grant(operation_id, batch_id, review_digest)
+    if kind == sis_grade_bridge.KIND:
+        result = sis_grade_bridge.apply_sis_grade_bridge(operation_id, batch_id, review_digest)
+        if result.get("bridge_assignment_id") and result.get("course_id"):
+            result = {**result, "verify_hint": [{"course_id": result["course_id"],
+                      "kind": "assignment", "id": result["bridge_assignment_id"]}]}
+        return result
+    return {"ok": False, "code": "unsupported_operation_kind", "error": "This operation kind cannot be applied here."}
+
+
+def get_course_content(course_id: str, kind: str, full_descriptions: bool | None = None,
+                       full_text: bool | None = None, include_unpublished: bool | None = None,
+                       include_items: bool | None = None) -> dict:
+    """Read assignments, pages or modules from the local course catalog."""
+    options = {"full_descriptions": full_descriptions, "full_text": full_text,
+               "include_unpublished": include_unpublished, "include_items": include_items}
+    allowed = {"assignments": {"full_descriptions"}, "pages": {"full_text", "include_unpublished"},
+               "modules": {"include_items"}}
+    if kind not in allowed:
+        return {"ok": False, "code": "invalid_content_kind", "error": "kind must be assignments, pages or modules."}
+    if any(value is not None and name not in allowed[kind] for name,value in options.items()):
+        return _inapplicable("The supplied options do not apply to this content kind.")
+    if kind == "assignments": return _catalog_assignments(course_id, bool(full_descriptions))
+    if kind == "pages": return _catalog_pages(course_id, bool(full_text), True if include_unpublished is None else include_unpublished)
+    return _catalog_modules(course_id, bool(include_items))
+
+
+def transfer_work_item(work_id: str, action: str, confirm_stale: bool = False) -> dict:
+    """Take over or hand off one shared work lease after sync."""
+    if action == "take_over": return _take_over_work(work_id, confirm_stale)
+    if action == "hand_off":
+        if confirm_stale: return _inapplicable("confirm_stale applies only to take_over.")
+        return _hand_off_work(work_id)
+    return {"ok": False, "code": "invalid_transfer_action", "error": "action must be take_over or hand_off."}
+
+
+def set_score_curve_rule(course_id: str, formula: dict | None = None,
+                         assignment_id: str | None = None, rule_id: str | None = None,
+                         active: bool = True) -> dict:
+    """Create or deactivate a local curve rule without changing Canvas grades."""
+    if rule_id is not None:
+        if active or formula is not None or assignment_id is not None:
+            return _inapplicable("Deactivation requires rule_id and active=false only.")
+        return _deactivate_curve(course_id, rule_id)
+    if not active: return _inapplicable("Deactivation requires rule_id.")
+    return _create_curve(course_id, formula, assignment_id or "")
+
+
+def _revision_session(scoring_session_id: str) -> bool:
+    # Revision scopes use feedback-<32hex>; scoring sessions use generated UUIDs.
+    return str(scoring_session_id).startswith("feedback-")
+
+
+def _revision_result(result: dict) -> dict:
+    if result.get("work_id"):
+        result = {**result, "scoring_session_id": result["work_id"]}
+    return result

@@ -365,6 +365,58 @@ def stage(work_id, expected_packet_digest, revisions, *, attachment_file=None, v
         return result
 
 
+def preview(work_id, offset=0, limit=25, *, vault, course_gate):
+    """Project exact staged edits against their scrubbed immutable originals.
+
+    Rebuild and validate the frozen plan as apply does, without any Canvas I/O
+    or local mutation. Private endpoint coordinates and attachment paths never
+    enter this projection.
+    """
+    store = SharedWorkStore()
+    state, error = _open(store, work_id, course_gate)
+    if error:
+        return error
+    if type(offset) is not int or offset < 0 or type(limit) is not int or limit < 1:
+        return _fail("feedback_preview_page_invalid")
+    frozen = state.get("stage")
+    if not isinstance(frozen, dict) or not isinstance(frozen.get("plan"), list):
+        return _fail("nothing_staged")
+    revisions = [{key: row.get(key) for key in ("pseudonym", "comment_key", "feedback")}
+                 for row in frozen["plan"] if isinstance(row, dict)]
+    plan = _plan(state, revisions, vault)
+    if (plan is None or plan != frozen["plan"]
+            or frozen.get("digest") != _digest(_stage_identity(state, plan, frozen.get("attachment")))):
+        return _fail("preview_stale")
+    attachment = frozen.get("attachment")
+    if attachment and state["status"] != "completed" and not _attachment_unchanged(attachment):
+        return _fail("feedback_attachment_changed")
+    originals = {(row["pseudonym"], row["comment_key"]): row["feedback"]
+                 for row in state["packet"]["revisions"]}
+    if any((row["pseudonym"], row["comment_key"]) not in originals for row in plan):
+        return _fail("preview_stale")
+    rows = [{"pseudonym": row["pseudonym"], "comment_key": row["comment_key"],
+             "current_comment": originals[(row["pseudonym"], row["comment_key"])],
+             "new_comment": row["feedback"]} for row in plan]
+    rows.sort(key=lambda row: (row["pseudonym"], row["comment_key"]))
+    limit = min(limit, 100)
+    result = {"ok": True, "work_id": work_id, "stage_digest": frozen["digest"],
+              "counts": {"selected": len(plan), "untouched": len(state["targets"]) - len(plan)},
+              "attachment": ({"file": attachment["file"], "size_bytes": attachment["size_bytes"]}
+                             if attachment else None),
+              "offset": offset, "limit": limit, "total": len(rows), "rows": [],
+              "returned": 0, "next_offset": None}
+    for row in rows[offset:offset + limit]:
+        returned = len(result["rows"]) + 1
+        candidate = {**result, "rows": [*result["rows"], row], "returned": returned,
+                     "next_offset": offset + returned if offset + returned < len(rows) else None}
+        if source_materials.estimate_text_tokens(json.dumps(candidate)) > TOKEN_BUDGET:
+            if not result["rows"]:
+                return _fail("feedback_preview_too_large")
+            break
+        result = candidate
+    return pseudonym.gate(result, vault) if _safe_text(result, vault) else _fail("feedback_packet_privacy_blocked")
+
+
 def _outcomes(state):
     receipts = state["receipts"]
     attached = state.get("attachment_receipts", [])

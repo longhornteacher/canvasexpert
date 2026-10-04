@@ -82,6 +82,8 @@ RETIRED_FILES = {
     # Same-name updates. Teachers are told to hand this file to an AI, so a
     # stale copy answers setup questions wrongly rather than harmlessly.
     "START HERE - CanvasAgent.txt": frozenset({
+        # Before the MCP lean surface and feedback-revision scoring mode.
+        "23e29b3a7df5e0994c3a17a78c2e0fc1640c597509114fb931c9f701eb895ed2",
         # Before routines, writing history, and learning objectives were retired.
         "9ec17496bab7b21bec1f18d6b1aca3f1b1a55fda4789bd7905bdea149446f9f2",
         # Before the local-first discovery and stage-then-explicit-apply workflow.
@@ -94,8 +96,7 @@ RETIRED_FILES = {
         "94788ae4a8c063cd2e60f234e51a3f902e8fed8282b10caba80121135c8fb80b",
         # Before Panels and the Panel theme tools were described.
         "52f9755e202e51072cb687df1a0d1fa6b85d468dd371d7f8c30bd73e4c3656fe",
-        # Before Appendix D described the local write tools and Appendix B added
-        # School Calendar and Learning Objectives coverage.
+        # Before the historical connected-tool and capability appendix expansion.
         "2cb1a3c99d4d01f0158fe61ce4995a0d5bcdab360430f62ee8363d8a75aa5798",
         # Before "Automations" was renamed to "Routines" (feature-freeze
         # hardening initiative, D2).

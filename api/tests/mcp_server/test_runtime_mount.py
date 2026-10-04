@@ -29,6 +29,6 @@ def test_lock_owner_exposes_the_same_tool_list_on_loopback():
                         result = await client.list_tools()
                         names = {tool.name for tool in result.tools}
                         assert "list_courses" in names
-                        assert "get_course_assignments" in names
+                        assert "get_course_content" in names
 
     anyio.run(exercise)

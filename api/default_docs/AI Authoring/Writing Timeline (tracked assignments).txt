@@ -171,7 +171,7 @@ sequence is authored as separate Canvas assignments, one envelope each, with
 the teacher setting each due date at push time. Each one is independently
 tracked or not tracked.
 
-What you cannot see through the MCP tools. get_course_assignments reports
+What you cannot see through the MCP tools. get_course_content(kind="assignments", ...) reports
 neither submission types nor allowed extensions, so a read cannot tell you
 whether an existing assignment is tracked. Ask the teacher, or have them check
 for the badge in PowerGrader. Do not infer it from the title.

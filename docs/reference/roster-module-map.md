@@ -41,8 +41,10 @@ table rendering, and filtered/selected student access.
   logs, or support output.
 - Browser lenses/filter state do not create a second persistence or mutation path.
 - An assistant can read and change local student settings over MCP
-  (`get_roster`, `get_roster_student_settings`, `preview_roster_student_change`,
-  `apply_roster_student_change`, `clear_roster_student_field`). This is a second entry
+  (`get_roster`, `preview_roster_student_change`, and
+  `apply_roster_student_change`). Passing `pseudonym` to `get_roster` reads that
+  student's settings and expected digest; a `null` field in the preview's `patch`
+  clears it through the same reviewed apply. This is a second entry
   point, not a second mutation path: `roster_mcp.update_student` calls
   `roster_updates.update_student` with the route's own injected dependencies, so route
   validation and extra-time/monitored handling still apply.

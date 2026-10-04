@@ -22,26 +22,6 @@ def test_refresh_mirror_returns_operation_and_revision(monkeypatch, _set_active_
     assert result["snapshot_id"] == "course-1:7"
 
 
-def test_workspace_reset_requires_unchanged_preview_and_returns_receipt(monkeypatch):
-    report = {
-        "mode": "dry_run", "status": "planned",
-        "counts": {"items": 1, "files": 2, "directories": 1},
-        "paths": ["C:/workspace/For AI"], "items": [], "refused": [],
-    }
-    applied = {**report, "mode": "apply", "status": "applied"}
-    calls = []
-
-    def reset(*, apply=False):
-        calls.append(apply)
-        return applied if apply else report
-
-    monkeypatch.setattr(tools.workspace, "reset_workspace", reset)
-    preview = tools.preview_workspace_reset()
-    result = tools.apply_workspace_reset(preview["preview_digest"])
-
-    assert result["ok"] is True
-    assert result["receipt_id"].startswith("workspace-reset-")
-    assert calls == [False, False, True]
 
 
 def test_scoring_packet_refuses_but_never_supersedes_when_mirror_revision_changes(

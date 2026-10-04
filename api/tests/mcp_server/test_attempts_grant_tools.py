@@ -13,10 +13,10 @@ def test_attempts_grant_tools_are_registered_with_the_versioned_shape():
         "course_id", "assignment_id", "grant",
     ]
     assert by_name["preview_attempts_grant"]["properties"]["grant"] == "object"
-    assert by_name["apply_attempts_grant"]["required"] == [
+    assert by_name["apply_operation"]["required"] == [
         "operation_id", "batch_id", "review_digest",
     ]
-    assert {"preview_attempts_grant", "apply_attempts_grant"} <= set(
+    assert {"preview_attempts_grant", "apply_operation"} <= set(
         server.mcp._tool_manager._tools)
 
 
@@ -35,7 +35,7 @@ def test_preview_wrapper_keeps_pseudonyms_and_says_apply_only_on_direct_instruct
                                           {"students": ["Pikachu"], "extra_attempts": 2})
 
     assert result["preview"]["students"][0]["pseudonym"] == "Pikachu"
-    assert "apply_attempts_grant" in result["next"]
+    assert "apply_operation" in result["next"]
     assert "direct instruction" in result["next"]
     refusal = {"ok": False, "code": "invalid_grant", "error": "synthetic."}
     monkeypatch.setattr(tools.attempts_grant, "preview_attempts_grant",
@@ -53,7 +53,8 @@ def test_server_apply_wrapper_is_thin_and_serializes_compactly(monkeypatch):
     )
     monkeypatch.setattr(tools, "final_response_gate", lambda payload: payload)
 
-    wire = server.apply_attempts_grant("op-synthetic", "batch-synthetic", "digest-synthetic")
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {"kind": "gradebook.attempts_grant"})
+    wire = server.apply_operation('op-synthetic', 'batch-synthetic', 'digest-synthetic')
 
     assert json.loads(wire)["status"] == "applied" and " " not in wire
 

@@ -1,8 +1,8 @@
 """CanvasMirror scheduling service — heartbeat passes, write-through notify,
 and the status payload for the mirror routes.
 
-The heartbeat mirrors ``_routines_heartbeat``'s shape (daemon thread, launch
-delay, try/except-never-die, gate on token) and is started from the server
+The heartbeat uses a daemon thread, launch delay, exception isolation, and a
+credential gate, and is started from the server
 lifespan. All real work lives in plain pass functions that tests drive
 directly with injected legacy and complete-only collection clients plus
 ``now=`` — the thread is never started in tests.

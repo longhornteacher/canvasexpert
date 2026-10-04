@@ -43,34 +43,6 @@ def test_synced_registration_is_student_free_and_replaces_exact_family(monkeypat
     assert "grades" not in str(state)
 
 
-def test_list_bridge_projection_omits_frozen_titles_and_digest(monkeypatch):
-    monkeypatch.setattr(config, "active_courses", lambda: [
-        {"id": "course-1", "name": "Invented Course", "active": True}
-    ])
-    monkeypatch.setattr(config, "list_sis_grade_bridges", lambda _course_id: [{
-        "family_title": "Invented Checkpoint",
-        "source_assignment_ids": ["source-1", "source-2"],
-        "source_titles": ["Invented Checkpoint - A", "Invented Checkpoint - B"],
-        "bridge_assignment_id": "bridge-1",
-        "bridge_state_digest": "b" * 64,
-    }])
-
-    result = sis_grade_bridge.list_sis_grade_bridges("course-1")
-
-    assert result == {
-        "ok": True,
-        "course_id": "course-1",
-        "bridges": [{
-            "family_title": "Invented Checkpoint",
-            "source_count": 2,
-            "bridge_assignment_id": "bridge-1",
-            "registered": True,
-        }],
-    }
-    assert "source_titles" not in str(result)
-    assert "bridge_state_digest" not in str(result)
-
-
 def test_apply_rejects_non_bridge_operation_before_executor(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "private_root", lambda: tmp_path / "private")
     operation = models.new_operation(

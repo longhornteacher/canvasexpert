@@ -77,12 +77,12 @@ at `invalidate` on a `catalog.*` scope, two of them added on 2026-09-07 for
 `ensure_item`) at `none`; that has no invalidate in this unit.
 
 **Pages (corrected 2026-09-07):** the v3 catalog carries a real `pages`
-scope, projected to teachers through the `get_course_pages` MCP tool and the
+scope, projected to teachers through the `get_course_content(kind="pages", ...)` MCP tool and the
 web UI, and `course_catalog.INVALIDATABLE_SCOPES` accepts it. Earlier
 revisions of this document recorded page bodies as having *no* catalog scope,
 which was true of the pre-v3 vocabulary and stale afterwards. A page created
 in Canvas by `PageAdapter.execute` now marks the local pages scope stale, so
-`get_course_pages` does not keep reporting a pre-push record set until a
+`get_course_content(kind="pages", ...)` does not keep reporting a pre-push record set until a
 teacher refreshes the catalog by hand. `content.page` invalidates
 `catalog.pages` unconditionally and reaches this through the same post-apply
 hook; nothing in the push path itself changed.
@@ -155,7 +155,7 @@ is deferred for 1.0beta. If reopened, verify these facts against code first.
 
 ### 4. Groups and membership (`private.groups`)
 
-Course Info and the agent-facing `list_groups` tool retain read-only group-set and
+Course Info and the agent-facing `get_roster(include=["groups"], ...)` tool retain read-only group-set and
 name display from the private mirror. Canvas Expert no longer creates group sets or
 edits memberships through Roster; the former `roster_canvas.py` and `roster_groups.py`
 write routes were retired in Forge Batch 1 (three tiers, no student-to-tier knowledge).

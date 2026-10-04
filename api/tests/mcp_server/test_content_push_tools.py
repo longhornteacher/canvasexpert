@@ -140,7 +140,8 @@ def test_tools_delegate_to_the_shared_use_case(monkeypatch):
     assert seen["preview"][3]["module_name"] == "Unit 3"
     assert result["next"] == tools._NEXT_STEPS["preview_content_push"]
 
-    applied = tools.apply_content_push("op", "batch", "digest")
+    monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {"kind": "content.page"})
+    applied = tools.apply_operation('op', 'batch', 'digest')
     assert applied["coordinates"] == ("op", "batch", "digest")
     # A refusal carries no post-call procedure: there is nothing to apply.
     monkeypatch.setattr(content_push, "preview_content_push",
@@ -283,7 +284,7 @@ def test_an_unstaged_kind_points_back_at_staging(_adapter):
     result = content_push.preview_content_push("course-x", "quiz", "unit-3")
 
     assert result["ok"] is False
-    assert "get_authoring_contract" in result["error"]
+    assert "get_product_guide" in result["error"]
 
 
 def test_a_draft_the_marker_does_not_cover_is_not_reachable(_adapter):
@@ -673,12 +674,7 @@ def test_mcp_differentiated_quiz_requires_dated_module_family(monkeypatch):
             or {"ok": True, "preview": {"bridge": {"title": "Shared Quiz"}}}
         ),
     )
-    result = tools.preview_differentiated_quiz_push(
-        "course-x",
-        [{"label": "variant-a"}, {"label": "variant-b"}],
-        due_at="2026-09-14T15:00:00-05:00",
-        module_name="Week 1",
-    )
+    result = tools.preview_content_push('course-x', due_at='2026-09-14T15:00:00-05:00', module_name='Week 1', variants=[{'label': 'variant-a'}, {'label': 'variant-b'}])
     assert result["ok"] is True
     assert seen["options"]["due_at"] == "2026-09-14T15:00:00-05:00"
     assert seen["options"]["module_name"] == "Week 1"
@@ -775,7 +771,7 @@ def test_the_frozen_operation_is_visible_to_the_teacher_and_applies_once(_ledger
     assert listed[0]["kind"] == "content.page"
     assert listed[0]["status"] == "reviewed"
 
-    wrong_digest = content_push.apply_content_push(
+    wrong_digest = tools.apply_operation(
         preview["operation_id"], preview["batch_id"], "not-the-digest")
     assert wrong_digest["ok"] is False
     assert "does not match" in wrong_digest["error"]
@@ -835,7 +831,7 @@ def test_preview_then_apply_a_date_change_sends_exactly_one_put(_assignment_upda
     ]
     assert sent == []  # no Canvas write yet
 
-    applied = content_push.apply_assignment_update(
+    applied = tools.apply_operation(
         preview["operation_id"], preview["batch_id"], preview["review_digest"])
 
     assert applied["ok"] is True
@@ -845,6 +841,10 @@ def test_preview_then_apply_a_date_change_sends_exactly_one_put(_assignment_upda
     assert method == "PUT"
     assert "assignments/24680" in path
     assert request == {"assignment": {"due_at": "2026-09-11T23:59:00Z"}}
+    repeated = tools.apply_operation(preview["operation_id"], preview["batch_id"], preview["review_digest"])
+    assert repeated == content_push.apply_assignment_update(preview["operation_id"], preview["batch_id"], preview["review_digest"])
+    assert repeated["ok"] is False
+    assert len(sent) == 1
 
 
 def test_apply_assignment_update_is_refused_by_apply_content_push(_assignment_update_ledger):
@@ -874,11 +874,11 @@ def test_preview_assignment_update_refuses_with_no_field_and_no_canvas_call(
 # --- the staging contract still says where drafts go ---------------------------
 
 def test_the_staging_appendix_offers_the_push_without_replacing_the_push_tab():
-    contract = tools.get_authoring_contract("page")["contract"]
+    contract = tools.get_product_guide('page')["contract"]
 
     assert "Canvas Expert push tab" in contract
     assert "preview_content_push" in contract
-    assert "apply_content_push" in contract
+    assert "apply_operation" in contract
 
 # --- staging from the assistant itself -----------------------------------------
 
@@ -1147,20 +1147,22 @@ def test_abandon_operation_delegates_and_refuses_when_the_status_is_wrong(monkey
 
 @pytest.mark.parametrize("call", [
     lambda monkeypatch: (
+        monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {"kind": "content.page"}),
         monkeypatch.setattr(tools.content_push, "apply_content_push", lambda *_a: {
             "ok": True, "operation_id": "op-1", "status": "applied",
             "targets": [{"state": "applied"}],
             "verify_hint": [{"course_id": "course-x", "kind": "page", "id": "9001"}],
         }),
-        tools.apply_content_push("op-1", "batch-1", "digest-1"),
+        tools.apply_operation('op-1', 'batch-1', 'digest-1'),
     )[-1],
     lambda monkeypatch: (
+        monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {"kind": "content.assignment_update"}),
         monkeypatch.setattr(tools.content_push, "apply_assignment_update", lambda *_a: {
             "ok": True, "operation_id": "op-1", "status": "applied", "kind": "assignment_update",
             "targets": [{"state": "applied"}],
             "verify_hint": [{"course_id": "course-x", "kind": "assignment", "id": "9001"}],
         }),
-        tools.apply_assignment_update("op-1", "batch-1", "digest-1"),
+        tools.apply_operation('op-1', 'batch-1', 'digest-1'),
     )[-1],
     lambda monkeypatch: (
         monkeypatch.setattr(tools.content_push, "push_content_live", lambda *_a, **_k: {
@@ -1171,11 +1173,12 @@ def test_abandon_operation_delegates_and_refuses_when_the_status_is_wrong(monkey
         tools.push_content_live("course-x", "page", "l", "body"),
     )[-1],
     lambda monkeypatch: (
+        monkeypatch.setattr(tools.operation_operations, "get_operation", lambda _id: {"kind": "gradebook.sis_bridge"}),
         monkeypatch.setattr(tools.sis_grade_bridge, "apply_sis_grade_bridge", lambda *_a: {
             "ok": True, "operation_id": "op-1", "status": "applied",
             "course_id": "course-x", "bridge_assignment_id": "9001",
         }),
-        tools.apply_sis_grade_bridge("op-1", "batch-1", "digest-1"),
+        tools.apply_operation('op-1', 'batch-1', 'digest-1'),
     )[-1],
 ], ids=["apply_content_push", "apply_assignment_update", "push_content_live", "apply_sis_grade_bridge"])
 def test_every_apply_tool_carries_verify_hint_on_success(monkeypatch, call):

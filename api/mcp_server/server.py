@@ -22,53 +22,89 @@ import sys
 import threading
 import time
 from typing import Literal, NotRequired, TypedDict
+from functools import wraps
+
+from api import operational_log
 
 from mcp.server.fastmcp import FastMCP
 
 from . import tools
 
 _SERVER_INSTRUCTIONS = (
-    "Local teacher-controlled runtime; real identities, credentials and private paths stay local, "
+    "Local teacher-controlled runtime; identities, credentials and private paths stay local; "
     "student rows are pseudonyms. Never read Identity Vault or teacher-only Web UI routes. "
-    "Use within_policy catalog/mirror as is; when outside policy, refresh it yourself "
-    "(refresh_mirror, refresh_course_structure, refresh_scoring_session) and continue. Tell the "
-    "teacher when a refresh finds new or resubmitted work. "
+    "Use within_policy catalog/mirror as is; outside policy refresh_mirror yourself "
+    "(structure_only=true for catalog), then continue. Tell the teacher when new/resubmitted work arrives. "
     "For broad grading, discover_scoring_work reads every Current course mirror: report all "
-    "assignment and attention rows, wait for teacher direction. Call prepare_scoring_session once "
-    "per exact assignment; on a refresh refusal call refresh_mirror and retry "
-    "(use_existing_mirror=true only if the teacher says nothing changed). On "
-    "scoring_session_already_open, work locally in it; never re-prepare it. "
-    "For needs_scoring_norms, ask its question and retry with bounded scoring guidance; never ask "
-    "the teacher to choose a scoring transport or assignment type. An explicit score/post "
-    "direction authorizes the selected discovery rows together without reconfirming each "
-    "assignment, but never extends beyond those rows or another session. "
-    "Read every SAFE page with get_scoring_packet including contract/rubric; held work and evidence "
-    "gaps are not empty. Stage unchanged packet results via stage_scoring_results with "
-    "expected_packet_digest. Put integrity concerns and other teacher-only notes in "
-    "agent_commentary, citing CE's evidence and your own checks. For needs_teacher_input, ask only "
-    "its questions; resubmit the same results to stage_scoring_results with its review digest and "
-    "answers. "
-    "After staging, show get_scoring_preview (rendered if the host allows, else a table): "
-    "warnings first, student-facing comments exactly as returned, agent commentary in a separate "
-    "yellow block labeled \"Agent commentary (teacher only)\". Edits mean restaging. Before any "
-    "apply_* or push_content_live, say what changes and any warnings, then wait for the "
-    "teacher's go (one go may cover selected rows/assignments); apply_staged_scoring_results only "
-    "when told to push. "
-    "Canvas Live is the record and later edit surface; list_scoring_sessions resumes work; "
-    "list_feedback_contracts gives rules. Graded feedback: prepare_feedback_revision, "
-    "get_feedback_revision_packet, stage_feedback_revisions, then apply_staged_feedback_revisions; "
-    "scores stay fixed. Across devices: handoff_work_item before switching, take_over_work_item "
-    "after sync; confirm stale takeover only once prior device stopped. Content: "
-    "get_authoring_contract or get_product_guide. Attachments: canvas_file by exact name or "
-    "stage_attachment(source_path); never list course files or pass bytes. No path: teacher "
-    "chooses Canvas Files."
+    "assignment and attention rows, wait for teacher direction. Prepare once per selected exact "
+    "assignment; refresh refusals need refresh_mirror and retry (use_existing_mirror=true only "
+    "if the teacher says nothing changed). On scoring_session_already_open, continue that session. "
+    "For needs_scoring_norms ask its bounded question; never ask the teacher to choose a scoring transport. An explicit score/post direction authorizes the "
+    "selected discovery rows together without reconfirming each assignment, never extends beyond those rows or another session. "
+    "Read every SAFE get_scoring_packet page including contract/rubric; held work and evidence gaps are not empty. "
+    "Stage exact packet results via stage_scoring_results with expected_packet_digest. Integrity concerns and teacher-only "
+    "notes belong in agent_commentary, with evidence. For needs_teacher_input ask only its questions "
+    "and resubmit unchanged results with review digest and answers. "
+    "Show get_scoring_preview in your conversation: warnings first, comments exactly as returned, "
+    "agent commentary separately in a yellow block labeled \"Agent commentary (teacher only)\". "
+    "Edits mean restaging. Before any apply_* or push_content_live say what changes and warnings, "
+    "then wait for the teacher's go; one go may cover selected rows/assignments; "
+    "apply_staged_scoring_results only when told to push. "
+    "Canvas Live is the record and later edit surface. Graded feedback uses the same scoring tools "
+    "with prepare_scoring_session(mode='feedback_revision'); scores stay fixed. "
+    "Across devices: transfer_work_item(action='hand_off') before switching and action='take_over' "
+    "after sync; confirm_stale only once the prior device stopped. Content: get_product_guide with "
+    "quiz, assignment or page topic. Attachments: exact canvas_file name or stage_attachment(source_path); "
+    "never pass bytes. No local path: teacher chooses Canvas Files."
 )
+
 
 mcp = FastMCP("canvas-expert", instructions=_SERVER_INSTRUCTIONS)
 
 
+def _log_tool_calls(manager) -> None:
+    """Wrap registered dispatch once, including argument validation, without payload logging."""
+    call_tool = manager.call_tool
+
+    @wraps(call_tool)
+    async def logged(name, arguments, *args, **kwargs):
+        tool = manager.get_tool(name)
+        if tool is None:
+            # An unknown caller-controlled string is not an allowlisted tool name.
+            return await call_tool(name, arguments, *args, **kwargs)
+        started = time.perf_counter()
+        outcome = "error"
+        error_class = None
+        try:
+            result = await call_tool(name, arguments, *args, **kwargs)
+            text = result if isinstance(result, str) else result[0].text
+            payload = json.loads(text)
+            outcome = "ok" if payload.get("ok") else "refused"
+            return result
+        except Exception as error:
+            error_class = type(error.__cause__ or error)
+            raise
+        finally:
+            fields = {"duration_ms": int((time.perf_counter() - started) * 1000)}
+            if error_class is not None:
+                fields["error_class"] = error_class
+            operational_log.emit(f"mcp.tool.{tool.name}", outcome, **fields)
+
+    manager.call_tool = logged
+
+
+class RevisionResult(TypedDict):
+    __pydantic_config__ = {"extra": "allow"}
+
+    pseudonym: str
+    comment_key: str
+    feedback: str
+
+
 class ScoringResult(TypedDict):
     """One SAFE packet row supplied to stage_scoring_results."""
+
+    __pydantic_config__ = {"extra": "allow"}
 
     pseudonym: str
     item_id: str
@@ -192,10 +228,6 @@ def list_courses() -> str:
     return _compact(tools.list_courses())
 
 
-@mcp.tool(structured_output=False)
-def list_sis_grade_bridges(course_id: str) -> str:
-    """List SIS grade bridges for one Current course_id returned by list_courses."""
-    return _compact(tools.list_sis_grade_bridges(course_id))
 
 
 @mcp.tool(structured_output=False)
@@ -204,37 +236,14 @@ def reconcile_sis_grade_bridges(course_id: str) -> str:
     return _compact(tools.reconcile_sis_grade_bridges(course_id))
 
 
-@mcp.tool(structured_output=False)
-def preview_sis_grade_bridge_reconciliation(
-    course_id: str,
-    family_title: str,
-    source_assignment_ids: list[str] | None = None,
-    bridge_assignment_id: str | None = None,
-) -> str:
-    """Agent chooses sources; teacher confirms before write."""
-    return _compact(tools.preview_sis_grade_bridge_reconciliation(
-        course_id,
-        family_title,
-        source_assignment_ids,
-        bridge_assignment_id,
-    ))
 
 
 @mcp.tool(structured_output=False)
-def preview_sis_grade_bridge(course_id: str, family_title: str) -> str:
-    """Freeze and persist a local SIS grade-bridge review for one differentiated family."""
-    return _compact(tools.preview_sis_grade_bridge(course_id, family_title))
+def preview_sis_grade_bridge(course_id: str, family_title: str, reconcile: bool=False, bridge_assignment_id: str | None=None, source_assignment_ids: list[str] | None=None) -> str:
+    'Persist a local SIS bridge projection or reconciliation review.'
+    return _compact(tools.preview_sis_grade_bridge(course_id=course_id, family_title=family_title, reconcile=reconcile, bridge_assignment_id=bridge_assignment_id, source_assignment_ids=source_assignment_ids))
 
 
-@mcp.tool(structured_output=False)
-def apply_sis_grade_bridge(
-    operation_id: str, batch_id: str, review_digest: str
-) -> str:
-    """Write the exact frozen SIS grade-bridge review to Canvas.
-    Use only the unchanged coordinates returned by preview_sis_grade_bridge."""
-    return _compact(tools.apply_sis_grade_bridge(
-        operation_id, batch_id, review_digest
-    ))
 
 
 @mcp.tool(structured_output=False)
@@ -248,14 +257,6 @@ def preview_grade_adjustment(
     ))
 
 
-@mcp.tool(structured_output=False)
-def apply_grade_adjustment(
-    operation_id: str, batch_id: str, review_digest: str
-) -> str:
-    """Write the exact frozen grade-adjustment review to Canvas."""
-    return _compact(tools.apply_grade_adjustment(
-        operation_id, batch_id, review_digest
-    ))
 
 
 @mcp.tool(structured_output=False)
@@ -265,73 +266,28 @@ def preview_attempts_grant(course_id: str, assignment_id: str, grant: dict) -> s
     return _compact(tools.preview_attempts_grant(course_id, assignment_id, grant))
 
 
-@mcp.tool(structured_output=False)
-def apply_attempts_grant(
-    operation_id: str, batch_id: str, review_digest: str
-) -> str:
-    """Write the exact frozen attempts grant to Canvas."""
-    return _compact(tools.apply_attempts_grant(
-        operation_id, batch_id, review_digest
-    ))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 @mcp.tool(structured_output=False)
-def preview_workspace_reset() -> str:
-    """Dry-run the explicitly authorized local assignment/evidence workspace reset."""
-    return _compact(tools.preview_workspace_reset())
+def get_roster(course_id: str, pseudonym: str | None=None, include: list[str] | None=None) -> str:
+    "Read stand-ins, selected sections/groups, or one pseudonym's local settings."
+    return _compact(tools.get_roster(course_id=course_id, pseudonym=pseudonym, include=include))
 
 
-@mcp.tool(structured_output=False)
-def apply_workspace_reset(preview_digest: str) -> str:
-    """Apply only an unchanged, non-refused workspace reset preview."""
-    return _compact(tools.apply_workspace_reset(preview_digest))
-
-
-@mcp.tool(structured_output=False)
-def list_sections(course_id: str) -> str:
-    """List a saved course's section names from the local mirror. No student data."""
-    return _compact(tools.list_sections(course_id))
-
-
-@mcp.tool(structured_output=False)
-def list_groups(course_id: str) -> str:
-    """List current-course group-set and group names from the local mirror only."""
-    return _compact(tools.list_groups(course_id))
-
-
-@mcp.tool(structured_output=False)
-def get_course_assignments(course_id: str, full_descriptions: bool = False) -> str:
-    """Read a saved course's assignments from the local course catalog.
-    Descriptions are previews unless full_descriptions=true. No student data."""
-    return _compact(tools.get_course_assignments(course_id, full_descriptions))
-
-
-@mcp.tool(structured_output=False)
-def get_modules(course_id: str, include_items: bool = False) -> str:
-    """Read a saved course's modules from the local course catalog.
-    Set include_items=true to include module items."""
-    return _compact(tools.get_modules(course_id, include_items))
-
-
-@mcp.tool(structured_output=False)
-def get_course_pages(course_id: str, full_text: bool = False,
-                     include_unpublished: bool = True) -> str:
-    """Read course pages from the local v3 catalog, including unpublished by default.
-    Set full_text=true for complete normalized bodies or include_unpublished=false to omit drafts."""
-    return _compact(tools.get_course_pages(course_id, full_text, include_unpublished))
-
-
-@mcp.tool(structured_output=False)
-def get_roster(course_id: str) -> str:
-    """Read a Current roster as stable one-word student stand-ins and section names."""
-    return _compact(tools.get_roster(course_id))
-
-
-@mcp.tool(structured_output=False)
-def get_roster_student_settings(course_id: str, pseudonym: str) -> str:
-    """Read one Current roster student's safe local settings by pseudonym.
-    Excludes stored nicknames and all identity IDs."""
-    return _compact(tools.get_roster_student_settings(course_id, pseudonym))
 
 
 @mcp.tool(structured_output=False)
@@ -348,53 +304,18 @@ def apply_roster_student_change(course_id: str, preview: dict,
         course_id, preview, preview_digest, expected_settings_digest))
 
 
-@mcp.tool(structured_output=False)
-def clear_roster_student_field(course_id: str, pseudonym: str, field: str,
-                               expected_settings_digest: str) -> str:
-    """Clear one supported local roster setting using a fresh hidden digest.
-    Nickname fields are never clearable through MCP."""
-    return _compact(tools.clear_roster_student_field(
-        course_id, pseudonym, field, expected_settings_digest))
 
 
 @mcp.tool(structured_output=False)
-def get_submissions(course_id: str, assignment_id: str,
-                    include_text: bool = True, pseudonyms: str = "",
-                    max_text_chars: int = 2000) -> str:
-    """Read pseudonymized mirror submissions; no live Canvas fallback or attachments.
-    include_text=false returns status/scores; pseudonyms and max_text_chars narrow output."""
-    return _compact(tools.get_submissions(
-        course_id, assignment_id,
-        include_text=include_text, pseudonyms=pseudonyms,
-        max_text_chars=max_text_chars,
-    ))
+def get_submissions(course_id: str, assignment_id: str, include_text: bool=True, pseudonyms: str='', max_text_chars: int | None=None, history: bool=False, offset: int | None=None, limit: int | None=None) -> str:
+    'Read pseudonymized submissions or paginated retained history from local stores.'
+    return _compact(tools.get_submissions(course_id=course_id, assignment_id=assignment_id, include_text=include_text, pseudonyms=pseudonyms, max_text_chars=max_text_chars, history=history, offset=offset, limit=limit))
 
 
-@mcp.tool(structured_output=False)
-def get_submission_history(course_id: str, assignment_id: str,
-                           pseudonyms: str = "", include_text: bool = True,
-                           max_text_chars: int = 12000,
-                           offset: int = 0, limit: int = 50) -> str:
-    """Read bounded retained assignment drafts and file evidence from local history.
-    History is observed-only and does not report current Canvas freshness or enrollment."""
-    return _compact(tools.get_submission_history(
-        course_id, assignment_id, pseudonyms=pseudonyms,
-        include_text=include_text, max_text_chars=max_text_chars,
-        offset=offset, limit=limit,
-    ))
 
 
-@mcp.tool(structured_output=False)
-def create_score_curve_rule(course_id: str, formula: dict,
-                            assignment_id: str = "") -> str:
-    """Create an immutable local score curve rule; no Canvas grades change."""
-    return _compact(tools.create_score_curve_rule(course_id, formula, assignment_id))
 
 
-@mcp.tool(structured_output=False)
-def deactivate_score_curve_rule(course_id: str, rule_id: str) -> str:
-    """Deactivate a local score curve rule; no Canvas grades change."""
-    return _compact(tools.deactivate_score_curve_rule(course_id, rule_id))
 
 
 @mcp.tool(structured_output=False)
@@ -412,10 +333,6 @@ def get_gradebook_snapshot(course_id: str) -> str:
     return _compact(tools.get_gradebook_snapshot(course_id))
 
 
-@mcp.tool(structured_output=False)
-def get_authoring_contract(kind: str) -> str:
-    """Return the canonical Forge authoring contract; no student data."""
-    return _compact(tools.get_authoring_contract(kind))
 
 
 @mcp.tool(structured_output=False)
@@ -432,54 +349,13 @@ def list_staged_content(kind: str = "") -> str:
 
 
 @mcp.tool(structured_output=False)
-def preview_content_push(
-    course_id: str,
-    kind: str,
-    label: str,
-    published: bool | None = None,
-    module_name: str = "",
-    assignment_group_name: str = "",
-    due_at: str = "",
-    unlock_at: str = "",
-    lock_at: str = "",
-    post_to_sis: bool | None = None,
-    module_id: str = "",
-    create_module: bool = False,
-) -> str:
-    """Persist a local frozen staged quiz, assignment, or page draft; no Canvas write."""
-    return _compact(tools.preview_content_push(
-        course_id, kind, label,
-        published=published, module_name=module_name,
-        assignment_group_name=assignment_group_name,
-        due_at=due_at, unlock_at=unlock_at, lock_at=lock_at,
-        post_to_sis=post_to_sis, module_id=module_id,
-         create_module=create_module,
-    ))
+def preview_content_push(course_id: str, kind: str='quiz', label: str='', published: bool | None=None, module_name: str='', assignment_group_name: str='', due_at: str='', unlock_at: str='', lock_at: str='', post_to_sis: bool | None=None, module_id: str='', create_module: bool=False, variants: list | None=None) -> str:
+    'Persist a local review of one staged draft or differentiated quiz variants.'
+    return _compact(tools.preview_content_push(course_id=course_id, kind=kind, label=label, published=published, module_name=module_name, assignment_group_name=assignment_group_name, due_at=due_at, unlock_at=unlock_at, lock_at=lock_at, post_to_sis=post_to_sis, module_id=module_id, create_module=create_module, variants=variants))
 
 
-@mcp.tool(structured_output=False)
-def preview_differentiated_quiz_push(
-    course_id: str, variants: list, published: bool = False,
-    module_name: str = "", assignment_group_name: str = "", due_at: str = "",
-    unlock_at: str = "", lock_at: str = "", post_to_sis: bool = False,
-    module_id: str = "", create_module: bool = False,
-) -> str:
-    """Freeze staged QuizForge labels into a reviewed unrestricted family plan."""
-    return _compact(tools.preview_differentiated_quiz_push(
-        course_id, variants, published=published, module_name=module_name,
-        assignment_group_name=assignment_group_name, due_at=due_at,
-        unlock_at=unlock_at, lock_at=lock_at, post_to_sis=post_to_sis,
-        module_id=module_id, create_module=create_module,
-    ))
 
 
-@mcp.tool(structured_output=False)
-def apply_content_push(operation_id: str, batch_id: str, review_digest: str) -> str:
-    """Apply the reviewed Forge draft in its Canvas course.
-    Use unchanged preview_content_push or preview_differentiated_quiz_push coordinates."""
-    return _compact(tools.apply_content_push(
-        operation_id, batch_id, review_digest
-    ))
 
 
 @mcp.tool(structured_output=False)
@@ -498,12 +374,6 @@ def preview_assignment_update(
     ))
 
 
-@mcp.tool(structured_output=False)
-def apply_assignment_update(operation_id: str, batch_id: str, review_digest: str) -> str:
-    """Write the frozen assignment patch preview_assignment_update returned, blocked as drift_detected if the assignment changed since preview."""
-    return _compact(tools.apply_assignment_update(
-        operation_id, batch_id, review_digest
-    ))
 
 
 @mcp.tool(structured_output=False)
@@ -562,15 +432,11 @@ def abandon_operation(operation_id: str) -> str:
 
 
 @mcp.tool(structured_output=False)
-def refresh_mirror(course_id: str, include_comments: bool = False) -> str:
-    """Refresh a saved course mirror; include_comments acquires full staff comments."""
-    return _compact(tools.refresh_mirror(course_id, include_comments))
+def refresh_mirror(course_id: str, include_comments: bool=False, structure_only: bool=False) -> str:
+    'Refresh a saved course mirror, or its catalog with structure_only.'
+    return _compact(tools.refresh_mirror(course_id=course_id, include_comments=include_comments, structure_only=structure_only))
 
 
-@mcp.tool(structured_output=False)
-def refresh_course_structure(course_id: str) -> str:
-    """Refresh the local student-free Course Catalog module structure."""
-    return _compact(tools.refresh_course_structure(course_id))
 
 
 @mcp.tool(structured_output=False)
@@ -586,18 +452,9 @@ def discover_scoring_work() -> str:
 
 
 @mcp.tool(structured_output=False)
-def prepare_scoring_session(course_id: str, assignment_id: str,
-                            scoring_guidance: str = "",
-                            use_existing_mirror: bool = False,
-                            scoring_guidance_provenance: str = "",
-                            feedback_contract_id: str = "",
-                            late_policy: str = "") -> str:
-    """Prepare one exact assignment for packet paging or return a typed blocker.
-    scoring_guidance_provenance: teacher_authored|inherited|default|unknown.
-    late_policy: ask|waive|apply (omit to keep)."""
-    return _compact(tools.prepare_scoring_session(
-        course_id, assignment_id, scoring_guidance, use_existing_mirror,
-        scoring_guidance_provenance, feedback_contract_id, late_policy))
+def prepare_scoring_session(course_id: str, assignment_id: str, scoring_guidance: str='', use_existing_mirror: bool=False, scoring_guidance_provenance: str='', feedback_contract_id: str='', late_policy: str='', mode: str='score') -> str:
+    'Prepare a local scoring or feedback_revision session for one exact assignment.'
+    return _compact(tools.prepare_scoring_session(course_id=course_id, assignment_id=assignment_id, scoring_guidance=scoring_guidance, use_existing_mirror=use_existing_mirror, scoring_guidance_provenance=scoring_guidance_provenance, feedback_contract_id=feedback_contract_id, late_policy=late_policy, mode=mode))
 
 
 @mcp.tool(structured_output=False)
@@ -608,17 +465,8 @@ def refresh_scoring_session(scoring_session_id: str, use_existing_mirror: bool =
         scoring_session_id, use_existing_mirror, replace_resubmitted))
 
 
-@mcp.tool(structured_output=False)
-def prepare_feedback_revision(course_id: str, assignment_id: str,
-                              use_existing_mirror: bool = False) -> str:
-    """Reopen graded ordinary feedback; preserve scores."""
-    return _compact(tools.prepare_feedback_revision(course_id, assignment_id, use_existing_mirror))
 
 
-@mcp.tool(structured_output=False)
-def get_feedback_revision_packet(work_id: str, offset: int = 0, limit: int = 10) -> str:
-    """Read complete scrubbed work and existing staff feedback."""
-    return _compact(tools.get_feedback_revision_packet(work_id, offset, limit))
 
 
 class FeedbackRevision(TypedDict):
@@ -627,17 +475,8 @@ class FeedbackRevision(TypedDict):
     feedback: str
 
 
-@mcp.tool(structured_output=False)
-def stage_feedback_revisions(work_id: str, expected_packet_digest: str, revisions: list[FeedbackRevision],
-                             attachment_file: str | None = None) -> str:
-    """Freeze feedback rows and an optional exact staged attachment filename."""
-    return _compact(tools.stage_feedback_revisions(work_id, expected_packet_digest, revisions, attachment_file))
 
 
-@mcp.tool(structured_output=False)
-def apply_staged_feedback_revisions(work_id: str, expected_stage_digest: str) -> str:
-    """Apply frozen feedback and optional attachment on teacher instruction; no grades or retries."""
-    return _compact(tools.apply_staged_feedback_revisions(work_id, expected_stage_digest))
 
 
 @mcp.tool(structured_output=False)
@@ -647,54 +486,27 @@ def list_scoring_sessions() -> str:
 
 
 @mcp.tool(structured_output=False)
-def list_work_items() -> str:
-    """List shared in-flight work, current holder, sync progress, and orphan count."""
-    return _compact(tools.list_work_items())
+def list_work_items(work_id: str | None=None) -> str:
+    'Read shared work holders and sync status, or one work_id detail.'
+    return _compact(tools.list_work_items(work_id=work_id))
+
+
+
+
+
+
 
 
 @mcp.tool(structured_output=False)
-def get_work_item(work_id: str) -> str:
-    """Get one work item's holder and event-sync status without its contents."""
-    return _compact(tools.get_work_item(work_id))
+def get_scoring_packet(scoring_session_id: str, offset: int=0, limit: int=10, include_context: bool | None=None) -> str:
+    'Read one SAFE packet page for scoring or existing-comment revision.'
+    return _compact(tools.get_scoring_packet(scoring_session_id=scoring_session_id, offset=offset, limit=limit, include_context=include_context))
 
 
 @mcp.tool(structured_output=False)
-def take_over_work_item(work_id: str, confirm_stale: bool = False) -> str:
-    """Take a released work item, or confirm takeover after its old lease goes stale."""
-    return _compact(tools.take_over_work_item(work_id, confirm_stale=confirm_stale))
-
-
-@mcp.tool(structured_output=False)
-def handoff_work_item(work_id: str) -> str:
-    """Release this device's work lease before continuing on another device."""
-    return _compact(tools.handoff_work_item(work_id))
-
-
-@mcp.tool(structured_output=False)
-def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10,
-                       include_context: bool = True) -> str:
-    """Read one page of the SAFE packet; read every page before staging."""
-    return _compact(tools.get_scoring_packet(
-        scoring_session_id, offset, limit, include_context))
-
-
-@mcp.tool(structured_output=False)
-def stage_scoring_results(
-    scoring_session_id: str,
-    results: list[ScoringResult],
-    expected_packet_digest: str,
-    review_digest: str = "",
-    answers: dict[str, str] | None = None,
-    grade_mode: Literal["post_score", "feedback_only"] | None = None,
-) -> str:
-    """Validate and stage SAFE results locally; no Canvas write.
-
-    ``grade_mode`` defaults to the mode already selected for this session,
-    or ``post_score`` for a session with no stored choice.
-    """
-    return _compact(tools.stage_scoring_results(
-        scoring_session_id, results, expected_packet_digest, review_digest, answers,
-        grade_mode=grade_mode))
+def stage_scoring_results(scoring_session_id: str, results: list[ScoringResult | RevisionResult], expected_packet_digest: str, review_digest: str='', answers: dict | None=None, grade_mode: str | None=None, attachment_file: str | None=None) -> str:
+    'Freeze scoring results or comment revisions locally; no Canvas write.'
+    return _compact(tools.stage_scoring_results(scoring_session_id=scoring_session_id, results=results, expected_packet_digest=expected_packet_digest, review_digest=review_digest, answers=answers, grade_mode=grade_mode, attachment_file=attachment_file))
 
 
 @mcp.tool(structured_output=False)
@@ -716,6 +528,30 @@ def apply_staged_scoring_results(scoring_session_id: str,
 def reset_scoring_review(scoring_session_id: str) -> str:
     """Reopen the current local scoring review."""
     return _compact(tools.reset_scoring_review(scoring_session_id))
+
+
+@mcp.tool(structured_output=False)
+def apply_operation(operation_id: str, batch_id: str, review_digest: str) -> str:
+    'Write the exact frozen operation to Canvas through its existing owner.'
+    return _compact(tools.apply_operation(operation_id=operation_id, batch_id=batch_id, review_digest=review_digest))
+
+
+@mcp.tool(structured_output=False)
+def get_course_content(course_id: str, kind: str, full_descriptions: bool | None=None, full_text: bool | None=None, include_unpublished: bool | None=None, include_items: bool | None=None) -> str:
+    'Read local catalog assignments, pages or modules with kind-specific options.'
+    return _compact(tools.get_course_content(course_id=course_id, kind=kind, full_descriptions=full_descriptions, full_text=full_text, include_unpublished=include_unpublished, include_items=include_items))
+
+
+@mcp.tool(structured_output=False)
+def transfer_work_item(work_id: str, action: str, confirm_stale: bool=False) -> str:
+    'Take over or hand off one shared work lease after sync.'
+    return _compact(tools.transfer_work_item(work_id=work_id, action=action, confirm_stale=confirm_stale))
+
+
+@mcp.tool(structured_output=False)
+def set_score_curve_rule(course_id: str, formula: dict | None=None, assignment_id: str | None=None, rule_id: str | None=None, active: bool=True) -> str:
+    'Create or deactivate a local score curve rule without changing Canvas grades.'
+    return _compact(tools.set_score_curve_rule(course_id=course_id, formula=formula, assignment_id=assignment_id, rule_id=rule_id, active=active))
 
 
 def _strip_generated_schema_titles(mcp_server) -> int:
@@ -769,3 +605,6 @@ def _strip_generated_schema_titles(mcp_server) -> int:
 
 
 _STRIPPED_SCHEMA_TITLES = _strip_generated_schema_titles(mcp)
+
+
+_log_tool_calls(mcp._tool_manager)

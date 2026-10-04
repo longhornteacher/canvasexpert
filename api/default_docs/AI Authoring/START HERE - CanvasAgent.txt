@@ -27,7 +27,7 @@ question goes past what this file covers.
 Use CanvasExpert runtime. Browser: setup, readiness, mirror, review, recovery, diagnostics.
 Follow connected tool results.
 
-For authoring, call get_authoring_contract(kind). Clarify grade, rigor, standards,
+For authoring, call get_product_guide(topic=kind). Clarify grade, rigor, standards,
 sources, and tracked/not tracked writing. Return one reviewed `<QUIZFORGE_JSON>`,
 `<ASSIGNMENTFORGE_JSON>`, or `<PAGEFORGE_JSON>` envelope. For AssignmentForge and
 PageForge, provide the content; Canvas Expert renders its presentation. For objective
@@ -242,19 +242,19 @@ What matters while you work:
 Reading
 
   * Call list_courses first, and use a course_id it returns.
-  * get_authoring_contract(kind) before authoring anything.
+  * get_product_guide(topic=kind) before authoring anything.
   * get_product_guide before you say what CanvasExpert can or cannot do, and
     before planning writing work. Omit the topic for the compact capability
     overview;
     topic="setup", "chat_authoring", "connected", "privacy",
     "troubleshooting" selects one Appendix A-F section;
-    topic="full" returns the whole CanvasAgent file. Every response lists all
-    available topics.
+    topic="full" returns the whole CanvasAgent file. Guide responses list the available topics; quiz, assignment and page
+    return the canonical Forge contract.
     topic="writing_timeline" for tracked and not-tracked assignments.
-  * get_modules, get_course_assignments, and get_course_pages read a local
-    catalog on disk, never live Canvas. If the catalog looks empty or stale, call
-    refresh_course_structure(course_id) yourself, then retry.
-  * list_sections(course_id) lists section ids and names.
+  * get_course_content(course_id, kind="modules"/"assignments"/"pages") reads
+    the local catalog on disk, never live Canvas. If the catalog looks empty or stale, call
+    refresh_mirror(course_id, structure_only=true) yourself, then retry.
+  * get_roster(course_id, include=["sections"]) lists section ids and names.
   * get_roster, get_submissions, and get_gradebook_snapshot
     read only the local mirror and will refuse when it is stale. When one
     refuses, call refresh_mirror(course_id) yourself, then retry that read once.
@@ -276,9 +276,9 @@ preview before applying it.
 If a tool refuses because a revision or digest is stale, something changed
 under you: read again rather than forcing it.
 
-  * Roster settings. get_roster_student_settings, then
-    preview_roster_student_change and apply_roster_student_change, or
-    clear_roster_student_field to clear one. These are mostly the teacher's
+  * Roster settings. get_roster(course_id, pseudonym), then
+    preview_roster_student_change and apply_roster_student_change.
+    A null patch value clears a supported field after the same preview. These are mostly the teacher's
     own local settings, pseudonym-first. These do not change Canvas group
     membership. Nicknames are not yours to set.
    * Scoring. discover_scoring_work first for the complete Current-course digest, then
@@ -286,8 +286,16 @@ under you: read again rather than forcing it.
      get_scoring_preview (show it to the teacher before pushing), and
      apply_staged_scoring_results as described
     under Scoring Sessions above. SIS bridge grade
-    projection uses preview_sis_grade_bridge and apply_sis_grade_bridge for an exact
+    projection uses preview_sis_grade_bridge and apply_operation for an exact
     family that differentiated Forge delivery already linked.
+  * Existing staff feedback uses prepare_scoring_session(mode="feedback_revision"),
+    followed by get_scoring_packet, stage_scoring_results with
+    {pseudonym, comment_key, feedback}, get_scoring_preview, and explicit apply.
+    Scores remain context only; attachments use stage_attachment then attachment_file.
+  * Shared work: list_work_items(work_id) reads holder/sync detail;
+    transfer_work_item(action="hand_off") releases before switching computers and
+    action="take_over" acquires after sync. Confirm stale takeover only after the old
+    computer stopped working. Retained attempts use get_submissions(history=true).
 
 How authored content reaches the teacher. Which one you use is decided by
 what they asked for, not by a default that outranks them:
@@ -311,7 +319,7 @@ what they asked for, not by a default that outranks them:
     retained Create tab, where they can validate and push it themselves.
   * It needs a due, unlock, or lock date. Stage it, then
     preview_content_push(course_id, kind, label) freezes that one draft for
-    that one course and returns what it will create, and apply_content_push
+    that one course and returns what it will create, and apply_operation
     lands it with the three coordinates unchanged. The label is the one
     list_staged_content returns.
 

@@ -32,7 +32,7 @@ def test_history_is_read_after_prune_with_scrubbed_text_and_local_only_files(tmp
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
     monkeypatch.setattr(tools.mirror_service, "canvas_get_all",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
-    result = tools.get_submission_history(COURSE, ASSIGNMENT)
+    result = tools.get_submissions(COURSE, ASSIGNMENT, history=True)
     assert result["ok"] is True, result
     assert result["source"] == "retained_history"
     assert result["coverage"] == "observed_only"
@@ -55,12 +55,12 @@ def test_include_text_false_never_extracts_and_pagination_is_bounded(tmp_path, m
     env["capture"]()
     monkeypatch.setattr(student_attachments, "route_bytes",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("extraction ran")))
-    first = tools.get_submission_history(COURSE, ASSIGNMENT, include_text=False, limit=1)
+    first = tools.get_submissions(COURSE, ASSIGNMENT, include_text=False, limit=1, history=True)
     assert first["ok"] is True
     assert "text" not in first["attempts"][0]
     assert first["next_offset"] is None
-    assert tools.get_submission_history(COURSE, ASSIGNMENT, limit=0)["ok"] is False
-    assert tools.get_submission_history(COURSE, ASSIGNMENT, max_text_chars=20001)["ok"] is False
+    assert tools.get_submissions(COURSE, ASSIGNMENT, limit=0, history=True)["ok"] is False
+    assert tools.get_submissions(COURSE, ASSIGNMENT, max_text_chars=20001, history=True)["ok"] is False
 
 
 def test_docx_text_is_scrubbed_but_pdf_remains_local_only(tmp_path, monkeypatch, retained_history_env):
@@ -73,7 +73,7 @@ def test_docx_text_is_scrubbed_but_pdf_remains_local_only(tmp_path, monkeypatch,
                          "<w:body><w:p><w:r><w:t>Alice document draft</w:t></w:r></w:p></w:body></w:document>")
     docx = docx_path.read_bytes()
     env["capture"]([("503", "student-private.docx", docx)])
-    result = tools.get_submission_history(COURSE, ASSIGNMENT)
+    result = tools.get_submissions(COURSE, ASSIGNMENT, history=True)
     file_result = result["attempts"][0]["files"][0]
     assert file_result["type"] == "docx"
     assert "Alice" not in file_result.get("text", "")
@@ -86,7 +86,7 @@ def test_file_extraction_failure_is_visible_without_empty_success(tmp_path, monk
     env["capture"]([("504", "draft.txt", b"safe words")])
     monkeypatch.setattr(student_attachments, "route_bytes",
                         lambda *a, **k: {"extraction_status": "failed", "text": ""})
-    result = tools.get_submission_history(COURSE, ASSIGNMENT)
+    result = tools.get_submissions(COURSE, ASSIGNMENT, history=True)
     assert result["attempts"][0]["files"][0]["status"] == "extraction_failed"
     assert "text" not in result["attempts"][0]["files"][0]
 
@@ -111,8 +111,7 @@ def test_budget_ends_the_page_and_never_blanks_an_attempt(retained_history_env):
 
     seen, offset, pages = [], 0, 0
     while offset is not None:
-        result = tools.get_submission_history(COURSE, ASSIGNMENT, max_text_chars=20000,
-                                              offset=offset, limit=100)
+        result = tools.get_submissions(COURSE, ASSIGNMENT, max_text_chars=20000, offset=offset, limit=100, history=True)
         assert result["ok"] is True, result
         assert result["attempts"], "a page always holds at least one attempt"
         if result["next_offset"] is not None:
@@ -131,7 +130,7 @@ def test_budget_ends_the_page_and_never_blanks_an_attempt(retained_history_env):
 def test_empty_body_with_text_file_reports_no_body_and_files_note(retained_history_env):
     env = retained_history_env
     env["capture"]([("505", "essay.txt", b"typed in a file")], body="")
-    result = tools.get_submission_history(env["course_id"], env["assignment_id"])
+    result = tools.get_submissions(env['course_id'], env['assignment_id'], history=True)
     item = result["attempts"][0]
     assert item["text_status"] == "no_body" and item["text"] == ""
     assert "files" in item["text_note"]
@@ -141,6 +140,5 @@ def test_empty_body_with_text_file_reports_no_body_and_files_note(retained_histo
 def test_include_text_false_marks_omitted_without_text(retained_history_env):
     env = retained_history_env
     env["capture"]()
-    item = tools.get_submission_history(
-        env["course_id"], env["assignment_id"], include_text=False)["attempts"][0]
+    item = tools.get_submissions(env['course_id'], env['assignment_id'], include_text=False, history=True)["attempts"][0]
     assert item["text_status"] == "omitted" and "text" not in item
