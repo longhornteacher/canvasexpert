@@ -1,21 +1,21 @@
-"""Extraction publication, caching, and privacy laws."""
+"""Association-keyed extraction publication, retries, and privacy laws."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
+import threading
 
 import pytest
 
 from api.mirror.evidence_extraction import (
-    ExtractionCache, extract_captured_attachments, extraction_cache_key,
-    extraction_entity_key, publish_extraction,
+    extract_captured_attachments, extraction_entity_key, publish_extraction,
 )
 from api.mirror.evidence_jobs import AttachmentJobStore
 from api.mirror.evidence_publish import EvidencePublisher
-from api.mirror.extraction.docx import extract as extract_docx
-from api.mirror.extraction.schema import PRIVACY_POLICY_REVISION
+from api.mirror.extraction.schema import ExtractionError, ExtractionResult
 from api.mirror.extraction.text import extract as extract_text
-from api.tests.mirror.extraction import document_samples
 from api.tests.mirror.acquisition_samples import SyntheticVault
+from api.tests.mirror.extraction import document_samples
 
 SOURCE = "a" * 64
 
@@ -27,27 +27,19 @@ def _publisher(tmp_path):
                              course_id="1", vault=SyntheticVault()), root
 
 
-def test_publish_extraction_scrubs_text_and_omits_filename(tmp_path):
-    publisher, root = _publisher(tmp_path)
-    result = extract_text(b"Avery Sample wrote this draft.")
-    publish_extraction(publisher=publisher, assignment_id="10", pseudonym="Pikachu",
-                       attempt=1, attachment_key="b" * 64, original_digest="c" * 64,
-                       result=result, writer_key="writer-a", run_id="run-a")
-    facts = [f for f in publisher.store.scan().facts.values()
-             if f["kind"] == "attachment_extraction"]
-    assert len(facts) == 1
-    text = "".join(block["text"] for block in facts[0]["payload"]["blocks"])
-    assert "Avery" not in text and "Sample" not in text
-    assert "filename" not in facts[0]["payload"]
-    safe_bytes = b"".join(p.read_bytes() for p in (root / "CanvasMirror").rglob("*.json"))
-    assert b"Avery" not in safe_bytes
+@contextmanager
+def _scope(publisher):
+    yield publisher
 
 
-def test_extraction_entity_key_is_content_and_version_addressed():
-    left = extraction_entity_key("10", "c" * 64, "docx-1", 1)
-    right = extraction_entity_key("10", "c" * 64, "docx-2", 1)
-    assert left != right
-    assert extraction_cache_key("c" * 64, "docx-1", 1) != extraction_cache_key("c" * 64, "docx-2", 1)
+def _job(jobs, key, *, pseudonym="Pikachu", attempt=1, filename="essay.docx",
+         digest="c" * 64, course_id="1", assignment_id="10", now=None):
+    return jobs.ensure(source_key=SOURCE, course_id=course_id,
+                       assignment_id=assignment_id, pseudonym=pseudonym,
+                       attempt=attempt, attachment_key=key,
+                       media_type="application/octet-stream", size=1,
+                       status="captured", digest=digest, filename=filename,
+                       file_id=key, now=now)
 
 
 def _runner(adapter_name, data, filename):
@@ -55,68 +47,290 @@ def _runner(adapter_name, data, filename):
     return registry.load_adapter(adapter_name)(data, filename=filename)
 
 
-def test_extract_captured_attachments_publishes_and_caches(tmp_path):
+def test_publish_extraction_scrubs_text_and_uses_association_identity(tmp_path):
     publisher, root = _publisher(tmp_path)
+    result = extract_text(b"Avery Sample wrote this draft.")
+    commit = publish_extraction(publisher=publisher, assignment_id="10", pseudonym="Pikachu",
+                                attempt=1, attachment_key="b" * 64, original_digest="c" * 64,
+                                result=result, writer_key="writer-a", run_id="run-a")
+    facts = [f for f in publisher.store.scan().facts.values()
+             if f["kind"] == "attachment_extraction"]
+    assert len(facts) == 1
+    assert facts[0]["entity_key"] == extraction_entity_key("10", "Pikachu", 1, "b" * 64)
+    assert facts[0]["entity_key"] == "extraction:10:Pikachu:1:" + "b" * 64
+    text = "".join(block["text"] for block in facts[0]["payload"]["blocks"])
+    assert "Avery" not in text and "Sample" not in text
+    assert "filename" not in facts[0]["payload"]
+    safe_bytes = b"".join(p.read_bytes() for p in (root / "CanvasMirror").rglob("*.json"))
+    assert b"Avery" not in safe_bytes
+    first_commit_count = len(publisher.store.scan().commits)
+    same = publish_extraction(publisher=publisher, assignment_id="10", pseudonym="Pikachu",
+                              attempt=1, attachment_key="b" * 64, original_digest="c" * 64,
+                              result=result, writer_key="writer-a", run_id="run-b")
+    assert same == commit
+    assert len(publisher.store.scan().commits) == first_commit_count
+
+
+def test_extraction_identity_is_association_not_content_or_version():
+    key = extraction_entity_key("10", "Pikachu", 1, "b" * 64)
+    assert key == "extraction:10:Pikachu:1:" + "b" * 64
+    assert extraction_entity_key("10", "Pikachu", 1, "b" * 64) != \
+        extraction_entity_key("10", "Eevee", 1, "b" * 64)
+    assert extraction_entity_key("10", "Pikachu", 1, "b" * 64) != \
+        extraction_entity_key("10", "Pikachu", 2, "b" * 64)
+    assert extraction_entity_key("10", "Pikachu", 1, "b" * 64) != \
+        extraction_entity_key("10", "Pikachu", 1, "d" * 64)
+    assert extraction_entity_key("10", "Pikachu", None, "b" * 64).endswith(":none:" + "b" * 64)
+
+
+def test_new_extraction_supersedes_legacy_content_key_for_same_association(tmp_path):
+    from api.mirror.evidence_publish import _utc_now
+
+    publisher, _ = _publisher(tmp_path)
+    old = extract_text(b"Older extracted text.")
+    publish_extraction(publisher=publisher, assignment_id="10", pseudonym="Pikachu",
+                       attempt=1, attachment_key="b" * 64, original_digest="c" * 64,
+                       result=old, writer_key="writer-a", run_id="run-a")
+    current = publisher.store.scan().scopes[(SOURCE, "1", "assignment.extractions", "10")]
+    old_fact = next(publisher.store.scan().facts[ref] for ref in current.current_refs)
+    payload = old_fact["payload"]
+    legacy_key = (f"extraction:10:{payload['original_digest']}:"
+                  f"{payload['extractor_version']}:{payload['privacy_policy_revision']}")
+    _, legacy_ref = publisher._fact("attachment_extraction", legacy_key, payload)
+    publisher.store.publish_commit({
+        "schema_version": 1, "source_key": SOURCE, "course_id": "1",
+        "scope": "assignment.extractions", "scope_id": "10",
+        "writer_key": "writer-a", "run_id": "legacy", "parents": list(current.heads),
+        "acquisition_started_at": _utc_now(), "acquisition_finished_at": _utc_now(),
+        "mode": "snapshot", "membership_complete": False,
+        "record_refs": [legacy_ref], "member_keys": [legacy_key],
+        "gaps": [], "watermarks": {},
+    })
+    newer = extract_text(b"Updated extracted text.")
+    newer = ExtractionResult(
+        input_digest=newer.input_digest, detected_format=newer.detected_format,
+        method=newer.method, availability=newer.availability, blocks=newer.blocks,
+        extractor_version="text-2", schema_version=newer.schema_version,
+        privacy_policy_revision=newer.privacy_policy_revision,
+        partial_reasons=newer.partial_reasons, warnings=newer.warnings,
+        processed_units=newer.processed_units, total_units=newer.total_units)
+    publish_extraction(publisher=publisher, assignment_id="10", pseudonym="Pikachu",
+                       attempt=1, attachment_key="b" * 64, original_digest="c" * 64,
+                       result=newer, writer_key="writer-a", run_id="run-b")
+    snapshot = publisher.store.scan()
+    state = snapshot.scopes[(SOURCE, "1", "assignment.extractions", "10")]
+    facts = [snapshot.facts[ref] for ref in state.current_refs]
+    assert len(facts) == 1 and facts[0]["payload"]["extractor_version"] == "text-2"
+    assert facts[0]["entity_key"] == extraction_entity_key("10", "Pikachu", 1, "b" * 64)
+
+
+def test_identical_files_for_two_students_publish_two_extractions(tmp_path):
+    publisher, _ = _publisher(tmp_path)
+    jobs = AttachmentJobStore(tmp_path / "control.sqlite3")
+    data = document_samples.build_docx(paragraphs=("Shared bytes.",))
+    digest = hashlib.sha256(data).hexdigest()
+    _job(jobs, "b" * 64, pseudonym="Pikachu", digest=digest)
+    _job(jobs, "d" * 64, pseudonym="Eevee", digest=digest)
+    outcome = extract_captured_attachments(
+        publisher_scope=lambda course_id: _scope(publisher), jobs=jobs,
+        recover_original=lambda _: data, run_adapter=_runner,
+        writer_key="writer-a", run_id="run-a")
+    facts = [f for f in publisher.store.scan().facts.values()
+             if f["kind"] == "attachment_extraction"]
+    assert len(facts) == 2 and len({fact["entity_key"] for fact in facts}) == 2
+    assert outcome.processed == 2 and outcome.published == 2 and outcome.gaps == ()
+    assert jobs.summary()["extraction_done"] == 2
+    assert {job.extracted_with for job in jobs.extraction_candidates(limit=10)} == set()
+    assert {job.extracted_with for job in jobs.extraction_candidates(limit=10)} == set()
+
+
+def test_extraction_chunks_drain_all_jobs_newest_first(tmp_path):
+    publisher, _ = _publisher(tmp_path)
     jobs = AttachmentJobStore(tmp_path / "control.sqlite3")
     data = document_samples.build_docx(paragraphs=("Synthetic body.",))
     digest = hashlib.sha256(data).hexdigest()
-    jobs.ensure(source_key=SOURCE, course_id="1", assignment_id="10",
-                pseudonym="Pikachu", attempt=1, attachment_key="b" * 64,
-                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                size=len(data), status="captured", digest=digest, filename="essay.docx")
-    cache = ExtractionCache(tmp_path / "extraction.sqlite3")
-    outcome = extract_captured_attachments(
-        publisher_for=lambda course: publisher, jobs=jobs, cache=cache,
-        recover_original=lambda d: data, run_adapter=_runner,
-        writer_key="writer-a", run_id="run-a")
-    assert outcome.published == 1 and outcome.failed == 0
-    # A second pass reuses the cache rather than re-extracting.
-    again = extract_captured_attachments(
-        publisher_for=lambda course: publisher, jobs=jobs, cache=cache,
-        recover_original=lambda d: data, run_adapter=_runner,
-        writer_key="writer-a", run_id="run-b")
-    assert again.cached == 1 and again.published == 0
+    for index in range(25):
+        _job(jobs, f"{index + 1:064x}", pseudonym="Pikachu", attempt=index + 1,
+             digest=digest)
+    first = extract_captured_attachments(
+        publisher_scope=lambda course_id: _scope(publisher), jobs=jobs,
+        recover_original=lambda _: data, run_adapter=_runner,
+        writer_key="writer-a", run_id="run-a", limit=20)
+    second = extract_captured_attachments(
+        publisher_scope=lambda course_id: _scope(publisher), jobs=jobs,
+        recover_original=lambda _: data, run_adapter=_runner,
+        writer_key="writer-a", run_id="run-b", limit=20)
+    assert first.processed == 20 and second.processed == 5
+    assert jobs.summary()["extraction_done"] == 25
+    assert jobs.extraction_candidates(limit=20) == ()
 
 
-def test_one_bad_file_does_not_stop_siblings(tmp_path):
-    publisher, root = _publisher(tmp_path)
+def test_failure_outcomes_publish_gaps_and_reopen_for_next_refresh(tmp_path, monkeypatch):
+    from api.mirror.extraction import registry
+
+    publisher, _ = _publisher(tmp_path)
     jobs = AttachmentJobStore(tmp_path / "control.sqlite3")
-    good = document_samples.build_docx(paragraphs=("Good body.",))
-    jobs.ensure(source_key=SOURCE, course_id="1", assignment_id="10",
-                pseudonym="Pikachu", attempt=1, attachment_key="b" * 64,
-                media_type="application/octet-stream", size=len(good),
-                status="captured", digest=hashlib.sha256(good).hexdigest(),
-                filename="good.docx")
-    jobs.ensure(source_key=SOURCE, course_id="1", assignment_id="10",
-                pseudonym="Pikachu", attempt=1, attachment_key="d" * 64,
-                media_type="application/octet-stream", size=4,
-                status="captured", digest="e" * 64, filename="bad.exe")
-    cache = ExtractionCache(tmp_path / "extraction.sqlite3")
+    _job(jobs, "b" * 64, filename="unsupported.exe", digest="b" * 64,
+         now="2026-01-01T00:00:00Z")
+    _job(jobs, "d" * 64, filename="missing.docx", attempt=2, digest="d" * 64,
+         now="2026-01-02T00:00:00Z")
+    _job(jobs, "e" * 64, filename="timeout.docx", attempt=3, digest="e" * 64,
+         now="2026-01-03T00:00:00Z")
+    _job(jobs, "f" * 64, filename="adapter.docx", attempt=4, digest="f" * 64,
+         now="2026-01-04T00:00:00Z")
+    original_load = registry.load_adapter
+
+    def load(name):
+        if name == ".docx" and not hasattr(load, "failed_once"):
+            load.failed_once = True
+            raise ExtractionError("missing_dependency")
+        return original_load(name)
+
+    monkeypatch.setattr(registry, "load_adapter", load)
+    def recover(digest):
+        if digest == "e" * 64:
+            raise FileNotFoundError
+        return b"ignored"
+
     outcome = extract_captured_attachments(
-        publisher_for=lambda course: publisher, jobs=jobs, cache=cache,
-        recover_original=lambda d: good, run_adapter=_runner,
+        publisher_scope=lambda course_id: _scope(publisher), jobs=jobs,
+        recover_original=recover,
+        run_adapter=lambda *args: (_ for _ in ()).throw(ExtractionError("timeout")),
         writer_key="writer-a", run_id="run-a")
-    assert outcome.published == 1
-    assert "unsupported_type" in outcome.gaps
+    assert outcome.processed == 4 and outcome.published == 4
+    assert set(outcome.gaps) == {"unsupported_type", "missing_dependency", "original_missing", "timeout"}
+    assert jobs.summary()["extraction_gaps"] == 4
+    snapshot = publisher.store.scan()
+    unavailable = [f["payload"] for f in snapshot.facts.values()
+                   if f["kind"] == "attachment_extraction" and f["payload"]["availability"] == "unavailable"]
+    assert {reason for fact in unavailable for reason in fact["partial_reasons"]} >= {
+        "unsupported_type", "missing_dependency", "timeout"}
+    associations = [f["payload"] for f in snapshot.facts.values()
+                    if f["kind"] == "attachment" and f["payload"]["status"] == "unavailable"]
+    assert len(associations) == 1 and associations[0]["original_digest"] is None
+    assert jobs.reopen_extractions(lambda filename: "current:1") == 4
+    assert jobs.summary()["extraction_needed"] == 4
 
 
-def test_stale_extractor_version_reprocesses_only_affected(tmp_path):
-    publisher, root = _publisher(tmp_path)
+def test_partial_adapter_result_is_preserved_as_gap(tmp_path):
+    publisher, _ = _publisher(tmp_path)
     jobs = AttachmentJobStore(tmp_path / "control.sqlite3")
-    data = document_samples.build_docx(paragraphs=("Body.",))
-    digest = hashlib.sha256(data).hexdigest()
-    jobs.ensure(source_key=SOURCE, course_id="1", assignment_id="10",
-                pseudonym="Pikachu", attempt=1, attachment_key="b" * 64,
-                media_type="application/octet-stream", size=len(data),
-                status="captured", digest=digest, filename="essay.docx")
-    cache = ExtractionCache(tmp_path / "extraction.sqlite3")
-    # Seed a cache entry for a different (older) extractor version.
-    cache.record(extraction_cache_key(digest, "docx-0", PRIVACY_POLICY_REVISION),
-                 original_digest=digest, extractor_version="docx-0",
-                 privacy_revision=PRIVACY_POLICY_REVISION, availability="complete",
-                 block_count=1)
+    _job(jobs, "b" * 64, filename="partial.txt")
+    partial = ExtractionResult(input_digest="c" * 64, detected_format="text", method="native",
+                              availability="partial", extractor_version="text-1",
+                              partial_reasons=("truncated",))
     outcome = extract_captured_attachments(
-        publisher_for=lambda course: publisher, jobs=jobs, cache=cache,
-        recover_original=lambda d: data, run_adapter=_runner,
+        publisher_scope=lambda course_id: _scope(publisher), jobs=jobs,
+        recover_original=lambda _: b"text", run_adapter=lambda *args: partial,
         writer_key="writer-a", run_id="run-a")
-    assert outcome.published == 1 and outcome.cached == 0
+    fact = next(f for f in publisher.store.scan().facts.values()
+                if f["kind"] == "attachment_extraction")
+    assert fact["payload"]["availability"] == "partial"
+    assert fact["payload"]["partial_reasons"] == ["truncated"]
+    assert outcome.gaps == ("truncated",)
+    assert jobs.summary()["extraction_gaps"] == 1
+
+
+@pytest.mark.parametrize(("error", "reason"), [
+    (RuntimeError("opaque failure"), "corruption"),
+    (ExtractionError("recognition_failed"), "recognition_gap"),
+])
+def test_adapter_failures_publish_sanitized_reasons(tmp_path, error, reason):
+    publisher, _ = _publisher(tmp_path)
+    jobs = AttachmentJobStore(tmp_path / "control.sqlite3")
+    _job(jobs, "b" * 64, filename="essay.txt")
+
+    def fail(*_args):
+        raise error
+
+    outcome = extract_captured_attachments(
+        publisher_scope=lambda course_id: _scope(publisher), jobs=jobs,
+        recover_original=lambda _: b"essay", run_adapter=fail,
+        writer_key="writer-a", run_id="run-a")
+    fact = next(f for f in publisher.store.scan().facts.values()
+                if f["kind"] == "attachment_extraction")
+    assert fact["payload"]["availability"] == "unavailable"
+    assert fact["payload"]["partial_reasons"] == [reason]
+    assert outcome.gaps == (reason,)
+
+
+def test_adapter_runs_outside_publisher_scope_and_chunk_stops_between_jobs(tmp_path):
+    publisher, _ = _publisher(tmp_path)
+    jobs = AttachmentJobStore(tmp_path / "control.sqlite3")
+    _job(jobs, "b" * 64, filename="one.txt", attempt=1)
+    _job(jobs, "d" * 64, filename="two.txt", attempt=2)
+    active = False
+    stop = threading.Event()
+
+    @contextmanager
+    def scoped(_course_id):
+        nonlocal active
+        active = True
+        try:
+            yield publisher
+        finally:
+            active = False
+
+    def run(_name, _data, _filename):
+        assert not active
+        stop.set()
+        return extract_text(b"ready")
+
+    outcome = extract_captured_attachments(
+        publisher_scope=scoped, jobs=jobs, recover_original=lambda _: b"x",
+        run_adapter=run, writer_key="writer-a", run_id="run-a", stop_event=stop)
+    assert outcome.processed == 1 and outcome.published == 1
+    assert jobs.summary()["extraction_done"] == 1
+    assert jobs.summary()["extraction_needed"] == 1
+
+
+def test_publication_failure_never_marks_extraction_done_and_retry_is_idempotent(tmp_path, monkeypatch):
+    publisher, _ = _publisher(tmp_path)
+    jobs = AttachmentJobStore(tmp_path / "control.sqlite3")
+    _job(jobs, "b" * 64, filename="essay.txt")
+    original_commit = publisher.store.publish_commit
+    failures = {"left": True}
+
+    def flaky_commit(record):
+        if failures["left"]:
+            failures["left"] = False
+            raise OSError("disk unavailable")
+        return original_commit(record)
+
+    monkeypatch.setattr(publisher.store, "publish_commit", flaky_commit)
+    args = dict(publisher_scope=lambda course_id: _scope(publisher), jobs=jobs,
+                recover_original=lambda _: b"essay", run_adapter=_runner,
+                writer_key="writer-a", run_id="run-a")
+    first = extract_captured_attachments(**args)
+    assert first.published == 0 and first.gaps == ("publication_failed",)
+    assert jobs.summary()["extraction_needed"] == 1
+    second = extract_captured_attachments(**args)
+    assert second.published == 1 and jobs.summary()["extraction_done"] == 1
+
+
+def test_completion_record_failure_retries_without_duplicate_commit(tmp_path, monkeypatch):
+    publisher, _ = _publisher(tmp_path)
+    jobs = AttachmentJobStore(tmp_path / "control.sqlite3")
+    _job(jobs, "b" * 64, filename="essay.txt")
+    original_record = jobs.record_extraction
+    fail = {"once": True}
+
+    def flaky_record(*args, **kwargs):
+        if fail["once"]:
+            fail["once"] = False
+            raise OSError("local completion write failed")
+        return original_record(*args, **kwargs)
+
+    monkeypatch.setattr(jobs, "record_extraction", flaky_record)
+    args = dict(publisher_scope=lambda course_id: _scope(publisher), jobs=jobs,
+                recover_original=lambda _: b"essay", run_adapter=_runner,
+                writer_key="writer-a", run_id="run-a")
+    first = extract_captured_attachments(**args)
+    assert first.gaps == ("publication_failed",)
+    assert first.published == 1
+    assert first.published == 1
+    assert jobs.summary()["extraction_needed"] == 1
+    commits = len(publisher.store.scan().commits)
+    second = extract_captured_attachments(**args)
+    assert second.published == 1 and jobs.summary()["extraction_done"] == 1
+    assert len(publisher.store.scan().commits) == commits

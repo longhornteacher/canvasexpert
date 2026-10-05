@@ -15,10 +15,12 @@ boundary on the existing publisher.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
+from urllib.parse import quote
 import sqlite3
 from pathlib import Path
 from typing import Callable
@@ -34,6 +36,7 @@ MAX_ATTEMPTS = 5
 BACKOFF_SECONDS = (30, 120, 600, 1800)
 TERMINAL_STATUSES = frozenset({"captured", "too_large", "unavailable", "foreign_origin"})
 RETRYABLE_STATUSES = frozenset({"pending", "failed"})
+CAPTURE_GAP_STATUSES = frozenset({"too_large", "unavailable", "foreign_origin"})
 CHUNK_BYTES = 64 * 1024
 
 
@@ -82,6 +85,9 @@ class AttachmentJob:
     last_error: str | None
     filename: str = ""
     file_id: str = ""
+    extraction_state: str = "needed"
+    extraction_error: str | None = None
+    extracted_with: str | None = None
 
 
 def _row_to_job(row: sqlite3.Row) -> AttachmentJob:
@@ -93,6 +99,8 @@ def _row_to_job(row: sqlite3.Row) -> AttachmentJob:
         digest=row["digest"], attempts=row["attempts"],
         next_attempt_at=row["next_attempt_at"], last_error=row["last_error"],
         filename=row["filename"], file_id=row["file_id"],
+        extraction_state=row["extraction_state"],
+        extraction_error=row["extraction_error"], extracted_with=row["extracted_with"],
     )
 
 
@@ -111,6 +119,19 @@ class AttachmentJobStore:
         db.execute("PRAGMA busy_timeout=2000")
         self._initialize(db)
         return db
+
+    @contextmanager
+    def _read_connection(self):
+        """Open an existing queue read-only and always release its file handle."""
+        resolved = str(self.path.resolve()).replace("\\", "/")
+        uri = "file:" + quote(resolved, safe="/:_") + "?mode=ro"
+        db = sqlite3.connect(uri, uri=True, timeout=2)
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA query_only=ON")
+            yield db
+        finally:
+            db.close()
 
     @staticmethod
     def _initialize(db: sqlite3.Connection) -> None:
@@ -132,12 +153,21 @@ class AttachmentJobStore:
             last_error TEXT,
             filename TEXT NOT NULL DEFAULT '',
             file_id TEXT NOT NULL DEFAULT '',
+            extraction_state TEXT NOT NULL DEFAULT 'needed',
+            extraction_error TEXT,
+            extracted_with TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS job_claimable
-            ON attachment_jobs(status, next_attempt_at, created_at, job_id);
+            ON attachment_jobs(status, next_attempt_at, file_id, created_at DESC, job_id);
         """)
+        columns = {row[1] for row in db.execute("PRAGMA table_info(attachment_jobs)")}
+        for name, declaration in (("extraction_state", "TEXT NOT NULL DEFAULT 'needed'"),
+                                  ("extraction_error", "TEXT"),
+                                  ("extracted_with", "TEXT")):
+            if name not in columns:
+                db.execute(f"ALTER TABLE attachment_jobs ADD COLUMN {name} {declaration}")
         db.commit()
 
     def ensure(self, *, source_key: str, course_id: str, assignment_id: str,
@@ -216,17 +246,15 @@ class AttachmentJobStore:
             raise JobError("invalid_limit")
         if type(max_bytes) is not int or max_bytes < 0:
             raise JobError("invalid_bytes")
-        moment = _parse(now or _now())
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM attachment_jobs WHERE status IN ('pending','failed') "
-                "ORDER BY created_at, job_id").fetchall()
+                "AND file_id != '' AND (next_attempt_at IS NULL OR next_attempt_at <= ?) "
+                "ORDER BY created_at DESC, job_id LIMIT ?",
+                ((now or _now()), limit * 4)).fetchall()
         selected, total = [], 0
         for row in rows:
             job = _row_to_job(row)
-            due = _parse(job.next_attempt_at)
-            if due is not None and moment is not None and due > moment:
-                continue
             if len(selected) >= limit:
                 break
             if job.size > max_bytes and selected:
@@ -256,7 +284,8 @@ class AttachmentJobStore:
             if status == "failed":
                 attempts += 1
                 if attempts >= MAX_ATTEMPTS:
-                    status = "failed"
+                    status = "unavailable"
+                    error = "retry_exhausted"
                     next_attempt = None
                 else:
                     delay = BACKOFF_SECONDS[min(attempts - 1, len(BACKOFF_SECONDS) - 1)]
@@ -271,25 +300,111 @@ class AttachmentJobStore:
             return _row_to_job(db.execute("SELECT * FROM attachment_jobs WHERE job_id=?",
                                           (identifier,)).fetchone())
 
-    def summary(self) -> dict:
-        with self._connect() as db:
-            rows = db.execute("SELECT status, COUNT(*) n FROM attachment_jobs "
-                              "GROUP BY status").fetchall()
-        counts = {row["status"]: row["n"] for row in rows}
+    def summary(self, *, course_id: str | None = None,
+                assignment_id: str | None = None) -> dict:
+        """Read queue counts without creating or migrating the private database."""
+        empty = {"total": 0, "by_status": {}, "pending": 0, "captured": 0,
+                 "capture_gaps": 0, "extraction_needed": 0, "extraction_done": 0,
+                 "extraction_gaps": 0, "remaining": 0}
+        if not self.path.exists():
+            return empty
+        with self._read_connection() as db:
+            tables = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='attachment_jobs'").fetchone()
+            if not tables:
+                return empty
+            columns = {row[1] for row in db.execute("PRAGMA table_info(attachment_jobs)")}
+            filters = ["file_id != ''"]
+            args = []
+            if course_id is not None:
+                filters.append("course_id=?")
+                args.append(str(course_id))
+            if assignment_id is not None:
+                filters.append("assignment_id=?")
+                args.append(str(assignment_id))
+            state_col = "extraction_state" if "extraction_state" in columns else "'needed'"
+            rows = db.execute(
+                "SELECT status," + state_col + " AS extraction_state, COUNT(*) AS n "
+                "FROM attachment_jobs WHERE " + " AND ".join(filters) +
+                " GROUP BY status, extraction_state", args).fetchall()
+        counts: dict[str, int] = {}
+        extraction = {"needed": 0, "done": 0, "gap": 0}
+        for row in rows:
+            status, state, count = row["status"], row["extraction_state"], row["n"]
+            counts[status] = counts.get(status, 0) + count
+            if status == "captured" and state in extraction:
+                extraction[state] += count
+        retryable = counts.get("pending", 0) + counts.get("failed", 0)
+        capture_gaps = sum(counts.get(status, 0) for status in CAPTURE_GAP_STATUSES)
+        needed = extraction["needed"]
         return {"total": sum(counts.values()), "by_status": counts,
-                "pending": counts.get("pending", 0) + counts.get("failed", 0),
-                "captured": counts.get("captured", 0)}
+                "pending": retryable, "captured": counts.get("captured", 0),
+                "capture_gaps": capture_gaps,
+                "extraction_needed": needed, "extraction_done": extraction["done"],
+                "extraction_gaps": extraction["gap"], "remaining": retryable + needed}
 
-    def captured_jobs(self, *, limit: int = 20) -> tuple[AttachmentJob, ...]:
-        """Return captured jobs with a verified digest, oldest first."""
+    def extraction_candidates(self, *, limit: int) -> tuple[AttachmentJob, ...]:
+        """Return one bounded newest-first chunk needing extraction."""
         if type(limit) is not int or not 1 <= limit <= 256:
             raise JobError("invalid_limit")
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM attachment_jobs WHERE status='captured' "
-                "AND digest IS NOT NULL ORDER BY created_at, job_id LIMIT ?",
+                "AND digest IS NOT NULL AND extraction_state='needed' "
+                "ORDER BY created_at DESC, job_id LIMIT ?",
                 (limit,)).fetchall()
         return tuple(_row_to_job(row) for row in rows)
+
+    def record_extraction(self, identifier: str, *, state: str, error: str | None = None,
+                          extracted_with: str | None = None) -> AttachmentJob:
+        if state not in {"needed", "done", "gap"}:
+            raise JobError("invalid_extraction_state")
+        if state == "gap" and not error:
+            raise JobError("missing_extraction_error")
+        if state == "done" and not extracted_with:
+            raise JobError("missing_extractor_version")
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM attachment_jobs WHERE job_id=?", (identifier,)).fetchone()
+            if row is None:
+                raise JobError("unknown_job")
+            db.execute("UPDATE attachment_jobs SET extraction_state=?,extraction_error=?,"
+                       "extracted_with=?,updated_at=? WHERE job_id=?",
+                       (state, error, extracted_with, _now(), identifier))
+            db.commit()
+            return _row_to_job(db.execute("SELECT * FROM attachment_jobs WHERE job_id=?",
+                                          (identifier,)).fetchone())
+
+    def reopen_exhausted_captures(self, *, course_id: str | None = None) -> int:
+        with self._connect() as db:
+            where = "last_error='retry_exhausted' AND status='unavailable'"
+            args: tuple = ()
+            if course_id is not None:
+                where += " AND course_id=?"
+                args = (str(course_id),)
+            cursor = db.execute("UPDATE attachment_jobs SET status='pending',attempts=0,"
+                                "next_attempt_at=NULL,last_error=NULL,updated_at=? WHERE " + where,
+                                (_now(), *args))
+            return cursor.rowcount
+
+    def reopen_extractions(self, current_version: Callable[[str], str | None], *,
+                           course_id: str | None = None) -> int:
+        with self._connect() as db:
+            query = "SELECT job_id,filename,extraction_state,extracted_with FROM attachment_jobs WHERE status='captured'"
+            args = ()
+            if course_id is not None:
+                query += " AND course_id=?"
+                args = (str(course_id),)
+            rows = db.execute(query, args).fetchall()
+            reopen = []
+            for row in rows:
+                expected = current_version(row["filename"])
+                if row["extraction_state"] == "gap" or (
+                        row["extraction_state"] == "done" and
+                        row["extracted_with"] != expected):
+                    reopen.append(row["job_id"])
+            db.executemany("UPDATE attachment_jobs SET extraction_state='needed',"
+                           "extraction_error=NULL,extracted_with=NULL,updated_at=? WHERE job_id=?",
+                           [(_now(), identifier) for identifier in reopen])
+            return len(reopen)
 
 
 def _origin_matches(url: str, origin: str) -> bool:
@@ -317,6 +432,8 @@ def run_attachment_chunk(
     now: str | None = None,
     limit: int = MAX_DOWNLOADS_PER_CHUNK,
     max_bytes: int = MAX_BYTES_PER_CHUNK,
+    stop_event=None,
+    publish_terminal: Callable[[AttachmentJob, str], None] | None = None,
 ) -> dict:
     """Process one bounded chunk; one failure never stops sibling jobs.
 
@@ -325,44 +442,79 @@ def run_attachment_chunk(
     the private association, and publishes the safe association fact. A job whose
     digest is already archived is reused without a second download.
     """
-    staging = Path(staging_dir)
-    staging.mkdir(parents=True, exist_ok=True)
     jobs = store.claim(now=now, limit=limit, max_bytes=max_bytes)
-    processed = captured = failed = skipped = 0
+    processed = captured = failed = skipped = published = 0
+    def finish(job, status, *, digest=None, error=None):
+        nonlocal published
+        terminal_status = status if status in CAPTURE_GAP_STATUSES else None
+        if status == "failed" and job.attempts + 1 >= MAX_ATTEMPTS:
+            terminal_status = "unavailable"
+            error = "retry_exhausted"
+        if terminal_status and publish_terminal is not None:
+            try:
+                publish_terminal(job, terminal_status)
+            except Exception:
+                return False
+            published += 1
+        store.record(job.job_id, status=status, digest=digest, error=error, now=now)
+        return True
+
+    staging = Path(staging_dir)
+    if stop_event is None or not stop_event.is_set():
+        staging.mkdir(parents=True, exist_ok=True)
     for job in jobs:
+        if stop_event is not None and stop_event.is_set():
+            break
         processed += 1
         # A completed, validated original is reused after any restart.
         if job.digest and original_exists(job.digest):
             try:
                 store_original(job, job.digest, "")
             except Exception:
-                store.record(job.job_id, status="failed", error="publication_failed", now=now)
+                finish(job, "failed", error="publication_failed")
                 failed += 1
                 continue
+            published += 1
             store.record(job.job_id, status="captured", digest=job.digest, now=now)
             captured += 1
             continue
         if job.size > MAX_FILE_BYTES:
-            store.record(job.job_id, status="too_large", error="over_file_limit", now=now)
+            if not finish(job, "too_large", error="over_file_limit"):
+                failed += 1
+                continue
             skipped += 1
             continue
-        url = resolve_url(job)
+        try:
+            url = resolve_url(job)
+        except Exception:
+            if not finish(job, "failed", error="url_resolution_failed"):
+                failed += 1
+                continue
+            failed += 1
+            continue
         if not url:
-            store.record(job.job_id, status="unavailable", error="url_unavailable", now=now)
+            if not finish(job, "unavailable", error="url_unavailable"):
+                failed += 1
+                continue
             skipped += 1
             continue
         if not _origin_matches(url, canvas_origin):
-            store.record(job.job_id, status="foreign_origin", error="foreign_origin", now=now)
+            if not finish(job, "foreign_origin", error="foreign_origin"):
+                failed += 1
+                continue
             skipped += 1
             continue
         response = None
         temporary = None
+        cancelled = False
         try:
             response, error = stream_get(url)
             if error or response is None:
                 if str(error or "").casefold() == "cancelled":
                     raise InterruptedError("attachment capture cancelled")
-                store.record(job.job_id, status="failed", error="transport_failed", now=now)
+                if not finish(job, "failed", error="transport_failed"):
+                    failed += 1
+                    continue
                 failed += 1
                 continue
             headers = getattr(response, "headers", {}) or {}
@@ -372,7 +524,9 @@ def run_attachment_chunk(
             except (TypeError, ValueError):
                 declared = 0
             if declared > MAX_FILE_BYTES:
-                store.record(job.job_id, status="too_large", error="over_file_limit", now=now)
+                if not finish(job, "too_large", error="over_file_limit"):
+                    failed += 1
+                    continue
                 skipped += 1
                 continue
             descriptor, temporary = _temp_file(staging)
@@ -380,6 +534,8 @@ def run_attachment_chunk(
             count = 0
             with os.fdopen(descriptor, "wb") as handle:
                 for chunk in response.iter_content(chunk_size=CHUNK_BYTES):
+                    if stop_event is not None and stop_event.is_set():
+                        raise InterruptedError("attachment capture cancelled")
                     if not chunk:
                         continue
                     count += len(chunk)
@@ -389,6 +545,8 @@ def run_attachment_chunk(
                         raise JobError("size_mismatch")
                     digest.update(chunk)
                     handle.write(chunk)
+                if stop_event is not None and stop_event.is_set():
+                    raise InterruptedError("attachment capture cancelled")
                 handle.flush()
                 os.fsync(handle.fileno())
             if declared and count != declared:
@@ -397,16 +555,26 @@ def run_attachment_chunk(
             # Record the digest before archiving so a crash after archive reuses it.
             store.record(job.job_id, status="pending", digest=digest_hex, now=now)
             store_original(job, digest_hex, temporary)
+            published += 1
             store.record(job.job_id, status="captured", digest=digest_hex, now=now)
             captured += 1
-        except (KeyboardInterrupt, SystemExit, InterruptedError):
+        except (KeyboardInterrupt, SystemExit):
             raise
+        except InterruptedError:
+            if stop_event is not None and stop_event.is_set():
+                cancelled = True
+            else:
+                raise
         except JobError as exc:
-            store.record(job.job_id, status="too_large" if exc.args and exc.args[0] == "over_file_limit"
-                         else "failed", error=str(exc.args[0]) if exc.args else "invalid", now=now)
+            outcome = "too_large" if exc.args and exc.args[0] == "over_file_limit" else "failed"
+            if not finish(job, outcome, error=str(exc.args[0]) if exc.args else "invalid"):
+                failed += 1
+                continue
             failed += 1
         except Exception:
-            store.record(job.job_id, status="failed", error="capture_failed", now=now)
+            if not finish(job, "failed", error="capture_failed"):
+                failed += 1
+                continue
             failed += 1
         finally:
             if response is not None:
@@ -419,8 +587,11 @@ def run_attachment_chunk(
                     os.unlink(temporary)
                 except OSError:
                     pass
+        if cancelled:
+            break
     return {"processed": processed, "captured": captured, "failed": failed,
-            "skipped": skipped, "remaining": store.summary()["pending"]}
+            "skipped": skipped, "published": published,
+            "remaining": store.summary()["pending"]}
 
 
 def _temp_file(staging: Path) -> tuple[int, str]:

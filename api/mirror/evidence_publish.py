@@ -180,6 +180,16 @@ class EvidencePublisher:
                 if (attempt is not None and entity_key != expected) or (
                         attempt is None and not str(entity_key).startswith(unresolved)):
                     raise PublicationRefused("identity_refused")
+            if kind == "attachment_extraction":
+                attempt = payload.get("attempt")
+                attempt_key = attempt if attempt is not None else "none"
+                expected = (f"extraction:{assignment_id}:{pseudonym}:"
+                            f"{attempt_key}:{payload.get('attachment_key')}")
+                legacy_key = (f"extraction:{assignment_id}:{payload.get('original_digest')}:"
+                              f"{payload.get('extractor_version')}:"
+                              f"{payload.get('privacy_policy_revision')}")
+                if entity_key not in {expected, legacy_key}:
+                    raise PublicationRefused("identity_refused")
         names, ids = self.vault.all_real_identifiers()
         stable_pseudonyms = {
             str(entry.get("pseudonym")) for entry in self.vault.entries()

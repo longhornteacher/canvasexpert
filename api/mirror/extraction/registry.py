@@ -61,3 +61,15 @@ def adapter_for(filename: str):
     if name is None:
         return None
     return load_adapter(name)
+
+
+def extractor_version(filename: str) -> str | None:
+    """Return the adapter module's version for a filename, when supported."""
+    name = adapter_name(filename)
+    if name is None:
+        return None
+    module_name, _callable_name = ADAPTERS[name]
+    if importlib.util.find_spec(module_name) is None:
+        return None
+    module = importlib.import_module(module_name)
+    return str(getattr(module, "EXTRACTOR_VERSION", name))

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sqlite3
+import threading
 
 import pytest
 
@@ -37,10 +39,10 @@ def _store(tmp_path):
     return AttachmentJobStore(tmp_path / "control.sqlite3")
 
 
-def _ensure(store, key, *, size=10, attempt=1, pseudonym="Pikachu", media="text/plain"):
+def _ensure(store, key, *, size=10, attempt=1, pseudonym="Pikachu", media="text/plain", now=None):
     return store.ensure(source_key=SOURCE, course_id="1", assignment_id="10",
                         pseudonym=pseudonym, attempt=attempt, attachment_key=key,
-                        media_type=media, size=size)
+                        media_type=media, size=size, file_id=key, now=now)
 
 
 def _harness(tmp_path, payloads, *, origin=ORIGIN):
@@ -87,9 +89,11 @@ def test_more_than_chunk_limit_eventually_all_processed(tmp_path):
     _, workspace, calls, kwargs = _harness(tmp_path, payloads)
     first = run_attachment_chunk(store, **kwargs)
     assert first["processed"] == evidence_jobs.MAX_DOWNLOADS_PER_CHUNK
+    assert first["published"] == evidence_jobs.MAX_DOWNLOADS_PER_CHUNK
     assert first["remaining"] == 5
     second = run_attachment_chunk(store, **kwargs)
     assert second["processed"] == 5
+    assert second["published"] == 5
     assert second["remaining"] == 0
     assert store.summary()["captured"] == 25
     assert len(calls["archived"]) == 25
@@ -107,6 +111,98 @@ def test_oversize_input_is_explicit_and_does_not_starve_siblings(tmp_path):
     assert store.get(job_id(SOURCE, "1", "10", "Pikachu", 1, big)).status == "too_large"
     assert store.get(job_id(SOURCE, "1", "10", "Pikachu", 1, small)).status == "captured"
     assert result["skipped"] == 1 and result["captured"] == 1
+
+
+def test_terminal_status_is_published_before_job_completion(tmp_path):
+    store = _store(tmp_path)
+    big = _ensure(store, "b" * 64, size=evidence_jobs.MAX_FILE_BYTES + 1)
+    _, _, _, kwargs = _harness(tmp_path, {})
+    calls = []
+
+    def publish(job, status):
+        assert store.get(job.job_id).status == "pending"
+        calls.append((job.job_id, status))
+
+    result = run_attachment_chunk(store, publish_terminal=publish, **kwargs)
+    assert calls == [(big.job_id, "too_large")]
+    assert result["published"] == 1
+    assert store.get(big.job_id).status == "too_large"
+
+
+def test_terminal_publication_failure_keeps_job_eligible(tmp_path):
+    store = _store(tmp_path)
+    big = _ensure(store, "b" * 64, size=evidence_jobs.MAX_FILE_BYTES + 1)
+    _, _, _, kwargs = _harness(tmp_path, {})
+
+    def refuse(_job, _status):
+        raise OSError("publication unavailable")
+
+    result = run_attachment_chunk(store, publish_terminal=refuse, **kwargs)
+    assert result["published"] == 0 and result["remaining"] == 1
+    assert store.get(big.job_id).status == "pending"
+
+
+def test_retry_exhaustion_publishes_unavailable_before_terminal_record(tmp_path):
+    store = _store(tmp_path)
+    job = _ensure(store, "b" * 64, size=4)
+    for index in range(evidence_jobs.MAX_ATTEMPTS - 1):
+        store.record(job.job_id, status="failed", error="transport_failed",
+                     now=f"2026-01-01T0{index}:00:00Z")
+    _, _, _, kwargs = _harness(tmp_path, {})
+    statuses = []
+
+    def publish(current, status):
+        assert store.get(current.job_id).status == "failed"
+        statuses.append(status)
+
+    result = run_attachment_chunk(store, now="2026-01-02T00:00:00Z",
+                                  publish_terminal=publish, **kwargs)
+    assert statuses == ["unavailable"]
+    assert result["published"] == 1
+    final = store.get(job.job_id)
+    assert final.status == "unavailable" and final.last_error == "retry_exhausted"
+
+
+def test_resolver_failure_isolated_to_one_job(tmp_path):
+    store = _store(tmp_path)
+    bad = _ensure(store, "b" * 64, size=4)
+    good = _ensure(store, "d" * 64, size=4)
+    _, _, _, kwargs = _harness(tmp_path, {"d" * 64: ([b"good"], 4)})
+    def resolve(job):
+        if job.job_id == bad.job_id:
+            raise RuntimeError("private Canvas detail")
+        return f"{ORIGIN}/files/{job.attachment_key}"
+    kwargs["resolve_url"] = resolve
+    result = run_attachment_chunk(store, **kwargs)
+    assert result["processed"] == 2 and result["captured"] == 1 and result["failed"] == 1
+    assert store.get(bad.job_id).last_error == "url_resolution_failed"
+    assert store.get(good.job_id).status == "captured"
+
+
+def test_stop_during_stream_leaves_capture_retryable(tmp_path):
+    store = _store(tmp_path)
+    job = _ensure(store, "b" * 64, size=8)
+    stop = threading.Event()
+
+    class StoppingResponse(Response):
+        def iter_content(self, chunk_size):
+            yield b"part"
+            stop.set()
+            yield b"rest"
+
+    def stream_get(_url):
+        return StoppingResponse([], declared=8), None
+
+    def original_exists(_digest):
+        return False
+
+    result = run_attachment_chunk(
+        store, resolve_url=lambda _job: f"{ORIGIN}/files/{job.attachment_key}",
+        stream_get=stream_get, canvas_origin=ORIGIN, original_exists=original_exists,
+        store_original=lambda *_: pytest.fail("stopped bytes must not be archived"),
+        staging_dir=tmp_path / "staging", stop_event=stop)
+    assert result["processed"] == 1 and result["captured"] == 0
+    assert store.get(job.job_id).status == "pending"
 
 
 def test_partial_stream_is_never_captured_and_retry_succeeds(tmp_path):
@@ -213,7 +309,8 @@ def test_restart_reuses_completed_original_without_redownload(tmp_path):
     store2 = _store(tmp_path / "second")
     store2.ensure(source_key=SOURCE, course_id="1", assignment_id="10",
                   pseudonym="Pikachu", attempt=1, attachment_key=key,
-                  media_type="text/plain", size=6, status="pending", digest=job.digest)
+                  media_type="text/plain", size=6, status="pending", digest=job.digest,
+                  file_id=key)
     downloads = []
 
     def stream_get(url):
@@ -264,6 +361,89 @@ def test_backoff_defers_retry_until_due(tmp_path):
     assert job.attempts == 1 and job.next_attempt_at is not None
     assert store.claim(now="2026-01-01T00:00:10Z") == ()
     assert len(store.claim(now="2026-01-01T00:01:00Z")) == 1
+
+
+def test_retry_exhaustion_is_terminal_until_reopened_for_course(tmp_path):
+    store = _store(tmp_path)
+    _ensure(store, "a" * 64)
+    other = store.ensure(source_key=SOURCE, course_id="2", assignment_id="10",
+                         pseudonym="Pikachu", attempt=1, attachment_key="b" * 64,
+                         media_type="text/plain", size=10, file_id="b" * 64)
+    for index in range(evidence_jobs.MAX_ATTEMPTS):
+        updated = store.record(job_id(SOURCE, "1", "10", "Pikachu", 1, "a" * 64),
+                               status="failed", error="transport_failed",
+                               now=f"2026-01-01T00:0{index}:00Z")
+    assert updated.status == "unavailable"
+    assert updated.last_error == "retry_exhausted" and updated.next_attempt_at is None
+    assert store.claim(now="2026-01-02T00:00:00Z") == (other,)
+    assert store.reopen_exhausted_captures(course_id="1") == 1
+    reopened = store.get(updated.job_id)
+    assert reopened.status == "pending" and reopened.attempts == 0
+    assert store.get(other.job_id).status == "pending"
+
+
+def test_claim_is_bounded_newest_first_and_requires_file_id(tmp_path):
+    store = _store(tmp_path)
+    old = store.ensure(source_key=SOURCE, course_id="1", assignment_id="10",
+                       pseudonym="Pikachu", attempt=1, attachment_key="1" * 64,
+                       media_type="text/plain", size=1, file_id="old",
+                       now="2026-01-01T00:00:00Z")
+    newest = store.ensure(source_key=SOURCE, course_id="1", assignment_id="10",
+                          pseudonym="Pikachu", attempt=1, attachment_key="2" * 64,
+                          media_type="text/plain", size=1, file_id="new",
+                          now="2026-01-02T00:00:00Z")
+    no_file = store.ensure(source_key=SOURCE, course_id="1", assignment_id="10",
+                           pseudonym="Pikachu", attempt=1, attachment_key="3" * 64,
+                           media_type="text/plain", size=1,
+                           now="2026-01-03T00:00:00Z")
+    claimed = store.claim(limit=1, now="2026-01-04T00:00:00Z")
+    assert claimed == (newest,)
+    summary = store.summary()
+    assert summary["total"] == 2 and summary["pending"] == 2
+    assert no_file.job_id not in {job.job_id for job in store.claim(limit=10)}
+    assert old.job_id != newest.job_id
+
+
+def test_summary_is_read_only_and_handles_old_schema(tmp_path):
+    absent = _store(tmp_path / "absent")
+    assert absent.summary() == {
+        "total": 0, "by_status": {}, "pending": 0, "captured": 0,
+        "capture_gaps": 0, "extraction_needed": 0, "extraction_done": 0,
+        "extraction_gaps": 0, "remaining": 0,
+    }
+    assert not absent.path.exists()
+    old_path = tmp_path / "old" / "control.sqlite3"
+    old_path.parent.mkdir()
+    with sqlite3.connect(old_path) as db:
+        db.execute("CREATE TABLE attachment_jobs(job_id TEXT, source_key TEXT, course_id TEXT, "
+                   "assignment_id TEXT, pseudonym TEXT, attempt INTEGER, attachment_key TEXT, "
+                   "media_type TEXT, size INTEGER, status TEXT, digest TEXT, attempts INTEGER, "
+                   "next_attempt_at TEXT, last_error TEXT, filename TEXT, file_id TEXT, "
+                   "created_at TEXT, updated_at TEXT)")
+        db.execute("INSERT INTO attachment_jobs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   ("a", SOURCE, "1", "10", "Pikachu", 1, "k", "text/plain", 1,
+                    "captured", "d" * 64, 0, None, None, "essay.txt", "file-1", "now", "now"))
+    old_store = AttachmentJobStore(old_path)
+    assert old_store.summary()["extraction_needed"] == 1
+    with sqlite3.connect(old_path) as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(attachment_jobs)")}
+    assert "extraction_state" not in columns
+
+
+def test_extraction_progress_is_association_scoped(tmp_path):
+    store = _store(tmp_path)
+    first = _ensure(store, "a" * 64, now="2026-01-01T00:00:00Z")
+    second = _ensure(store, "b" * 64, attempt=2, now="2026-01-02T00:00:00Z")
+    store.record(first.job_id, status="captured", digest="c" * 64)
+    store.record(second.job_id, status="captured", digest="d" * 64)
+    assert [j.job_id for j in store.extraction_candidates(limit=10)] == [second.job_id, first.job_id]
+    store.record_extraction(first.job_id, state="done", extracted_with="text-1:1")
+    store.record_extraction(second.job_id, state="gap", error="timeout", extracted_with="docx-1:1")
+    assert store.summary(course_id="1", assignment_id="10")["extraction_done"] == 1
+    assert store.summary()["extraction_gaps"] == 1
+    assert store.extraction_candidates(limit=10) == ()
+    assert store.reopen_extractions(lambda filename: "text-2:1", course_id="1") == 2
+    assert store.summary()["extraction_needed"] == 2
 
 
 def test_terminal_status_never_regresses(tmp_path):
