@@ -364,6 +364,13 @@ def build_packet(
                 }
             raw_text = response.get("response") or ""
             text = str(raw_text)
+            # A required-file hold is structural: readable partial text must not
+            # bypass it. The marker is independent of nonempty response text.
+            if response.get("_held"):
+                held += 1
+                if pseudonym not in held_pseudonyms:
+                    held_pseudonyms.append(pseudonym)
+                continue
             if not text.strip():
                 held += 1
                 if pseudonym not in held_pseudonyms:
@@ -374,6 +381,7 @@ def build_packet(
                 "item_id": item_id,
                 "text": text,
                 "evidence": response.get("evidence") or None,
+                "evidence_complete": bool(response.get("_evidence_complete", True)),
             })
 
     source_response_total = len(scorable)

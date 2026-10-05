@@ -203,11 +203,17 @@ def validate_results(results, bundle: dict = None, vault: IdentityVault = None,
                 "warnings": [], "n": 0, "fields": []}
 
     expected = set()
+    held_keys = set()
     possible = _possible_by_key(bundle) if bundle else {}
     if bundle:
         for s in bundle.get("students", []):
             for r in s.get("responses", []):
-                expected.add((s.get("pseudonym"), str(r.get("item_id", ""))))
+                key = (s.get("pseudonym"), str(r.get("item_id", "")))
+                expected.add(key)
+                # A required-file hold is structural: readable partial text must
+                # not let a held item be scored as complete.
+                if r.get("_held"):
+                    held_keys.add(key)
 
     seen = set()
     for i, r in enumerate(results):
@@ -253,6 +259,9 @@ def validate_results(results, bundle: dict = None, vault: IdentityVault = None,
         if key in seen:
             errors.append(f"{where}: duplicate result for {key}")
         seen.add(key)
+        if key in held_keys:
+            _error(where, "item_id",
+                   f"{key} is held for incomplete required evidence and cannot be scored")
         if vault is not None and ps and vault.reverse(ps) is None:
             _error(where, "pseudonym", f"pseudonym '{ps}' is not in the vault")
         if bundle:

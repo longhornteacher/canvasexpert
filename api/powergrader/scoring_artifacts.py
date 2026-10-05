@@ -56,6 +56,18 @@ def build_scoring_artifacts(
         with vault.transaction():
             bundle = pseudonymize_submissions(submitted, vault, assignment_name)
             bundle = context.apply_shared_context(bundle, assignment_description, source_context)
+            # Merge durable extracted evidence (published, scrubbed facts) so a
+            # student with readable attachment text is scorable, while an
+            # incomplete required file carries an explicit hold marker.
+            try:
+                from api.mirror import evidence_scoring
+                from api.platform_services import config as _config
+                evidence_scoring.merge_into_bundle(
+                    bundle, course_id=course_id, assignment_id=assignment_id,
+                    workspace_root=workspace.workspace_root(),
+                    canvas_base=_config.get_canvas_base())
+            except Exception:
+                pass
             verdict = feedback_safety.scan_payload(bundle, vault) if bundle.get("students") else None
         if not bundle.get("students"):
             _step(steps, "pseudonymize", "Prepared eligible responses", "warn",
