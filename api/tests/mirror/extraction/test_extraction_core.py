@@ -22,11 +22,13 @@ def test_registry_declares_every_required_format():
 def test_implemented_adapters_load():
     for extension in (".txt", ".docx"):
         assert registry.adapter_for(f"file{extension}") is not None
+        assert registry.extractor_version(f"file{extension}")
 
 
 def test_registry_unknown_extension_has_no_adapter():
     assert registry.adapter_for("file.exe") is None
     assert registry.adapter_for("file") is None
+    assert registry.extractor_version("file.exe") is None
 
 
 def test_result_round_trips_through_worker_serialization():
