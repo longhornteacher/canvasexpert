@@ -607,7 +607,6 @@ def evidence_status() -> dict:
     returned. Distinguishes local publication from cloud delivery and original
     capture from complete extraction.
     """
-    from api.mirror.evidence_activation import read_activation
     from api.mirror.evidence_jobs import AttachmentJobStore
     from api.mirror.evidence_paths import control_store_path, local_source_root, source_key_for_origin
     root = workspace.workspace_root()
@@ -617,16 +616,14 @@ def evidence_status() -> dict:
         source_key = source_key_for_origin(config.get_canvas_base())
     except Exception:
         return {"state": "unconfigured", "reason": "canvas_origin_unconfigured"}
-    activation = read_activation(source_key=source_key, workspace_root=root)
+    maintenance = _read_maintenance_status(root, source_key)
     jobs = AttachmentJobStore(control_store_path(source_key, root))
     summary = jobs.summary()
     index_path = local_source_root(source_key, root) / "query.sqlite3"
     owner = acquisition_owner_status()
     return {
-        "state": activation.state,
-        "coverage": activation.coverage,
-        "activated_at": activation.activated_at,
-        "rolled_back_at": activation.rolled_back_at,
+        "state": index_stage(maintenance, index_path.exists()).get("state"),
+        "index": maintenance,
         "index_present": index_path.exists(),
         "attachments": {"total": summary["total"], "captured": summary["captured"],
                         "pending": summary["pending"]},
@@ -634,6 +631,21 @@ def evidence_status() -> dict:
                               "is_owner": bool(owner and owner.is_owner)},
         "gaps": list(owner.issues) if owner else [],
     }
+
+
+def evidence_stages(*, course_id=None, assignment_id=None) -> dict:
+    """Read-only local index and attachment stages for status and MCP results."""
+    from api.mirror.evidence_paths import control_store_path, local_source_root, source_key_for_origin
+    root = workspace.workspace_root()
+    if root is None:
+        return {"index": stage("index", "not_run"), "attachments": stage("attachments", "not_run")}
+    source = source_key_for_origin(config.get_canvas_base())
+    maintenance = _read_maintenance_status(root, source)
+    index_path = local_source_root(source, root) / "query.sqlite3"
+    jobs = AttachmentJobStore(control_store_path(source, root))
+    summary = jobs.summary(course_id=course_id, assignment_id=assignment_id)
+    return {"index": index_stage(maintenance, index_path.exists(), course_id=course_id),
+            "attachments": attachment_stage(summary), "summary": summary}
 
 
 
