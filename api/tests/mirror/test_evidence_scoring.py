@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import nullcontext
 
 import pytest
 
@@ -10,7 +11,7 @@ from api.mirror.evidence_acquisition import (
     CourseAcquisitionReceipt, ScopeReceipt, publish_captured_attachment,
     publish_course_receipt,
 )
-from api.mirror.evidence_extraction import ExtractionCache, extract_captured_attachments
+from api.mirror.evidence_extraction import extract_captured_attachments
 from api.mirror.evidence_index import EvidenceIndex
 from api.mirror.evidence_jobs import AttachmentJobStore, enqueue_from_receipt
 from api.mirror.evidence_paths import local_source_root, source_key_for_origin
@@ -50,9 +51,8 @@ def _seed(tmp_path, monkeypatch, *, filename="essay.docx", data=None, capture=Tr
         job = jobs.get(job.job_id)
         publish_captured_attachment(publisher=publisher, job=job, digest=digest,
                                     writer_key="writer-a", run_id="run-b")
-        cache = ExtractionCache(tmp_path / "extraction.sqlite3")
         extract_captured_attachments(
-            publisher_for=lambda course: publisher, jobs=jobs, cache=cache,
+            publisher_scope=lambda course: nullcontext(publisher), jobs=jobs,
             recover_original=lambda d: payload,
             run_adapter=lambda name, data, filename: __import__(
                 "api.mirror.extraction.registry", fromlist=["load_adapter"]

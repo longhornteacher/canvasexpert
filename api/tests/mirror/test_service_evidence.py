@@ -247,3 +247,35 @@ def test_owner_heartbeat_progresses_during_slow_rebuild(evidence_service_workspa
         release.set()
         worker.join(timeout=2)
     assert not worker.is_alive()
+
+
+@pytest.mark.parametrize("scope,priority,reopen", [
+    ("course.refresh", "manual", True),
+    ("course.feedback_refresh", "manual", True),
+    ("course.refresh", "background", False),
+    ("course.structure_refresh", "manual", False),
+    ("roster", "manual", False),
+    ("groups", "manual", False),
+])
+def test_explicit_refresh_reopens_only_requested_course(
+        evidence_service_workspace, monkeypatch, scope, priority, reopen):
+    from types import SimpleNamespace
+    calls = []
+    monkeypatch.setattr(service.coordinator, "current_worker_context", lambda: {"priority": priority})
+    monkeypatch.setattr(service, "_request_owner_first", lambda *args: False)
+    monkeypatch.setattr(service, "acquisition_owner_status", lambda: SimpleNamespace(is_owner=True))
+    monkeypatch.setattr(service, "prepare_evidence_work", lambda **kw: calls.append(kw))
+    monkeypatch.setattr(service, "wake_evidence_workers", lambda: calls.append("wake"))
+    outcome = service._selected_runner(lambda _: {"ok": True}, scope)("1")
+    assert outcome["ok"]
+    assert calls == ([{"course_id": "1"}, "wake"] if reopen else [])
+
+
+def test_prepare_work_does_not_create_control_store(evidence_service_workspace, monkeypatch):
+    from api.mirror.evidence_paths import control_store_path
+    env = evidence_service_workspace
+    from api.mirror import evidence_paths
+    monkeypatch.setattr(evidence_paths, "source_key_for_origin", lambda _: env["source"])
+    path = control_store_path(env["source"], env["root"])
+    service.prepare_evidence_work(course_id="1")
+    assert not path.exists()

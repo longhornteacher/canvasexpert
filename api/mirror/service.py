@@ -208,18 +208,13 @@ def release_acquisition_owner():
             _OWNER_BINDING = None
 
 
-def run_attachment_capture_chunk(*, limit=None, max_bytes=None) -> dict:
-    """Drain one bounded chunk of the private attachment queue.
-
-    Uses the coordinated Canvas transport (``canvas_stream_get``) and reacquires
-    each fresh URL through CE from the stable file id. One failure never stops
-    sibling jobs; remaining work persists in the machine-local control store.
-    """
+def run_attachment_capture_chunk(*, limit=None, max_bytes=None, stop_event=None) -> dict:
+    """Capture one bounded chunk; acquire the vault only for safe publication."""
     from api import local_runtime
+    from api.mirror.evidence_acquisition import publish_attachment_status
     from api.mirror.evidence_jobs import (
         AttachmentJobStore, MAX_BYTES_PER_CHUNK, MAX_DOWNLOADS_PER_CHUNK,
-        make_original_sink, resolve_canvas_file_url, run_attachment_chunk,
-    )
+        make_original_sink, resolve_canvas_file_url, run_attachment_chunk)
     from api.mirror.evidence_paths import control_store_path, local_source_root, source_key_for_origin
     from api.mirror.evidence_publish import EvidencePublisher
     root = workspace.workspace_root()
@@ -229,28 +224,29 @@ def run_attachment_capture_chunk(*, limit=None, max_bytes=None) -> dict:
     jobs = AttachmentJobStore(control_store_path(source_key, root))
     writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
     run_id = uuid.uuid4().hex
-    staging = local_source_root(source_key, root) / "staging" / "attachments"
-    with store._vault_transaction(root) as vault:
-        def store_original(job, digest, temp_path):
+    def store_original(job, digest, temp_path):
+        with store._vault_transaction(root) as vault:
             publisher = EvidencePublisher(workspace_root=root, source_key=source_key,
                                           course_id=job.course_id, vault=vault)
             make_original_sink(workspace_root=root, publisher=publisher,
-                               writer_key=writer, run_id=run_id)(job, digest, temp_path)
-
-        result = run_attachment_chunk(
-            jobs,
-            resolve_url=lambda job: resolve_canvas_file_url(job, canvas_get=canvas_get),
-            stream_get=canvas_stream_get,
-            canvas_origin=config.get_canvas_base(),
-            original_exists=lambda digest: _original_exists(root, digest),
-            store_original=store_original,
-            staging_dir=staging,
-            limit=limit or MAX_DOWNLOADS_PER_CHUNK,
-            max_bytes=max_bytes or MAX_BYTES_PER_CHUNK,
-        )
+                writer_key=writer, run_id=run_id)(job, digest, temp_path)
+    def publish_terminal(job, status):
+        with store._vault_transaction(root) as vault:
+            publisher = EvidencePublisher(workspace_root=root, source_key=source_key,
+                                          course_id=job.course_id, vault=vault)
+            publish_attachment_status(publisher=publisher, job=job, status=status,
+                                      writer_key=writer, run_id=run_id)
+    result = run_attachment_chunk(jobs,
+        resolve_url=lambda job: resolve_canvas_file_url(job, canvas_get=canvas_get),
+        stream_get=canvas_stream_get, canvas_origin=config.get_canvas_base(),
+        original_exists=lambda digest: _original_exists(root, digest),
+        store_original=store_original, publish_terminal=publish_terminal,
+        staging_dir=local_source_root(source_key, root) / "staging" / "attachments",
+        limit=MAX_DOWNLOADS_PER_CHUNK if limit is None else limit,
+        max_bytes=MAX_BYTES_PER_CHUNK if max_bytes is None else max_bytes,
+        stop_event=stop_event)
     if result.get("published", 0):
-        request_index_maintenance("publication")
-        wake_evidence_workers()
+        request_index_maintenance("capture")
     return result
 
 
@@ -262,15 +258,11 @@ def _original_exists(root, digest) -> bool:
         return False
 
 
-def run_extraction_chunk(*, limit: int = 20) -> dict:
-    """Extract captured originals lacking a current extraction, one bounded chunk.
-
-    Runs each adapter in a supervised worker process; a missing dependency or
-    timeout marks that file's gap and continues siblings. Results are scrubbed
-    and published through the same privacy boundary as other safe evidence.
-    """
+def run_extraction_chunk(*, limit: int = 20, stop_event=None) -> dict:
+    """Run adapters outside vault transactions and publish one job at a time."""
+    from contextlib import contextmanager
     from api import local_runtime
-    from api.mirror.evidence_extraction import ExtractionCache, extract_captured_attachments
+    from api.mirror.evidence_extraction import extract_captured_attachments
     from api.mirror.evidence_jobs import AttachmentJobStore
     from api.mirror.evidence_paths import control_store_path, local_source_root, source_key_for_origin
     from api.mirror.evidence_publish import EvidencePublisher
@@ -281,40 +273,57 @@ def run_extraction_chunk(*, limit: int = 20) -> dict:
         raise ValueError("workspace_unconfigured")
     source_key = source_key_for_origin(config.get_canvas_base())
     jobs = AttachmentJobStore(control_store_path(source_key, root))
-    cache = ExtractionCache(local_source_root(source_key, root) / "extraction.sqlite3")
     writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
-    run_id = uuid.uuid4().hex
-    with store._vault_transaction(root) as vault:
-        def publisher_for(course_id):
-            return EvidencePublisher(workspace_root=root, source_key=source_key,
-                                     course_id=course_id, vault=vault)
+    @contextmanager
+    def publisher_scope(course_id):
+        with store._vault_transaction(root) as vault:
+            yield EvidencePublisher(workspace_root=root, source_key=source_key,
+                                    course_id=course_id, vault=vault)
+    def adapter_runner(adapter_name, data, filename):
+        import tempfile
+        staging = local_source_root(source_key, root) / "staging" / "extraction"
+        staging.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix or ".bin",
+                                         delete=False, dir=str(staging)) as handle:
+            handle.write(data)
+            path = Path(handle.name)
+        try:
+            return run_adapter(adapter_name, path)
+        finally:
+            path.unlink(missing_ok=True)
+    outcome = extract_captured_attachments(publisher_scope=publisher_scope, jobs=jobs,
+        recover_original=lambda digest: recover_original(root, digest),
+        run_adapter=adapter_runner, writer_key=writer, run_id=uuid.uuid4().hex,
+        limit=limit, stop_event=stop_event)
+    if outcome.published:
+        request_index_maintenance("extraction")
+    return {"processed": outcome.processed, "published": outcome.published,
+            "gaps": list(outcome.gaps)}
 
-        def adapter_runner(adapter_name, data, filename):
-            # Stage the recovered bytes so the supervised worker reads a path.
-            staging = local_source_root(source_key, root) / "staging" / "extraction"
-            staging.mkdir(parents=True, exist_ok=True)
-            import tempfile
-            from pathlib import Path
-            with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix or ".bin",
-                                             delete=False, dir=str(staging)) as handle:
-                handle.write(data)
-                path = Path(handle.name)
-            try:
-                return run_adapter(adapter_name, path)
-            finally:
-                path.unlink(missing_ok=True)
 
-        outcome = extract_captured_attachments(
-            publisher_for=publisher_for, jobs=jobs, cache=cache,
-            recover_original=lambda digest: recover_original(root, digest),
-            run_adapter=adapter_runner, writer_key=writer, run_id=run_id, limit=limit)
-        result = {"processed": outcome.processed, "published": outcome.published,
-                  "cached": outcome.cached, "failed": outcome.failed,
-                  "gaps": list(outcome.gaps)}
-    if result.get("published", 0):
-        request_index_maintenance("publication")
-        wake_evidence_workers()
-    return result
+def prepare_evidence_work(*, course_id=None) -> None:
+    from api.mirror.evidence_jobs import AttachmentJobStore
+    from api.mirror.evidence_paths import control_store_path, source_key_for_origin
+    from api.mirror.extraction import registry
+    from api.mirror.extraction.schema import PRIVACY_POLICY_REVISION
+    root = workspace.workspace_root()
+    if root is None:
+        return
+    source = source_key_for_origin(config.get_canvas_base())
+    path = control_store_path(source, root)
+    if not path.exists():
+        return
+    def current_version(filename):
+        name = registry.adapter_name(filename)
+        if name is None:
+            return None
+        try:
+            return f"{registry.extractor_version(name)}:{PRIVACY_POLICY_REVISION}"
+        except Exception:
+            return None
+    jobs = AttachmentJobStore(path)
+    jobs.reopen_exhausted_captures(course_id=course_id)
+    jobs.reopen_extractions(current_version, course_id=course_id)
 
 
 _MAINTENANCE_LOCK = threading.Lock()
@@ -359,7 +368,7 @@ def attachment_work_worker(stop_event, *, wait=None) -> None:
     """Bounded continuation; capture obeys ownership, local extraction does not."""
     wait = wait or _work_wake.wait
     try:
-        recover_evidence_work_chunk()
+        prepare_evidence_work()
     except Exception as exc:
         operational_log.emit("mirror.evidence_work", "failed", error_class=type(exc))
     while not stop_event.is_set():
@@ -369,11 +378,11 @@ def attachment_work_worker(stop_event, *, wait=None) -> None:
             if config.token_is_set() and config.mirror_enabled():
                 owner = acquisition_owner_status()
                 if owner is not None and owner.is_owner:
-                    result = run_attachment_capture_chunk()
-                    progressed = bool(result.get("processed"))
+                    result = run_attachment_capture_chunk(stop_event=stop_event)
+                    progressed = bool(result.get("published") or result.get("captured") or result.get("skipped") or result.get("failed"))
             if not stop_event.is_set():
-                result = run_extraction_chunk()
-                progressed = progressed or bool(result.get("processed"))
+                result = run_extraction_chunk(stop_event=stop_event)
+                progressed = progressed or bool(result.get("published"))
         except Exception as exc:
             operational_log.emit("mirror.evidence_work", "failed", error_class=type(exc))
         if stop_event.is_set():
@@ -627,51 +636,6 @@ def evidence_status() -> dict:
     }
 
 
-def recover_evidence_work_chunk(*, extraction_limit: int = 20) -> dict:
-    """Resume interrupted attachment capture and extraction after a restart."""
-    from api import local_runtime
-    from api.mirror.evidence_activation import recover_evidence_work
-    from api.mirror.evidence_extraction import ExtractionCache
-    from api.mirror.evidence_jobs import AttachmentJobStore
-    from api.mirror.evidence_paths import control_store_path, local_source_root, source_key_for_origin
-    from api.mirror.evidence_publish import EvidencePublisher
-    from api.mirror.extraction.supervisor import run_adapter
-    from api.mirror.original_archive import recover_original
-    root = workspace.workspace_root()
-    if root is None:
-        raise ValueError("workspace_unconfigured")
-    source_key = source_key_for_origin(config.get_canvas_base())
-    jobs = AttachmentJobStore(control_store_path(source_key, root))
-    cache = ExtractionCache(local_source_root(source_key, root) / "extraction.sqlite3")
-    writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
-    run_id = uuid.uuid4().hex
-    with store._vault_transaction(root) as vault:
-        def publisher_for(course_id):
-            return EvidencePublisher(workspace_root=root, source_key=source_key,
-                                     course_id=course_id, vault=vault)
-
-        def adapter_runner(adapter_name, data, filename):
-            import tempfile
-            from pathlib import Path
-            staging = local_source_root(source_key, root) / "staging" / "extraction"
-            staging.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix or ".bin",
-                                             delete=False, dir=str(staging)) as handle:
-                handle.write(data)
-                path = Path(handle.name)
-            try:
-                return run_adapter(adapter_name, path)
-            finally:
-                path.unlink(missing_ok=True)
-
-        return recover_evidence_work(
-            source_key=source_key, workspace_root=root, jobs=jobs, cache=cache,
-            publisher_for=publisher_for,
-            recover_original=lambda digest: recover_original(root, digest),
-            run_adapter=adapter_runner, writer_key=writer, run_id=run_id,
-            capture_chunk=lambda: run_attachment_capture_chunk(),
-            extraction_limit=extraction_limit)
-
 
 def acquisition_owner_worker(stop_event):
     """Heartbeat independently of acquisition duration and the 900s cadence."""
@@ -790,6 +754,13 @@ def _selected_runner(runner, scope=None):
             operational_log.emit("mirror.acquisition", "failed", error_class=type(exc))
             result = {"ok": False, "error_class": "acquisition_failed"}
         result["stages"] = _runner_stages(result)
+        if (result.get("ok") and scope in {"course.refresh", "course.feedback_refresh"}
+                and coordinator.current_worker_context().get("priority") == "manual"):
+            try:
+                prepare_evidence_work(course_id=str(course_id))
+                wake_evidence_workers()
+            except Exception as exc:
+                operational_log.emit("mirror.evidence_work_prepare", "failed", error_class=type(exc))
         return result
     return run
 

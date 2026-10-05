@@ -45,7 +45,7 @@ def test_start_starts_evidence_workers_after_recovery_and_runs_nothing_synchrono
     monkeypatch.setattr(service, "index_maintenance_worker", lambda stop: evidence_worker("index", stop))
     monkeypatch.setattr(service, "attachment_work_worker", lambda stop: evidence_worker("evidence", stop))
     monkeypatch.setattr(service, "run_index_maintenance", lambda **kw: pytest.fail("synchronous indexing"))
-    monkeypatch.setattr(service, "recover_evidence_work_chunk", lambda **kw: pytest.fail("synchronous attachment work"))
+    monkeypatch.setattr(service, "prepare_evidence_work", lambda **kw: pytest.fail("synchronous attachment work"))
     created = []
     real_thread = threading.Thread
     def make_thread(**kwargs):

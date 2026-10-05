@@ -487,13 +487,11 @@ No live runtime, Canvas acquisition, reset, or deployment performed.
 | S05 | GREEN slice | Commit containing this row; `service.py`, `coordinator.py`, `store.py`, `sync.py`, runtime rename and matching/shared tests | `.venv\Scripts\python -m pytest api/tests/mirror/test_service_evidence.py api/tests/mirror/test_sync.py api/tests/mirror/test_coordinator.py api/tests/mirror/test_service_selection.py api/tests/mirror/test_store.py -p no:randomly -q` — 154 passed | Sanitized stages; refresh last success/failure stage; independent course rebuild and absent-course removal; local corrupt/schema repair with zero Canvas calls; safe files survive index failure; descriptor failure diagnostic only; short frozen vault snapshot preserves verification | Checkpoint follows verified S01–S03 dependencies while independent S04 worker continues, honoring per-slice commit request. No unfinished S04 interface is called by this slice; deployment remains deferred |
 | S06 | GREEN index/lifecycle slice | Commit containing this row; `service.py`, `runtime.py`, lifecycle/service tests and isolated fixtures | `.venv\Scripts\python -m pytest api/tests/test_runtime_startup.py api/tests/mirror/test_service_evidence.py api/tests/mirror/test_acquisition_owner.py api/tests/mirror/test_acquisition_requests.py -p no:randomly -q` — 39 passed | No synchronous startup indexing/extraction; both workers start after operation recovery; wake/join on stop; 30-second rescans, coalescing and requests during rebuild; owner heartbeat not held by slow indexing | Existing attachment chunk/recovery internals deliberately remain for S07 integration after S04; never deploy this intermediate tree. Read-only Luna review found no material lifecycle/coalescing defects |
 
-S00 commit: `036ab61`. The repo-local `.venv` is now ready: Python 3.13.14,
-S02 commit: `caf7b22`.
-S01 commit: `c2439a8`.
-S03 commit: `22d4d10`.
-S05 commit: `51b917e`.
-pytest 9.0.1, dependencies installed from `api/requirements.txt` (including
-RapidOCR 3.9.2, ONNX Runtime 1.29.0, pypdfium2 5.1.0, python-pptx 1.0.2).
+S00 commit: `036ab61`; S02: `caf7b22`; S01: `c2439a8`; S03: `22d4d10`;
+S05: `51b917e`; S06: `952788e`.
+The repo-local `.venv` is ready: Python 3.13.14, pytest 9.0.1, dependencies
+installed from `api/requirements.txt` (including RapidOCR 3.9.2, ONNX Runtime
+1.29.0, pypdfium2 5.1.0, python-pptx 1.0.2).
 `.venv\Scripts\python -m pytest api/tests/mirror/extraction -p no:randomly -q`
 — **49 passed**, 44.52 seconds; real OCR and supported adapters verified.
 
