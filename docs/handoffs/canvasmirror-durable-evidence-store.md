@@ -1295,7 +1295,7 @@ independently maintained current-state store after cutover.
 
 ## 12. Execution result (lead updates in place)
 
-**Execution result:** S00–S06 are implemented and accepted on synthetic/local
+**Execution result:** S00–S07 are implemented and accepted on synthetic/local
 evidence. No teacher workspace migration, live Canvas call, production read
 activation, or public push was performed. The isolated OCR environment's full
 suite passes; the global `py` environment still lacks the S00 OCR wheels.
@@ -1309,14 +1309,13 @@ suite passes; the global `py` environment still lacks the S00 OCR wheels.
 | S04 originals/jobs | GREEN | `00633ee` | 124 focused tests passed (18 new job tests + 106 existing); full repository gate 2372 passed, 2 skipped | New `assignment.attachments` scope publishes opaque association facts (key/media-type/size/status, never filename/URL); `evidence_jobs.py` owns a machine-local private `control.sqlite3` queue with deterministic job ids, 20-download/200-MiB resumable chunks, retry backoff, terminal statuses, and fact-based reconstruction; `service.run_attachment_capture_chunk` drains through the coordinated transport and reacquires fresh URLs from the stable file id. Same 6 unrelated baseline failures (OCR wheels, QF golden, readiness probe). No live Canvas or teacher workspace activation. |
 | S05 required extraction | GREEN | `e753fdc` | 162 focused tests passed in the isolated OCR env; isolated full gate 2408 passed, 2 skipped, 0 failed | New `extraction/` package: strict result schema, format registry, supervised worker, and DOCX/PPTX/XLSX/PDF/JPG-PNG/text adapters. DOCX preserves order/formatting/tracked changes; PPTX follows relationship slide order + notes; XLSX keeps formulas vs cached values; PDF does native-then-OCR per page; images OCR with located blocks. `evidence_extraction.py` publishes scrubbed `assignment.extractions` facts with content/version-addressed caching. Global `py` shows the same 6 baseline failures plus the new real-OCR adapter test (same OCR-wheel category as S00's own tests). No live Canvas or teacher workspace activation. |
 | S06 reads/comparisons/notes | GREEN | `68901d1` | 359 MCP tests + 48 comparison/note tests passed; isolated full gate 2426 passed, 2 skipped, 0 failed | New `get_assignment_evidence(course_id, assignment_id, view)` MCP tool (views attachments/comparisons/notes) over the same query service as direct SQL; `evidence_comparisons.py` (exact-file equality, prompt-excluded wording overlap, successive-attempt changes); `evidence_notes.py` (append-only revisions, optimistic concurrency, stale marking, scrubbed publication); `canvasmirror` guide topic with a narrow `read_access` descriptor. Schema bumped v80→v81 (38 tools), snapshot regenerated, listing budget re-measured to 15300. Global `py` shows the same 6 baseline failures plus the OCR-wheel adapter test. No live Canvas or teacher workspace activation. |
-| S07 scoring consumption | Not started | — | — | — |
+| S07 scoring consumption | GREEN | `73e0945` | 5 new scoring-consumption tests + 349 powergrader/feedback tests passed; isolated full gate 2431 passed, 2 skipped, 0 failed | New `evidence_scoring.py` reads published attachment/extraction facts into scoring-ready rows and merges extracted text into the SAFE bundle with explicit `_evidence_complete`/`_held` markers. `scoring_packet.build_packet` holds a marked response despite readable text; `feedback_results.validate_results` refuses a held item even with nonempty text. `scoring_artifacts` merges durable evidence before the safety scan. Global `py` shows the same 6 baseline failures plus the OCR-wheel adapter test. No live Canvas or teacher workspace activation. |
 | S08 activation/recovery | Not started | — | — | Two-machine field acceptance outstanding |
 
-**Current traffic light:** YELLOW. S00–S06 are accepted against their
-synthetic/local gates. S07 scoring consumption is the next pointer.
+**Current traffic light:** YELLOW. S00–S07 are accepted against their
+synthetic/local gates. S08 activation/recovery is the next pointer.
 The private pilot import and production activation remain reserved for S08's
-announced acceptance run; scoring consumption and two-computer field acceptance
-remain outstanding.
+announced acceptance run; two-computer field acceptance remains outstanding.
 
 For each completed slice record actual SHA, owned files, exact commands/counts,
 traffic light, deviations, baseline exception and remaining field evidence. Keep a
