@@ -1169,6 +1169,7 @@ def status(plan_id: str | None = None) -> dict:
             "passes": state["passes"],
             "watermarks": state["watermarks"],
             "context": store.read_course_context(course_id),
+            "evidence": evidence_stages(course_id=course_id),
         })
     owner = acquisition_owner_status()
     payload = {
@@ -1181,6 +1182,7 @@ def status(plan_id: str | None = None) -> dict:
         "serve_max_age_hours": config.mirror_serve_max_age_hours(),
         "courses": courses,
         "vault_conflict": _vault_conflict_files(),
+        "evidence": evidence_status(),
     }
     if plan_id:
         payload["plan"] = coordinator_instance().status(plan_id)
