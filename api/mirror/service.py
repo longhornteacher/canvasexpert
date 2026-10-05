@@ -658,9 +658,7 @@ def evidence_status() -> dict:
     return {
         "state": index_stage(maintenance, index_path.exists()).get("state"),
         "index": maintenance,
-        "index_present": index_path.exists(),
-        "attachments": {"total": summary["total"], "captured": summary["captured"],
-                        "pending": summary["pending"]},
+        "attachments": {**summary, "stage": attachment_stage(summary)},
         "acquisition_owner": {"state": owner.state if owner else "disabled",
                               "is_owner": bool(owner and owner.is_owner)},
         "gaps": list(owner.issues) if owner else [],

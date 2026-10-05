@@ -473,13 +473,13 @@ live-state inspection or browser acceptance is claimed by this preflight.
 
 **Execution result: IN PROGRESS — YELLOW.** S00 started 2026-10-05 at `5600db2`.
 S08 follow-up (2026-10-05): the refresh-continuation bug was fixed and the
-activation-free resolver completed; see the S08 row. Full-suite state after the
-follow-up: `2516 passed, 28 failed, 2 skipped` (excluding two pre-existing
-collection errors: `test_ocr_samples.py` needs `pypdf`; `test_evidence_activation.py`
-imports the removed `ExtractionCache`). The 28 failures are all pre-existing and
-outside this batch's changed behavior: 9 extraction/OCR tests need the OCR
-dependency set, 18 `test_evidence_migration.py` tests are S09 deletion targets
-(they import the renamed `rebuild_evidence_index`), and 1 readiness baseline.
+activation-free resolver completed; see the S08 row.
+S09 (2026-10-05): the obsolete activation/import/migration cutover machinery was
+deleted; see the S09 row. The repo-local `.venv` was recreated (Python 3.14) and
+`api/requirements.txt` reinstalled, so the OCR/extraction dependency failures are
+resolved. Full-suite state after S09: **2492 passed, 1 skipped, 0 failed** —
+synthetic GREEN. S10 console copy/browser gate, S11 docs/integrated acceptance,
+and S12/S13 field acceptance remain.
 Clean `dev`; fetch succeeded; `dev...origin/dev` = `0 0`,
 `dev...origin/main` = `19 0`. No application source drift from `30b9465` in
 the declared owners. Inventory confirms the activation/import/recovery,
@@ -497,7 +497,8 @@ No live runtime, Canvas acquisition, reset, or deployment performed.
 | S04 | GREEN slice | `2a4513e`, `70c90b7`; durable attachment jobs, extraction, registry version lookup, matching tests | `.venv\Scripts\python -m pytest api/tests/mirror/test_evidence_jobs.py api/tests/mirror/test_evidence_extraction.py -p no:randomly -q` — 39 passed | Newest-first bounded queue, terminal capture publication before completion, association-keyed extraction, explicit gaps and restart reopening, no extraction cache, adapter version tracking | S04 was committed after S06’s independent lifecycle checkpoint so each verified slice remains recoverable; no deployment |
 | S07 | GREEN coding slice | `ffd8aa6`; `service.py`, scoring/startup fixture migration, worker integration tests | `.venv\Scripts\python -m pytest api/tests/mirror/test_evidence_jobs.py api/tests/mirror/test_evidence_extraction.py api/tests/mirror/test_evidence_workers.py api/tests/mirror/test_service_evidence.py api/tests/test_runtime_startup.py api/tests/mirror/test_evidence_scoring.py -p no:randomly -q` — 82 passed, 1 warning | Capture and extraction workers run in bounded chunks; downloads/adapters occur outside vault transactions; restart reuses captured bytes; non-owner extraction is allowed; explicit refresh reopening is course-scoped; 45-job scheduling fixture drains across chunks | Worker orchestration test uses a fast durable queue double for the 45-job drain; direct transport/vault-boundary and restart tests exercise the real service chunks. Field, MCP, console, and second-computer acceptance remain |
 | S08 | GREEN coding slice | `951e7b2` + follow-up; `tools.py`, `server.py`, `service.py`, MCP tests/fixtures | `.venv\Scripts\python -m pytest api/tests/mcp_server -p no:randomly -q` — 356 passed | One `_evidence_reader()` resolver replaces `_activated_evidence_lane`; the four reads serve from the evidence index with `coverage`/`warnings` and honest partial/unknown handling; refresh continuation fixed to read the coordinator plan view and report real stages/`fully_ready`; legacy typed-mirror helpers (`_roster_sections`, `_roster_groups`, `_mirror_submission_bundle`, `_load_snapshot`, `_submission_history`) deleted; vault-conflict fail-closed preserved | `_mirror_roster_doc` and `_freshness_attention` retained (still used by roster settings and catalog reads). Schema settled to v82; listing budget 15400 |
-| S09/S10 | YELLOW partial | `7184607`, `51d747f`; activation-free evidence status/stages surfaced through service and console status | `.venv\Scripts\python -m pytest api/tests/test_desk_routes.py api/tests/mirror/test_service_evidence.py -p no:randomly -q` — 25 passed, 1 warning | `evidence_status()` and scoped `evidence_stages()` read maintenance/index/queue state without activation files; console status includes evidence stages | Full activation/import/migration module deletion, browser route gate, and stage copy remain open (S09/S10) |
+| S09 | GREEN slice | `7184607`, `51d747f` + follow-up; deleted `evidence_activation.py`, `evidence_activation_proof.py`, `evidence_import.py`, `evidence_migration.py`, `legacy_samples.py` and their five test modules; `service.py` `evidence_status()` shape; `test_retired_paths.py` | `.venv\Scripts\python -m pytest api/tests/test_retired_paths.py api/tests/mirror api/tests/mcp_server -p no:randomly -q` — 887 passed | Obsolete activation/import/migration cutover machinery deleted; `evidence_status()` returns `{state, index, attachments(+stage), acquisition_owner, gaps}`; RETIRED_PATHS rows added; no dangling references; `activation.v1.json`/`extraction.sqlite3` left on disk | None |
+| S10 | YELLOW partial | `7184607`, `51d747f`; activation-free evidence status/stages surfaced through service and console status | `.venv\Scripts\python -m pytest api/tests/test_desk_routes.py api/tests/mirror/test_service_evidence.py -p no:randomly -q` — 25 passed, 1 warning | `evidence_status()` and scoped `evidence_stages()` read maintenance/index/queue state without activation files; console status includes evidence stages | §4.8 console copy, `canvasagent.js` stage rendering, and the browser route gate remain open |
 
 S00 commit: `036ab61`; S02: `caf7b22`; S01: `c2439a8`; S03: `22d4d10`;
 S05: `51b917e`; S06: `952788e`.

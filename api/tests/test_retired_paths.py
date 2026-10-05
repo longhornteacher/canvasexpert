@@ -264,6 +264,16 @@ RETIRED_PATHS = (
     ("docs/guides/Holidays.csv", "(none)", "Keep calendar defaults in one canonical source"),
     ("api/work_registry", "(none)", "Remove the unread work-registry projection"),
     ("docs/contracts/work-registry-contract.md", "(none)", "Remove the retired work-registry contract"),
+    ("api/mirror/evidence_activation.py", "(none)", "CanvasMirror functional read path: no activation/import cutover"),
+    ("api/mirror/evidence_activation_proof.py", "(none)", "CanvasMirror functional read path: no activation/import cutover"),
+    ("api/mirror/evidence_import.py", "(none)", "CanvasMirror functional read path: no activation/import cutover"),
+    ("api/mirror/evidence_migration.py", "(none)", "CanvasMirror functional read path: no activation/import cutover"),
+    ("api/tests/mirror/test_evidence_activation.py", "(none)", "CanvasMirror functional read path: no activation/import cutover"),
+    ("api/tests/mirror/test_evidence_activation_proof.py", "(none)", "CanvasMirror functional read path: no activation/import cutover"),
+    ("api/tests/mirror/test_evidence_import.py", "(none)", "CanvasMirror functional read path: no activation/import cutover"),
+    ("api/tests/mirror/test_evidence_migration.py", "(none)", "CanvasMirror functional read path: no activation/import cutover"),
+    ("api/tests/mirror/legacy_samples.py", "(none)", "CanvasMirror functional read path: no activation/import cutover"),
+    ("api/tests/mirror/test_legacy_samples.py", "(none)", "CanvasMirror functional read path: no activation/import cutover"),
 )
 
 
