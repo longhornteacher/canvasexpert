@@ -20,6 +20,7 @@ import uuid
 import threading
 import time
 import requests
+from dataclasses import dataclass
 from pathlib import Path
 
 from api import operational_log
@@ -56,6 +57,59 @@ _FOCUSED_PLANS = {}
 _REQUEST_QUEUE = None
 _REQUEST_BINDING = None
 FOCUSED_OWNER_WAIT_SECONDS = 2.0
+
+STAGE_CODES = {
+    "acquisition": frozenset({"canvas_unavailable", "auth_failed", "pagination_incomplete",
+        "course_not_selected", "acquisition_owner_waiting", "acquisition_failed"}),
+    "publication": frozenset({"publication_incomplete"}),
+    "index": frozenset({"index_maintenance_pending", "index_rebuild_failed", "index_busy",
+        "evidence_update_required", "course_evidence_not_arrived"}),
+    "attachments": frozenset({"attachments_pending", "attachment_gaps"}),
+}
+_STAGE_FALLBACKS = {"acquisition": "acquisition_failed", "publication": "publication_incomplete",
+                    "index": "index_rebuild_failed", "attachments": "attachment_gaps"}
+
+
+def stage(name: str, state: str, code: str | None = None) -> dict:
+    if name not in coordinator.STAGE_NAMES or state not in coordinator.STAGE_STATES:
+        raise ValueError("invalid_stage")
+    result = {"state": state}
+    if code is not None:
+        result["code"] = code if code in STAGE_CODES[name] else _STAGE_FALLBACKS[name]
+    return result
+
+
+def overall_ok(stages) -> bool:
+    return (stages.get("acquisition", {}).get("state") == "ready"
+            and stages.get("publication", {}).get("state") in {"ready", "not_run"})
+
+
+def fully_ready(stages) -> bool:
+    return bool(stages) and all(value.get("state") in {"ready", "not_run"}
+                                for value in stages.values())
+
+
+def _runner_stages(outcome) -> dict:
+    outcome = outcome if isinstance(outcome, dict) else {}
+    errors = {str(outcome.get(key) or "") for key in ("error_class", "error_code", "error")}
+    publication = stage("publication", "not_run")
+    if outcome.get("ok"):
+        acquisition, publication = stage("acquisition", "ready"), stage("publication", "ready")
+    elif "acquisition_owner_waiting" in errors or "waiting" in errors:
+        acquisition = stage("acquisition", "pending", "acquisition_owner_waiting")
+    elif "publication_incomplete" in errors:
+        acquisition, publication = stage("acquisition", "ready"), stage("publication", "failed", "publication_incomplete")
+    elif errors & {"course_not_selected", "course_unavailable"}:
+        acquisition = stage("acquisition", "failed", "course_not_selected")
+    elif errors & {"acquisition_owner_repair_required", "workspace not configured", "acquisition_failed"}:
+        acquisition = stage("acquisition", "failed", "acquisition_failed")
+    elif "pagination_incomplete" in errors:
+        acquisition = stage("acquisition", "failed", "pagination_incomplete")
+    elif any(course_catalog.error_code(error) in {"auth_unavailable", "auth_failed", "forbidden"} for error in errors):
+        acquisition = stage("acquisition", "failed", "auth_failed")
+    else:
+        acquisition = stage("acquisition", "failed", "canvas_unavailable")
+    return {"acquisition": acquisition, "publication": publication}
 
 
 def acquisition_owner_status(*, tick=False):
@@ -191,7 +245,7 @@ def run_attachment_capture_chunk(*, limit=None, max_bytes=None) -> dict:
             limit=limit or MAX_DOWNLOADS_PER_CHUNK,
             max_bytes=max_bytes or MAX_BYTES_PER_CHUNK,
         )
-    rebuild_evidence_index(root=root, source_key=source_key)
+    run_index_maintenance(root=root, source_key=source_key)
     return result
 
 
@@ -252,91 +306,223 @@ def run_extraction_chunk(*, limit: int = 20) -> dict:
         result = {"processed": outcome.processed, "published": outcome.published,
                   "cached": outcome.cached, "failed": outcome.failed,
                   "gaps": list(outcome.gaps)}
-    rebuild_evidence_index(root=root, source_key=source_key)
+    run_index_maintenance(root=root, source_key=source_key)
     return result
 
 
-def rebuild_evidence_index(*, root=None, source_key=None) -> dict:
-    """Rebuild one complete local source index from every validated safe course."""
-    from api.mirror.evidence_index import EvidenceIndex
+_MAINTENANCE_LOCK = threading.Lock()
+_MAINTENANCE_STATUS_LOCK = threading.Lock()
+_maintenance_requested = False
+
+
+@dataclass(frozen=True)
+class _VaultSnapshot:
+    """Read-only privacy verification data, copied under a short vault lock."""
+    def __init__(self, vault):
+        from copy import deepcopy
+        object.__setattr__(self, "_entries", deepcopy(vault.entries()))
+        names, identifiers = vault.all_real_identifiers()
+        object.__setattr__(self, "_names", frozenset(names))
+        object.__setattr__(self, "_identifiers", frozenset(identifiers))
+
+    def entries(self):
+        from copy import deepcopy
+        return deepcopy(self._entries)
+
+    def all_real_identifiers(self):
+        return set(self._names), set(self._identifiers)
+
+
+def _read_maintenance_status(root, source_key):
+    import json
+    from api.mirror.evidence_paths import maintenance_status_path
+    empty = {"schema_version": 1, "state": "not_run", "code": None, "revision": None,
+             "last_attempt_at": "", "last_success_at": "", "not_arrived_courses": [],
+             "update_required_courses": [], "descriptor": {"state": "not_run", "code": None}}
+    try:
+        document = json.loads(maintenance_status_path(source_key, root).read_text(encoding="utf-8"))
+        if (not isinstance(document, dict) or set(document) != set(empty)
+                or type(document["schema_version"]) is not int or document["schema_version"] != 1
+                or document["state"] not in coordinator.STAGE_STATES
+                or document["code"] not in STAGE_CODES["index"] | {None}
+                or not isinstance(document["descriptor"], dict)
+                or set(document["descriptor"]) != {"state", "code"}
+                or document["descriptor"].get("state") not in coordinator.STAGE_STATES
+                or document["descriptor"].get("code") not in {None, "descriptor_write_failed"}
+                or any(not isinstance(document[key], list)
+                       or any(not isinstance(cid, str) or not cid.isdecimal() for cid in document[key])
+                       for key in ("not_arrived_courses", "update_required_courses"))
+                or any(not isinstance(document[key], str)
+                       or (document[key] and not store._valid_iso_z(document[key]))
+                       for key in ("last_attempt_at", "last_success_at"))
+                or (document["revision"] is not None
+                    and (not isinstance(document["revision"], str)
+                         or len(document["revision"]) != 64
+                         or any(c not in "0123456789abcdef" for c in document["revision"])))):
+            return empty
+        return document
+    except (OSError, ValueError, TypeError):
+        return empty
+
+
+def _write_maintenance_status(root, source_key, document):
+    import json
+    import tempfile
+    from api.mirror.evidence_paths import maintenance_status_path
+    target = maintenance_status_path(source_key, root)
+    with _MAINTENANCE_STATUS_LOCK:
+        temporary = None
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False,
+                                             dir=target.parent, suffix=".tmp") as handle:
+                temporary = handle.name
+                json.dump(document, handle, sort_keys=True, separators=(",", ":"))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, target)
+        except OSError as exc:
+            operational_log.emit("mirror.maintenance_status", "failed", error_class=type(exc))
+        finally:
+            if temporary is not None:
+                try:
+                    Path(temporary).unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+
+def index_stage(status, index_present, *, course_id=None):
+    if _maintenance_requested:
+        return stage("index", "pending", "index_maintenance_pending")
+    if status.get("state") == "failed":
+        return stage("index", "failed", status.get("code") or "index_rebuild_failed")
+    if not index_present:
+        return stage("index", "pending", "index_maintenance_pending") if status.get("state") != "not_run" else stage("index", "not_run")
+    updated = status.get("update_required_courses", [])
+    absent = status.get("not_arrived_courses", [])
+    if course_id is not None:
+        updated = [cid for cid in updated if str(cid) == str(course_id)]
+        absent = [cid for cid in absent if str(cid) == str(course_id)]
+    if updated:
+        return stage("index", "partial", "evidence_update_required")
+    if absent:
+        return stage("index", "partial", "course_evidence_not_arrived")
+    return stage("index", "ready")
+
+
+def attachment_stage(summary):
+    if not summary.get("total", 0):
+        return stage("attachments", "not_run")
+    if summary.get("remaining", 0):
+        return stage("attachments", "pending", "attachments_pending")
+    if summary.get("capture_gaps", 0) + summary.get("extraction_gaps", 0):
+        return stage("attachments", "partial", "attachment_gaps")
+    return stage("attachments", "ready")
+
+
+def run_index_maintenance(*, root=None, source_key=None) -> dict:
+    """Independently reduce safe courses; rebuild only the disposable local index."""
+    from api.mirror.evidence_index import EvidenceIndex, IndexReadError, IndexBusy
     from api.mirror.evidence_paths import local_source_root, source_key_for_origin
     from api.mirror.evidence_publish import EvidencePublisher
-    from api.mirror.evidence_store import EvidenceStore
+    from api.mirror.evidence_queries import write_reader_descriptor
+    from api.mirror.evidence_store import EvidenceStore, StoreSnapshot
     root = root or workspace.workspace_root()
     if root is None:
-        return {"state": "repair_required", "reason": "workspace_unconfigured"}
+        return {"state": "not_run", "code": None, "revision": None}
     try:
         source_key = source_key or source_key_for_origin(config.get_canvas_base())
-        evidence_root = Path(workspace.canvas_mirror_evidence_root(root))
-        course_root = evidence_root / "sources" / source_key / "courses"
-        course_ids = sorted(path.name for path in course_root.iterdir()
-                            if path.is_dir() and path.name.isdecimal()) if course_root.exists() else []
-        index_path = local_source_root(source_key, root) / "query.sqlite3"
-        if index_path.exists():
-            try:
-                with sqlite3.connect(index_path.resolve().as_uri() + "?mode=ro", uri=True) as db:
-                    indexed_courses = {row[0] for row in db.execute(
-                        "SELECT course_id FROM course_selection WHERE source_key=?", (source_key,))}
-                if indexed_courses - set(course_ids):
-                    return {"state": "pending", "reason": "course_evidence_not_arrived",
-                            "courses": len(course_ids)}
-            except sqlite3.DatabaseError:
-                # A corrupt disposable index is rebuilt from the safe files below.
-                pass
-        if not course_ids:
-            return {"state": "empty", "courses": 0}
-        selected = {str(course.get("id")) for course in config.active_courses()
-                    if str(course.get("id") or "").isdecimal()}
-        snapshots = []
-        with store._vault_transaction(root) as vault:
-            for course_id in course_ids:
-                publisher = EvidencePublisher(workspace_root=root, source_key=source_key,
-                                              course_id=course_id, vault=vault)
-                safe_store = EvidenceStore(evidence_root, source_key, course_id,
-                    verify_safe=publisher.verify_safe,
-                    private_diagnostics_root=local_source_root(source_key, root) / "staging" / "diagnostics")
-                snapshot = safe_store.scan()
-                # A privacy rejection can indicate that synced identity facts have
-                # not arrived yet. Keep the entire previous publication intact.
-                if any(issue.code in {"invalid_fact", "invalid_commit", "invalid_reference_graph"}
-                       for issue in snapshot.issues):
-                    return {"state": "pending", "reason": "safe_file_repair_required",
-                            "courses": len(course_ids)}
-                # A temporarily empty synchronized directory is indistinguishable
-                # from a delayed replica. Never replace the complete index with a
-                # snapshot that silently omits a previously indexed course.
-                if not (snapshot.facts or snapshot.commits or snapshot.issues):
-                    return {"state": "pending", "reason": "course_evidence_not_arrived",
-                            "courses": len(course_ids)}
-                if snapshot.facts or snapshot.commits or snapshot.issues:
-                    snapshots.append(snapshot)
-        if not snapshots:
-            return {"state": "pending", "reason": "safe_evidence_not_arrived",
-                    "courses": len(course_ids)}
-        index = EvidenceIndex(index_path)
+    except ValueError:
+        return {"state": "not_run", "code": None, "revision": None}
+    with _MAINTENANCE_LOCK:
+        binding = (workspace.workspace_root(), config.get_canvas_base())
+        previous = _read_maintenance_status(root, source_key)
+        status = {**previous, "state": "ready", "code": None,
+                  "last_attempt_at": store.now_iso(), "not_arrived_courses": [],
+                  "update_required_courses": [], "descriptor": {"state": "not_run", "code": None}}
+        count = 0
         try:
-            revision = index.ingest_many(snapshots, selected_courses=selected)
-        except sqlite3.DatabaseError:
-            # Remove local bytes only when SQLite confirms that the disposable
-            # index is corrupt. A healthy index plus a failed ingest keeps its
-            # last-good rows intact for repair and diagnosis.
-            corrupt = False
-            if index_path.exists():
+            evidence_root = Path(workspace.canvas_mirror_evidence_root(root))
+            courses_root = evidence_root / "sources" / source_key / "courses"
+            course_ids = {path.name for path in courses_root.iterdir()
+                          if path.is_dir() and path.name.isdecimal()} if courses_root.exists() else set()
+            selected = {str(course.get("id")) for course in config.active_courses()
+                        if str(course.get("id") or "").isdecimal()}
+            index = EvidenceIndex(local_source_root(source_key, root) / "query.sqlite3")
+            indexed = set()
+            usable = False
+            if index.path.exists():
                 try:
-                    with sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True) as check_db:
-                        result = check_db.execute("PRAGMA quick_check").fetchone()
-                    corrupt = not result or result[0] != "ok"
-                except sqlite3.DatabaseError:
-                    corrupt = True
-            if not corrupt:
-                raise
-            for suffix in ("", "-wal", "-shm"):
-                Path(str(index_path) + suffix).unlink(missing_ok=True)
-            revision = index.ingest_many(snapshots, selected_courses=selected)
-        return {"state": "current", "revision": revision, "courses": len(course_ids)}
-    except Exception as exc:
-        operational_log.emit("mirror.evidence_index_rebuild", "failed", error_class=type(exc))
-        return {"state": "repair_required", "reason": "index_rebuild_failed"}
+                    with index.read_connection() as db:
+                        indexed = {row[0] for row in db.execute(
+                            "SELECT course_id FROM course_selection WHERE source_key=?", (source_key,))}
+                        usable = True
+                except IndexReadError:
+                    pass
+            absent = (selected | indexed) - course_ids
+            snapshots = []
+            with store._vault_transaction(root) as vault:
+                snapshot_vault = _VaultSnapshot(vault)
+            for cid in sorted(course_ids):
+                try:
+                    publisher = EvidencePublisher(workspace_root=root, source_key=source_key,
+                                                  course_id=cid, vault=snapshot_vault)
+                    snapshot = EvidenceStore(evidence_root, source_key, cid,
+                        verify_safe=publisher.verify_safe,
+                        private_diagnostics_root=index.path.parent / "staging" / "diagnostics").scan()
+                    if any(issue.code == "unsupported_schema" for issue in snapshot.issues):
+                        status["update_required_courses"].append(cid)
+                    if not (snapshot.facts or snapshot.commits):
+                        absent.add(cid)
+                    else:
+                        snapshots.append(snapshot)
+                except Exception as exc:
+                    absent.add(cid)
+                    operational_log.emit("mirror.evidence_course_scan", "failed", error_class=type(exc))
+            status["not_arrived_courses"] = sorted(absent)
+            count = len(snapshots)
+            if binding != (workspace.workspace_root(), config.get_canvas_base()):
+                return {"state": "pending", "code": "index_maintenance_pending", "revision": None}
+            if status["update_required_courses"]:
+                status.update(state="partial", code="evidence_update_required")
+            elif absent or not snapshots:
+                status.update(state="partial", code="course_evidence_not_arrived")
+            def ingest():
+                if snapshots:
+                    return index.ingest_many(snapshots, selected_courses=selected)
+                if usable:
+                    empty = StoreSnapshot({}, {}, (), hashlib.sha256(b"empty-source").hexdigest(),
+                                          verify_safe=lambda _: (_ for _ in ()).throw(ValueError("empty_source")))
+                    return index.ingest(empty, selected_courses=selected)
+                return None
+            try:
+                revision = ingest()
+            except (IndexReadError, sqlite3.DatabaseError) as exc:
+                if isinstance(exc, IndexBusy):
+                    raise
+                if isinstance(exc, IndexReadError) and str(exc) not in {"index_schema_mismatch", "index_corrupt"}:
+                    raise
+                index.discard()
+                revision = ingest()
+            status["revision"] = revision
+            if revision:
+                status["last_success_at"] = store.now_iso()
+                try:
+                    write_reader_descriptor(index.path, revision=revision)
+                    status["descriptor"] = {"state": "ready", "code": None}
+                except Exception as exc:
+                    status["descriptor"] = {"state": "failed", "code": "descriptor_write_failed"}
+                    operational_log.emit("mirror.reader_descriptor", "failed", error_class=type(exc))
+        except Exception as exc:
+            status.update(state="failed", code="index_busy" if isinstance(exc, IndexBusy) else "index_rebuild_failed")
+            operational_log.emit("mirror.evidence_index_rebuild", "failed", error_class=type(exc))
+        if binding != (workspace.workspace_root(), config.get_canvas_base()):
+            return {"state": "pending", "code": "index_maintenance_pending", "revision": None}
+        _write_maintenance_status(root, source_key, status)
+        return {"state": status["state"], "code": status["code"], "revision": status["revision"],
+                "courses": {"indexed": count, "not_arrived": status["not_arrived_courses"],
+                            "update_required": status["update_required_courses"]},
+                "descriptor": status["descriptor"]}
 
 
 def evidence_status() -> dict:
@@ -468,7 +654,7 @@ def _publish_acquisition(receipt):
                                  pseudonym_for=lambda raw: vault.get_or_assign(str(raw)))
         except Exception:
             operational_log.emit("mirror.attachment_enqueue", "failed")
-    rebuild_evidence_index(root=root, source_key=source_key)
+    run_index_maintenance(root=root, source_key=source_key)
     return result
 
 
@@ -509,13 +695,15 @@ def _selected_course(course_id: str) -> dict | None:
 
 def _selected_runner(runner, scope=None):
     """Recheck at execution; a queued job cannot refresh a Previous course."""
-    def run(course_id):
+    def acquire(course_id):
         if _selected_course(course_id) is None:
             return {"ok": False, "error_class": "course_not_selected"}
         if coordinator.current_worker_context().get("priority") in {"background", "concluded"}:
             owner = acquisition_owner_status()
             if owner is None or not owner.is_owner:
-                return {"ok": False, "error_class": "acquisition_owner_waiting" if owner is None else owner.state}
+                return {"ok": False, "error_class": "acquisition_owner_repair_required"
+                        if owner is not None and owner.state == "repair_required"
+                        else "acquisition_owner_waiting"}
         duplicate = False
         if scope and coordinator.current_worker_context().get("priority") in {"manual", "post_write"}:
             try:
@@ -525,6 +713,16 @@ def _selected_runner(runner, scope=None):
         result = runner(course_id)
         if duplicate and isinstance(result, dict):
             result = {**result, "acquisition_mode": "bounded_duplicate", "owner_requested": True}
+        return result
+
+    def run(course_id):
+        try:
+            result = acquire(course_id)
+            result = dict(result) if isinstance(result, dict) else {"ok": True}
+        except Exception as exc:
+            operational_log.emit("mirror.acquisition", "failed", error_class=type(exc))
+            result = {"ok": False, "error_class": "acquisition_failed"}
+        result["stages"] = _runner_stages(result)
         return result
     return run
 
@@ -959,7 +1157,7 @@ def mirror_heartbeat_worker(stop_event):
         return
     while not stop_event.is_set():
         try:
-            rebuild_evidence_index()
+            run_index_maintenance()
             run_coordinated_heartbeat_tick()
         except Exception as exc:
             operational_log.emit("mirror.heartbeat_tick", "failed", error_class=type(exc))

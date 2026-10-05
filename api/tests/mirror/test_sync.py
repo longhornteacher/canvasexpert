@@ -157,6 +157,21 @@ def test_refresh_persists_operation_revision_and_usable_snapshot(tmp_path):
     assert assignments["refresh_state"] == submissions["refresh_state"] == "synced"
 
 
+@pytest.mark.parametrize("error,stage", [
+    ("publication_incomplete", "publication"), ("canvas_unavailable", "acquisition")])
+def test_refresh_failure_records_stage_and_keeps_last_success(tmp_path, monkeypatch, error, stage):
+    monkeypatch.setattr(sync, "delta_pass", lambda *a, **k: {"ok": True})
+    sync.refresh(COURSE, root=str(tmp_path), now=NOW, force=True,
+                 canvas_get_all=None, canvas_get_all_complete=None)
+    monkeypatch.setattr(sync, "delta_pass", lambda *a, **k: {"ok": False, "error_code": error})
+    sync.refresh(COURSE, root=str(tmp_path), now="2026-07-16T13:00:00Z", force=True,
+                 canvas_get_all=None, canvas_get_all_complete=None)
+    document = store.read_refresh(COURSE, root=str(tmp_path))
+    assert document["failure_stage"] == stage
+    assert document["last_success_at"] == NOW
+    assert document["finished_at"] == "2026-07-16T13:00:00Z"
+
+
 def test_refresh_lifecycle_persists_syncing_before_terminal_state(tmp_path):
     store.begin_refresh(COURSE, operation_id="op-1", requested_at=NOW,
                         root=str(tmp_path))

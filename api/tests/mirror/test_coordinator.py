@@ -3,8 +3,33 @@ from __future__ import annotations
 
 import threading
 import time
+import pytest
 
 from api.mirror.coordinator import MirrorCoordinator
+
+
+@pytest.mark.parametrize("stages,accepted", [
+    ({"acquisition": {"state": "ready"}, "publication": {"state": "ready"}}, True),
+    ({"acquisition": {"state": "pending", "code": "acquisition_owner_waiting"}}, True),
+    ({"private": {"state": "ready"}}, False),
+    ({"acquisition": {"state": "invented"}}, False),
+    ({"acquisition": {"state": "ready", "private": "value"}}, False),
+])
+def test_coordinator_copies_only_valid_runner_stages(stages, accepted):
+    coordinator = MirrorCoordinator({"roster": lambda _: {"ok": True, "stages": stages}})
+    try:
+        plan = _wait(coordinator, coordinator.submit(["1"], ["roster"]))
+        job = plan["jobs"][0]
+        assert job.get("stages") == (stages if accepted else None)
+        if accepted:
+            job["stages"]["acquisition"]["state"] = "failed"
+            assert coordinator.status(plan["plan_id"])["plans"][0]["jobs"][0]["stages"] == stages
+    finally:
+        with coordinator._lock:
+            coordinator._closed = True
+            coordinator._lock.notify_all()
+        for thread in coordinator._threads:
+            thread.join(timeout=1)
 
 
 def _wait(coordinator, plan_id):

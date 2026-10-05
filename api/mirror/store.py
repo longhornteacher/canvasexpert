@@ -557,7 +557,9 @@ def validate_sync(document: dict, course_id) -> dict:
 
 
 def validate_refresh(document: dict, course_id) -> dict:
-    _require_exact_keys(document, _REFRESH_KEYS, "refresh")
+    if (not isinstance(document, dict) or not _REFRESH_KEYS <= document.keys()
+            or not document.keys() <= _REFRESH_KEYS | {"last_success_at", "failure_stage"}):
+        raise ValueError("refresh keys are invalid")
     if document["schema_version"] != REFRESH_VERSION:
         raise ValueError("refresh schema_version is unsupported")
     if str(document["course_id"]) != str(course_id):
@@ -567,6 +569,12 @@ def validate_refresh(document: dict, course_id) -> dict:
     for key in ("requested_at", "started_at", "finished_at"):
         if document[key] and not _valid_iso_z(document[key]):
             raise ValueError(f"refresh {key} is invalid")
+    last_success = document.get("last_success_at", "")
+    if not isinstance(last_success, str) or (last_success and not _valid_iso_z(last_success)):
+        raise ValueError("refresh last_success_at is invalid")
+    if (not isinstance(document.get("failure_stage", ""), str)
+            or document.get("failure_stage", "") not in {"", "acquisition", "publication"}):
+        raise ValueError("refresh failure_stage is invalid")
     if not isinstance(document["operation_id"], str) or not document["operation_id"]:
         raise ValueError("refresh operation_id is invalid")
     if not isinstance(document["error_code"], str):
@@ -1307,13 +1315,17 @@ def default_refresh(course_id) -> dict:
         "error_code": "not_refreshed",
         "revision": 0,
         "snapshot_id": "",
+        "last_success_at": "",
+        "failure_stage": "",
     }
 
 
 def read_refresh(course_id, *, root=None) -> dict:
     document = _read_document(refresh_path(course_id, root),
                               lambda d: validate_refresh(d, course_id))
-    return document if document is not None else default_refresh(course_id)
+    if document is None:
+        return default_refresh(course_id)
+    return {"last_success_at": "", "failure_stage": "", **document}
 
 
 def begin_refresh(course_id, *, operation_id: str, requested_at: str | None = None,
@@ -1339,6 +1351,8 @@ def begin_refresh(course_id, *, operation_id: str, requested_at: str | None = No
             "error_code": "",
             "revision": previous.get("revision", 0),
             "snapshot_id": previous.get("snapshot_id", ""),
+            "last_success_at": previous.get("last_success_at", ""),
+            "failure_stage": "",
         }
         return _write_document(refresh_path(course_id, root),
                                validate_refresh(document, course_id))
@@ -1346,7 +1360,7 @@ def begin_refresh(course_id, *, operation_id: str, requested_at: str | None = No
 
 def finish_refresh(course_id, *, operation_id: str, ok: bool,
                    finished_at: str | None = None, error_code: str = "",
-                   root=None) -> dict:
+                   failure_stage: str = "", root=None) -> dict:
     """Commit the terminal lifecycle state after projection writes settle."""
     _require_dir(course_id, root)
     finished_at = finished_at or now_iso()
@@ -1360,11 +1374,13 @@ def finish_refresh(course_id, *, operation_id: str, ok: bool,
                 "state": "synced", "finished_at": finished_at,
                 "error_code": "", "revision": revision,
                 "snapshot_id": f"{str(course_id)}:{revision}",
+                "last_success_at": finished_at, "failure_stage": "",
             })
         else:
             document.update({
                 "state": "failed", "finished_at": finished_at,
                 "error_code": str(error_code or "sync_failed"),
+                "failure_stage": failure_stage,
             })
         return _write_document(refresh_path(course_id, root),
                                validate_refresh(document, course_id))

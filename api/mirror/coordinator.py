@@ -17,6 +17,8 @@ from typing import Callable, Iterable
 
 
 PRIORITIES = ("post_write", "manual", "background", "concluded")
+STAGE_NAMES = ("acquisition", "publication", "index", "attachments")
+STAGE_STATES = frozenset({"ready", "partial", "pending", "failed", "not_run"})
 _PRIORITY_VALUE = {name: index for index, name in enumerate(PRIORITIES)}
 PRODUCTION_SCOPES = (
     "course.refresh", "course_context", "roster", "groups",
@@ -48,6 +50,7 @@ class _Job:
     mirror_revision: int = 0
     snapshot_id: str = ""
     canvas_external_count: int = 0
+    stages: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -204,6 +207,8 @@ class MirrorCoordinator:
         if job.mirror_revision or job.snapshot_id:
             view.update({"mirror_revision": job.mirror_revision,
                          "snapshot_id": job.snapshot_id})
+        if job.stages:
+            view["stages"] = {name: dict(value) for name, value in job.stages.items()}
         if (job.state == "succeeded" and job.scope in {
                 "course.refresh", "course.feedback_refresh", "course.scoring_refresh",
                 "submissions.course_delta"}):
@@ -245,6 +250,15 @@ class MirrorCoordinator:
                     else:
                         job.state = "succeeded"
                     if isinstance(outcome, dict):
+                        stages = outcome.get("stages")
+                        if (isinstance(stages, dict) and stages
+                                and set(stages) <= {"acquisition", "publication"}
+                                and all(isinstance(value, dict)
+                                        and set(value) <= {"state", "code"}
+                                        and value.get("state") in STAGE_STATES
+                                        and ("code" not in value or isinstance(value["code"], str))
+                                        for value in stages.values())):
+                            job.stages = {name: dict(value) for name, value in stages.items()}
                         job.mirror_revision = int(outcome.get("mirror_revision") or 0)
                         job.snapshot_id = str(outcome.get("snapshot_id") or "")
                         count = outcome.get("canvas_external_count")

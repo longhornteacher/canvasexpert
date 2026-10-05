@@ -3,6 +3,46 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture
+def evidence_service_workspace(tmp_path, monkeypatch):
+    """Safe publication and service maintenance with a synthetic vault."""
+    from contextlib import contextmanager
+    from api import runtime_paths
+    from api.mirror import service, store
+    from api.mirror.evidence_acquisition import publish_course_receipt
+    from api.mirror.evidence_publish import EvidencePublisher
+    from api.tests.mirror.acquisition_samples import SyntheticVault, course_receipt_sample
+
+    root = tmp_path / "workspace"
+    source = "a" * 64
+    vault = SyntheticVault()
+    locked = [False]
+    monkeypatch.setattr(runtime_paths, "local_cache_dir", lambda: tmp_path / "local")
+    monkeypatch.setattr(service.workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(service.config, "active_courses", lambda: [{"id": "1"}])
+    monkeypatch.setattr(service.config, "get_canvas_base", lambda: "https://canvas.example.test")
+
+    @contextmanager
+    def transaction(_root):
+        locked[0] = True
+        try:
+            yield vault
+        finally:
+            locked[0] = False
+
+    monkeypatch.setattr(store, "_vault_transaction", transaction)
+
+    def publish(variant="full", *, receipt=None):
+        receipt = receipt or course_receipt_sample(variant)
+        publisher = EvidencePublisher(workspace_root=root, source_key=source,
+                                      course_id=receipt.course_id, vault=vault)
+        return publish_course_receipt(publisher=publisher, receipt=receipt,
+                                      writer_key="writer-a", run_id="run-a")
+
+    return {"root": root, "source": source, "vault": vault,
+            "locked": locked, "publish": publish}
+
+
 @pytest.fixture(autouse=True)
 def score_ledger_workspace(tmp_path, monkeypatch):
     """Keep durable score evidence separate from each disposable mirror root."""

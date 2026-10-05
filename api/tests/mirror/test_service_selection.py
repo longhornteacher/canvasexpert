@@ -5,6 +5,40 @@ import pytest
 from api.mirror import service
 
 
+@pytest.mark.parametrize("outcome,acquisition,publication", [
+    ({"ok": True}, {"state": "ready"}, {"state": "ready"}),
+    ({"error_class": "acquisition_owner_waiting"},
+     {"state": "pending", "code": "acquisition_owner_waiting"}, {"state": "not_run"}),
+    ({"error_code": "publication_incomplete"}, {"state": "ready"},
+     {"state": "failed", "code": "publication_incomplete"}),
+    ({"error_class": "course_unavailable"},
+     {"state": "failed", "code": "course_not_selected"}, {"state": "not_run"}),
+    ({"error_class": "acquisition_owner_repair_required"},
+     {"state": "failed", "code": "acquisition_failed"}, {"state": "not_run"}),
+    ({"error": "pagination_incomplete"},
+     {"state": "failed", "code": "pagination_incomplete"}, {"state": "not_run"}),
+    ({"error": "HTTP 401 Unauthorized"},
+     {"state": "failed", "code": "auth_failed"}, {"state": "not_run"}),
+    ({"error": "connection failed"},
+     {"state": "failed", "code": "canvas_unavailable"}, {"state": "not_run"}),
+    ({"error_class": "acquisition_failed"},
+     {"state": "failed", "code": "acquisition_failed"}, {"state": "not_run"}),
+])
+def test_runner_outcomes_map_to_stage_table(outcome, acquisition, publication):
+    assert service._runner_stages(outcome) == {
+        "acquisition": acquisition, "publication": publication}
+
+
+def test_index_and_attachment_failure_do_not_reverse_safe_publication():
+    stages = {"acquisition": service.stage("acquisition", "ready"),
+              "publication": service.stage("publication", "ready"),
+              "index": service.stage("index", "failed", "private exception text"),
+              "attachments": service.stage("attachments", "pending", "attachments_pending")}
+    assert stages["index"] == {"state": "failed", "code": "index_rebuild_failed"}
+    assert service.overall_ok(stages)
+    assert not service.fully_ready(stages)
+
+
 def test_manual_enqueue_uses_only_current_courses(monkeypatch):
     submitted = []
 
@@ -27,9 +61,10 @@ def test_queued_runner_rechecks_selection_before_any_read(monkeypatch):
     monkeypatch.setattr(service.config, "active_courses",
                         lambda: [{"id": value} for value in active])
     guarded = service._selected_runner(lambda course: calls.append(course) or {"ok": True})
-    assert guarded("1") == {"ok": True}
+    assert guarded("1") == {"ok": True, "stages": service._runner_stages({"ok": True})}
     active.clear()
-    assert guarded("1") == {"ok": False, "error_class": "course_not_selected"}
+    rejected = {"ok": False, "error_class": "course_not_selected"}
+    assert guarded("1") == {**rejected, "stages": service._runner_stages(rejected)}
     assert calls == ["1"]
 
 
@@ -47,7 +82,9 @@ def test_background_owner_gate_runs_before_any_canvas_acquisition(monkeypatch, s
     monkeypatch.setattr(service, "acquisition_owner_status", lambda: SimpleNamespace(is_owner=False, state=state))
     calls = []
     guarded = service._selected_runner(lambda course: calls.append(course))
-    assert guarded("1") == {"ok": False, "error_class": state}
+    rejected = {"ok": False, "error_class": "acquisition_owner_repair_required"
+                if state == "repair_required" else "acquisition_owner_waiting"}
+    assert guarded("1") == {**rejected, "stages": service._runner_stages(rejected)}
     assert calls == []
 
 
@@ -83,7 +120,8 @@ def test_focused_owner_request_falls_back_with_explicit_duplicate_label(monkeypa
             return "a" * 32
     monkeypatch.setattr(service, "_focused_requests", lambda: Requests())
     result = service._selected_runner(lambda course: {"ok": True}, "roster")("1")
-    assert result == {"ok": True, "acquisition_mode": "bounded_duplicate", "owner_requested": True}
+    assert result == {"ok": True, "acquisition_mode": "bounded_duplicate", "owner_requested": True,
+                      "stages": service._runner_stages({"ok": True})}
     assert events[0]["course_id"] == "1"
     assert events[0]["scope"] == "roster"
     assert "SYNTHETIC" not in events[0]["writer_key"]

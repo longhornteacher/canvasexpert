@@ -529,12 +529,16 @@ def refresh(course_id, *, canvas_get_all, canvas_get_all_complete, root=None,
                 course_id, operation_id=operation_id, ok=bool(result.get("ok")),
                 finished_at=now or store.now_iso(),
                 error_code=str(result.get("error_code") or result.get("error") or ""),
+                failure_stage=("" if result.get("ok") else "publication"
+                    if (result.get("error_code") or result.get("error")) == "publication_incomplete"
+                    else "acquisition"),
                 root=root,
             )
         except Exception as exc:
             lifecycle = store.finish_refresh(
                 course_id, operation_id=operation_id, ok=False,
                 finished_at=now or store.now_iso(), error_code=type(exc).__name__,
+                failure_stage="acquisition",
                 root=root,
             )
             result = {"ok": False, "error_code": type(exc).__name__}

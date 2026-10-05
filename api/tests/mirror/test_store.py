@@ -16,6 +16,17 @@ from api.mirror import course_context, read_service, store
 
 COURSE = "111"
 
+
+@pytest.mark.parametrize("field,value", [
+    ("last_success_at", None), ("last_success_at", 0), ("last_success_at", False),
+    ("last_success_at", "private text"), ("failure_stage", []),
+])
+def test_refresh_optional_fields_have_strict_types(field, value):
+    document = store.default_refresh(COURSE)
+    document[field] = value
+    with pytest.raises(ValueError):
+        store.validate_refresh(document, COURSE)
+
 USERS = [
     {"id": 900001, "name": "Learner One", "sortable_name": "One, Learner",
      "short_name": "Lee", "sis_user_id": "SIS-900001",

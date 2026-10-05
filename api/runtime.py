@@ -87,8 +87,8 @@ def start() -> None:
         # Build the disposable local evidence projection before the first
         # agent read; only validated synchronized facts enter SQLite.
         try:
-            from api.mirror.service import rebuild_evidence_index
-            rebuild_evidence_index()
+            from api.mirror.service import run_index_maintenance
+            run_index_maintenance()
         except Exception as exc:
             _note("evidence_index", exc)
 
