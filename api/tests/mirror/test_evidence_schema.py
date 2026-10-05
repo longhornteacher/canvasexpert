@@ -17,6 +17,16 @@ def test_canonical_json_has_stable_digest_and_preserves_text():
     assert "—".encode() in canonical_bytes(first)
 
 
+@pytest.mark.parametrize("record_kind", ["fact", "commit"])
+def test_future_version_is_unsupported_not_invalid(evidence_factory, record_kind):
+    record = evidence_factory[record_kind]()
+    record["schema_version"] = 2
+    record["future_field"] = "ignored by this reader"
+    validator = validate_fact if record_kind == "fact" else validate_commit
+    with pytest.raises(EvidenceValidationError, match="unsupported_schema"):
+        validator(record)
+
+
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, {1: "value"}, (1, 2), b"raw"])
 def test_non_json_or_nonfinite_values_are_refused(value):
     with pytest.raises(EvidenceValidationError, match="non_json_value"):

@@ -62,6 +62,59 @@ def test_sync_pending_preserves_last_good_then_converges(tmp_path, evidence_fact
     assert reduce_scope(reader.scan(), "assignment.submissions", "10").current_refs == (ref2,)
 
 
+def test_future_record_is_reported_and_last_good_stays_current(tmp_path, evidence_factory):
+    from api.mirror.evidence_schema import canonical_bytes, digest_record
+    store = evidence_factory["store"](tmp_path / "safe")
+    first = evidence_factory["fact"]()
+    first_ref = store.publish_fact(first)
+    first_commit = store.publish_commit(evidence_factory["commit"](
+        refs=[first_ref], members=[first["entity_key"]]))
+    future = evidence_factory["fact"](body="Future synthetic fact")
+    future["schema_version"] = 2
+    future["future_field"] = "reader must not copy diagnostics"
+    future_ref = digest_record(future)
+    future_path = store._path("objects", future_ref)
+    future_path.parent.mkdir(parents=True, exist_ok=True)
+    future_path.write_bytes(canonical_bytes(future))
+    future_commit = evidence_factory["commit"](refs=[future_ref], parents=[first_commit],
+        members=[future["entity_key"]], run_id="future-run")
+    commit_ref = digest_record(future_commit)
+    commit_path = store._path("commits", commit_ref)
+    commit_path.parent.mkdir(parents=True, exist_ok=True)
+    commit_path.write_bytes(canonical_bytes(future_commit))
+
+    snapshot = store.scan()
+    assert any(issue.code == "unsupported_schema" for issue in snapshot.issues)
+    assert not list(store.private_diagnostics_root.rglob("*.bin"))
+    state = reduce_scope(snapshot, "assignment.submissions", "10")
+    assert state.status == "sync_pending"
+    assert state.current_refs == state.last_good_refs == (first_ref,)
+
+
+def test_future_commit_keeps_only_valid_scope_metadata_without_diagnostics(tmp_path, evidence_factory):
+    from api.mirror.evidence_schema import canonical_bytes, digest_record
+    store = evidence_factory["store"](tmp_path / "safe")
+    fact = evidence_factory["fact"]("course", "course:1", {"title": "Synthetic course"})
+    ref = store.publish_fact(fact)
+    store.publish_commit(evidence_factory["commit"](scope="course.context", scope_id="1",
+        refs=[ref], members=[fact["entity_key"]]))
+    future = evidence_factory["commit"](scope="assignment.submissions", scope_id="10")
+    future["schema_version"] = 2
+    future["future_field"] = "synthetic future metadata"
+    digest = digest_record(future)
+    path = store._path("commits", digest)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(canonical_bytes(future))
+
+    snapshot = store.scan()
+    issue = next(issue for issue in snapshot.issues if issue.code == "unsupported_schema")
+    assert (issue.scope, issue.scope_id, issue.source_key, issue.course_id) == (
+        "assignment.submissions", "10", store.source_key, store.course_id)
+    assert reduce_scope(snapshot, "assignment.submissions", "10").status == "sync_pending"
+    assert reduce_scope(snapshot, "course.context", "1").status == "ready"
+    assert not list(store.private_diagnostics_root.rglob("*.bin"))
+
+
 def test_partial_and_delta_do_not_delete_but_complete_empty_tombstones(tmp_path, evidence_factory):
     store = EvidenceStore(tmp_path, "a" * 64, "1", verify_safe=lambda record: None, private_diagnostics_root=tmp_path.parent / (tmp_path.name + "-diagnostics"))
     record = evidence_factory["fact"]()

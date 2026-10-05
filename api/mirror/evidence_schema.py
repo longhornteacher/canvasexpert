@@ -179,10 +179,10 @@ def digest_record(record: dict) -> str:
 
 
 def validate_fact(record: dict) -> dict:
+    if isinstance(record, dict) and (type(record.get("schema_version")) is not int or record.get("schema_version") != SCHEMA_VERSION):
+        _fail("unsupported_schema")
     _object(record, FACT_FIELDS, FACT_FIELDS)
     canonical_bytes(record)
-    if type(record["schema_version"]) is not int or record["schema_version"] != SCHEMA_VERSION:
-        _fail("unsupported_schema")
     kind = record["kind"]
     if not isinstance(kind, str) or kind not in PAYLOAD_FIELDS:
         _fail("unsupported_kind")
@@ -386,10 +386,10 @@ def validate_fact(record: dict) -> dict:
 
 
 def validate_commit(record: dict) -> dict:
+    if isinstance(record, dict) and (type(record.get("schema_version")) is not int or record.get("schema_version") != SCHEMA_VERSION):
+        _fail("unsupported_schema")
     _object(record, COMMIT_FIELDS, COMMIT_FIELDS)
     canonical_bytes(record)
-    if type(record["schema_version"]) is not int or record["schema_version"] != SCHEMA_VERSION:
-        _fail("unsupported_schema")
     validate_digest(record["source_key"])
     for key in ("course_id", "scope_id", "writer_key", "run_id"):
         validate_component(record[key])

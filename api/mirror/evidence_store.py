@@ -34,7 +34,7 @@ class StoreIssue:
 
 
 def validate_store_issue(issue: StoreIssue) -> StoreIssue:
-    if not isinstance(issue, StoreIssue) or not isinstance(issue.code, str) or issue.code not in {"invalid_fact", "invalid_commit", "invalid_reference_graph", "diagnostics_failed"}:
+    if not isinstance(issue, StoreIssue) or not isinstance(issue.code, str) or issue.code not in {"invalid_fact", "invalid_commit", "unsupported_schema", "invalid_reference_graph", "diagnostics_failed"}:
         raise EvidenceValidationError("invalid_store_issue")
     if issue.digest is not None:
         validate_digest(issue.digest)
@@ -210,9 +210,20 @@ class EvidenceStore:
                     if expected and digest != expected:
                         raise EvidenceValidationError("digest_mismatch")
                     destination[digest] = checked
-                except (OSError, UnicodeError, json.JSONDecodeError, EvidenceValidationError, TypeError, RecursionError):
-                    issues.append(StoreIssue("invalid_commit" if is_commit else "invalid_fact", expected, issue_scope, issue_scope_id, issue_source, issue_course))
-                    if raw is not None:
+                except (OSError, UnicodeError, json.JSONDecodeError, EvidenceValidationError, TypeError, RecursionError) as exc:
+                    unsupported_schema = isinstance(exc, EvidenceValidationError) and exc.code == "unsupported_schema"
+                    if unsupported_schema and is_commit and isinstance(record, dict):
+                        raw_scope = record.get("scope")
+                        raw_scope_id = record.get("scope_id")
+                        if isinstance(raw_scope, str) and raw_scope in SCOPE_KINDS:
+                            try:
+                                validate_component(raw_scope_id)
+                                issue_scope, issue_scope_id = raw_scope, raw_scope_id
+                                issue_source, issue_course = self.source_key, self.course_id
+                            except EvidenceValidationError:
+                                pass
+                    issues.append(StoreIssue(("unsupported_schema" if unsupported_schema else "invalid_commit" if is_commit else "invalid_fact"), expected, issue_scope, issue_scope_id, issue_source, issue_course))
+                    if raw is not None and not unsupported_schema:
                         try:
                             self._diagnose(raw)
                         except (OSError, EvidenceValidationError):
