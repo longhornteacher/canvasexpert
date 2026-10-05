@@ -6,32 +6,7 @@ from api.mirror.evidence_publish import EvidencePublisher
 import pytest
 
 
-class SyntheticVault:
-    def __init__(self):
-        self.people = {
-            "991001": ("Pikachu", "Avery Sample"),
-            "991002": ("Eevee", "Morgan Sample"),
-        }
-
-    def entries(self):
-        return [
-            {"canvas_id": raw, "real_name": name, "pseudonym": pseudo,
-             "sis_id": "", "nicknames": []}
-            for raw, (pseudo, name) in self.people.items()
-        ]
-
-    def all_real_identifiers(self):
-        return ({name for _, name in self.people.values()}, set(self.people))
-
-    def get_or_assign(self, raw, real_name=""):
-        return self.people[str(raw)][0]
-
-    def require_stable(self, raw):
-        if str(raw) not in self.people:
-            raise ValueError("unresolved")
-
-    def save(self):
-        pass
+from api.tests.mirror.acquisition_samples import SyntheticVault
 
 
 def _publisher(tmp_path):

@@ -471,7 +471,23 @@ both computers' availability and updates, selected private reset manifest, and
 actual two-machine sync. Confirm these only in announced field acceptance; no
 live-state inspection or browser acceptance is claimed by this preflight.
 
-**Execution result: NOT STARTED.** Record commits, changed files, commands/counts,
+**Execution result: IN PROGRESS — YELLOW.** S00 started 2026-10-05 at `5600db2`.
+Clean `dev`; fetch succeeded; `dev...origin/dev` = `0 0`,
+`dev...origin/main` = `19 0`. No application source drift from `30b9465` in
+the declared owners. Inventory confirms the activation/import/recovery,
+descriptor publication, and extraction-cache consumers documented above.
+No live runtime, Canvas acquisition, reset, or deployment performed.
+
+| Slice | State | Commit(s)/files | Focused command and count | Acceptance evidence | Deviation/blocker |
+|---|---|---|---|---|---|
+| S00 | GREEN coding preparation; extraction environment pending | Commit containing this row; shared acquisition samples and SyntheticVault import consumers | `py -m pytest api/tests/mirror/test_evidence_publish.py api/tests/mirror/test_acquisition_samples.py -p no:randomly -q` — 22 passed | SyntheticVault moved to shared builder with SIS/nickname registration; read_path, second_course, in-memory documents added; inventory complete | Repo-local `.venv` installation in progress; focused fixture check used baseline Python 3.13.14 |
+
+Lead owns integration and commits. Luna index worker owns S02 → S03; Luna
+publication worker owns S01 → S04, with disjoint files and slice review pauses.
+User requests a commit after every verified slice. Preserve intermediate slices
+without deployment; overall acceptance remains YELLOW through field checks.
+
+Record commits, changed files, commands/counts,
 boundary regressions proved, remaining private-projection consumers, deviations,
 reset performed/not performed, and field evidence here. Synthetic GREEN means the
 code gate passed; overall acceptance stays YELLOW until required pilot/two-machine

@@ -15,7 +15,7 @@ from api.mirror.extraction.docx import extract as extract_docx
 from api.mirror.extraction.schema import PRIVACY_POLICY_REVISION
 from api.mirror.extraction.text import extract as extract_text
 from api.tests.mirror.extraction import document_samples
-from api.tests.mirror.test_evidence_publish import SyntheticVault
+from api.tests.mirror.acquisition_samples import SyntheticVault
 
 SOURCE = "a" * 64
 

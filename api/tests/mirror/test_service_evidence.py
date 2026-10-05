@@ -13,7 +13,7 @@ def test_rebuild_preserves_all_courses_until_delayed_files_arrive(
         tmp_path, monkeypatch, evidence_factory):
     from api import runtime_paths
     from api.mirror import store as mirror_store
-    from api.tests.mirror.test_evidence_publish import SyntheticVault
+    from api.tests.mirror.acquisition_samples import SyntheticVault
 
     source = evidence_factory["source"]
     root = tmp_path / "workspace"

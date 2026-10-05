@@ -322,7 +322,7 @@ def test_captured_attachment_republishes_digest_without_filename(tmp_path):
     )
     from api.mirror.evidence_jobs import enqueue_from_receipt
     from api.mirror.evidence_publish import EvidencePublisher
-    from api.tests.mirror.test_evidence_publish import SyntheticVault
+    from api.tests.mirror.acquisition_samples import SyntheticVault
 
     publisher = EvidencePublisher(workspace_root=tmp_path, source_key=SOURCE,
                                   course_id="1", vault=SyntheticVault())
@@ -386,7 +386,7 @@ def test_original_sink_archives_associates_and_publishes(tmp_path):
     from api.mirror.evidence_jobs import enqueue_from_receipt, make_original_sink
     from api.mirror.evidence_publish import EvidencePublisher
     from api.mirror.original_archive import recover_original
-    from api.tests.mirror.test_evidence_publish import SyntheticVault
+    from api.tests.mirror.acquisition_samples import SyntheticVault
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -426,7 +426,7 @@ def test_missing_private_original_does_not_erase_published_safe_text(tmp_path):
         CourseAcquisitionReceipt, ScopeReceipt, publish_course_receipt,
     )
     from api.mirror.evidence_publish import EvidencePublisher
-    from api.tests.mirror.test_evidence_publish import SyntheticVault
+    from api.tests.mirror.acquisition_samples import SyntheticVault
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()

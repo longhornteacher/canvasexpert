@@ -20,6 +20,66 @@ INCARNATION_A = "3" * 32
 INCARNATION_B = "4" * 32
 
 
+class SyntheticVault:
+    """Synthetic identities supporting the real roster registration surface."""
+
+    def __init__(self):
+        self.people = {
+            "991001": ("Pikachu", "Avery Sample"),
+            "991002": ("Eevee", "Morgan Sample"),
+        }
+        self.sis_ids = {}
+        self.nicknames = {}
+
+    def entries(self):
+        return [{"canvas_id": raw, "real_name": name, "pseudonym": pseudo,
+                 "sis_id": self.sis_ids.get(raw, ""),
+                 "nicknames": list(self.nicknames.get(raw, []))}
+                for raw, (pseudo, name) in self.people.items()]
+
+    def all_real_identifiers(self):
+        names = {name for _, name in self.people.values()}
+        names.update(n for values in self.nicknames.values() for n in values)
+        return names, set(self.people) | set(self.sis_ids.values())
+
+    def get_or_assign(self, raw, real_name="", sis_id=""):
+        raw = str(raw)
+        if raw not in self.people:
+            pseudo = {"synthetic-user-01": "Pikachu", "synthetic-user-02": "Eevee"}.get(raw)
+            if pseudo is None:
+                raise ValueError("unresolved")
+            self.people[raw] = (pseudo, real_name)
+        self.remember_identity(raw, real_name, sis_id)
+        return self.people[raw][0]
+
+    def remember_identity(self, raw, name, sis_id):
+        raw = str(raw)
+        if raw in self.people and name:
+            self.people[raw] = (self.people[raw][0], name)
+        if sis_id:
+            self.sis_ids[raw] = str(sis_id)
+
+    def add_nicknames(self, raw, names):
+        self.nicknames.setdefault(str(raw), []).extend(names)
+
+    def require_stable(self, raw):
+        if str(raw) not in self.people:
+            raise ValueError("unresolved")
+
+    def save(self):
+        pass
+
+
+def synthetic_documents():
+    from io import BytesIO
+    from docx import Document
+    document = Document()
+    document.add_paragraph("Synthetic thesis sentence.")
+    stream = BytesIO()
+    document.save(stream)
+    return {"9001": stream.getvalue(), "9002": b"%PDF-1.4 not a real pdf"}
+
+
 def _presence(writer: str, incarnation: str, claim: str, *, lineage=(),
               counter=1, released=False, refs=()):
     return {
@@ -125,7 +185,29 @@ def course_receipt_sample(variant: str = "full") -> CourseAcquisitionReceipt:
                        "student_ids": ["synthetic-user-01"],
                        "due_at": "2026-01-05T12:00:00Z"},), True),
     ]
-    if variant == "full":
+    if variant == "read_path":
+        scopes.append(ScopeReceipt("course.sections", course_id,
+                                   ({"id": 500, "name": "Synthetic section"},), True))
+        submissions[0]["attachments"] = [
+            {"id": "9001", "filename": "essay.docx", "size": 100,
+             "url": "https://canvas.example.test/files/9001"},
+            {"id": "9002", "filename": "broken.pdf", "size": 100,
+             "url": "https://canvas.example.test/files/9002"},
+        ]
+    elif variant == "second_course":
+        course_id = "2"
+        scopes = [
+            ScopeReceipt("course.context", course_id,
+                         ({"id": 2, "name": "Synthetic second course"},), True),
+            ScopeReceipt("course.assignments", course_id,
+                         ({"id": 20, "name": "Synthetic second writing"},), True),
+            ScopeReceipt("course.roster", course_id,
+                         ({"id": "synthetic-user-02", "name": "Synthetic Learner Two"},), True),
+            ScopeReceipt("assignment.submissions", "20",
+                         (_submission("synthetic-user-02", "20", 1,
+                                      "Synthetic second course response.", finish),), True),
+        ]
+    elif variant == "full":
         pass
     elif variant == "partial_submissions":
         scopes[3] = ScopeReceipt("assignment.submissions", "10", submissions[:1], False,

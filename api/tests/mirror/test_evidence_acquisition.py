@@ -5,7 +5,7 @@ from api.mirror.evidence_acquisition import (
     CourseAcquisitionReceipt, ScopeReceipt, publish_course_receipt,
 )
 from api.mirror.evidence_publish import EvidencePublisher, PublicationRefused
-from api.tests.mirror.test_evidence_publish import SyntheticVault
+from api.tests.mirror.acquisition_samples import SyntheticVault
 
 
 def publish(tmp_path, scopes, *, run="run-a", publisher=None):

@@ -15,7 +15,7 @@ from api.mirror.evidence_jobs import AttachmentJobStore
 from api.mirror.evidence_paths import source_key_for_origin
 from api.mirror.evidence_publish import EvidencePublisher
 from api.tests.mirror.extraction import document_samples
-from api.tests.mirror.test_evidence_publish import SyntheticVault
+from api.tests.mirror.acquisition_samples import SyntheticVault
 
 ORIGIN = "https://canvas.example.edu"
 SOURCE = source_key_for_origin(ORIGIN)

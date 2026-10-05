@@ -8,7 +8,7 @@ from api.mirror.evidence_notes import (
     publish_note,
 )
 from api.mirror.evidence_publish import EvidencePublisher
-from api.tests.mirror.test_evidence_publish import SyntheticVault
+from api.tests.mirror.acquisition_samples import SyntheticVault
 
 SOURCE = "a" * 64
 
