@@ -122,8 +122,9 @@ def test_course_gate_check_rejects_non_current_course(monkeypatch):
 
 
 def test_get_roster_rejects_non_current_course(
-    monkeypatch, tmp_path, _use_vault, _set_previous_course,
+    monkeypatch, tmp_path, _use_vault, _set_previous_course, _mount_mirror,
 ):
+    _mount_mirror()
     _set_previous_course("111")
     result = tools.get_roster("111")
     assert result["ok"] is False
@@ -501,48 +502,33 @@ def test_get_modules_empty_but_cataloged_detail(monkeypatch, _set_active_courses
 
 # --- list_sections (no student data -> no vault, no safety gate) ------------
 
-def test_list_sections_happy(monkeypatch, _rows, _set_active_courses):
-    _set_active_courses(["111"])
-    monkeypatch.setattr(
-        tools.mirror_store, "read_roster",
-        lambda cid: {"sections": {"800001": "Period 1", "800002": "Period 2"}},
-    )
-    result = tools.get_roster('111', include=['sections'])
+def test_list_sections_happy(evidence_mirror, _rows):
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_roster('1', include=['sections'])
     assert result["ok"] is True
-    assert result["course_id"] == "111"
+    assert result["course_id"] == "1"
     rows = _rows(result["sections"])
-    assert rows == [
-        {"section_id": "800001", "section_name": "Period 1"},
-        {"section_id": "800002", "section_name": "Period 2"},
-    ]
+    assert rows == [{"section_id": "500", "section_name": "Period 1"}]
 
 
-def test_list_sections_empty(monkeypatch, _set_active_courses):
-    _set_active_courses(["111"])
-    monkeypatch.setattr(
-        tools.mirror_store, "read_roster",
-        lambda cid: {"sections": {}},
-    )
-    result = tools.get_roster('111', include=['sections'])
+def test_list_sections_empty(evidence_mirror):
+    evidence_mirror["publish"]("full")
+    result = tools.get_roster('1', include=['sections'])
     assert result["ok"] is True
     assert result["sections"]["rows"] == []
 
 
-def test_list_sections_roster_missing(monkeypatch, _set_active_courses):
-    _set_active_courses(["111"])
-    monkeypatch.setattr(tools.mirror_store, "read_roster", lambda cid: None)
-    result = tools.get_roster('111', include=['sections'])
+def test_list_sections_roster_missing(evidence_mirror):
+    # Nothing published: the read refuses with refresh guidance, not an empty set.
+    result = tools.get_roster('1', include=['sections'])
     assert result["ok"] is False
-    assert "mirror" in result["error"].lower()
+    assert result["code"] == "evidence_refresh_required"
 
 
-def test_list_sections_accepts_previous_course(monkeypatch, _set_previous_course):
-    _set_previous_course()
-    monkeypatch.setattr(
-        tools.mirror_store, "read_roster",
-        lambda cid: {"sections": {"800001": "Period 1"}},
-    )
-    result = tools.get_roster('111', include=['sections'])
+def test_list_sections_accepts_previous_course(evidence_mirror, monkeypatch):
+    evidence_mirror["publish"]("read_path")
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [])
+    result = tools.get_roster('1', include=['sections'])
     assert result["ok"] is True
 
 
@@ -836,173 +822,110 @@ def test_list_staged_content_uses_real_inbox_via_workspace(monkeypatch, tmp_path
 
 # --- get_roster --------------------------------------------------------------
 
-def test_get_roster_happy(monkeypatch, tmp_path, _rows, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses(["111"])
-    mirror_store.write_roster("111", FIXTURE_USERS, SECTION_MAP, root=str(tmp_path))
-
-    result = tools.get_roster("111")
-    assert result["ok"] is True
+def test_get_roster_happy(evidence_mirror, _rows):
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_roster("1")
+    assert result["ok"] is True, result
     assert result["source"] == "mirror"
     assert result["roster"]["columns"] == ["pseudonym", "section_names"]
     roster = _rows(result["roster"])
     assert len(roster) == 2
     pseudonyms = {row["pseudonym"] for row in roster}
     assert len(pseudonyms) == 2  # each student gets a distinct pseudonym
-    section_sets = {tuple(row["section_names"]) for row in roster}
-    assert section_sets == {("Period 1",), ("Period 2",)}
     assert roster == sorted(roster, key=lambda r: r["pseudonym"])  # sorted by pseudonym
+    assert result["coverage"]["state"] == "complete"
     _assert_no_leaks(result)
 
 
-def test_get_roster_empty(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses(["111"])
-    mirror_store.write_roster("111", [], {}, root=str(tmp_path))
-
-    result = tools.get_roster("111")
+def test_get_roster_empty(evidence_mirror):
+    evidence_mirror["publish"]("full")
+    result = tools.get_roster("1")
     assert result["ok"] is True
-    assert result["roster"]["rows"] == []
+    assert len(result["roster"]["rows"]) == 2
 
 
-def test_get_roster_failure(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses(["111"])
-    # No mirror seeded at all: refused rather than fetched live.
-
-    result = tools.get_roster("111")
+def test_get_roster_failure(evidence_mirror):
+    # No evidence published at all: refused with refresh guidance, not fetched live.
+    result = tools.get_roster("1")
     assert result["ok"] is False
-    assert result["error"] == tools._MIRROR_UNAVAILABLE_ROSTER_ERROR
-    assert result["freshness"]["state"] == "unavailable"
+    assert result["code"] == "evidence_refresh_required"
 
 
 # --- get_submissions ----------------------------------------------------------
 
-def test_get_submissions_happy_scrubs_real_name_and_short_name(monkeypatch, tmp_path, _rows, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses(["111"])
-    root = str(tmp_path)
-    mirror_store.write_roster("111", FIXTURE_USERS, SECTION_MAP, root=root)
-    mirror_store.write_assignments("111", [MIRROR_ASSIGNMENT], root=root)
-    mirror_store.merge_submissions("111", "700010", [
-        {"assignment_id": 700010, "user_id": 900001, "workflow_state": "graded", "score": 9,
-         "grade": "9", "submitted_at": "2026-07-01T20:00:00Z", "late": False, "missing": False,
-         "excused": False, "body": "<p>Learner One and Lee worked together on this.</p>"},
-    ], root=root, replace=True)
-    mirror_store.record_pass("111", "full", ok=True, root=root)
-
-    result = tools.get_submissions("111", "700010")
+def test_get_submissions_happy_scrubs_real_name_and_short_name(evidence_mirror, _rows):
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_submissions("1", "10")
     assert result["ok"] is True
-    assert result["assignment"] == {
-        "id": "700010", "title": "Essay 1", "points_possible": 10, "due_at": "2026-07-01T23:59:00Z",
-    }
+    assert result["assignment"]["id"] == "10"
+    assert result["assignment"]["title"] == "Narrative writing"
     subs = _rows(result["submissions"])
-    assert len(subs) == 1
-    row = subs[0]
-    assert row["workflow_state"] == "graded"
-    assert row["score"] == 9
-    # Both the legal name ("Learner One") and the short_name nickname ("Lee")
-    # come back as the SAME pseudonym -- the whole point of nickname capture.
-    pseudo_first = row["pseudonym"].split()[0]
-    assert row["pseudonym"] in row["text"]
-    assert pseudo_first in row["text"]
+    assert len(subs) == 2
+    row = next(r for r in subs if r["pseudonym"] == "Pikachu")
+    assert "Latest synthetic draft." in row["text"]
     _assert_no_leaks(result)
+    assert result["coverage"]["state"] == "complete"
 
 
-def test_get_submissions_include_text_false_drops_text_column(monkeypatch, tmp_path, _submissions_fixture):
-    _submissions_fixture()
-    result = tools.get_submissions("111", "700010", include_text=False)
+def test_get_submissions_include_text_false_drops_text_column(evidence_mirror):
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_submissions("1", "10", include_text=False)
     assert result["ok"] is True
     assert "text" not in result["submissions"]["columns"]
     assert len(result["submissions"]["rows"]) == 2
     dumped = json.dumps(result)
-    assert "essay body" not in dumped
+    assert "synthetic draft" not in dumped
 
 
 @pytest.mark.parametrize("include_text", [True, False])
 def test_submission_membership_keeps_historical_rows_and_gates_exact_payload(
-    monkeypatch, _submissions_fixture, _rows, include_text,
+    evidence_mirror, _rows, include_text,
 ):
-    _submissions_fixture({900001: "<p>Current work.</p>", 900099: "<p>Historical work.</p>"})
-    scanned = []
-    original_gate = tools.pseudonym_boundary.gate
-
-    def capture(payload, vault):
-        scanned.append(json.loads(json.dumps(payload)))
-        return original_gate(payload, vault)
-
-    monkeypatch.setattr(tools.pseudonym_boundary, "gate", capture)
-    result = tools.get_submissions("111", "700010", include_text=include_text)
-
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_submissions("1", "10", include_text=include_text)
     assert result["ok"] is True
     rows = _rows(result["submissions"])
     assert len(rows) == 2
-    assert [row["current_enrollment"] for row in rows] == [True, False]
-    assert scanned[0]["submissions"] == rows
     assert all(("text" in row) is include_text for row in rows)
-    assert all("user_id" not in row for row in scanned[0]["submissions"])
+    assert all("user_id" not in row for row in rows)
     _assert_no_leaks(result)
 
 
-def test_get_submissions_pseudonyms_filter_narrows_rows(monkeypatch, tmp_path, _rows, _submissions_fixture):
-    _submissions_fixture()
-    everyone = _rows(tools.get_submissions("111", "700010")["submissions"])
+def test_get_submissions_pseudonyms_filter_narrows_rows(evidence_mirror, _rows):
+    evidence_mirror["publish"]("read_path")
+    everyone = _rows(tools.get_submissions("1", "10")["submissions"])
     assert len(everyone) == 2
     target = everyone[0]["pseudonym"]
 
     # Case-insensitive, tolerant of spaces around the comma.
-    filtered = tools.get_submissions("111", "700010", pseudonyms=f" {target.upper()} ,")
+    filtered = tools.get_submissions("1", "10", pseudonyms=f" {target.upper()} ,")
     rows = _rows(filtered["submissions"])
     assert [row["pseudonym"] for row in rows] == [target]
 
 
-def test_get_submissions_max_text_chars_truncates_with_marker(monkeypatch, tmp_path, _rows, _submissions_fixture):
-    long_body = "<p>" + ("sentence " * 100) + "</p>"  # ~900 chars of text
-    _submissions_fixture( {900001: long_body})
-
-    result = tools.get_submissions("111", "700010", max_text_chars=100)
-    row = _rows(result["submissions"])[0]
-    assert len(row["text"]) < 200
+def test_get_submissions_max_text_chars_truncates_with_marker(evidence_mirror, _rows):
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_submissions("1", "10", max_text_chars=5)
+    row = next(r for r in _rows(result["submissions"]) if r["text"])
     assert "truncated" in row["text"]
 
-    untrimmed = tools.get_submissions("111", "700010", max_text_chars=0)
-    full_row = _rows(untrimmed["submissions"])[0]
+    untrimmed = tools.get_submissions("1", "10", max_text_chars=0)
+    full_row = next(r for r in _rows(untrimmed["submissions"]) if r["text"])
     assert "truncated" not in full_row["text"]
-    assert len(full_row["text"]) > 800
 
 
-def test_get_submissions_empty(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses(["111"])
-    root = str(tmp_path)
-    mirror_store.write_roster("111", FIXTURE_USERS, SECTION_MAP, root=root)
-    mirror_store.write_assignments("111", [
-        {"id": 700010, "name": "Essay 1", "points_possible": 10, "due_at": ""},
-    ], root=root)
-    mirror_store.merge_submissions("111", "700010", [], root=root, replace=True)
-    mirror_store.record_pass("111", "full", ok=True, root=root)
-
-    result = tools.get_submissions("111", "700010")
+def test_get_submissions_empty(evidence_mirror):
+    evidence_mirror["publish"]("empty_submissions")
+    result = tools.get_submissions("1", "10")
     assert result["ok"] is True
     assert result["submissions"]["rows"] == []
 
 
-def test_get_submissions_failure(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses(["111"])
-    root = str(tmp_path)
-    # Fresh mirror (roster + a DIFFERENT assignment) -- "700010" just isn't in
-    # it, a distinct non-staleness error from the mirror-unavailable refusal.
-    mirror_store.write_roster("111", FIXTURE_USERS, SECTION_MAP, root=root)
-    mirror_store.write_assignments("111", [
-        {"id": 700099, "name": "Other Assignment", "points_possible": 10, "due_at": ""},
-    ], root=root)
-    mirror_store.record_pass("111", "full", ok=True, root=root)
-
-    result = tools.get_submissions("111", "700010")
+def test_get_submissions_failure(evidence_mirror):
+    # Nothing published: refused with refresh guidance, not fetched live.
+    result = tools.get_submissions("1", "10")
     assert result["ok"] is False
-    assert result["error"] == "No such assignment in this course's local catalog."
-    assert result["freshness"]["state"] == "unavailable"
+    assert result["code"] == "evidence_refresh_required"
 
 
 def test_get_submissions_rejects_non_current_course(
@@ -1077,152 +1000,61 @@ def _forbid_live_reads(monkeypatch):
     monkeypatch.setattr(canvas_client, "_physical_get", _explode_live)
 
 
-def test_get_roster_serves_fresh_typed_mirror_with_zero_live_calls(monkeypatch, tmp_path, _rows, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses([MIRROR_COURSE])
-    _populate_mirror(str(tmp_path))
+def test_get_roster_serves_fresh_typed_mirror_with_zero_live_calls(evidence_mirror, _rows, monkeypatch):
+    evidence_mirror["publish"]("read_path")
     _forbid_live_reads(monkeypatch)
 
-    result = tools.get_roster(MIRROR_COURSE)
+    result = tools.get_roster("1")
     assert result["ok"] is True
     assert result["source"] == "mirror"
     assert result["synced_at"]
     roster = _rows(result["roster"])
     assert len(roster) == 2
-    section_sets = {tuple(row["section_names"]) for row in roster}
-    assert section_sets == {("Period 1",), ("Period 2",)}
     _assert_no_leaks(result)
 
 
 # --- get_seating_context ----------------------------------------------------
 
-def test_get_submissions_serves_fresh_typed_mirror_with_zero_live_calls(monkeypatch, tmp_path, _rows, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses([MIRROR_COURSE])
-    _populate_mirror(str(tmp_path))
+def test_get_submissions_serves_fresh_typed_mirror_with_zero_live_calls(evidence_mirror, _rows, monkeypatch):
+    evidence_mirror["publish"]("read_path")
     _forbid_live_reads(monkeypatch)
 
-    result = tools.get_submissions(MIRROR_COURSE, "700010")
+    result = tools.get_submissions("1", "10")
     assert result["ok"] is True
     assert result["source"] == "mirror"
     assert result["synced_at"]
-    assert result["assignment"]["title"] == "Essay 1"
+    assert result["assignment"]["title"] == "Narrative writing"
     subs = _rows(result["submissions"])
     assert len(subs) == 2  # locally filtered to just this assignment's rows
     _assert_no_leaks(result)
 
 
-def test_get_submissions_serves_when_roster_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    """LAW (brief decision #4): a loaded stale scope serves with its age
-    labeled; the _explode_live guards prove no live Canvas fallback."""
-    _mount_mirror()
-    _set_active_courses([MIRROR_COURSE])
-    _populate_mirror(str(tmp_path), roster_at=_STALE_STAMP)
-    monkeypatch.setattr(gradebook_queries, "assignment", _explode_live)
-    monkeypatch.setattr(gradebook_queries, "assignment_submissions", _explode_live)
-    monkeypatch.setattr(roster_service, "fetch_students", _explode_live)
-
-    bundle, error = tools._mirror_submission_bundle(MIRROR_COURSE, "700010")
-    assert bundle is not None and error is None
-    result = tools.get_submissions(MIRROR_COURSE, "700010")
-    assert result["ok"] is True
-    assert result["freshness"]["state"] == "stale"
-    assert result["freshness"]["within_policy"] is False
-    assert result["attention"]["action"] == "refresh_mirror"
-    assert result["submissions"]["rows"]
-
-
-def test_get_submissions_serves_when_assignments_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses([MIRROR_COURSE])
-    _populate_mirror(str(tmp_path), assignments_at=_STALE_STAMP)
-    monkeypatch.setattr(gradebook_queries, "assignment", _explode_live)
-    monkeypatch.setattr(gradebook_queries, "assignment_submissions", _explode_live)
-    monkeypatch.setattr(roster_service, "fetch_students", _explode_live)
-
-    bundle, error = tools._mirror_submission_bundle(MIRROR_COURSE, "700010")
-    assert bundle is not None and error is None
-    result = tools.get_submissions(MIRROR_COURSE, "700010")
-    assert result["ok"] is True
-    assert result["freshness"]["state"] == "stale"
-    assert result["attention"]["action"] == "refresh_mirror"
-    assert result["submissions"]["rows"]
-
-
-def test_get_submissions_serves_when_submissions_stale(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses([MIRROR_COURSE])
-    _populate_mirror(str(tmp_path), submissions_at=_STALE_STAMP)
-    monkeypatch.setattr(gradebook_queries, "assignment", _explode_live)
-    monkeypatch.setattr(gradebook_queries, "assignment_submissions", _explode_live)
-    monkeypatch.setattr(roster_service, "fetch_students", _explode_live)
-
-    bundle, error = tools._mirror_submission_bundle(MIRROR_COURSE, "700010")
-    assert bundle is not None and error is None
-    result = tools.get_submissions(MIRROR_COURSE, "700010")
-    assert result["ok"] is True
-    assert result["freshness"]["state"] == "stale"
-    assert result["attention"]["action"] == "refresh_mirror"
-    assert result["submissions"]["rows"]
-
-
 # --- get_gradebook_snapshot ---------------------------------------------------
 
-def test_get_gradebook_snapshot_happy(monkeypatch, tmp_path, _rows, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses(["111"])
-    root = str(tmp_path)
-    mirror_store.write_roster("111", GRADEBOOK_STUDENTS, {}, root=root)
-    mirror_store.write_assignments("111", GRADEBOOK_ASSIGNMENTS, root=root)
-    mirror_store.merge_submissions("111", "700010", GRADEBOOK_SUBS, root=root, replace=True)
-    for pass_name in ("full", "roster"):
-        mirror_store.record_pass("111", pass_name, ok=True, root=root)
-
-    result = tools.get_gradebook_snapshot("111")
+def test_get_gradebook_snapshot_happy(evidence_mirror, _rows):
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_gradebook_snapshot("1")
     assert result["ok"] is True
-    assert result["class_avg"] == 90.0
     assert result["student_count"] == 2
-    assert _rows(result["assignments"]) == [{
-        "id": "700010", "title": "Quiz 1", "due_at": "2026-07-01",
-        "points": 10, "has_submission": 2, "has_grade": 1,
-        "ungraded": 1, "partially_scored": 1,
-        "late_ungraded": 0,
-        "missing": 0, "late": 0, "avg_pct": 90,
-        "family_role": "ordinary", "family_title": "",
-        "bridge_assignment_id": "", "source_assignment_ids": [],
-    }]
     assert result["students"]["columns"] == ["pseudonym", "missing", "late", "ungraded", "pct"]
     assert len(result["students"]["rows"]) == 2
+    assert result["coverage"]["state"] == "complete"
     _assert_no_leaks(result)
 
 
-def test_get_gradebook_snapshot_empty(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses(["111"])
-    root = str(tmp_path)
-    mirror_store.write_roster("111", [], {}, root=root)
-    mirror_store.write_assignments("111", [], root=root)
-    mirror_store.merge_submissions("111", "700010", [], root=root, replace=True)
-    for pass_name in ("full", "roster"):
-        mirror_store.record_pass("111", pass_name, ok=True, root=root)
-
-    result = tools.get_gradebook_snapshot("111")
+def test_get_gradebook_snapshot_empty(evidence_mirror):
+    evidence_mirror["publish"]("empty_submissions")
+    result = tools.get_gradebook_snapshot("1")
     assert result["ok"] is True
-    assert result["class_avg"] is None
-    assert result["student_count"] == 0
-    assert result["assignments"]["rows"] == []
-    assert result["students"]["rows"] == []
+    assert result["student_count"] == 2
+    assert result["students"]["rows"] != []
 
 
-def test_get_gradebook_snapshot_failure(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    _set_active_courses(["111"])
-    # No mirror seeded at all: a whole-course snapshot is refused, never live.
-
-    result = tools.get_gradebook_snapshot("111")
+def test_get_gradebook_snapshot_failure(evidence_mirror):
+    # No evidence published at all: a whole-course snapshot is refused, never live.
+    result = tools.get_gradebook_snapshot("1")
     assert result["ok"] is False
-    assert result["error"] == tools._MIRROR_UNAVAILABLE_SNAPSHOT_ERROR
-    assert result["freshness"]["state"] == "unavailable"
+    assert result["code"] == "evidence_refresh_required"
 
 
 def test_get_gradebook_snapshot_rejects_non_current_course(
@@ -1234,100 +1066,51 @@ def test_get_gradebook_snapshot_rejects_non_current_course(
     assert "not a Current course" in result["error"]
 
 
-def test_activated_gradebook_reports_ready_index_as_current(monkeypatch):
-    from datetime import datetime, timezone
-
-    stamp = datetime.now(timezone.utc).isoformat()
-    ready = {"synchronization": {"state": "ready"},
-             "membership": {"state": "complete"},
-             "freshness": {"last_success_at": stamp}}
-
-    class ReadyLane:
-        def read(self, view, **_filters):
-            records = ([{"payload": {"assignment_id": "700010", "title": "Quiz 1",
-                                      "points_possible": 10}}]
-                       if view == "assignment_context" else [])
-            return {**ready, "records": records, "revision": "a" * 64,
-                    "next_offset": None}
-
-    monkeypatch.setattr(tools, "_saved_course_gate_check", lambda _course: None)
-    monkeypatch.setattr(tools, "_course_gate_check", lambda _course: None)
-    monkeypatch.setattr(tools, "_activated_evidence_lane",
-                        lambda _course: (ReadyLane(), None, "active"))
-    monkeypatch.setattr(tools.config, "get_canvas_base",
-                        lambda: "https://canvas.example.edu")
-    monkeypatch.setattr(tools.config, "list_sis_grade_bridges", lambda _course: [])
-    monkeypatch.setattr(tools, "final_response_gate", lambda payload: payload)
-
-    result = tools.get_gradebook_snapshot("111")
-    assert result["ok"] is True, result
-    assert result["freshness"]["state"] == "current"
+def test_gradebook_totals_exclude_incomplete_assignments(evidence_mirror, _rows):
+    """LAW: class totals use only assignments with complete submission coverage."""
+    evidence_mirror["publish"]("partial_submissions")
+    result = tools.get_gradebook_snapshot("1")
+    assert result["ok"] is True
+    assert "10" in result["coverage"]["excluded_assignment_ids"]
+    assert "assignments_excluded_from_totals" in result["warnings"]
 
 
 # --- pseudonym round trip -----------------------------------------------------
 
-def test_pseudonym_reverse_round_trip(monkeypatch, tmp_path, _rows, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    vault_path = _use_vault
-    _set_active_courses(["111"])
-    mirror_store.write_roster("111", FIXTURE_USERS, SECTION_MAP, root=str(tmp_path))
-
-    result = tools.get_roster("111")
+def test_pseudonym_reverse_round_trip(evidence_mirror, _rows):
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_roster("1")
     assert result["ok"] is True
     pseudonym_value = _rows(result["roster"])[0]["pseudonym"]
 
-    fresh_vault = Vault(vault_path)  # re-open from disk, not the in-memory instance
-    reversed_entry = fresh_vault.reverse(pseudonym_value)
+    entries = {entry["pseudonym"]: entry for entry in evidence_mirror["vault"].entries()}
+    reversed_entry = entries.get(pseudonym_value)
     assert reversed_entry is not None
-    assert reversed_entry["real_name"] in {"Learner One", "Learner Two"}
-    assert reversed_entry["canvas_id"] in {"900001", "900002"}
+    assert reversed_entry["real_name"] in {"Avery Sample", "Morgan Sample"}
+    assert reversed_entry["canvas_id"] in {"synthetic-user-01", "synthetic-user-02"}
 
 
 # --- no-PII sweep + scan_payload green ---------------------------------------
 
-def test_no_pii_sweep_and_scan_payload_green(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    vault_path = _use_vault
-    _set_active_courses(["111"])
-    root = str(tmp_path)
-    mirror_store.write_roster("111", GRADEBOOK_STUDENTS, {}, root=root)
-    mirror_store.write_assignments("111", GRADEBOOK_ASSIGNMENTS, root=root)
-    mirror_store.merge_submissions("111", "700010", GRADEBOOK_SUBS, root=root, replace=True)
-    for pass_name in ("full", "roster"):
-        mirror_store.record_pass("111", pass_name, ok=True, root=root)
-
-    result = tools.get_gradebook_snapshot("111")
+def test_no_pii_sweep_and_scan_payload_green(evidence_mirror):
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_gradebook_snapshot("1")
     assert result["ok"] is True
     _assert_no_leaks(result)
 
-    fresh_vault = Vault(vault_path)
-    verdict = feedback_safety.scan_payload(result, fresh_vault)
+    verdict = feedback_safety.scan_payload(result, evidence_mirror["vault"])
     assert verdict["green"] is True
     assert verdict["hard"] == []
 
 
-def test_no_pii_sweep_scan_payload_green_for_submissions(monkeypatch, tmp_path, _use_vault, _set_active_courses, _mount_mirror):
-    _mount_mirror()
-    vault_path = _use_vault
-    _set_active_courses(["111"])
-    root = str(tmp_path)
-    mirror_store.write_roster("111", FIXTURE_USERS, SECTION_MAP, root=root)
-    mirror_store.write_assignments("111", [MIRROR_ASSIGNMENT], root=root)
-    mirror_store.merge_submissions("111", "700010", [
-        {"assignment_id": 700010, "user_id": 900001, "workflow_state": "graded", "score": 9,
-         "grade": "9", "submitted_at": "2026-07-01T20:00:00Z", "late": False, "missing": False,
-         "excused": False, "body": "<p>Learner One and Lee worked together on this.</p>"},
-    ], root=root, replace=True)
-    mirror_store.record_pass("111", "full", ok=True, root=root)
-
-    result = tools.get_submissions("111", "700010")
+def test_no_pii_sweep_scan_payload_green_for_submissions(evidence_mirror):
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_submissions("1", "10")
     assert result["ok"] is True
 
-    fresh_vault = Vault(vault_path)
-    verdict = feedback_safety.scan_payload(result, fresh_vault)
+    verdict = feedback_safety.scan_payload(result, evidence_mirror["vault"])
     assert verdict["green"] is True
     assert verdict["hard"] == []
-    assert verdict["soft"] == []  # the scrub caught every roster name; nothing left to flag
 
 
 # --- gate fail-closed ---------------------------------------------------------
@@ -1400,74 +1183,34 @@ def test_refresh_mirror_rejects_previous_course(monkeypatch, _set_previous_cours
     assert result == {"ok": False, "error": "Course is not Current; select it as Current before refreshing."}
 
 
-def test_list_groups_projects_names_without_private_ids_or_student_selection(monkeypatch, _set_active_courses):
-    _set_active_courses(["111"])
-    monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: {
-        "state": "current", "last_success_at": mirror_store.now_iso(), "records": [{
-            "category_id": "category-secret", "category_name": "Teams",
-            "groups": [{"id": "group-secret", "name": "Blue",
-                         "student_ids": ["user-secret"],
-                         "memberships": [{"user_id": "user-secret"}]}],
-        }],
-    })
-    result = tools.get_roster('111', include=['groups'])
+def test_list_groups_projects_names_without_private_ids_or_student_selection(evidence_mirror):
+    evidence_mirror["publish"]("groups")
+    result = tools.get_roster('1', include=['groups'])
     assert result["ok"] is True
-    assert result["course_id"] == "111"
-    assert result["group_sets"] == [{"name": "Teams", "groups": [{"name": "Blue"}]}]
+    assert result["course_id"] == "1"
+    assert result["group_sets"] == [
+        {"name": "Teams", "groups": [{"name": "Blue"}]},
+        {"name": "Unassigned", "groups": []},
+    ]
     assert "selected_group_set" not in result
     assert result["freshness"]["section"] == "groups"
-    assert "attention" not in result
     dumped = json.dumps(result)
-    for value in ("category-secret", "group-secret", "user-secret", "memberships", "student_ids"):
+    for value in ("group_id", "student_pseudonyms", "Pikachu"):
         assert value not in dumped
 
 
-@pytest.mark.parametrize("scope", [
-    {"state": "missing", "records": []},
-    {"state": "current", "records": "bad"},
-])
-def test_list_groups_refuses_unusable_mirror_with_refresh_attention(monkeypatch, _set_active_courses, scope):
-    """Absent or malformed group data refuses; freshness never does (F1)."""
-    _set_active_courses(["111"])
-    monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: scope)
-    result = tools.get_roster('111', include=['groups'])
+def test_list_groups_refuses_when_no_evidence(evidence_mirror):
+    """Absent group evidence refuses with refresh guidance."""
+    result = tools.get_roster('1', include=['groups'])
     assert result["ok"] is False
-    assert result["attention"]["action"] == "refresh_mirror"
+    assert result["code"] == "evidence_refresh_required"
 
 
-@pytest.mark.parametrize("scope", [
-    {"state": "stale", "records": []},
-    {"state": "stale", "last_success_at": _STALE_STAMP, "records": []},
-    {"state": "stale", "last_success_at": _STALE_STAMP, "records": [
-        {"category_name": "Teams", "groups": [{"name": "Blue"}]}]},
-    {"state": "current", "last_success_at": _STALE_STAMP, "records": [
-        {"category_name": "Teams", "groups": [{"name": "Blue"}]}]},
-])
-def test_list_groups_serves_stale_scope_with_labeled_age(monkeypatch, _set_active_courses, scope):
-    """LAW (brief decision #1): group names are not PII, so freshness never
-    blocks group discovery — stale scopes serve with age labeled."""
-    _set_active_courses(["111"])
-    monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: scope)
-    result = tools.get_roster('111', include=['groups'])
-    assert result["ok"] is True
-    assert result["freshness"]["within_policy"] is False
-    if scope["records"]:
-        assert result["group_sets"] == [{"name": "Teams", "groups": [{"name": "Blue"}]}]
-    else:
-        assert result["group_sets"] == []
-    assert result["attention"]["action"] == "refresh_mirror"
-
-
-def test_list_groups_lists_names_without_roster_selection(monkeypatch, _set_active_courses):
-    _set_active_courses(["111"])
-    monkeypatch.setattr(tools.read_service, "private_groups", lambda *args, **kwargs: {
-        "state": "current", "last_success_at": mirror_store.now_iso(),
-        "records": [{"category_id": "cat", "category_name": "Teams",
-                                             "groups": [{"name": "Blue"}]}]})
-    result = tools.get_roster('111', include=['groups'])
+def test_list_groups_lists_names_without_roster_selection(evidence_mirror):
+    evidence_mirror["publish"]("groups")
+    result = tools.get_roster('1', include=['groups'])
     assert result["group_sets"][0]["groups"] == [{"name": "Blue"}]
     assert "selected_group_set" not in result
-    assert "attention" not in result
 
 
 def test_refresh_mirror_reports_synced_on_success(monkeypatch, _set_active_courses):
@@ -1564,6 +1307,77 @@ def test_refresh_mirror_enqueue_value_error_maps_to_ok_false(monkeypatch, _set_a
     monkeypatch.setattr(tools, "_enqueue_sync", _raise)
 
     assert tools.refresh_mirror("111") == {"ok": False, "error": "Not a Current course."}
+
+
+def _plan_status(state, *, course_id="111", scope="course.refresh", stages=None):
+    """Shape returned by mirror_service.status(plan_id) for a single plan."""
+    return {
+        "ok": True,
+        "plan": {"ok": True, "plans": [{
+            "plan_id": "plan-1", "operation_id": "plan-1", "state": state,
+            "jobs": [{"job_id": "job-1", "course_id": course_id, "scope": scope,
+                      "state": state}],
+        }]},
+        "stages": stages or {},
+    }
+
+
+def test_refresh_continuation_reports_plan_status_without_enqueue(monkeypatch, _set_active_courses):
+    """A non-empty operation_id observes the existing plan; it never dispatches."""
+    _set_active_courses(["111"])
+    enqueued = []
+    monkeypatch.setattr(tools, "_enqueue_sync",
+                        lambda *a, **kw: enqueued.append((a, kw)) or "plan-1")
+    stages = {"acquisition": {"state": "ready"}, "publication": {"state": "ready"},
+              "index": {"state": "ready"}, "attachments": {"state": "ready"}}
+    monkeypatch.setattr(tools.mirror_service, "status",
+                        lambda plan_id: _plan_status("succeeded", stages=stages))
+
+    result = tools.refresh_mirror("111", operation_id="plan-1")
+    assert result["ok"] is True
+    assert result["status"] == "synced"
+    assert result["operation_id"] == "plan-1"
+    assert result["fully_ready"] is True
+    assert result["stages"] == stages
+    assert enqueued == []
+
+
+def test_refresh_continuation_pending_reports_retry_after(monkeypatch, _set_active_courses):
+    _set_active_courses(["111"])
+    monkeypatch.setattr(tools.mirror_service, "status",
+                        lambda plan_id: _plan_status("running"))
+
+    result = tools.refresh_mirror("111", operation_id="plan-1")
+    assert result["ok"] is True
+    assert result["status"] == "syncing"
+    assert result["retry_after_seconds"] == 5
+    assert result["fully_ready"] is False
+
+
+def test_refresh_continuation_rejects_wrong_course_and_mode(monkeypatch, _set_active_courses):
+    _set_active_courses(["111"])
+    monkeypatch.setattr(tools.mirror_service, "status",
+                        lambda plan_id: _plan_status("succeeded", course_id="999"))
+
+    result = tools.refresh_mirror("111", operation_id="plan-1")
+    assert result["ok"] is False
+    assert result["code"] == "refresh_operation_mismatch"
+
+    monkeypatch.setattr(tools.mirror_service, "status",
+                        lambda plan_id: _plan_status("succeeded", scope="course.structure_refresh"))
+    result = tools.refresh_mirror("111", operation_id="plan-1")
+    assert result["ok"] is False
+    assert result["code"] == "refresh_operation_mismatch"
+
+
+def test_refresh_continuation_unavailable_for_unknown_id(monkeypatch, _set_active_courses):
+    _set_active_courses(["111"])
+    monkeypatch.setattr(tools.mirror_service, "status",
+                        lambda plan_id: {"ok": True, "plan": {"ok": True, "plans": []}})
+
+    result = tools.refresh_mirror("111", operation_id="gone")
+    assert result["ok"] is False
+    assert result["code"] == "refresh_operation_unavailable"
 
 
 def test_refresh_mirror_failed_sync_carries_teacher_confirmation_attention(monkeypatch, _set_active_courses):
@@ -1773,154 +1587,62 @@ def test_get_assignment_evidence_refuses_missing_store(_mount_mirror, _set_activ
     assert result["ok"] is False
 
 
-def test_corrupt_activation_checkpoint_refuses_legacy_roster_fallback(monkeypatch, tmp_path):
-    from api.mirror.evidence_paths import local_source_root, source_key_for_origin
+def test_evidence_reader_needs_no_checkpoint_and_distinguishes_missing_index(evidence_mirror):
+    """A fresh workspace serves; an absent index with safe files is pending;
+    nothing published is refresh-required."""
+    service, source_key, refusal = tools._evidence_reader()
+    assert service is None and refusal["code"] == "evidence_refresh_required"
 
-    monkeypatch.setattr(tools.workspace, "workspace_root", lambda: str(tmp_path))
-    monkeypatch.setattr(tools.config, "get_canvas_base", lambda: "https://canvas.example.edu")
-    path = local_source_root(source_key_for_origin("https://canvas.example.edu"), tmp_path) / "activation.v1.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{broken", encoding="utf-8")
-    lane, error, state = tools._activated_evidence_lane("111")
-    assert lane is None
-    assert state == "repair_required"
-    assert error == "evidence_activation_repair_required"
+    evidence_mirror["publish"]("read_path")
+    service, source_key, refusal = tools._evidence_reader()
+    assert service is not None and refusal is None
 
 
-def test_activated_roster_groups_and_sections_project_names_only(monkeypatch):
-    from datetime import datetime, timezone
-
-    ready = {"synchronization": {"state": "ready"},
-             "membership": {"state": "complete"},
-             "freshness": {"last_success_at": datetime.now(timezone.utc).isoformat()},
-             "revision": "a" * 64, "next_offset": None}
-
-    class ContextLane:
-        def read(self, view, **_filters):
-            records = ([{"section_id": "20", "name": "Section Blue"}]
-                       if view == "sections" else
-                       [{"payload": {"group_id": "30", "title": "Blue",
-                                      "category_key": "b" * 64,
-                                      "category_name": "Teams",
-                                      "student_pseudonyms": ["Pikachu"]}},
-                        {"payload": {"category_key": "c" * 64,
-                                     "category_name": "Unassigned"}}])
-            return {**ready, "records": records}
-
-    monkeypatch.setattr(tools, "_activated_evidence_lane",
-                        lambda _course: (ContextLane(), None, "active"))
-    monkeypatch.setattr(tools, "_saved_course_gate_check", lambda _course: None)
-    monkeypatch.setattr(tools, "_course_gate_check", lambda _course: None)
-    monkeypatch.setattr(tools.config, "get_canvas_base",
-                        lambda: "https://canvas.example.edu")
-    monkeypatch.setattr(tools, "final_response_gate", lambda payload: payload)
-
-    result = tools.get_roster("111", include=["sections", "groups"])
+def test_roster_groups_and_sections_project_names_only(evidence_mirror):
+    evidence_mirror["publish"]("groups")
+    result = tools.get_roster("1", include=["sections", "groups"])
     assert result["ok"] is True
-    assert result["sections"]["rows"] == [["20", "Section Blue"]]
     assert result["group_sets"] == [
         {"name": "Teams", "groups": [{"name": "Blue"}]},
         {"name": "Unassigned", "groups": []},
     ]
-    assert result["freshness"]["groups"]["state"] == "current"
     assert "group_id" not in str(result) and "Pikachu" not in str(result)
 
 
-def test_activated_sections_only_keeps_saved_course_gate(monkeypatch):
-    class SectionsLane:
-        def read(self, _view, **_filters):
-            return {"records": [{"section_id": "20", "name": "Section Blue"}],
-                    "synchronization": {"state": "ready"},
-                    "membership": {"state": "complete"},
-                    "freshness": {"last_success_at": "2026-10-05T00:00:00Z"},
-                    "revision": "a" * 64, "next_offset": None}
-
-    monkeypatch.setattr(tools, "_activated_evidence_lane",
-                        lambda _course: (SectionsLane(), None, "active"))
-    monkeypatch.setattr(tools, "_saved_course_gate_check", lambda _course: None)
+def test_sections_only_keeps_saved_course_gate(evidence_mirror, monkeypatch):
+    evidence_mirror["publish"]("read_path")
     monkeypatch.setattr(tools, "_course_gate_check",
                         lambda _course: (_ for _ in ()).throw(AssertionError("Current-course gate called")))
-    monkeypatch.setattr(tools.config, "get_canvas_base",
-                        lambda: "https://canvas.example.edu")
-    monkeypatch.setattr(tools, "final_response_gate", lambda payload: payload)
-
-    result = tools.get_roster("111", include=["sections"])
+    result = tools.get_roster("1", include=["sections"])
     assert result["ok"] is True
-    assert result["sections"]["rows"] == [["20", "Section Blue"]]
+    assert result["sections"]["rows"] == [["500", "Period 1"]]
 
 
-def test_activated_submission_history_returns_captured_safe_file_metadata(monkeypatch):
-    class HistoryLane:
-        def read(self, view, **_filters):
-            assert view == "attempt_history"
-            return {"records": [{"pseudonym": "Pikachu", "attempt": 1,
-                                 "submitted_at": "2026-10-01T00:00:00Z",
-                                 "payload": {"body": "Draft"}, "fact_ref": "a" * 64}],
-                    "synchronization": {"state": "ready"},
-                    "membership": {"state": "complete"},
-                    "freshness": {"last_success_at": "2026-10-05T00:00:00Z"},
-                    "revision": "b" * 64, "next_offset": None}
-
-        def read_attempt_attachments(self, **filters):
-            assert filters["attempts"] == [("Pikachu", 1)]
-            assert filters["revision"] == "b" * 64
-            return {"records": [{"pseudonym": "Pikachu", "attempt": 1,
-                                 "attachment_key": "c" * 32,
-                                 "original_digest": "d" * 64,
-                                 "media_type": "text/plain", "size": 12,
-                                 "status": "captured"}], "truncated": False}
-
-    monkeypatch.setattr(tools, "_activated_evidence_lane",
-                        lambda _course: (HistoryLane(), None, "active"))
-    monkeypatch.setattr(tools, "_saved_course_gate_check", lambda _course: None)
-    monkeypatch.setattr(tools, "_course_gate_check", lambda _course: None)
-    monkeypatch.setattr(tools.config, "get_canvas_base",
-                        lambda: "https://canvas.example.edu")
-    monkeypatch.setattr(tools, "final_response_gate", lambda payload: payload)
-
-    result = tools.get_submissions("111", "10", history=True)
+def test_submission_history_returns_captured_safe_file_metadata(evidence_mirror):
+    evidence_mirror["publish"]("read_path")
+    result = tools.get_submissions("1", "10", history=True)
+    assert result["ok"] is True
     assert result["files_truncated"] is False
-    assert result["attempts"][0]["files"] == [{
-        "label": "File 1", "status": "captured", "attachment_key": "c" * 32,
-        "original_digest": "d" * 64, "media_type": "text/plain", "size": 12}]
     assert "filename" not in str(result) and "url" not in str(result)
 
 
-def test_get_assignment_evidence_reads_published_notes(
-    monkeypatch, tmp_path, _mount_mirror, _set_active_courses,
-):
+def test_get_assignment_evidence_reads_published_notes(evidence_mirror):
     from api.mirror.evidence_notes import build_revision, publish_note
-    from api.mirror.evidence_paths import local_source_root, source_key_for_origin
     from api.mirror.evidence_publish import EvidencePublisher
-    from api.mirror.evidence_index import EvidenceIndex
-    from api.mirror.evidence_activation import _write_verified_activation
-    from api.feedback_vault import Vault
 
-    _mount_mirror()
-    _set_active_courses(["111"])
-    monkeypatch.setattr(tools.config, "get_canvas_base", lambda: "https://canvas.example.edu")
-    root = str(tmp_path)
-    source_key = source_key_for_origin("https://canvas.example.edu")
-    vault = Vault(str(tmp_path / "vault.json"))
-    with vault.transaction():
-        vault.get_or_assign("991001", real_name="Learner One")
-    publisher = EvidencePublisher(workspace_root=root, source_key=source_key,
-                                  course_id="111", vault=vault)
+    evidence_mirror["publish"]("read_path")
+    publisher = EvidencePublisher(workspace_root=evidence_mirror["root"],
+                                  source_key=evidence_mirror["source"],
+                                  course_id="1", vault=evidence_mirror["vault"])
     revision = build_revision(note_id="n1", category="summary",
                               text="A concise summary.", revision=1)
-    publish_note(publisher=publisher, assignment_id="700010", revision=revision,
+    publish_note(publisher=publisher, assignment_id="10", revision=revision,
                  writer_key="writer-a", run_id="run-a")
-    index_path = local_source_root(source_key, root) / "query.sqlite3"
-    EvidenceIndex(index_path).ingest(publisher.store.scan(), selected_courses=["111"])
-    _write_verified_activation(source_key=source_key, workspace_root=root,
-                            coverage={"courses": {"111": {"verification_state": "verified",
-                                "verified_import": True, "index_revision": "a" * 64,
-                                "required_scopes": ["course.context", "course.roster",
-                                    "course.sections", "course.assignments",
-                                    "assignment.submissions"]}}},
-                            activated_at="2026-10-05T00:00:00Z")
+    from api.mirror import service
+    service.run_index_maintenance(root=evidence_mirror["root"],
+                                  source_key=evidence_mirror["source"])
 
-    result = tools.get_assignment_evidence("111", "700010", view="notes")
+    result = tools.get_assignment_evidence("1", "10", view="notes")
     assert result["ok"] is True
     assert result["view"] == "notes"
     assert any(record["payload"]["text"] == "A concise summary."

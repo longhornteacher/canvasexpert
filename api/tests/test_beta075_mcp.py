@@ -126,77 +126,72 @@ def test_mcp_mirror_gradebook_snapshot_stays_pseudonymized(tmp_path, monkeypatch
     assert "webui.routes" not in tools_source
     assert "webui.routes" not in pseudonym_source
 
-    users = [{
-        "id": "900001",
-        "name": "Learner One",
-        "sortable_name": "One, Learner",
-        "short_name": "Lee",
-        "sis_user_id": "SIS-900001",
-        "enrollments": [{"course_section_id": "800001"}],
-    }]
-    assignments = [{
-        "id": "700010", "name": "Synthetic Essay", "due_at": "2026-07-01T23:59:00Z",
-        "points_possible": 10, "html_url": "https://example.invalid/essay", "published": True,
-    }]
-    submissions = [{
-        "assignment_id": "700010", "user_id": "900001", "workflow_state": "graded",
-        "score": 9, "submitted_at": "2026-07-01T20:00:00Z",
-        "body": "Learner One wrote this.",
-        "attachments": [{"filename": "private-name.pdf"}],
-    }]
+    # Publish synthetic safe evidence and index it: the MCP reads serve from the
+    # pseudonymized evidence index, never live Canvas.
+    from api.mirror import service
+    from api.mirror.evidence_acquisition import publish_course_receipt
+    from api.mirror.evidence_paths import source_key_for_origin
+    from api.mirror.evidence_publish import EvidencePublisher
+    from api.tests.mirror.acquisition_samples import SyntheticVault, course_receipt_sample
 
-    # Seed a real machine-local cache instead of monkeypatching live Canvas
-    # reads: the MCP tools must read that projection.
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    mirror_store.write_roster("current", users, {"800001": "Period 1"})
-    mirror_store.write_assignments("current", assignments)
-    mirror_store.merge_submissions("current", "700010", submissions, replace=True)
-    mirror_store.record_pass("current", "full", ok=True)
+    from contextlib import contextmanager
+    from api.mirror import store as mirror_store_module
 
-    # Tripwires: if either path ever fell back to a live Canvas read instead
-    # of the mirror seeded above, one of these would raise. (roster_service
-    # is deliberately left unpatched here -- tools._cache_safe() treats a
-    # patched roster_service.fetch_students/fetch_sections as a test seam and
-    # refuses to serve the mirror at all, which would break the very mirror
-    # path this test is proving out.)
+    root = tmp_path / "workspace"
+    source = source_key_for_origin("https://canvas.example.test")
+    vault = SyntheticVault()
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(workspace.runtime_paths, "local_cache_dir", lambda: tmp_path / "local")
+
+    @contextmanager
+    def _transaction(_root):
+        yield vault
+
+    monkeypatch.setattr(mirror_store_module, "_vault_transaction", _transaction)
+    monkeypatch.setattr(tools.config, "get_canvas_base",
+                        lambda: "https://canvas.example.test")
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [
+        {"id": "1", "active": True}, {"id": "previous", "active": False},
+    ])
+    monkeypatch.setattr(tools.config, "saved_courses", lambda: [
+        {"id": "1", "active": True}, {"id": "previous", "active": False},
+    ])
+    monkeypatch.setattr(tools.config, "list_sis_grade_bridges", lambda _course: [])
+    monkeypatch.setattr(tools, "_open_vault", lambda: (vault, None))
+
+    # Tripwires: a live Canvas read would raise.
     monkeypatch.setattr(gradebook_queries, "course_students", _explode_live)
     monkeypatch.setattr(gradebook_queries, "course_assignments", _explode_live)
     monkeypatch.setattr(gradebook_queries, "course_submissions", _explode_live)
     monkeypatch.setattr(gradebook_queries, "assignment", _explode_live)
     monkeypatch.setattr(gradebook_queries, "assignment_submissions", _explode_live)
-    monkeypatch.setattr(tools.config, "active_courses", lambda: [
-        {"id": "current", "active": True}, {"id": "previous", "active": False},
-    ])
-    monkeypatch.setattr(tools, "_vault_factory", lambda: Vault(str(tmp_path / "vault.json")))
 
-    real_mcp_loader = tools.scoring_local.load_scoring_snapshot
-    mcp_loader_calls = []
+    receipt = course_receipt_sample("read_path")
+    publisher = EvidencePublisher(workspace_root=root, source_key=source,
+                                  course_id="1", vault=vault)
+    publish_course_receipt(publisher=publisher, receipt=receipt,
+                           writer_key="writer-a", run_id="run-a")
+    service.run_index_maintenance(root=root, source_key=source)
 
-    def counted_mcp_loader(course_id, **kwargs):
-        mcp_loader_calls.append(course_id)
-        return real_mcp_loader(course_id, **kwargs)
-
-    monkeypatch.setattr(tools.scoring_local, "load_scoring_snapshot", counted_mcp_loader)
-    mcp_gradebook = tools.get_gradebook_snapshot("current")
-    # The MCP scoring snapshot reads the local mirror without Canvas.
-    assert mcp_loader_calls == ["current"]
+    mcp_gradebook = tools.get_gradebook_snapshot("1")
     assert mcp_gradebook["source"] == "mirror"
     assert mcp_gradebook["students"]["columns"] == [
         "pseudonym", "missing", "late", "ungraded", "pct"]
-    assert len(mcp_gradebook["students"]["rows"]) == 1
+    assert len(mcp_gradebook["students"]["rows"]) == 2
 
-    mcp_roster = tools.get_roster("current")
-    mcp_submissions = tools.get_submissions("current", "700010")
+    mcp_roster = tools.get_roster("1")
+    mcp_submissions = tools.get_submissions("1", "10")
     assert mcp_roster["source"] == "mirror"
     assert mcp_submissions["source"] == "mirror"
     for payload in (mcp_roster, mcp_submissions, mcp_gradebook):
         assert payload["ok"] is True
         verdict = __import__("api.feedback_safety", fromlist=["scan_payload"]).scan_payload(
-            payload, Vault(str(tmp_path / "vault.json"))
+            payload, vault
         )
         assert verdict["green"] is True
         dumped = json.dumps(payload)
-        for leak in ("Learner One", "Learner", "900001", "SIS-900001", "private-name.pdf"):
+        for leak in ("Avery Sample", "Morgan Sample", "synthetic-user-01",
+                     "synthetic-user-02", "essay.docx", "broken.pdf"):
             assert leak not in dumped
 
     assert "No local course catalog found" in tools.get_course_content('previous', kind='assignments')["error"]

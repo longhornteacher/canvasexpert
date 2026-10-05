@@ -96,15 +96,33 @@ def test_get_roster_fails_closed_on_shared_vault_conflict(monkeypatch, tmp_path)
 
 
 def test_get_roster_uses_stable_pseudonyms_without_leaking_identity(monkeypatch, tmp_path):
+    """LAW: the evidence read path serves stable pseudonyms across calls and
+    never leaks a real identity, even through the shared vault."""
+    from api.mirror import service
+    from api.mirror.evidence_acquisition import publish_course_receipt
+    from api.mirror.evidence_paths import source_key_for_origin
+    from api.mirror.evidence_publish import EvidencePublisher
+    from api.tests.mirror.acquisition_samples import course_receipt_sample
+
     monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
     monkeypatch.setattr(workspace.runtime_paths, "local_cache_dir", lambda: tmp_path / "local-cache")
     _use_shared_vault(monkeypatch, tmp_path)
-    _set_active_courses(monkeypatch, ["111"])
-    mirror_store.write_roster("111", FIXTURE_USERS, SECTION_MAP, root=str(tmp_path))
+    _set_active_courses(monkeypatch, ["1"])
+    monkeypatch.setattr(tools.config, "get_canvas_base",
+                        lambda: "https://canvas.example.test")
+    vault = SharedVault(tmp_path / "_Shared" / "vault", workspace_root=tmp_path,
+                        secret_provider=lambda: b"s" * 32)
+    source = source_key_for_origin("https://canvas.example.test")
+    receipt = course_receipt_sample("read_path")
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key=source,
+                                  course_id="1", vault=vault)
+    publish_course_receipt(publisher=publisher, receipt=receipt,
+                           writer_key="writer-a", run_id="run-a")
+    service.run_index_maintenance(root=tmp_path, source_key=source)
 
-    first = tools.get_roster("111")
-    second = tools.get_roster("111")
-    assert first["ok"] is True
+    first = tools.get_roster("1")
+    second = tools.get_roster("1")
+    assert first["ok"] is True, first
     assert first["roster"] == second["roster"]
     assert len(first["roster"]["rows"]) == 2
     assert len({row[0] for row in first["roster"]["rows"]}) == 2

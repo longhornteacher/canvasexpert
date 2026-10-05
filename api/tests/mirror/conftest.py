@@ -10,11 +10,12 @@ def evidence_service_workspace(tmp_path, monkeypatch):
     from api import runtime_paths
     from api.mirror import service, store
     from api.mirror.evidence_acquisition import publish_course_receipt
+    from api.mirror.evidence_paths import source_key_for_origin
     from api.mirror.evidence_publish import EvidencePublisher
     from api.tests.mirror.acquisition_samples import SyntheticVault, course_receipt_sample
 
     root = tmp_path / "workspace"
-    source = "a" * 64
+    source = source_key_for_origin("https://canvas.example.test")
     vault = SyntheticVault()
     import threading
     monkeypatch.setattr(service, "_maintenance_requested", False)

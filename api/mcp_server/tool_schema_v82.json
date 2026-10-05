@@ -1,0 +1,454 @@
+{
+  "schema_version": 82,
+  "tools": [
+    {
+      "name": "abandon_operation",
+      "properties": {
+        "operation_id": "string"
+      },
+      "required": [
+        "operation_id"
+      ]
+    },
+    {
+      "name": "apply_operation",
+      "properties": {
+        "batch_id": "string",
+        "operation_id": "string",
+        "review_digest": "string"
+      },
+      "required": [
+        "operation_id",
+        "batch_id",
+        "review_digest"
+      ]
+    },
+    {
+      "name": "apply_roster_student_change",
+      "properties": {
+        "course_id": "string",
+        "expected_settings_digest": "string",
+        "preview": "object",
+        "preview_digest": "string"
+      },
+      "required": [
+        "course_id",
+        "preview",
+        "preview_digest",
+        "expected_settings_digest"
+      ]
+    },
+    {
+      "name": "apply_staged_scoring_results",
+      "properties": {
+        "expected_stage_digest": "string",
+        "idempotency_key": "string",
+        "scoring_session_id": "string"
+      },
+      "required": [
+        "scoring_session_id",
+        "expected_stage_digest"
+      ]
+    },
+    {
+      "name": "discover_scoring_work",
+      "properties": {},
+      "required": []
+    },
+    {
+      "name": "get_assignment_evidence",
+      "properties": {
+        "assignment_id": "string",
+        "course_id": "string",
+        "limit": "integer",
+        "offset": "integer",
+        "view": "string"
+      },
+      "required": [
+        "course_id",
+        "assignment_id"
+      ]
+    },
+    {
+      "name": "get_course_content",
+      "properties": {
+        "course_id": "string",
+        "full_descriptions": "boolean",
+        "full_text": "boolean",
+        "include_items": "boolean",
+        "include_unpublished": "boolean",
+        "kind": "string"
+      },
+      "required": [
+        "course_id",
+        "kind"
+      ]
+    },
+    {
+      "name": "get_gradebook_snapshot",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "get_product_guide",
+      "properties": {
+        "topic": "string"
+      },
+      "required": []
+    },
+    {
+      "name": "get_roster",
+      "properties": {
+        "course_id": "string",
+        "include": "array",
+        "pseudonym": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "get_score_ledger",
+      "properties": {
+        "assignment_id": "string",
+        "course_id": "string",
+        "limit": "integer",
+        "offset": "integer",
+        "pseudonyms": "string"
+      },
+      "required": [
+        "course_id",
+        "assignment_id"
+      ]
+    },
+    {
+      "name": "get_scoring_packet",
+      "properties": {
+        "include_context": "boolean",
+        "limit": "integer",
+        "offset": "integer",
+        "scoring_session_id": "string"
+      },
+      "required": [
+        "scoring_session_id"
+      ]
+    },
+    {
+      "name": "get_scoring_preview",
+      "properties": {
+        "limit": "integer",
+        "offset": "integer",
+        "scoring_session_id": "string"
+      },
+      "required": [
+        "scoring_session_id"
+      ]
+    },
+    {
+      "name": "get_submissions",
+      "properties": {
+        "assignment_id": "string",
+        "course_id": "string",
+        "history": "boolean",
+        "include_text": "boolean",
+        "limit": "integer",
+        "max_text_chars": "integer",
+        "offset": "integer",
+        "pseudonyms": "string"
+      },
+      "required": [
+        "course_id",
+        "assignment_id"
+      ]
+    },
+    {
+      "name": "list_courses",
+      "properties": {},
+      "required": []
+    },
+    {
+      "name": "list_feedback_contracts",
+      "properties": {},
+      "required": []
+    },
+    {
+      "name": "list_scoring_sessions",
+      "properties": {},
+      "required": []
+    },
+    {
+      "name": "list_staged_content",
+      "properties": {
+        "kind": "string"
+      },
+      "required": []
+    },
+    {
+      "name": "list_work_items",
+      "properties": {
+        "work_id": "string"
+      },
+      "required": []
+    },
+    {
+      "name": "prepare_scoring_session",
+      "properties": {
+        "assignment_id": "string",
+        "course_id": "string",
+        "feedback_contract_id": "string",
+        "late_policy": "string",
+        "mode": "string",
+        "scoring_guidance": "string",
+        "scoring_guidance_provenance": "string",
+        "use_existing_mirror": "boolean"
+      },
+      "required": [
+        "course_id",
+        "assignment_id"
+      ]
+    },
+    {
+      "name": "preview_assignment_update",
+      "properties": {
+        "assignment_id": "string",
+        "course_id": "string",
+        "due_at": "string",
+        "lock_at": "string",
+        "published": "boolean",
+        "unlock_at": "string"
+      },
+      "required": [
+        "course_id",
+        "assignment_id"
+      ]
+    },
+    {
+      "name": "preview_attempts_grant",
+      "properties": {
+        "assignment_id": "string",
+        "course_id": "string",
+        "grant": "object"
+      },
+      "required": [
+        "course_id",
+        "assignment_id",
+        "grant"
+      ]
+    },
+    {
+      "name": "preview_content_push",
+      "properties": {
+        "assignment_group_name": "string",
+        "course_id": "string",
+        "create_module": "boolean",
+        "due_at": "string",
+        "kind": "string",
+        "label": "string",
+        "lock_at": "string",
+        "module_id": "string",
+        "module_name": "string",
+        "post_to_sis": "boolean",
+        "published": "boolean",
+        "quiz_settings": "object",
+        "unlock_at": "string",
+        "variants": "array"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "preview_grade_adjustment",
+      "properties": {
+        "adjustment": "object",
+        "assignment_id": "string",
+        "course_id": "string"
+      },
+      "required": [
+        "course_id",
+        "assignment_id",
+        "adjustment"
+      ]
+    },
+    {
+      "name": "preview_roster_student_change",
+      "properties": {
+        "course_id": "string",
+        "patch": "object",
+        "pseudonym": "string"
+      },
+      "required": [
+        "course_id",
+        "pseudonym",
+        "patch"
+      ]
+    },
+    {
+      "name": "preview_sis_grade_bridge",
+      "properties": {
+        "bridge_assignment_id": "string",
+        "course_id": "string",
+        "family_title": "string",
+        "reconcile": "boolean",
+        "source_assignment_ids": "array"
+      },
+      "required": [
+        "course_id",
+        "family_title"
+      ]
+    },
+    {
+      "name": "push_content_live",
+      "properties": {
+        "assignment_group_name": "string",
+        "content": "string",
+        "course_id": "string",
+        "create_module": "boolean",
+        "kind": "string",
+        "label": "string",
+        "module_id": "string",
+        "module_name": "string",
+        "post_to_sis": "boolean",
+        "published": "boolean",
+        "quiz_settings": "object"
+      },
+      "required": [
+        "course_id",
+        "kind",
+        "label",
+        "content"
+      ]
+    },
+    {
+      "name": "reconcile_sis_grade_bridges",
+      "properties": {
+        "course_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "refresh_mirror",
+      "properties": {
+        "course_id": "string",
+        "include_comments": "boolean",
+        "operation_id": "string",
+        "structure_only": "boolean"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "refresh_scoring_session",
+      "properties": {
+        "replace_resubmitted": "boolean",
+        "scoring_session_id": "string",
+        "use_existing_mirror": "boolean"
+      },
+      "required": [
+        "scoring_session_id"
+      ]
+    },
+    {
+      "name": "reset_scoring_review",
+      "properties": {
+        "scoring_session_id": "string"
+      },
+      "required": [
+        "scoring_session_id"
+      ]
+    },
+    {
+      "name": "resume_operation",
+      "properties": {
+        "operation_id": "string"
+      },
+      "required": [
+        "operation_id"
+      ]
+    },
+    {
+      "name": "set_score_curve_rule",
+      "properties": {
+        "active": "boolean",
+        "assignment_id": "string",
+        "course_id": "string",
+        "formula": "object",
+        "rule_id": "string"
+      },
+      "required": [
+        "course_id"
+      ]
+    },
+    {
+      "name": "stage_attachment",
+      "properties": {
+        "source_path": "string"
+      },
+      "required": [
+        "source_path"
+      ]
+    },
+    {
+      "name": "stage_content",
+      "properties": {
+        "content": "string",
+        "kind": "string",
+        "label": "string"
+      },
+      "required": [
+        "kind",
+        "label",
+        "content"
+      ]
+    },
+    {
+      "name": "stage_scoring_results",
+      "properties": {
+        "answers": "object",
+        "attachment_file": "string",
+        "expected_packet_digest": "string",
+        "grade_mode": "string",
+        "results": "array",
+        "review_digest": "string",
+        "scoring_session_id": "string"
+      },
+      "required": [
+        "scoring_session_id",
+        "results",
+        "expected_packet_digest"
+      ]
+    },
+    {
+      "name": "transfer_work_item",
+      "properties": {
+        "action": "string",
+        "confirm_stale": "boolean",
+        "work_id": "string"
+      },
+      "required": [
+        "work_id",
+        "action"
+      ]
+    },
+    {
+      "name": "verify_live",
+      "properties": {
+        "course_id": "string",
+        "id": "string",
+        "kind": "string",
+        "title": "string"
+      },
+      "required": [
+        "course_id",
+        "kind"
+      ]
+    }
+  ]
+}

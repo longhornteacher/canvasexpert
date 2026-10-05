@@ -115,7 +115,7 @@ def test_maintenance_scans_without_holding_vault_lock(evidence_service_workspace
     unsafe = {'schema_version': 1, 'kind': 'submission', 'source_key': env['source'],
               'course_id': '1', 'entity_key': 'submission:10:Pikachu',
               'payload': {'assignment_id': '10', 'pseudonym': 'Pikachu', 'attempt': 1,
-                          'body': 'Synthetic Learner One'}}
+                          'body': 'Avery Sample'}}
     ref = digest_record(unsafe)
     path = env['root'] / 'CanvasMirror' / 'sources' / env['source'] / 'courses' / '1' / 'objects' / ref[:2] / (ref + '.json')
     path.parent.mkdir(parents=True, exist_ok=True)

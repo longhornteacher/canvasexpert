@@ -17,7 +17,7 @@ from api.mcp_server import server, tools
 # v79 adds the two quiz_settings inputs.
 INSTRUCTION_BUDGET = 2303
 # v81 adds get_assignment_evidence (course_id, assignment_id, view, offset, limit).
-LISTING_BUDGET = 15300
+LISTING_BUDGET = 15400
 DESCRIPTION_BUDGET = 343
 
 RESULT_NEXT_TOOLS = {

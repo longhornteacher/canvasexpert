@@ -118,107 +118,11 @@ def test_assignment_submissions_filters_orphan_not_in_index(tmp_path):
     assert err is None and len(data) == 1
 
 
-# --- MCP tools: mirror paths ------------------------------------------------------
-
-def _mcp_setup(monkeypatch, tmp_path):
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": COURSE}])
-    # No _vault_factory override: the mirror scrubs bodies at rest with the
-    # workspace identity vault, so the tool must read through that same vault.
-
-
-def test_mcp_get_roster_serves_from_mirror_without_canvas(monkeypatch, tmp_path):
-    _mcp_setup(monkeypatch, tmp_path)
-    _populate(str(tmp_path))
-    result = tools.get_roster(COURSE)
-    assert result["ok"] is True
-    assert result["source"] == "mirror"
-    assert result["synced_at"] != ""
-    assert len(result["roster"]["rows"]) == 2
-    dumped = json.dumps(result)
-    for leak in ("Learner One", "900001", "SIS-900001"):
-        assert leak not in dumped
-
-
-def test_mcp_get_submissions_serves_from_mirror_scrubbed(monkeypatch, tmp_path):
-    _mcp_setup(monkeypatch, tmp_path)
-    _populate(str(tmp_path))
-    result = tools.get_submissions(COURSE, "700010")
-    assert result["ok"] is True
-    assert result["source"] == "mirror"
-    assert result["assignment"]["title"] == "Essay 1"
-    rows = [dict(zip(result["submissions"]["columns"], row))
-            for row in result["submissions"]["rows"]]
-    graded = next(r for r in rows if r["workflow_state"] == "graded")
-    # Real name and nickname scrubbed to the same pseudonym.
-    assert graded["pseudonym"] in graded["text"]
-    dumped = json.dumps(result)
-    for leak in ("Learner One", "Lee", "900001"):
-        assert leak not in dumped
-
-
-def test_mcp_get_gradebook_snapshot_serves_from_mirror(monkeypatch, tmp_path):
-    _mcp_setup(monkeypatch, tmp_path)
-    _populate(str(tmp_path))
-    result = tools.get_gradebook_snapshot(COURSE)
-    assert result["ok"] is True
-    assert result["source"] == "mirror"
-    assert result["synced_at"] != ""
-    assert len(result["students"]["rows"]) == 2
-
-
-def _pin_mcp_freshness(monkeypatch, now):
-    class FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            if tz is None:
-                return now.replace(tzinfo=None)
-            return now.astimezone(tz)
-
-    monkeypatch.setattr(freshness_policy, "datetime", FixedDateTime)
-    monkeypatch.setattr(store, "datetime", FixedDateTime)
-    monkeypatch.setattr(grading_policy, "load_no_school_dates", lambda root=None: [])
-    monkeypatch.setattr(queries, "_serve_max_age_hours", lambda: 6.0)
-
-
-def _assert_mcp_freshness_results(monkeypatch, tmp_path, *, age_minutes, within_policy):
-    _mcp_setup(monkeypatch, tmp_path)
-    now = datetime(2026, 9, 25, 2, 0, tzinfo=timezone.utc)
-    _pin_mcp_freshness(monkeypatch, now)
-    stamp = (now - timedelta(minutes=age_minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    _populate(str(tmp_path), stamp=stamp)
-
-    roster = tools.get_roster(COURSE)
-    submissions = tools.get_submissions(COURSE, "700010")
-    for result in (roster, submissions):
-        assert result["freshness"]["school_hours"] is False
-        assert result["freshness"]["policy_window_minutes"] == 600
-        assert result["freshness"]["age_minutes"] == age_minutes
-        assert result["freshness"]["within_policy"] is within_policy
-    return roster, submissions
-
-
-def test_mcp_r3_past_policy_window_serves_with_labeled_age_and_refresh_hint(monkeypatch, tmp_path):
-    """LAW (brief decision #4): age is metadata, not a gate. A projection that
-    loads serves with its freshness labeled and a non-blocking refresh hint —
-    never a refusal, never an escalation to the teacher."""
-    roster, submissions = _assert_mcp_freshness_results(
-        monkeypatch, tmp_path, age_minutes=601, within_policy=False)
-    for result in (roster, submissions):
-        assert result["ok"] is True
-        assert result["freshness"]["within_policy"] is False
-        assert result["attention"]["action"] == "refresh_mirror"
-    assert roster["roster"]["rows"]
-    assert submissions["submissions"]["rows"]
-
-
-def test_mcp_r3_within_policy_serves_past_mirror_cutoff(monkeypatch, tmp_path):
-    roster, submissions = _assert_mcp_freshness_results(
-        monkeypatch, tmp_path, age_minutes=480, within_policy=True)
-    assert 480 > queries._serve_max_age_hours() * 60
-    assert roster["ok"] is True
-    assert submissions["ok"] is True
-    assert roster["freshness"]["age_minutes"] == 480
-    assert submissions["freshness"]["age_minutes"] == 480
-    assert roster["roster"]["rows"]
-    assert submissions["submissions"]["rows"]
+# --- MCP tools: evidence read path ------------------------------------------------
+#
+# The four student-data MCP reads now serve ONLY from the pseudonymized evidence
+# index (see api/tests/mcp_server/test_tools.py::evidence_mirror). The retired
+# typed-mirror read path (store.write_roster/assignments/submissions feeding the
+# tools directly) is no longer a read authority, so its MCP-serving tests were
+# removed with the functional read path. The `queries` provider tests above still
+# cover the typed-mirror projection used by internal consumers.

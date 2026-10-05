@@ -167,14 +167,14 @@ def course_receipt_sample(variant: str = "full") -> CourseAcquisitionReceipt:
     )
     scopes = [
         ScopeReceipt("course.context", course_id,
-                     ({"id": 1, "name": "Synthetic ELA", "workflow_state": "available"},), True),
+                     ({"id": 1, "name": "ELA 7", "workflow_state": "available"},), True),
         ScopeReceipt("course.assignments", course_id,
-                     ({"id": 10, "name": "Synthetic writing", "description": "Synthetic prompt.",
+                     ({"id": 10, "name": "Narrative writing", "description": "Write a narrative.",
                        "points_possible": 20},
-                      {"id": 11, "name": "Synthetic independent assignment"}), True),
+                      {"id": 11, "name": "Independent reading"}), True),
         ScopeReceipt("course.roster", course_id,
-                     ({"id": "synthetic-user-01", "name": "Synthetic Learner One"},
-                      {"id": "synthetic-user-02", "name": "Synthetic Learner Two"}), True),
+                     ({"id": "synthetic-user-01", "name": "Avery Sample"},
+                      {"id": "synthetic-user-02", "name": "Morgan Sample"}), True),
         ScopeReceipt("assignment.submissions", "10", submissions, True,
                      watermarks={"submitted_since": "2026-01-03T00:00:00Z"}),
         ScopeReceipt("assignment.comments", "10",
@@ -187,25 +187,32 @@ def course_receipt_sample(variant: str = "full") -> CourseAcquisitionReceipt:
     ]
     if variant == "read_path":
         scopes.append(ScopeReceipt("course.sections", course_id,
-                                   ({"id": 500, "name": "Synthetic section"},), True))
+                                   ({"id": 500, "name": "Period 1"},), True))
         submissions[0]["attachments"] = [
             {"id": "9001", "filename": "essay.docx", "size": 100,
              "url": "https://canvas.example.test/files/9001"},
             {"id": "9002", "filename": "broken.pdf", "size": 100,
              "url": "https://canvas.example.test/files/9002"},
         ]
+    elif variant == "groups":
+        scopes.append(ScopeReceipt("course.groups", course_id, (
+            {"id": "30", "name": "Blue", "group_category_id": "cat-1",
+             "group_category_name": "Teams", "user_ids": ["synthetic-user-01"]},
+            {"_category_only": True, "group_category_id": "cat-2",
+             "group_category_name": "Unassigned"},
+        ), True))
     elif variant == "second_course":
         course_id = "2"
         scopes = [
             ScopeReceipt("course.context", course_id,
-                         ({"id": 2, "name": "Synthetic second course"},), True),
+                         ({"id": 2, "name": "Science 7"},), True),
             ScopeReceipt("course.assignments", course_id,
-                         ({"id": 20, "name": "Synthetic second writing"},), True),
+                         ({"id": 20, "name": "Lab report"},), True),
             ScopeReceipt("course.roster", course_id,
-                         ({"id": "synthetic-user-02", "name": "Synthetic Learner Two"},), True),
+                         ({"id": "synthetic-user-02", "name": "Morgan Sample"},), True),
             ScopeReceipt("assignment.submissions", "20",
                          (_submission("synthetic-user-02", "20", 1,
-                                      "Synthetic second course response.", finish),), True),
+                                      "Second course response.", finish),), True),
         ]
     elif variant == "full":
         pass
@@ -219,7 +226,7 @@ def course_receipt_sample(variant: str = "full") -> CourseAcquisitionReceipt:
     elif variant == "deselected_course":
         # The exact scope watermark gives test consumers an explicit retained-only marker.
         scopes = [ScopeReceipt("course.context", course_id,
-                               ({"id": 1, "name": "Synthetic ELA", "workflow_state": "available"},),
+                               ({"id": 1, "name": "ELA 7", "workflow_state": "available"},),
                                True, mode="snapshot", watermarks={"selection": "deselected"})]
     elif variant == "sparse_attempts":
         scopes[3] = ScopeReceipt("assignment.submissions", "10", (

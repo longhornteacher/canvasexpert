@@ -115,6 +115,40 @@ def _runner_stages(outcome) -> dict:
     return {"acquisition": acquisition, "publication": publication}
 
 
+_STAGE_SEVERITY = {"failed": 4, "partial": 3, "pending": 2, "not_run": 1, "ready": 0}
+
+
+def _worst_stage(name: str, candidates: list) -> dict:
+    """Worst state across job stage dicts: failed > partial > pending > not_run > ready."""
+    if not candidates:
+        return stage(name, "not_run")
+    return max(candidates, key=lambda value: _STAGE_SEVERITY.get(value.get("state"), 0))
+
+
+def _plan_stages(plan_view: dict) -> dict:
+    """Worst acquisition/publication across a plan's jobs plus course-scoped
+    index/attachment stages. Queued/running jobs without an outcome are pending,
+    never not_run or success."""
+    jobs = [job for job in (plan_view.get("jobs") or []) if isinstance(job, dict)]
+    acquisition, publication = [], []
+    for job in jobs:
+        job_stages = job.get("stages") if isinstance(job.get("stages"), dict) else {}
+        if "acquisition" in job_stages:
+            acquisition.append(job_stages["acquisition"])
+        elif job.get("state") in {"queued", "running"}:
+            acquisition.append(stage("acquisition", "pending"))
+        if "publication" in job_stages:
+            publication.append(job_stages["publication"])
+    stages = {"acquisition": _worst_stage("acquisition", acquisition),
+              "publication": _worst_stage("publication", publication)}
+    course_ids = {str(job.get("course_id")) for job in jobs if job.get("course_id")}
+    if len(course_ids) == 1:
+        local = evidence_stages(course_id=next(iter(course_ids)))
+        stages["index"] = local["index"]
+        stages["attachments"] = local["attachments"]
+    return stages
+
+
 def acquisition_owner_status(*, tick=False):
     """Observe advisory acquisition ownership without touching work leases."""
     global _OWNER, _OWNER_BINDING, _OWNER_ERROR
@@ -1185,7 +1219,11 @@ def status(plan_id: str | None = None) -> dict:
         "evidence": evidence_status(),
     }
     if plan_id:
-        payload["plan"] = coordinator_instance().status(plan_id)
+        plan_view = coordinator_instance().status(plan_id)
+        payload["plan"] = plan_view
+        plans = plan_view.get("plans") or []
+        if plans:
+            payload["stages"] = _plan_stages(plans[0])
     return payload
 
 

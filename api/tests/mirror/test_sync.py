@@ -279,30 +279,27 @@ def test_delta_after_full_does_not_erase_stored_comments(tmp_path):
     assert entry["current"]["attempt"] == 2
 
 
-def test_mcp_get_submissions_never_leaks_comment_text(monkeypatch, tmp_path):
-    from api.feedback_vault import Vault
+def test_mcp_get_submissions_never_leaks_comment_text(evidence_service_workspace, monkeypatch):
+    """LAW: the evidence read path serves submissions from the current_submissions
+    view, which carries no comment text; a published comment scope never reaches
+    get_submissions."""
     from api.mcp_server import tools
     from api.platform_services import workspace
 
-    canvas = FakeCanvas(submissions=[
-        _sub(700010, submission_comments=[
-            {"author_id": 900099, "comment": "SECRET-FEEDBACK-TEXT",
-             "created_at": "2026-07-01T11:00:00Z"},
-        ]),
-    ])
-    # Real now_iso() (not the fixed NOW fixture) so the mirror-serve
-    # freshness gate — which compares against wall-clock time — passes.
-    sync.full_pass(COURSE, canvas_get_all=canvas,
-                   canvas_get_all_complete=canvas.complete, root=str(tmp_path), now=store.now_iso())
+    from api.mirror import service
+    env = evidence_service_workspace
+    env["publish"]()
+    service.run_index_maintenance(root=env["root"], source_key=env["source"])
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(env["root"]))
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "1"}])
+    monkeypatch.setattr(tools.config, "get_canvas_base",
+                        lambda: "https://canvas.example.test")
+    monkeypatch.setattr(tools, "_open_vault", lambda: (env["vault"], None))
 
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": COURSE}])
-    monkeypatch.setattr(tools, "_vault_factory",
-                        lambda: Vault(str(tmp_path / "vault.json")))
-    result = tools.get_submissions(COURSE, "700010")
-    assert result["ok"] is True
+    result = tools.get_submissions("1", "10")
+    assert result["ok"] is True, result
     dumped = json.dumps(result)
-    assert "SECRET-FEEDBACK-TEXT" not in dumped
+    assert "Synthetic teacher comment" not in dumped
     assert "submission_comments" not in dumped
 
 

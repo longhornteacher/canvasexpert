@@ -58,15 +58,16 @@ def test_inapplicable_options_are_refused_before_side_effects(call):
 
 
 @pytest.mark.parametrize("include", [["sections", "groups"], ["groups", "sections"], ["groups", "sections", "groups"]])
-def test_roster_include_is_order_independent_and_keeps_safe_projection_metadata(monkeypatch, include):
-    sections = {"ok": True, "sections": {"columns": [], "rows": []}, "freshness": {"section": "roster"}}
-    groups = {"ok": True, "group_sets": [{"name": "Public Set", "groups": []}], "freshness": {"section": "groups"}}
-    monkeypatch.setattr(tools, "_roster_sections", lambda course: sections)
-    monkeypatch.setattr(tools, "_roster_groups", lambda course: groups)
-    result = tools.get_roster("c", include=include)
-    assert result["sections"] == sections["sections"]
-    assert result["group_sets"] == groups["group_sets"]
-    assert result["freshness"] == {"sections": sections["freshness"], "groups": groups["freshness"]}
+def test_roster_include_is_order_independent_and_keeps_safe_projection_metadata(evidence_mirror, include):
+    evidence_mirror["publish"]("groups")
+    result = tools.get_roster("1", include=include)
+    assert result["ok"] is True
+    assert result["sections"]["columns"] == ["section_id", "section_name"]
+    assert result["group_sets"] == [
+        {"name": "Teams", "groups": [{"name": "Blue"}]},
+        {"name": "Unassigned", "groups": []},
+    ]
+    assert set(result["freshness"]) == {"sections", "groups"}
 
 
 def test_revision_dispatch_never_tries_the_scoring_store(monkeypatch):

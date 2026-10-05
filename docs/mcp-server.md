@@ -58,7 +58,7 @@ authoring guidance, call `get_product_guide` with the relevant topic:
 
 ## Tools
 
-Tool schema version 81 (38 tools).
+Tool schema version 82 (38 tools).
 
 | Tool | Purpose | Student data? |
 |---|---|---|

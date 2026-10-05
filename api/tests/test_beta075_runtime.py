@@ -142,35 +142,43 @@ def test_quick_fix_contract_and_version(monkeypatch, tmp_path):
         assert importlib.util.find_spec(module_name) is None
     assert not any(route.path.startswith("/api/feedback/") for route in server.app.routes)
 
-    class CountingVault:
-        def __init__(self):
-            self.save_calls = 0
-            self.pseudonyms = {}
+    # Publish synthetic safe evidence and index it: the MCP reads serve from the
+    # pseudonymized evidence index, never live Canvas.
+    from api.mirror import service
+    from api.mirror.evidence_acquisition import publish_course_receipt
+    from api.mirror.evidence_paths import source_key_for_origin
+    from api.mirror.evidence_publish import EvidencePublisher
+    from api.tests.mirror.acquisition_samples import SyntheticVault, course_receipt_sample
 
-        def get_or_assign(self, canvas_id, *_args, **_kwargs):
-            return self.pseudonyms.setdefault(str(canvas_id), "Avery Example")
+    from contextlib import contextmanager
+    from api.mirror import store as mirror_store_module
 
-        def add_nicknames(self, *_args, **_kwargs):
-            return None
+    root = tmp_path / "workspace"
+    source = source_key_for_origin("https://canvas.example.test")
+    vault = SyntheticVault()
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(workspace.runtime_paths, "local_cache_dir", lambda: tmp_path / "local")
 
-        def all_real_identifiers(self):
-            return [], []
+    @contextmanager
+    def _transaction(_root):
+        yield vault
 
-        def save(self):
-            self.save_calls += 1
+    monkeypatch.setattr(mirror_store_module, "_vault_transaction", _transaction)
+    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "1"}])
+    monkeypatch.setattr(tools.config, "saved_courses", lambda: [{"id": "1"}])
+    monkeypatch.setattr(tools.config, "get_canvas_base",
+                        lambda: "https://canvas.example.test")
+    monkeypatch.setattr(tools, "_open_vault", lambda: (vault, None))
 
-    vault = CountingVault()
-    monkeypatch.setattr(workspace, "workspace_root", lambda: str(tmp_path))
-    monkeypatch.setattr(tools.config, "active_courses", lambda: [{"id": "course-1"}])
-    mirror_store.write_roster(
-        "course-1", [{"id": "student-1", "name": "Synthetic Student"}], {},
-        root=str(tmp_path),
-    )
-    monkeypatch.setattr(tools, "_vault_factory", lambda: vault)
+    receipt = course_receipt_sample("read_path")
+    publisher = EvidencePublisher(workspace_root=root, source_key=source,
+                                  course_id="1", vault=vault)
+    publish_course_receipt(publisher=publisher, receipt=receipt,
+                           writer_key="writer-a", run_id="run-a")
+    service.run_index_maintenance(root=root, source_key=source)
 
-    result = tools.get_roster("course-1")
+    result = tools.get_roster("1")
     assert result["ok"] is True
-    assert vault.save_calls == 1
 
     monkeypatch.setattr(config, "token_is_set", lambda: True)
     monkeypatch.setattr(config, "get_canvas_base", lambda: "https://canvas.invalid")

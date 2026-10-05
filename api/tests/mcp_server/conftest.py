@@ -213,6 +213,57 @@ def _mount_mirror(monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def evidence_mirror(monkeypatch, tmp_path):
+    """Publish synthetic safe evidence and index it for the MCP read tools.
+
+    Uses the real publisher, index, and maintenance path with a synthetic
+    vault, so the four evidence reads exercise production behavior without
+    live Canvas or teacher files. Returns a builder that publishes a named
+    receipt variant and rebuilds the index.
+    """
+    import threading
+    from contextlib import contextmanager
+    from api.mirror import service, store
+    from api.mirror.evidence_acquisition import publish_course_receipt
+    from api.mirror.evidence_paths import source_key_for_origin
+    from api.mirror.evidence_publish import EvidencePublisher
+    from api.tests.mirror.acquisition_samples import SyntheticVault, course_receipt_sample
+
+    root = tmp_path / "workspace"
+    source = source_key_for_origin("https://canvas.example.test")
+    vault = SyntheticVault()
+    monkeypatch.setattr(service, "_maintenance_requested", False)
+    monkeypatch.setattr(service, "_index_wake", threading.Event())
+    monkeypatch.setattr(service, "_work_wake", threading.Event())
+    monkeypatch.setattr(runtime_paths, "local_cache_dir", lambda: tmp_path / "local")
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+
+    @contextmanager
+    def transaction(_root):
+        yield vault
+
+    monkeypatch.setattr(store, "_vault_transaction", transaction)
+    monkeypatch.setattr(tools.config, "get_canvas_base",
+                        lambda: "https://canvas.example.test")
+    monkeypatch.setattr(tools.config, "active_courses",
+                        lambda: [{"id": "1", "name": "Synthetic ELA"}])
+    monkeypatch.setattr(tools.config, "saved_courses",
+                        lambda: [{"id": "1", "name": "Synthetic ELA"}])
+    monkeypatch.setattr(tools.config, "list_sis_grade_bridges", lambda _course: [])
+    monkeypatch.setattr(tools, "_open_vault", lambda: (vault, None))
+
+    def publish(variant="read_path"):
+        receipt = course_receipt_sample(variant)
+        publisher = EvidencePublisher(workspace_root=root, source_key=source,
+                                      course_id=receipt.course_id, vault=vault)
+        publish_course_receipt(publisher=publisher, receipt=receipt,
+                               writer_key="writer-a", run_id="run-a")
+        return service.run_index_maintenance(root=root, source_key=source)
+
+    return {"root": root, "source": source, "vault": vault, "publish": publish}
+
+
+@pytest.fixture
 def _submissions_fixture(request, _mount_mirror, _use_vault, _set_active_courses, tmp_path):
     def submissions_fixture(bodies_by_user=None):
         bodies_by_user = bodies_by_user or {

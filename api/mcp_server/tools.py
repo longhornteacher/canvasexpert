@@ -34,6 +34,7 @@ import re
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 from api import attempts_grant, content_push, course_catalog, course_scope, feedback_scrub, freshness_policy, grade_adjustment, gradebook_snapshot, grading_policy, live_verify, operational_log, roster_service, sis_grade_bridge
 from api.operation_ledger import claims as operation_claims
@@ -219,24 +220,103 @@ def _freshness_attention(envelope: dict) -> dict | None:
     }
 
 
-def _activated_evidence_lane(course_id: str):
-    """Return the local evidence reader without an activation checkpoint."""
+def _safe_evidence_exists(source_key: str, root) -> bool:
+    """True when any safe course directory holds evidence for this source."""
+    from api.platform_services import workspace as _workspace
+    base = _workspace.canvas_mirror_evidence_root(root)
+    if base is None:
+        return False
+    courses = Path(base) / "sources" / source_key / "courses"
+    if not courses.is_dir():
+        return False
+    try:
+        return any(child.is_dir() and any(child.iterdir()) for child in courses.iterdir())
+    except OSError:
+        return False
+
+
+def _evidence_reader():
+    """Resolve the local evidence reader without an activation checkpoint.
+
+    Returns ``(service, source_key, None)`` on success or
+    ``(None, None, refusal)`` where ``refusal`` is a ready-to-return dict.
+    Writes nothing to disk; a read miss only requests local maintenance.
+    """
     from api.mirror.evidence_paths import local_source_root, source_key_for_origin
     from api.mirror.evidence_queries import EvidenceQueryService
+    from api.mirror.evidence_index import IndexReadError
+    # Fail closed on a forked shared vault before serving any pseudonymized
+    # evidence; the outbound gate re-checks, but the read must not proceed.
+    _vault, vault_error = _open_vault()
+    if vault_error:
+        return None, None, {"ok": False, "error": vault_error}
     root = workspace.workspace_root()
     if root is None:
-        return None, None, None
+        return None, None, {"ok": False, "code": "workspace_unconfigured",
+                            "error": "Set your workspace in Canvas Expert Settings, then try again."}
     try:
         source_key = source_key_for_origin(config.get_canvas_base())
     except Exception:
-        return None, None, None
+        return None, None, {"ok": False, "code": "canvas_origin_unconfigured",
+                            "error": "Configure your Canvas address in Canvas Expert Settings, then try again."}
+    maintenance = mirror_service._read_maintenance_status(root, source_key)
+    if maintenance.get("update_required_courses"):
+        return None, None, {"ok": False, "code": "evidence_update_required",
+                            "error": ("Some saved Canvas data was written by a newer Canvas Expert. "
+                                      "Update Canvas Expert on this computer.")}
+    path = local_source_root(source_key, root) / "query.sqlite3"
+    if not path.exists():
+        if _safe_evidence_exists(source_key, root):
+            mirror_service.request_index_maintenance("read_miss")
+            return None, None, {"ok": False, "code": "evidence_index_pending",
+                                "error": ("Saved Canvas data is waiting for local indexing. "
+                                          "It updates automatically."),
+                                "retry_after_seconds": 5}
+        return None, None, {"ok": False, "code": "evidence_refresh_required",
+                            "error": ("No saved Canvas data for this course yet. "
+                                      "Call refresh_mirror(course_id), then retry.")}
+    service = EvidenceQueryService(path)
     try:
-        path = local_source_root(source_key, root) / "query.sqlite3"
-        if not path.exists():
-            return None, "evidence_index_pending", "active"
-        return EvidenceQueryService(path), None, "active"
-    except Exception:
-        return None, "evidence_index_repair_required", "active"
+        with service.index.read_connection():
+            pass
+    except IndexReadError as exc:
+        if _safe_evidence_exists(source_key, root):
+            mirror_service.request_index_maintenance("read_miss")
+            return None, None, {"ok": False, "code": "evidence_index_pending",
+                                "error": ("Saved Canvas data is waiting for local indexing. "
+                                          "It updates automatically."),
+                                "retry_after_seconds": 5}
+        return None, None, {"ok": False, "code": "evidence_refresh_required",
+                            "error": ("No saved Canvas data for this course yet. "
+                                      "Call refresh_mirror(course_id), then retry.")}
+    return service, source_key, None
+
+
+def _evidence_coverage(page: dict) -> dict:
+    """Honest coverage for one evidence page: complete, incomplete, or unknown."""
+    membership = (page.get("membership") or {}).get("state")
+    state = ("complete" if membership == "complete"
+             else "unknown" if membership in (None, "unknown") else "incomplete")
+    freshness = page.get("freshness") or {}
+    return {"state": state,
+            "synchronization": (page.get("synchronization") or {}).get("state") or "unknown",
+            "last_success_at": freshness.get("last_success_at") or "",
+            "age_seconds": freshness.get("age_seconds")}
+
+
+def _evidence_warnings(page: dict, *, assignment_context_missing: bool = False) -> list:
+    """Sanitized warning codes for one evidence page."""
+    warnings = []
+    membership = (page.get("membership") or {}).get("state")
+    if membership == "incomplete":
+        warnings.append("membership_incomplete")
+    elif membership in (None, "unknown"):
+        warnings.append("membership_unknown")
+    if (page.get("synchronization") or {}).get("state") == "sync_pending":
+        warnings.append("sync_pending")
+    if assignment_context_missing:
+        warnings.append("assignment_context_missing")
+    return warnings
 
 
 def _read_all_evidence(service, view: str, *, source_key: str, course_id: str,
@@ -467,43 +547,6 @@ def _mirror_roster_doc(course_id: str):
     return {"students": roster["records"], "sections": document["sections"],
             "state": roster["state"],
             "last_success_at": roster["last_success_at"]}
-
-
-def _mirror_submission_bundle(course_id: str, assignment_id: str):
-    """Read one assignment from typed local scopes and return its shared age."""
-    roster = read_service.private_roster(course_id, max_age_hours=None)
-    assignments = read_service.private_assignments(course_id, max_age_hours=None)
-    submissions = read_service.private_submissions(course_id, max_age_hours=None)
-    scopes = (roster, assignments, submissions)
-    if not all(scope.get("state") in {"current", "stale"}
-               and isinstance(scope.get("records"), list)
-               and str(scope.get("last_success_at") or "") for scope in scopes):
-        return None, None
-    assignment_row = next(
-        (row for row in assignments["records"] if str(row.get("id")) == str(assignment_id)),
-        None)
-    if assignment_row is None:
-        return None, "No such assignment in this course's local catalog."
-    rows = [row for row in submissions["records"]
-            if str(row.get("assignment_id")) == str(assignment_id)]
-    synced_at = min(roster["last_success_at"], assignments["last_success_at"],
-                    submissions["last_success_at"])
-    state = "stale" if any(scope.get("state") == "stale" for scope in scopes) else "current"
-    return {"assignment": assignment_row, "rows": rows,
-            "roster": roster["records"], "synced_at": synced_at,
-            "state": state}, None
-
-
-def _load_snapshot(course_id: str):
-    """Load the local gradebook projection and its age without any Canvas call."""
-    loaded = scoring_local.load_scoring_snapshot(
-        course_id, course_name=config.course_display_name(course_id),
-    )
-    if loaded.get("error") or not isinstance(loaded.get("snapshot"), dict):
-        return None, _MIRROR_UNAVAILABLE_SNAPSHOT_ERROR
-    snapshot = loaded["snapshot"]
-    snapshot["_freshness"] = loaded.get("freshness") or {}
-    return snapshot, None
 
 
 def _load_scoring_snapshot(course_id: str, *, course_name: str = ""):
@@ -817,128 +860,6 @@ def list_courses() -> dict:
 
 
 _SECTION_COLUMNS = ("section_id", "section_name")
-
-
-def _roster_sections(course_id: str) -> dict:
-    """Section names from the local CanvasMirror roster (disk-only, no live
-    Canvas fallback) for any saved course (Current or Previous). No student
-    data — no vault, no safety gate. Returns
-    a {columns, rows} table of (section_id, section_name)."""
-    identity_error = _saved_course_gate_check(course_id)
-    if identity_error:
-        return {"ok": False, "error": identity_error}
-    document = mirror_store.read_roster(course_id)
-    if document is None:
-        return {
-            "ok": False,
-            "error": _MIRROR_UNAVAILABLE_ROSTER_ERROR,
-            "freshness": _freshness("mirror", "roster", "unavailable", ""),
-        }
-
-    sections = document.get("sections", {})
-    rows = [
-        {"section_id": str(sid), "section_name": str(name)}
-        for sid, name in sections.items()
-    ]
-    result = {
-        "ok": True,
-        "course_id": course_id,
-        "sections": _tabulate(rows, _SECTION_COLUMNS),
-        "freshness": _freshness("mirror", "roster", document.get("state", "unavailable"),
-                                 document.get("last_success_at", "")),
-    }
-    attention = _freshness_attention(result["freshness"])
-    if attention:
-        result["attention"] = attention
-    return result
-
-
-def _roster_groups(course_id: str) -> dict:
-    """List current-course group-set and group names from the local mirror only.
-
-    Memberships and Canvas identifiers are deliberately consumed here and never
-    enter the assistant-facing projection.
-    """
-    error = _course_gate_check(course_id)
-    if error:
-        return {"ok": False, "error": error}
-    try:
-        scope = read_service.private_groups(
-            course_id, max_age_hours=None,
-        )
-    except Exception:
-        scope = {"state": "malformed", "records": None}
-    # Group names are not PII (memberships and Canvas ids are consumed above
-    # and never projected), so freshness never blocks discovery: serve any
-    # current-or-stale scope with its age labeled, exactly as _roster_sections
-    # does on the same roster. Only a genuinely absent scope refuses.
-    if scope.get("state") not in {"current", "stale"}:
-        state = scope.get("state") or "unavailable"
-        return {
-            "ok": False,
-            "error": "A local Canvas group mirror is required for group discovery.",
-            "state": state,
-            "freshness": _freshness("mirror", "groups", state,
-                                     str(scope.get("last_success_at") or "")),
-            "attention": {
-                "action": "refresh_mirror",
-                "reason": "Refresh the current course mirror, then retry get_roster(include=[groups]).",
-            },
-        }
-    records = scope.get("records")
-    if not isinstance(records, list):
-        return {
-            "ok": False,
-            "error": "The local Canvas group mirror is malformed.",
-            "state": "malformed",
-            "freshness": _freshness("mirror", "groups", "malformed",
-                                     str(scope.get("last_success_at") or "")),
-            "attention": {
-                "action": "refresh_mirror",
-                "reason": "Refresh the current course mirror, then retry get_roster(include=[groups]).",
-            },
-        }
-    freshness = _freshness("mirror", "groups", scope.get("state", "unavailable"),
-                           str(scope.get("last_success_at") or ""))
-    attention = _freshness_attention(freshness)
-    group_sets = []
-    for category in records:
-        if not isinstance(category, dict):
-            return {
-                "ok": False,
-            "error": "The local Canvas group mirror is malformed.",
-            "state": "malformed",
-            "freshness": _freshness("mirror", "groups", "malformed",
-                                     str(scope.get("last_success_at") or "")),
-                "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry get_roster(include=[groups])."},
-            }
-        category_name = str(category.get("category_name") or "").strip()
-        groups = category.get("groups")
-        if not category_name or not isinstance(groups, list):
-            return {
-                "ok": False,
-                "error": "The local Canvas group mirror is malformed.",
-                "state": "malformed",
-                "freshness": _freshness("mirror", "groups", "malformed",
-                                         str(scope.get("last_success_at") or "")),
-                "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry get_roster(include=[groups])."},
-            }
-        safe_groups = []
-        for group in groups:
-            if not isinstance(group, dict) or not str(group.get("name") or "").strip():
-                return {
-                    "ok": False,
-                    "error": "The local Canvas group mirror is malformed.",
-                    "state": "malformed",
-                    "attention": {"action": "refresh_mirror", "reason": "Refresh the current course mirror, then retry get_roster(include=[groups])."},
-                }
-            safe_groups.append({"name": str(group["name"]).strip()})
-        group_sets.append({"name": category_name, "groups": safe_groups})
-    result = {"ok": True, "course_id": str(course_id), "group_sets": group_sets,
-              "freshness": freshness}
-    if attention:
-        result["attention"] = attention
-    return result
 
 
 def _catalog_assignments(course_id: str, full_descriptions: bool = False) -> dict:
@@ -1617,17 +1538,6 @@ _MIRROR_UNAVAILABLE_ROSTER_ERROR = (
     "Canvas Expert withholds it rather than fetching live from Canvas — call "
     "refresh_mirror for this course, then try again."
 )
-_MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR = (
-    "The local CanvasMirror for this course (roster, assignments, or "
-    "submissions) is stale or missing. Canvas Expert withholds submissions "
-    "rather than fetching live from Canvas — call refresh_mirror for this "
-    "course, then try again."
-)
-_MIRROR_UNAVAILABLE_SNAPSHOT_ERROR = (
-    "The local CanvasMirror for this course isn't fresh enough to serve a "
-    "whole-course snapshot. Canvas Expert withholds it rather than fetching "
-    "live from Canvas — call refresh_mirror for this course, then try again."
-)
 
 
 def get_roster(course_id: str, pseudonym: str | None = None, include: list[str] | None = None) -> dict:
@@ -1646,163 +1556,86 @@ def get_roster(course_id: str, pseudonym: str | None = None, include: list[str] 
         result = _roster_settings(course_id, pseudonym)
         if result.get("settings_digest"): result = {**result, "expected_settings_digest": result["settings_digest"]}
         return result
-    lane, lane_error, activation_state = _activated_evidence_lane(course_id)
-    if activation_state == "repair_required":
-        return {"ok": False, "code": lane_error or "evidence_activation_repair_required",
-                "error": "The CanvasMirror activation checkpoint needs repair."}
-    if activation_state == "active":
-        if lane_error:
-            return {"ok": False, "code": lane_error,
-                    "error": "The activated CanvasMirror evidence index needs repair."}
-        if include:
-            identity_error = _saved_course_gate_check(course_id)
-            if identity_error:
-                return {"ok": False, "error": identity_error}
-            if "groups" in include:
-                err = _course_gate_check(course_id)
-                if err:
-                    return {"ok": False, "error": err}
-            try:
-                from api.mirror.evidence_paths import source_key_for_origin
-                source_key = source_key_for_origin(config.get_canvas_base())
-                projections = {}
-                revisions = set()
-                for name, view in (("sections", "sections"), ("groups", "group_context")):
-                    if name not in include:
-                        continue
-                    page = _read_all_evidence(lane, view, source_key=source_key,
-                                              course_id=str(course_id))
-                    if (page["synchronization"].get("state") not in {"ready", "stale"}
-                            or page["membership"].get("state") != "complete"):
-                        return {"ok": False, "code": "evidence_coverage_incomplete",
-                                "error": f"The activated evidence index has incomplete {name} coverage."}
-                    revisions.add(page["revision"])
-                    projections[name] = page
-                if len(revisions) != 1:
-                    return {"ok": False, "code": "evidence_index_repair_required",
-                            "error": "The activated evidence index changed during this read."}
-                result = {"ok": True, "course_id": str(course_id),
-                          "revision": next(iter(revisions))}
-                if "sections" in projections:
-                    result["sections"] = _tabulate([
-                        {"section_id": str(row["section_id"]),
-                         "section_name": str(row["name"])}
-                        for row in projections["sections"]["records"]], _SECTION_COLUMNS)
-                if "groups" in projections:
-                    categories = {}
-                    for row in projections["groups"]["records"]:
-                        payload = row["payload"]
-                        key, category_name = payload.get("category_key"), payload.get("category_name")
-                        if not key or not category_name:
-                            return {"ok": False, "code": "evidence_coverage_incomplete",
-                                    "error": "The activated evidence index has incomplete group labels."}
-                        category = categories.setdefault(key, {"name": category_name, "groups": []})
-                        if category["name"] != category_name:
-                            return {"ok": False, "code": "evidence_coverage_incomplete",
-                                    "error": "The activated evidence index has conflicting group labels."}
-                        if "group_id" in payload:
-                            if not payload.get("title"):
-                                return {"ok": False, "code": "evidence_coverage_incomplete",
-                                        "error": "The activated evidence index has incomplete group labels."}
-                            category["groups"].append({"name": str(payload["title"])})
-                    result["group_sets"] = sorted(categories.values(), key=lambda row: row["name"])
-                    for category in result["group_sets"]:
-                        category["groups"].sort(key=lambda row: row["name"])
-                freshness = {name: _evidence_freshness(page, name)
-                             for name, page in projections.items()}
-                result["freshness"] = freshness[include[0]] if len(include) == 1 else freshness
-                return final_response_gate(result)
-            except Exception:
-                return {"ok": False, "code": "evidence_index_repair_required",
-                        "error": "The activated CanvasMirror evidence index needs repair."}
-    if include and activation_state != "active":
-        include = list(dict.fromkeys(include))
-        projections = [_roster_sections(course_id) if name == "sections" else _roster_groups(course_id) for name in include]
-        for projection in projections:
-            if not projection.get("ok"): return projection
-        if len(projections) == 1: return projections[0]
-        return {"ok": True, "course_id": course_id,
-                **{key: value for projection in projections for key,value in projection.items() if key not in ("ok", "course_id", "freshness")},
-                "freshness": {name: projection.get("freshness") for name,projection in zip(include,projections)}}
     identity_error = _saved_course_gate_check(course_id)
     if identity_error:
         return {"ok": False, "error": identity_error}
-    err = _course_gate_check(course_id)
-    if err:
-        return {"ok": False, "error": err}
-
-    if activation_state == "active":
-        try:
-            from api.mirror.evidence_paths import source_key_for_origin
-            source_key = source_key_for_origin(config.get_canvas_base())
-            page = _read_all_evidence(lane, "roster", source_key=source_key,
-                                      course_id=str(course_id))
-            sections_page = _read_all_evidence(lane, "sections", source_key=source_key,
-                                               course_id=str(course_id))
-            if (page["synchronization"].get("state") != "ready"
-                    or page["membership"].get("state") != "complete"
-                    or sections_page["synchronization"].get("state") != "ready"
-                    or sections_page["membership"].get("state") != "complete"):
-                return {"ok": False, "code": "evidence_coverage_incomplete",
-                        "error": "The activated evidence index has incomplete roster or section coverage."}
-            section_names = {str(row["section_id"]): row["name"]
-                             for row in sections_page["records"]}
-            if include == ["sections"]:
-                section_rows = [{"section_id": str(row["section_id"]),
-                                 "section_name": str(row["name"])}
-                                for row in sections_page["records"]]
-                freshness = _evidence_freshness(sections_page, "sections")
-                return final_response_gate({"ok": True, "course_id": str(course_id),
-                        "sections": _tabulate(section_rows, _SECTION_COLUMNS),
-                        "freshness": freshness, "revision": sections_page["revision"]})
-            rows = []
-            for row in page["records"]:
-                section_ids = row["payload"].get("section_ids") or []
-                if any(str(section_id) not in section_names for section_id in section_ids):
-                    return {"ok": False, "code": "evidence_coverage_incomplete",
-                            "error": "The activated evidence index is missing a referenced section label."}
-                rows.append({"pseudonym": row["pseudonym"],
-                             "section_names": [section_names[str(section_id)] for section_id in section_ids]})
-            freshness = _evidence_freshness(page, "roster")
-            result = {"ok": True, "course_id": str(course_id),
-                      "roster": _tabulate(rows, _ROSTER_COLUMNS),
-                      "source": "mirror", "synced_at": freshness.get("synced_at") or "",
-                      "freshness": freshness, "revision": page["revision"],
-                      "membership": page["membership"]}
+    if not include or "groups" in include:
+        err = _course_gate_check(course_id)
+        if err:
+            return {"ok": False, "error": err}
+    service, source_key, refusal = _evidence_reader()
+    if refusal:
+        return refusal
+    try:
+        if include:
+            projections = {}
+            revisions = set()
+            for name, view in (("sections", "sections"), ("groups", "group_context")):
+                if name not in include:
+                    continue
+                page = _read_all_evidence(service, view, source_key=source_key,
+                                          course_id=str(course_id))
+                revisions.add(page["revision"])
+                projections[name] = page
+            if len(revisions) != 1:
+                return {"ok": False, "code": "evidence_revision_changed",
+                        "error": "CanvasMirror updated during this read. Call the same tool again."}
+            result = {"ok": True, "course_id": str(course_id), "revision": next(iter(revisions))}
+            if "sections" in projections:
+                result["sections"] = _tabulate([
+                    {"section_id": str(row["section_id"]), "section_name": str(row["name"])}
+                    for row in projections["sections"]["records"]], _SECTION_COLUMNS)
+            if "groups" in projections:
+                categories = {}
+                for row in projections["groups"]["records"]:
+                    payload = row["payload"]
+                    key, category_name = payload.get("category_key"), payload.get("category_name")
+                    if not key or not category_name:
+                        continue
+                    category = categories.setdefault(key, {"name": category_name, "groups": []})
+                    if "group_id" in payload and payload.get("title"):
+                        category["groups"].append({"name": str(payload["title"])})
+                result["group_sets"] = sorted(categories.values(), key=lambda row: row["name"])
+                for category in result["group_sets"]:
+                    category["groups"].sort(key=lambda row: row["name"])
+            freshness = {name: _evidence_freshness(page, name) for name, page in projections.items()}
+            result["freshness"] = freshness[include[0]] if len(include) == 1 else freshness
             return final_response_gate(result)
-        except Exception:
-            return {"ok": False, "code": "evidence_index_repair_required",
-                    "error": "The activated CanvasMirror evidence index needs repair."}
-
-    vault, vault_err = _open_vault()
-    if vault_err:
-        return {"ok": False, "error": vault_err}
-
-    mirror_doc = _mirror_roster_doc(course_id)
-    if mirror_doc is None:
-        return {"ok": False, "error": _MIRROR_UNAVAILABLE_ROSTER_ERROR,
-                "freshness": _freshness("mirror", "roster", "unavailable", "")}
-
-    freshness = _freshness("mirror", "roster", mirror_doc.get("state", "unavailable"),
-                           mirror_doc.get("last_success_at", ""))
-    # Age is metadata, not a gate: the projection loaded and is structurally
-    # sound, so it serves with its freshness labeled. The attention hint stays
-    # attached but never blocks (brief decision #4).
-    attention = _freshness_attention(freshness)
-
-    with _vault_transaction(vault):
-        users = mirror_doc["students"]
-        roster_service.upsert_roster(vault, users)
-        roster = pseudonym_boundary.pseudonymize_roster(vault, users, mirror_doc["sections"])
-        result = pseudonym_boundary.gate(
-            {"roster": roster, "source": "mirror",
-             "synced_at": mirror_doc["last_success_at"],
-             "freshness": freshness}, vault)
-    if result.get("ok"):
-        result["roster"] = _tabulate(result["roster"], _ROSTER_COLUMNS)
-        if attention:
-            result["attention"] = attention
-    return result
+        page = _read_all_evidence(service, "roster", source_key=source_key, course_id=str(course_id))
+        if (page["membership"].get("state") in (None, "unknown")) and not page["records"]:
+            return {"ok": False, "code": "evidence_not_acquired",
+                    "error": "No roster evidence has been acquired for this course. Call refresh_mirror(course_id), then retry."}
+        sections_page = _read_all_evidence(service, "sections", source_key=source_key,
+                                           course_id=str(course_id))
+        if page["revision"] != sections_page["revision"]:
+            return {"ok": False, "code": "evidence_revision_changed",
+                    "error": "CanvasMirror updated during this read. Call the same tool again."}
+        section_names = {str(row["section_id"]): row["name"] for row in sections_page["records"]}
+        rows = []
+        label_missing = False
+        for row in page["records"]:
+            section_ids = row["payload"].get("section_ids") or []
+            names = []
+            for section_id in section_ids:
+                name = section_names.get(str(section_id))
+                if name is None:
+                    label_missing = True
+                    name = "Unknown section"
+                names.append(name)
+            rows.append({"pseudonym": row["pseudonym"], "section_names": names})
+        freshness = _evidence_freshness(page, "roster")
+        warnings = _evidence_warnings(page)
+        if label_missing:
+            warnings.append("section_label_missing")
+        result = {"ok": True, "course_id": str(course_id),
+                  "roster": _tabulate(rows, _ROSTER_COLUMNS),
+                  "source": "mirror", "synced_at": freshness.get("synced_at") or "",
+                  "freshness": freshness, "revision": page["revision"],
+                  "coverage": _evidence_coverage(page), "warnings": warnings}
+        return final_response_gate(result)
+    except Exception:
+        return {"ok": False, "code": "evidence_index_repair_required",
+                "error": "The local CanvasMirror evidence index needs repair."}
 
 
 def get_assignment_evidence(course_id: str, assignment_id: str, view: str = "attachments",
@@ -1825,32 +1658,22 @@ def get_assignment_evidence(course_id: str, assignment_id: str, view: str = "att
     err = _course_gate_check(course_id)
     if err:
         return {"ok": False, "error": err}
+    service, source_key, refusal = _evidence_reader()
+    if refusal:
+        return refusal
     try:
-        from api.mirror.evidence_paths import local_source_root, source_key_for_origin
-        from api.mirror.evidence_activation import read_activation
-        from api.mirror.evidence_queries import EvidenceQueryService
-        root = workspace.workspace_root()
-        if root is None:
-            return {"ok": False, "error": "The workspace is not configured."}
-        source_key = source_key_for_origin(config.get_canvas_base())
-        activation = read_activation(source_key=source_key, workspace_root=root)
-        index_path = local_source_root(source_key, root) / "query.sqlite3"
-        if not index_path.exists():
-            return {"ok": False, "code": "evidence_read_repair_required",
-                    "error": _MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR,
-                    "activation_state": activation.state}
-        service = EvidenceQueryService(index_path)
         result = service.read_assignment_evidence(
             view, source_key=source_key, course_id=str(course_id),
             assignment_id=str(assignment_id), limit=limit, offset=offset)
     except Exception:
-        return {"ok": False, "code": "evidence_read_repair_required",
-                "error": _MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR}
+        return {"ok": False, "code": "evidence_index_repair_required",
+                "error": "The local CanvasMirror evidence index needs repair."}
     payload = {"ok": True, "view": view, "assignment_id": str(assignment_id),
                "revision": result["revision"], "records": result["records"],
                "next_offset": result["next_offset"], "freshness": result["freshness"],
                "membership": result["membership"], "evidence": result["evidence"],
-               "synchronization": result["synchronization"]}
+               "synchronization": result["synchronization"],
+               "coverage": _evidence_coverage(result), "warnings": _evidence_warnings(result)}
     return final_response_gate(payload)
 
 
@@ -1868,82 +1691,69 @@ def get_submissions(course_id: str, assignment_id: str,
     never included. Historical rows remain; ``current_enrollment`` marks
     membership in this bundle's mirror roster. Gated by the outbound safety scan."""
     if history:
-        lane, lane_error, activation_state = _activated_evidence_lane(course_id)
-        if activation_state == "repair_required":
-            return {"ok": False, "code": lane_error or "evidence_activation_repair_required",
-                    "error": "The CanvasMirror activation checkpoint needs repair."}
-        if activation_state == "active":
-            identity_error = _saved_course_gate_check(course_id)
-            if identity_error:
-                return {"ok": False, "error": identity_error}
-            err = _course_gate_check(course_id)
-            if err:
-                return {"ok": False, "error": err}
-            if lane_error:
-                return {"ok": False, "code": lane_error, "error": "The activated evidence index needs repair."}
-            history_limit = 50 if limit is None else limit
-            history_offset = 0 if offset is None else offset
-            text_bound = 12000 if max_text_chars is None else max_text_chars
-            if (not isinstance(history_limit, int) or isinstance(history_limit, bool) or not 1 <= history_limit <= 100
-                    or not isinstance(history_offset, int) or isinstance(history_offset, bool) or history_offset < 0
-                    or not isinstance(text_bound, int) or isinstance(text_bound, bool) or not 0 <= text_bound <= 20000):
-                return {"ok": False, "error": "Invalid pagination or text bounds."}
-            wanted = [value.strip() for value in str(pseudonyms or "").split(",") if value.strip()]
-            try:
-                from api.mirror.evidence_paths import source_key_for_origin
-                page = lane.read("attempt_history", source_key=source_key_for_origin(config.get_canvas_base()),
-                    course_id=str(course_id), assignment_id=str(assignment_id),
-                    pseudonyms=wanted or None, limit=history_limit, offset=history_offset)
-                if (page["synchronization"].get("state") != "ready"
-                        or page["membership"].get("state") != "complete"):
-                    return {"ok": False, "code": "evidence_coverage_incomplete",
-                            "error": "The activated evidence index has incomplete attempt history."}
-                attachment_page = lane.read_attempt_attachments(
-                    source_key=source_key_for_origin(config.get_canvas_base()),
-                    course_id=str(course_id), assignment_id=str(assignment_id),
-                    attempts=[(record["pseudonym"], record["attempt"])
-                              for record in page["records"] if type(record["attempt"]) is int],
-                    revision=page["revision"], max_files=200)
-                files_by_attempt = {}
-                for file_number, file in enumerate(attachment_page["records"], start=1):
-                    key = (file["pseudonym"], file["attempt"])
-                    files_by_attempt.setdefault(key, []).append({
-                        "label": f"File {file_number}",
-                        "status": "captured", "attachment_key": file["attachment_key"],
-                        "original_digest": file["original_digest"],
-                        "media_type": file["media_type"], "size": file["size"],
-                    })
-                attempts = []
-                file_budget = 200
-                files_truncated = attachment_page["truncated"]
-                for record in page["records"]:
-                    payload = record["payload"]
-                    body = str(payload.get("body") or "")
-                    matching_files = files_by_attempt.get((record["pseudonym"], record["attempt"]), [])
-                    files = matching_files[:file_budget]
-                    file_budget -= len(files)
-                    files_truncated = files_truncated or len(files) < len(matching_files)
-                    attempts.append({"pseudonym": record["pseudonym"], "attempt": record["attempt"],
-                        "submitted_at": record["submitted_at"],
-                        "text": _truncate_text(body, text_bound) if include_text else None,
-                        "text_status": ("omitted" if not include_text else "included" if body else "no_body"), "files": files,
-                        "observation_digest": record["fact_ref"],
-                        "evidence_consistency": "observed_text"})
-                return final_response_gate({"source": "mirror_evidence", "coverage": page["membership"]["state"],
-                    "history_note": "Indexed pseudonymized attempt evidence; current membership and acquisition state are labeled separately.",
-                    "revision": page["revision"], "total": None, "offset": history_offset,
-                    "limit": history_limit, "next_offset": page["next_offset"], "attempts": attempts,
-                    "freshness": page["freshness"], "synchronization": page["synchronization"],
-                    "files_truncated": files_truncated})
-            except Exception:
-                return {"ok": False, "code": "evidence_index_repair_required",
-                        "error": "The activated evidence index needs repair."}
-        if activation_state == "active":
-            return {"ok": False, "code": lane_error or "evidence_index_repair_required",
-                    "error": "The activated evidence index needs repair."}
-        return _submission_history(course_id, assignment_id, pseudonyms, include_text,
-                                   12000 if max_text_chars is None else max_text_chars,
-                                   0 if offset is None else offset, 50 if limit is None else limit)
+        identity_error = _saved_course_gate_check(course_id)
+        if identity_error:
+            return {"ok": False, "error": identity_error}
+        err = _course_gate_check(course_id)
+        if err:
+            return {"ok": False, "error": err}
+        history_limit = 50 if limit is None else limit
+        history_offset = 0 if offset is None else offset
+        text_bound = 12000 if max_text_chars is None else max_text_chars
+        if (not isinstance(history_limit, int) or isinstance(history_limit, bool) or not 1 <= history_limit <= 100
+                or not isinstance(history_offset, int) or isinstance(history_offset, bool) or history_offset < 0
+                or not isinstance(text_bound, int) or isinstance(text_bound, bool) or not 0 <= text_bound <= 20000):
+            return {"ok": False, "error": "Invalid pagination or text bounds."}
+        service, source_key, refusal = _evidence_reader()
+        if refusal:
+            return refusal
+        wanted = [value.strip() for value in str(pseudonyms or "").split(",") if value.strip()]
+        try:
+            page = service.read("attempt_history", source_key=source_key,
+                course_id=str(course_id), assignment_id=str(assignment_id),
+                pseudonyms=wanted or None, limit=history_limit, offset=history_offset)
+            if (page["membership"].get("state") in (None, "unknown")) and not page["records"]:
+                return {"ok": False, "code": "evidence_not_acquired",
+                        "error": "No attempt history has been acquired for this assignment. Call refresh_mirror(course_id), then retry."}
+            attachment_page = service.read_attempt_attachments(
+                source_key=source_key, course_id=str(course_id), assignment_id=str(assignment_id),
+                attempts=[(record["pseudonym"], record["attempt"])
+                          for record in page["records"] if type(record["attempt"]) is int],
+                revision=page["revision"], max_files=200)
+            files_by_attempt = {}
+            for file_number, file in enumerate(attachment_page["records"], start=1):
+                key = (file["pseudonym"], file["attempt"])
+                files_by_attempt.setdefault(key, []).append({
+                    "label": f"File {file_number}",
+                    "status": "captured", "attachment_key": file["attachment_key"],
+                    "original_digest": file["original_digest"],
+                    "media_type": file["media_type"], "size": file["size"],
+                })
+            attempts = []
+            file_budget = 200
+            files_truncated = attachment_page["truncated"]
+            for record in page["records"]:
+                payload = record["payload"]
+                body = str(payload.get("body") or "")
+                matching_files = files_by_attempt.get((record["pseudonym"], record["attempt"]), [])
+                files = matching_files[:file_budget]
+                file_budget -= len(files)
+                files_truncated = files_truncated or len(files) < len(matching_files)
+                attempts.append({"pseudonym": record["pseudonym"], "attempt": record["attempt"],
+                    "submitted_at": record["submitted_at"],
+                    "text": _truncate_text(body, text_bound) if include_text else None,
+                    "text_status": ("omitted" if not include_text else "included" if body else "no_body"), "files": files,
+                    "observation_digest": record["fact_ref"],
+                    "evidence_consistency": "observed_text"})
+            return final_response_gate({"source": "mirror_evidence", "coverage": _evidence_coverage(page),
+                "history_note": "Indexed pseudonymized attempt evidence; current membership and acquisition state are labeled separately.",
+                "revision": page["revision"], "total": None, "offset": history_offset,
+                "limit": history_limit, "next_offset": page["next_offset"], "attempts": attempts,
+                "freshness": page["freshness"], "synchronization": page["synchronization"],
+                "warnings": _evidence_warnings(page), "files_truncated": files_truncated})
+        except Exception:
+            return {"ok": False, "code": "evidence_index_repair_required",
+                    "error": "The local CanvasMirror evidence index needs repair."}
     if offset is not None or limit is not None: return _inapplicable("offset and limit require history=true.")
     max_text_chars = _DEFAULT_MAX_TEXT_CHARS if max_text_chars is None else max_text_chars
     identity_error = _saved_course_gate_check(course_id)
@@ -1952,324 +1762,56 @@ def get_submissions(course_id: str, assignment_id: str,
     err = _course_gate_check(course_id)
     if err:
         return {"ok": False, "error": err}
-
-    lane, lane_error, activation_state = _activated_evidence_lane(course_id)
-    if activation_state == "repair_required":
-        return {"ok": False, "code": lane_error or "evidence_activation_repair_required",
-                "error": "The CanvasMirror activation checkpoint needs repair."}
-    if activation_state == "active":
-        if lane_error:
-            return {"ok": False, "code": lane_error, "error": "The activated evidence index needs repair."}
-        if max_text_chars is not None and (not isinstance(max_text_chars, int)
-                or isinstance(max_text_chars, bool) or max_text_chars < 0):
-            return {"ok": False, "error": "max_text_chars must be a non-negative integer."}
-        try:
-            from api.mirror.evidence_paths import source_key_for_origin
-            source_key = source_key_for_origin(config.get_canvas_base())
-            assignment_page = lane.read("assignment_context", source_key=source_key,
-                course_id=str(course_id), assignment_id=str(assignment_id))
-            assignment = assignment_page["records"][0]["payload"] if assignment_page["records"] else None
-            if assignment is None:
-                return {"ok": False, "code": "evidence_scope_unavailable",
-                        "error": "Assignment context is missing from the activated evidence index."}
-            page = _read_all_evidence(lane, "current_submissions", source_key=source_key,
-                course_id=str(course_id), assignment_id=str(assignment_id))
-            roster = _read_all_evidence(lane, "roster", source_key=source_key,
-                                        course_id=str(course_id))
-            if any(item[key].get("state") != expected for item, key, expected in (
-                (assignment_page, "synchronization", "ready"),
-                (assignment_page, "membership", "complete"),
-                (page, "synchronization", "ready"), (page, "membership", "complete"),
-                (roster, "synchronization", "ready"), (roster, "membership", "complete"))):
-                return {"ok": False, "code": "evidence_coverage_incomplete",
-                        "error": "The activated evidence index has incomplete submission coverage."}
-            current_people = {row["pseudonym"] for row in roster["records"]}
-            wanted = {value.strip().casefold() for value in str(pseudonyms or "").split(",") if value.strip()}
-            rows = []
-            for record in page["records"]:
-                payload = record["payload"]
-                person = record["pseudonym"]
-                if wanted and person.casefold() not in wanted:
-                    continue
-                row = {"pseudonym": person, "workflow_state": payload.get("workflow_state", ""),
-                    "submitted_at": payload.get("submitted_at"), "late": bool(payload.get("late")),
-                    "missing": bool(payload.get("missing")), "excused": bool(payload.get("excused")),
-                    "score": payload.get("score"), "grade": payload.get("grade"),
-                    "text": str(payload.get("body") or ""),
-                    "current_enrollment": person in current_people}
-                if include_text:
-                    row["text"] = _truncate_text(row["text"], max_text_chars)
-                else:
-                    row.pop("text", None)
-                rows.append(row)
-            freshness = _evidence_freshness(page, "submissions")
-            columns = (_SUBMISSION_COLUMNS if include_text else tuple(c for c in _SUBMISSION_COLUMNS if c != "text"))
-            return final_response_gate({"ok": True, "assignment": {"id": assignment.get("assignment_id"),
-                "title": assignment.get("title", ""), "points_possible": assignment.get("points_possible"),
-                "due_at": assignment.get("due_at", "")},
-                "submissions": _tabulate(rows, columns), "source": "mirror",
-                "synced_at": freshness.get("synced_at", ""), "freshness": freshness,
-                "revision": page["revision"], "membership": page["membership"],
-                "synchronization": page["synchronization"]})
-        except Exception:
-            return {"ok": False, "code": "evidence_index_repair_required",
-                    "error": "The activated evidence index needs repair."}
-
-    vault, vault_err = _open_vault()
-    if vault_err:
-        return {"ok": False, "error": vault_err}
-
-    bundle, bundle_err = _mirror_submission_bundle(course_id, assignment_id)
-    if bundle_err:
-        return {"ok": False, "error": bundle_err,
-                "freshness": _freshness("mirror", "submissions", "unavailable", "")}
-    if bundle is None:
-        return {"ok": False, "error": _MIRROR_UNAVAILABLE_SUBMISSIONS_ERROR,
-                "freshness": _freshness("mirror", "submissions", "unavailable", "")}
-
-    freshness = _freshness("mirror", "submissions", bundle.get("state", "unavailable"),
-                           bundle.get("synced_at", ""))
-    # Age is metadata, not a gate: the bundle loaded and is structurally
-    # sound, so it serves with its freshness labeled. The attention hint stays
-    # attached but never blocks (brief decision #4).
-    attention = _freshness_attention(freshness)
-
-    # Sync the full roster first so the scrub map covers every enrolled
-    # student, not just the ones who submitted this assignment.
-    with _vault_transaction(vault):
-        roster_service.upsert_roster(vault, bundle["roster"])
-        assignment, subs = bundle["assignment"], bundle["rows"]
-
-        rows = pseudonym_boundary.pseudonymize_submission_rows(vault, subs)
-        current_pseudonyms = {
-            vault.get_or_assign(student["id"])
-            for student in bundle["roster"] if student.get("id") is not None
-        }
-        for row in rows:
-            row["current_enrollment"] = row["pseudonym"] in current_pseudonyms
-        wanted = {p.strip().casefold() for p in pseudonyms.split(",") if p.strip()}
-        if wanted:
-            rows = [r for r in rows if r["pseudonym"].casefold() in wanted]
-        # Trim/drop text BEFORE the gate so the scan covers exactly the bytes
-        # that leave the machine.
-        for row in rows:
+    if max_text_chars is not None and (not isinstance(max_text_chars, int)
+            or isinstance(max_text_chars, bool) or max_text_chars < 0):
+        return {"ok": False, "error": "max_text_chars must be a non-negative integer."}
+    service, source_key, refusal = _evidence_reader()
+    if refusal:
+        return refusal
+    try:
+        assignment_page = service.read("assignment_context", source_key=source_key,
+            course_id=str(course_id), assignment_id=str(assignment_id))
+        assignment = assignment_page["records"][0]["payload"] if assignment_page["records"] else None
+        page = _read_all_evidence(service, "current_submissions", source_key=source_key,
+            course_id=str(course_id), assignment_id=str(assignment_id))
+        if (page["membership"].get("state") in (None, "unknown")) and not page["records"]:
+            return {"ok": False, "code": "evidence_not_acquired",
+                    "error": "No submissions have been acquired for this assignment. Call refresh_mirror(course_id), then retry."}
+        roster = _read_all_evidence(service, "roster", source_key=source_key,
+                                    course_id=str(course_id))
+        current_people = {row["pseudonym"] for row in roster["records"]}
+        wanted = {value.strip().casefold() for value in str(pseudonyms or "").split(",") if value.strip()}
+        rows = []
+        for record in page["records"]:
+            payload = record["payload"]
+            person = record["pseudonym"]
+            if wanted and person.casefold() not in wanted:
+                continue
+            row = {"pseudonym": person, "workflow_state": payload.get("workflow_state", ""),
+                "submitted_at": payload.get("submitted_at"), "late": bool(payload.get("late")),
+                "missing": bool(payload.get("missing")), "excused": bool(payload.get("excused")),
+                "score": payload.get("score"), "grade": payload.get("grade"),
+                "text": str(payload.get("body") or ""),
+                "current_enrollment": person in current_people}
             if include_text:
                 row["text"] = _truncate_text(row["text"], max_text_chars)
             else:
                 row.pop("text", None)
-
-        payload = {
-            "assignment": {
-                "id": assignment.get("id"),
-                "title": assignment.get("name", ""),
-                "points_possible": assignment.get("points_possible"),
-                "due_at": assignment.get("due_at", ""),
-            },
-            "submissions": rows,
-            "source": "mirror",
-            "synced_at": bundle["synced_at"],
-            "freshness": freshness,
-        }
-        result = pseudonym_boundary.gate(payload, vault)
-    if result.get("ok"):
-        columns = (_SUBMISSION_COLUMNS if include_text
-                   else tuple(c for c in _SUBMISSION_COLUMNS if c != "text"))
-        result["submissions"] = _tabulate(result["submissions"], columns)
-        if attention:
-            result["attention"] = attention
-    return result
-
-
-def _submission_history(course_id: str, assignment_id: str,
-                          pseudonyms: str = "", include_text: bool = True,
-                          max_text_chars: int = 12000,
-                          offset: int = 0, limit: int = 50) -> dict:
-    """Read bounded, retained assignment attempts from private local history.
-
-    This is historical observed evidence. It reads no Canvas data and makes no
-    claim about current membership or freshness.
-    """
-    identity_error = _saved_course_gate_check(course_id)
-    if identity_error:
-        return {"ok": False, "error": identity_error}
-    if (not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100
-            or not isinstance(offset, int) or isinstance(offset, bool) or offset < 0
-            or not isinstance(max_text_chars, int) or isinstance(max_text_chars, bool)
-            or not 1 <= max_text_chars <= 20000):
-        return {"ok": False, "error": "Invalid pagination or text bounds."}
-    vault, vault_err = _open_vault()
-    if vault_err:
-        return {"ok": False, "error": vault_err}
-    try:
-        manifest = read_service.private_submission_history(
-            str(course_id), str(assignment_id), root=workspace.workspace_root())
+            rows.append(row)
+        freshness = _evidence_freshness(page, "submissions")
+        columns = (_SUBMISSION_COLUMNS if include_text else tuple(c for c in _SUBMISSION_COLUMNS if c != "text"))
+        warnings = _evidence_warnings(page, assignment_context_missing=assignment is None)
+        return final_response_gate({"ok": True, "assignment": {"id": str(assignment_id),
+            "title": (assignment or {}).get("title", ""),
+            "points_possible": (assignment or {}).get("points_possible"),
+            "due_at": (assignment or {}).get("due_at", "")},
+            "submissions": _tabulate(rows, columns), "source": "mirror",
+            "synced_at": freshness.get("synced_at", ""), "freshness": freshness,
+            "revision": page["revision"], "coverage": _evidence_coverage(page),
+            "warnings": warnings})
     except Exception:
-        return {"ok": False, "error": "Retained submission history is unavailable or invalid."}
-
-    replacement_map = feedback_scrub.build_replacement_map(vault.entries(), set())
-    wanted = {value.strip().casefold() for value in str(pseudonyms or "").split(",")
-              if value.strip()}
-    selected = []
-    for attempt in manifest.get("attempts", {}).values():
-        person = str(attempt.get("pseudonym") or "")
-        if wanted and person.casefold() not in wanted:
-            continue
-        for observation in attempt.get("observations", []):
-            selected.append((person, int(attempt.get("attempt") or 0),
-                             str(attempt.get("submitted_at") or ""),
-                             str(observation.get("digest") or ""), attempt, observation))
-    selected.sort(key=lambda row: (row[0].casefold(), row[1], row[2], row[3]))
-    total = len(selected)
-    page = selected[offset:offset + limit]
-    next_offset = offset + len(page) if offset + len(page) < total else None
-    text_budget = 100000
-    attempts = []
-    page_end_reason = ""
-    item_chars = 0
-
-    def bounded_text(value):
-        # Each piece is bounded by max_text_chars only. The aggregate budget
-        # ends the page between attempts; it never blanks an attempt's text.
-        nonlocal item_chars
-        safe = feedback_scrub.scrub_text(str(value or ""), replacement_map)
-        truncated = len(safe) > max_text_chars
-        result = safe[:max_text_chars]
-        item_chars += len(result)
-        return result, truncated
-
-    from api.nq_report import html_to_text
-    from api.mirror.attempt_text import digest as attempt_text_digest
-    from api.powergrader import student_attachments
-    from api.mirror import submission_history as history_store
-    import io
-    import zipfile
-    file_budget = 200
-    omitted_file_count = 0
-    for person, number, submitted_at, digest, attempt, observation in page:
-        item_chars = 0
-        file_budget_before = file_budget
-        omitted_before = omitted_file_count
-        item = {
-            "pseudonym": person, "attempt": number,
-            "submitted_at": submitted_at,
-            "captured_at": str(observation.get("captured_at") or ""),
-            "observation_digest": digest,
-            "conflict": bool(observation.get("conflict") or attempt.get("conflict")),
-            "text_provenance": str(observation.get("body_provenance") or "canvas_attempt"),
-            "files": [],
-        }
-        stored_files = {str(entry.get("key")): entry for entry in attempt.get("files", [])}
-        digest_files = [{key: stored_files[file_key].get(key)
-                         for key in ("key", "filename", "size", "content_type")}
-                        for file_key in observation.get("file_keys") or []
-                        if file_key in stored_files]
-        expected_digest = history_store._json_digest({
-            "body": observation.get("body") or "", "files": digest_files})
-        expected_text_digest = attempt_text_digest(observation.get("body") or "")
-        stored_text_digest = str(observation.get("text_digest") or "")
-        item["normalized_text_digest"] = stored_text_digest or None
-        item["evidence_consistency"] = (
-            "digest_mismatch" if expected_digest != digest else
-            "text_digest_mismatch" if stored_text_digest and stored_text_digest != expected_text_digest else
-            "text_digest_missing" if not stored_text_digest else
-            "conflicting" if item["conflict"] else
-            "missing_text" if not str(observation.get("body") or "").strip() else "consistent")
-        body_text = html_to_text(observation.get("body") or "")
-        if include_text:
-            item["text"], item["text_truncated"] = bounded_text(body_text)
-            item["text_status"] = ("no_body" if not body_text.strip()
-                                   else "truncated" if item["text_truncated"]
-                                   else "included")
-        else:
-            item["text_status"] = "omitted"
-        observation_keys = set(observation.get("file_keys") or [])
-        related_files = [entry for entry in attempt.get("files", [])
-                         if entry.get("key") in observation_keys]
-        for file_entry in related_files:
-            if file_budget <= 0:
-                omitted_file_count += 1
-                continue
-            file_budget -= 1
-            file_index = 200 - file_budget
-            filename = str(file_entry.get("filename") or "")
-            extension = os.path.splitext(filename)[1].lower()
-            approved = extension in student_attachments.AI_TEXT_EXTS
-            file_info = {
-                "label": f"File {file_index}",
-                "type": "docx" if extension == ".docx" else ("text" if approved else "local_only"),
-                "status": str(file_entry.get("status") or "unavailable"),
-                "artifact_ref": str(file_entry.get("artifact_ref") or "") or None,
-            }
-            if include_text and approved and file_info["status"] == "captured":
-                if not attempts and text_budget - item_chars <= 0:
-                    # Only a page's first attempt can overrun the aggregate;
-                    # later attempts that do not fit end the page instead.
-                    file_info["status"] = "text_budget_exhausted"
-                else:
-                    path = history_store.file_path(
-                        course_id, assignment_id, file_info["artifact_ref"],
-                        root=workspace.workspace_root())
-                    try:
-                        if not path or os.path.getsize(workspace.extended_path(path)) > 5 * 1024 * 1024:
-                            file_info["status"] = "extraction_limit"
-                        else:
-                            with open(workspace.extended_path(path), "rb") as handle:
-                                data = handle.read(5 * 1024 * 1024 + 1)
-                            if len(data) > 5 * 1024 * 1024:
-                                file_info["status"] = "extraction_limit"
-                            elif extension == ".docx":
-                                with zipfile.ZipFile(io.BytesIO(data)) as zipped:
-                                    members = zipped.infolist()
-                                    if len(members) > 10000 or sum(x.file_size for x in members) > 100 * 1024 * 1024:
-                                        file_info["status"] = "extraction_limit"
-                                    else:
-                                        routed = student_attachments.route_bytes(
-                                            filename, data, max_ai_chars=100000)
-                                        if routed.get("extraction_status") != "extracted":
-                                            file_info["status"] = "extraction_failed"
-                                        else:
-                                            file_info["text"], file_info["text_truncated"] = bounded_text(
-                                                routed.get("text") or "")
-                            else:
-                                routed = student_attachments.route_bytes(
-                                    filename, data, max_ai_chars=100000)
-                                if routed.get("extraction_status") != "extracted":
-                                    file_info["status"] = "extraction_failed"
-                                else:
-                                    file_info["text"], file_info["text_truncated"] = bounded_text(
-                                        routed.get("text") or "")
-                    except Exception:
-                        file_info["status"] = "extraction_failed"
-            item["files"].append(file_info)
-        if item_chars > text_budget and attempts:
-            file_budget = file_budget_before
-            omitted_file_count = omitted_before
-            page_end_reason = "text_budget"
-            break
-        text_budget -= item_chars
-        if item.get("text_status") == "no_body":
-            item["text_note"] = (
-                "No typed body; text may be in files."
-                if any("text" in entry for entry in item["files"])
-                else "No typed text was observed for this observation.")
-        attempts.append(item)
-    if page_end_reason:
-        next_offset = offset + len(attempts)
-
-    payload = {
-        "source": "retained_history", "coverage": "observed_only",
-        "history_note": "Historical evidence only; current Canvas freshness and enrollment are unknown.",
-        "revision": int(manifest.get("revision") or 0),
-        "manifest_digest": hashlib.sha256(json.dumps(
-            manifest, ensure_ascii=False, sort_keys=True,
-            separators=(",", ":")).encode("utf-8")).hexdigest(),
-        "total": total, "offset": offset, "limit": limit,
-        "next_offset": next_offset, "attempts": attempts,
-        "omitted_file_count": omitted_file_count,
-    }
-    if page_end_reason:
-        payload["page_end_reason"] = page_end_reason
-    return pseudonym_boundary.gate(payload, vault)
+        return {"ok": False, "code": "evidence_index_repair_required",
+                "error": "The local CanvasMirror evidence index needs repair."}
 
 
 # A student's writing history has no session lookback of its own to borrow, and
@@ -2297,138 +1839,80 @@ def get_gradebook_snapshot(course_id: str) -> dict:
     if err:
         return {"ok": False, "error": err}
 
-    lane, lane_error, activation_state = _activated_evidence_lane(course_id)
-    if activation_state == "repair_required":
-        return {"ok": False, "code": lane_error or "evidence_activation_repair_required",
-                "error": "The CanvasMirror activation checkpoint needs repair."}
-    if activation_state == "active":
-        if lane_error:
-            return {"ok": False, "code": lane_error, "error": "The activated evidence index needs repair."}
-        try:
-            from api.mirror.evidence_paths import source_key_for_origin
-            source_key = source_key_for_origin(config.get_canvas_base())
-            roster_page = _read_all_evidence(lane, "roster", source_key=source_key,
-                                             course_id=str(course_id))
-            assignment_page = _read_all_evidence(lane, "assignment_context", source_key=source_key,
-                                                  course_id=str(course_id))
-            if (roster_page["synchronization"].get("state") != "ready"
-                    or roster_page["membership"].get("state") != "complete"
-                    or assignment_page["synchronization"].get("state") != "ready"
-                    or assignment_page["membership"].get("state") != "complete"):
-                return {"ok": False, "code": "evidence_coverage_incomplete",
-                        "error": "The activated evidence index has incomplete gradebook coverage."}
-            assignments = []
-            submissions = []
-            submission_pages = []
-            for row in assignment_page["records"]:
-                assignment = row["payload"]
-                assignment_id = str(assignment["assignment_id"])
-                assignments.append({"id": assignment_id, "name": assignment.get("title", ""),
-                    "due_at": assignment.get("due_at"), "points_possible": assignment.get("points_possible"),
-                    "published": assignment.get("published", True)})
-                page = _read_all_evidence(lane, "current_submissions", source_key=source_key,
-                    course_id=str(course_id), assignment_id=assignment_id)
-                submission_pages.append(page)
-                if (page["synchronization"].get("state") != "ready"
-                        or page["membership"].get("state") != "complete"):
-                    return {"ok": False, "code": "evidence_coverage_incomplete",
-                            "error": "The activated evidence index has incomplete submission coverage."}
-                for record in page["records"]:
-                    value = record["payload"]
-                    submissions.append({"assignment_id": assignment_id,
-                        "user_id": record["pseudonym"], "workflow_state": value.get("workflow_state"),
-                        "submitted_at": value.get("submitted_at"), "excused": value.get("excused"),
-                        "missing": value.get("missing"), "late": value.get("late"),
-                        "score": value.get("score")})
-            students = [{"id": row["pseudonym"], "name": row["pseudonym"]}
-                        for row in roster_page["records"]]
-            snapshot = gradebook_snapshot.build_snapshot(students, assignments, submissions,
-                family_links=config.list_sis_grade_bridges(str(course_id)))
-            for row in snapshot["assignments"]:
-                row["title"] = row.pop("name", "")
-                row.pop("html_url", None)
-                row["has_submission"] = row.pop("submitted")
-                row["has_grade"] = row.pop("graded")
-            for row in snapshot["students"]:
-                row["pseudonym"] = row.pop("name", "")
-                row.pop("user_id", None)
-            stamps = [page["freshness"].get("last_success_at") for page in submission_pages
-                      if page["freshness"].get("last_success_at")]
-            stamps.extend(page["freshness"].get("last_success_at") for page in (roster_page, assignment_page)
-                          if page["freshness"].get("last_success_at"))
-            synced_at = min(stamps, default="")
-            all_pages = [roster_page, assignment_page, *submission_pages]
-            freshness_state = ("current" if all(
-                page["synchronization"].get("state") == "ready"
-                and page["membership"].get("state") == "complete"
-                for page in all_pages) else "stale")
-            freshness = _freshness("mirror", "gradebook_snapshot", freshness_state, synced_at)
-            payload = {"ok": True, "class_avg": snapshot["class_avg"],
-                "student_count": snapshot["student_count"], "total_missing": snapshot["total_missing"],
-                "total_ungraded": snapshot["total_ungraded"], "source": "mirror",
-                "synced_at": synced_at, "freshness": freshness,
-                "revision": assignment_page["revision"],
-                "assignments": _tabulate(snapshot["assignments"], _GRADEBOOK_ASSIGNMENT_COLUMNS),
-                "students": _tabulate(snapshot["students"], _GRADEBOOK_STUDENT_COLUMNS)}
-            return final_response_gate(payload)
-        except Exception:
-            return {"ok": False, "code": "evidence_index_repair_required",
-                    "error": "The activated evidence index needs repair."}
-
-    # Resolve the PII boundary before reading the private mirror projection.
-    # This also gives a clear workspace error if the protected vault location
-    # cannot be resolved, instead of a misleading cache-missing response.
-    vault, vault_err = _open_vault()
-    if vault_err:
-        return {"ok": False, "error": vault_err}
-
-    snapshot, snapshot_error = _load_snapshot(course_id)
-    if snapshot_error:
-        return {"ok": False, "error": snapshot_error,
-                "freshness": _freshness("mirror", "gradebook_snapshot", "unavailable", "")}
-    freshness = snapshot.pop("_freshness", None)
-    if not isinstance(freshness, dict):
-        freshness = _freshness("mirror", "gradebook_snapshot", "current",
-                               str(snapshot.get("synced_at") or ""))
-    # Age is metadata, not a gate: the snapshot loaded and is structurally
-    # sound, so it serves with its freshness labeled. The attention hint stays
-    # attached but never blocks (brief decision #4).
-    attention = _freshness_attention(freshness)
-
-    students = snapshot.get("students") or []
-
-    assignment_rows = []
-    for a in snapshot["assignments"]:
-        row = {k: v for k, v in a.items() if k not in ("name", "html_url")}
-        row["title"] = a.get("name", "")
-        row["has_submission"] = row.pop("submitted")
-        row["has_grade"] = row.pop("graded")
-        assignment_rows.append(row)
-
-    payload = {
-        "class_avg": snapshot["class_avg"],
-        "student_count": snapshot["student_count"],
-        "total_missing": snapshot["total_missing"],
-        "total_ungraded": snapshot["total_ungraded"],
-        "source": snapshot.get("source", "canvas"),
-        "synced_at": snapshot.get("synced_at", ""),
-        "freshness": freshness,
-        "assignments": assignment_rows,
-        "students": [],
-    }
-    with _vault_transaction(vault):
-        roster_service.upsert_roster(vault, [
-            {"id": row.get("user_id"), "name": row.get("name", "")}
-            for row in students
-        ])
-        payload["students"] = pseudonym_boundary.pseudonymize_gradebook_rows(vault, snapshot["students"])
-        result = pseudonym_boundary.gate(payload, vault)
-    if result.get("ok"):
-        if attention:
-            result["attention"] = attention
-        result["assignments"] = _tabulate(result["assignments"], _GRADEBOOK_ASSIGNMENT_COLUMNS)
-        result["students"] = _tabulate(result["students"], _GRADEBOOK_STUDENT_COLUMNS)
-    return result
+    service, source_key, refusal = _evidence_reader()
+    if refusal:
+        return refusal
+    try:
+        roster_page = _read_all_evidence(service, "roster", source_key=source_key,
+                                         course_id=str(course_id))
+        assignment_page = _read_all_evidence(service, "assignment_context", source_key=source_key,
+                                              course_id=str(course_id))
+        if (roster_page["membership"].get("state") in (None, "unknown")
+                and assignment_page["membership"].get("state") in (None, "unknown")
+                and not roster_page["records"] and not assignment_page["records"]):
+            return {"ok": False, "code": "evidence_not_acquired",
+                    "error": "No gradebook evidence has been acquired for this course. Call refresh_mirror(course_id), then retry."}
+        assignments = []
+        submissions = []
+        submission_pages = []
+        excluded_assignment_ids = []
+        for row in assignment_page["records"]:
+            assignment = row["payload"]
+            assignment_id = str(assignment["assignment_id"])
+            assignments.append({"id": assignment_id, "name": assignment.get("title", ""),
+                "due_at": assignment.get("due_at"), "points_possible": assignment.get("points_possible"),
+                "published": assignment.get("published", True)})
+            page = _read_all_evidence(service, "current_submissions", source_key=source_key,
+                course_id=str(course_id), assignment_id=assignment_id)
+            submission_pages.append(page)
+            if page["membership"].get("state") != "complete":
+                excluded_assignment_ids.append(assignment_id)
+                continue
+            for record in page["records"]:
+                value = record["payload"]
+                submissions.append({"assignment_id": assignment_id,
+                    "user_id": record["pseudonym"], "workflow_state": value.get("workflow_state"),
+                    "submitted_at": value.get("submitted_at"), "excused": value.get("excused"),
+                    "missing": value.get("missing"), "late": value.get("late"),
+                    "score": value.get("score")})
+        students = [{"id": row["pseudonym"], "name": row["pseudonym"]}
+                    for row in roster_page["records"]]
+        snapshot = gradebook_snapshot.build_snapshot(students, assignments, submissions,
+            family_links=config.list_sis_grade_bridges(str(course_id)))
+        for row in snapshot["assignments"]:
+            row["title"] = row.pop("name", "")
+            row.pop("html_url", None)
+            row["has_submission"] = row.pop("submitted")
+            row["has_grade"] = row.pop("graded")
+        for row in snapshot["students"]:
+            row["pseudonym"] = row.pop("name", "")
+            row.pop("user_id", None)
+        stamps = [page["freshness"].get("last_success_at") for page in submission_pages
+                  if page["freshness"].get("last_success_at")]
+        stamps.extend(page["freshness"].get("last_success_at") for page in (roster_page, assignment_page)
+                      if page["freshness"].get("last_success_at"))
+        synced_at = min(stamps, default="")
+        all_pages = [roster_page, assignment_page, *submission_pages]
+        freshness_state = ("current" if all(
+            page["membership"].get("state") == "complete" for page in all_pages) else "stale")
+        freshness = _freshness("mirror", "gradebook_snapshot", freshness_state, synced_at)
+        warnings = _evidence_warnings(roster_page)
+        if excluded_assignment_ids:
+            warnings.append("assignments_excluded_from_totals")
+        payload = {"ok": True, "class_avg": snapshot["class_avg"],
+            "student_count": snapshot["student_count"], "total_missing": snapshot["total_missing"],
+            "total_ungraded": snapshot["total_ungraded"], "source": "mirror",
+            "synced_at": synced_at, "freshness": freshness,
+            "revision": assignment_page["revision"],
+            "coverage": {**_evidence_coverage(assignment_page),
+                         "excluded_assignment_ids": excluded_assignment_ids},
+            "warnings": warnings,
+            "assignments": _tabulate(snapshot["assignments"], _GRADEBOOK_ASSIGNMENT_COLUMNS),
+            "students": _tabulate(snapshot["students"], _GRADEBOOK_STUDENT_COLUMNS)}
+        return final_response_gate(payload)
+    except Exception:
+        return {"ok": False, "code": "evidence_index_repair_required",
+                "error": "The local CanvasMirror evidence index needs repair."}
 
 
 def _create_curve(course_id: str, formula: dict,
@@ -2685,23 +2169,29 @@ def refresh_mirror(course_id: str, include_comments: bool = False, structure_onl
         return {"ok": False, "error": "Course is not Current; select it as Current before refreshing."}
     if operation_id:
         try:
-            plan = mirror_service.status(operation_id).get("plan")
+            status = mirror_service.status(operation_id)
         except Exception:
-            plan = None
+            status = None
+        plans = (status or {}).get("plan", {}).get("plans") or []
+        plan = plans[0] if plans else None
         if not isinstance(plan, dict):
             return {"ok": False, "code": "refresh_operation_unavailable",
                     "error": "That refresh operation is no longer available."}
-        jobs = plan.get("jobs") or plan.get("plans") or []
+        jobs = [job for job in (plan.get("jobs") or []) if isinstance(job, dict)]
         scopes = {"course.structure_refresh"} if structure_only else (
             {"course.feedback_refresh", "roster", "groups"} if include_comments else set(_REFRESH_SCOPES))
         if any(str(job.get("course_id")) != str(course_id) or
                (job.get("scope") and job.get("scope") not in scopes) for job in jobs):
             return {"ok": False, "code": "refresh_operation_mismatch",
                     "error": "That refresh operation does not match this course and mode."}
-        result = {"ok": plan.get("state") not in {"failed", "cancelled"},
-                  "status": "synced" if plan.get("state") == "succeeded" else plan.get("state", "syncing"),
-                  "operation_id": operation_id, "stages": plan.get("stages", {})}
-        result["fully_ready"] = bool(plan.get("state") == "succeeded")
+        state = plan.get("state", "failed")
+        stages = (status or {}).get("stages") or {}
+        result = {"ok": state not in {"failed", "cancelled"},
+                  "status": "synced" if state == "succeeded" else ("syncing" if state in {"queued", "running"} else state),
+                  "operation_id": operation_id, "stages": stages}
+        result["fully_ready"] = mirror_service.fully_ready(stages)
+        if state in {"queued", "running"}:
+            result["retry_after_seconds"] = 5
         return result
     # Counted before dispatch so structure-only refreshes join the same
     # per-course loop window as ordinary syncs.
