@@ -1,13 +1,17 @@
 # CanvasMirror: durable synced course store
 
-Status: teacher-approved direction, 2026-10-04. Synthetic/local implementation
-is complete through the read-activation repair; private pilot import, live
-activation, and two-computer field acceptance remain separate checks.
+Status: teacher-approved direction, revised 2026-10-05. The functional-read-path
+brief has completed coding preflight and is ready for execution slicing; its
+baseline/environment findings remain YELLOW. Grading periods guide the agent
+rather than gate CE/CanvasMirror. No code or state reset has been performed. The
+teacher permits a fresh mirror start instead of a lossless
+pilot migration. Prior synthetic acceptance does not establish pilot functionality.
 
 ## Teacher-visible outcome
 
-The teacher's accumulated course information lives in one durable CanvasMirror
-store in the synced workspace. Another computer or agent can use that information
+Make current work easy, and do not make historical completeness anybody's problem.
+Useful acquired course information lives in one CanvasMirror store in the synced
+workspace. Another computer or agent can use that information
 after sync without rebuilding its course knowledge from Canvas first. Optional
 machine-local indexes are disposable conveniences, not the durable source.
 
@@ -44,6 +48,46 @@ behavior remains as implemented until an execution brief changes it.
 ## Teacher priorities and constraints
 
 Recorded 2026-10-04 during planning; these decisions govern the implementation.
+The 2026-10-05 decisions below supersede conflicting retention and cutover
+requirements in earlier briefs and contracts for this transition.
+
+### Functional milestone and transition decisions — 2026-10-05
+
+- Final teacher refinement: **make current work easy; historical completeness is
+  not required.** Grading periods (the four instructional periods, not semesters)
+  guide the agent's choice of relevant work, not programmatic acquisition eligibility.
+  This supersedes the earlier hard period-boundary interpretation. No mandatory
+  calendar, assignment-to-period mapping, rollover gate, three-week cutoff, or
+  date-based queue cancellation. Missing period knowledge never blocks CE/CM.
+- CE executes bounded requests; explicitly requested older work remains valid.
+  Previously acquired older evidence remains readable and incidental older rows
+  need not be filtered from collection responses. Missing history does not trigger
+  completeness backfill or block current work. Prioritize requested/new work over
+  unrelated backlog; do not require the whole attachment archive to be processed.
+  District calendars belong in private teacher/agent guidance, not source defaults.
+- First milestone: an agent reliably reads current-course assignments,
+  submissions, and available attachment text, with explicit gaps. Scoring follows
+  once the required evidence is complete enough.
+- Old or incomplete evidence remains readable with its age and missing pieces.
+  Hold only work that requires the missing evidence, such as scoring an unread
+  required attachment. Privacy and Canvas write safeguards remain mandatory.
+- Switching computers is automatic when versions are compatible. The agent
+  should explicitly explain when an update or refresh is required.
+- Current functionality far outweighs preservation of six-month-old work.
+  Retention is desirable, not a lossless-history acceptance condition or a reason
+  to build elaborate compatibility and migration machinery.
+- A maintenance window and a complete reset of existing CanvasMirror local and
+  synced state are acceptable if needed. Nothing in the existing mirror sync
+  must be treated as sacred. Prefer a fresh acquisition over a complex migration
+  when it produces the simpler reliable system.
+- This is permission to plan a reset, not an instruction to delete files during
+  diagnosis. Identify exact reset targets in the implementation brief. Do not
+  infer that unrelated workspace artifacts, credentials, identity mappings, or
+  live Canvas objects need deletion.
+- Remain in diagnosis/design until the replacement implementation brief is
+  agreed. No reset or implementation was performed when recording these decisions.
+
+### Continuing requirements
 
 - Primary use is agent-led ELA and CS scoring: writing assessment, authenticity
   and plagiarism investigation, and actionable feedback. Comparisons across
@@ -52,13 +96,16 @@ Recorded 2026-10-04 during planning; these decisions govern the implementation.
   evidence, not incidental display fields. Accommodation decisions come from the
   teacher-agent conversation. Preserve each attempt's original submission time;
   a later attempt or changed Canvas lateness state never overwrites it.
-- Only explicitly selected courses are acquired. Acquire all available evidence.
-  Deselection stops refresh but retains the course and its history indefinitely.
+- Only explicitly selected courses are acquired. Acquire relevant available evidence
+  through bounded requests; the agent supplies teaching context, not a required
+  grading-period gate. Historical completeness is not a goal.
+  Deselection stops refresh; retaining available history is desirable, subject to
+  the functionality-first and reset decisions above.
 - Expected scale is approximately three courses, 30 students per course, 30
   assignments per term, four terms, and about five major assignments with
   multiple attempts. Drafts are attempts on the same Canvas assignment.
 - Default integrity comparison is across students within the assignment, not
-  across years. Indefinite retention does not imply multi-year comparison scope.
+  across years. Retention does not imply multi-year comparison scope.
 - Preserve informational content and metadata useful to integrity analysis;
   reproducing Canvas presentation is not the priority.
 - Files and attachments are required scope: DOCX, PDF, PPTX, XLSX, and JPG.
@@ -70,7 +117,8 @@ Recorded 2026-10-04 during planning; these decisions govern the implementation.
   including quote characters. The writing itself is the primary integrity
   evidence; extraction must not unnecessarily flatten it or invent unavailable
   editing history.
-- Preserve observed history. The OneDrive tenant disallows some file types,
+- Retain useful observed history where straightforward; do not reconstruct missing
+  history as a prerequisite for current work. The OneDrive tenant disallows some file types,
   including `.py`, `.exe`, and `.js`; ZIP is allowed. The teacher has no complete
   blocked-type list. Attachment retention needs a tenant-permitted representation;
   do not assume raw uploaded filenames/extensions can be synced.
@@ -87,8 +135,9 @@ Recorded 2026-10-04 during planning; these decisions govern the implementation.
 - Reliability takes precedence over speed targets: slow is acceptable if work
   continues reliably. Eliminate avoidable refresh/sync reasoning. Offline
   operation is not the driving requirement, and no fixed refresh SLA is chosen.
-- Acquisition should be very complete, with efficient change detection and
-  incremental updates where possible.
+- Acquisition should be useful and complete for the requested work, with explicit
+  gaps, efficient change detection, and incremental updates where possible. This
+  does not require a historically complete course archive.
 - Agent-created summaries, notes, and derived analyses may persist in one
   contained area, clearly distinguished from acquired Canvas evidence.
   The senior may choose sensible persistence defaults.
@@ -104,15 +153,14 @@ Recorded 2026-10-04 during planning; these decisions govern the implementation.
 
 ## Execution design
 
-S00–S08 of the durable evidence store have passed their synthetic/local gates,
-but production pilot import and activation have not occurred. A senior review
-found index/cutover, incomplete-attachment hold, and comparison-view integration
-gaps. The current repair brief is
-`docs/handoffs/canvasmirror-read-activation-repair.md`; the original slice brief
-is retained under `docs/handoffs/retired/` as historical execution evidence.
-
-Agent-host prioritization is not yet specified; the teacher requested clarification
-of that question. This does not reopen the approved direct-read/MCP access model.
-
-No live pilot data has been moved or deleted. Complete the current repair brief
-and separately report its private import and two-computer field acceptance.
+The prior read-activation repair's lossless import/cutover scope is superseded
+by the 2026-10-05 decisions; its brief is retired to Git history.
+The current execution pointer is
+`docs/handoffs/canvasmirror-functional-read-path.md`. It fixes acquisition,
+safe-publication, replaceable-index, and agent-read boundaries and defines a bounded
+fresh-start procedure. The detailed staged implementation plan is
+[`canvasmirror-functional-read-path-slices.md`](canvasmirror-functional-read-path-slices.md);
+the brief remains execution authority. Read only the sections it names. Two-computer behavior still
+needs field verification; synthetic gates alone do not establish it. Scoring
+consumption and remaining private projections are the next senior assessment after
+this milestone, not a queued implementation brief.
