@@ -158,14 +158,27 @@ def _isolate_real_machine_and_workspace_paths(tmp_path, monkeypatch):
 def isolated_runtime_owner(monkeypatch):
     """Give runtime lifecycle tests clean, automatically restored process state."""
     from api import runtime
+    import threading
 
     for name, value in (
         ("_started", False),
         ("_stopped", False),
         ("_heartbeat_stop", None),
         ("_heartbeat_thread", None),
+        ("_owner_stop", None),
+        ("_owner_thread", None),
+        ("_index_stop", None),
+        ("_index_thread", None),
+        ("_evidence_stop", None),
+        ("_evidence_thread", None),
     ):
         monkeypatch.setattr(runtime, name, value)
+    from api.mirror import service
+    monkeypatch.setattr(service, "_maintenance_requested", False)
+    monkeypatch.setattr(service, "_index_wake", threading.Event())
+    monkeypatch.setattr(service, "_work_wake", threading.Event())
+    monkeypatch.setattr(service, "index_maintenance_worker", lambda stop: None)
+    monkeypatch.setattr(service, "attachment_work_worker", lambda stop: None)
     yield runtime
     runtime.stop()
 

@@ -47,6 +47,9 @@ TICK_SECONDS = 900                # delta cadence while the app runs
 FULL_MAX_AGE_HOURS = 24.0         # backfill + nightly reconcile
 ROSTER_MAX_AGE_HOURS = 24.0
 NOTIFY_DELAY_SECONDS = 15.0       # write-through settle delay
+INDEX_MAINTENANCE_SECONDS = 30.0
+ATTACHMENT_IDLE_SECONDS = 30.0
+ATTACHMENT_CHUNK_PAUSE_SECONDS = 1.0
 
 
 _OWNER_LOCK = threading.RLock()
@@ -245,7 +248,9 @@ def run_attachment_capture_chunk(*, limit=None, max_bytes=None) -> dict:
             limit=limit or MAX_DOWNLOADS_PER_CHUNK,
             max_bytes=max_bytes or MAX_BYTES_PER_CHUNK,
         )
-    run_index_maintenance(root=root, source_key=source_key)
+    if result.get("published", 0):
+        request_index_maintenance("publication")
+        wake_evidence_workers()
     return result
 
 
@@ -306,13 +311,74 @@ def run_extraction_chunk(*, limit: int = 20) -> dict:
         result = {"processed": outcome.processed, "published": outcome.published,
                   "cached": outcome.cached, "failed": outcome.failed,
                   "gaps": list(outcome.gaps)}
-    run_index_maintenance(root=root, source_key=source_key)
+    if result.get("published", 0):
+        request_index_maintenance("publication")
+        wake_evidence_workers()
     return result
 
 
 _MAINTENANCE_LOCK = threading.Lock()
 _MAINTENANCE_STATUS_LOCK = threading.Lock()
 _maintenance_requested = False
+_INDEX_REQUEST_LOCK = threading.Lock()
+_index_wake = threading.Event()
+_work_wake = threading.Event()
+
+
+def request_index_maintenance(reason: str) -> None:
+    """Coalesce a local maintenance request without any disk or Canvas work."""
+    global _maintenance_requested
+    with _INDEX_REQUEST_LOCK:
+        _maintenance_requested = True
+        _index_wake.set()
+
+
+def wake_evidence_workers() -> None:
+    _index_wake.set()
+    _work_wake.set()
+
+
+def index_maintenance_worker(stop_event, *, wait=None) -> None:
+    global _maintenance_requested
+    wait = wait or _index_wake.wait
+    while not stop_event.is_set():
+        if not _index_wake.is_set():
+            wait(INDEX_MAINTENANCE_SECONDS)
+        if stop_event.is_set():
+            break
+        with _INDEX_REQUEST_LOCK:
+            _maintenance_requested = False
+            _index_wake.clear()
+        try:
+            run_index_maintenance()
+        except Exception as exc:
+            operational_log.emit("mirror.evidence_index_worker", "failed", error_class=type(exc))
+
+
+def attachment_work_worker(stop_event, *, wait=None) -> None:
+    """Bounded continuation; capture obeys ownership, local extraction does not."""
+    wait = wait or _work_wake.wait
+    try:
+        recover_evidence_work_chunk()
+    except Exception as exc:
+        operational_log.emit("mirror.evidence_work", "failed", error_class=type(exc))
+    while not stop_event.is_set():
+        _work_wake.clear()
+        progressed = False
+        try:
+            if config.token_is_set() and config.mirror_enabled():
+                owner = acquisition_owner_status()
+                if owner is not None and owner.is_owner:
+                    result = run_attachment_capture_chunk()
+                    progressed = bool(result.get("processed"))
+            if not stop_event.is_set():
+                result = run_extraction_chunk()
+                progressed = progressed or bool(result.get("processed"))
+        except Exception as exc:
+            operational_log.emit("mirror.evidence_work", "failed", error_class=type(exc))
+        if stop_event.is_set():
+            break
+        wait(ATTACHMENT_CHUNK_PAUSE_SECONDS if progressed else ATTACHMENT_IDLE_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -654,7 +720,8 @@ def _publish_acquisition(receipt):
                                  pseudonym_for=lambda raw: vault.get_or_assign(str(raw)))
         except Exception:
             operational_log.emit("mirror.attachment_enqueue", "failed")
-    run_index_maintenance(root=root, source_key=source_key)
+    request_index_maintenance("publication")
+    wake_evidence_workers()
     return result
 
 
@@ -1157,7 +1224,6 @@ def mirror_heartbeat_worker(stop_event):
         return
     while not stop_event.is_set():
         try:
-            run_index_maintenance()
             run_coordinated_heartbeat_tick()
         except Exception as exc:
             operational_log.emit("mirror.heartbeat_tick", "failed", error_class=type(exc))

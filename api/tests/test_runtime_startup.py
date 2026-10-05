@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 
-def test_start_orders_recovery_before_heartbeat_and_stop_is_idempotent(
+def test_start_starts_evidence_workers_after_recovery_and_runs_nothing_synchronously(
     monkeypatch, tmp_path, isolated_runtime_owner
 ):
     from api import ai_authoring, runtime, runtime_paths
@@ -35,6 +35,24 @@ def test_start_orders_recovery_before_heartbeat_and_stop_is_idempotent(
 
     monkeypatch.setattr(service, "mirror_heartbeat_worker", worker)
 
+    evidence_started = {name: threading.Event() for name in ("index", "evidence")}
+    evidence_stopped = {name: threading.Event() for name in evidence_started}
+    def evidence_worker(name, stop):
+        events.append(name)
+        evidence_started[name].set()
+        stop.wait()
+        evidence_stopped[name].set()
+    monkeypatch.setattr(service, "index_maintenance_worker", lambda stop: evidence_worker("index", stop))
+    monkeypatch.setattr(service, "attachment_work_worker", lambda stop: evidence_worker("evidence", stop))
+    monkeypatch.setattr(service, "run_index_maintenance", lambda **kw: pytest.fail("synchronous indexing"))
+    monkeypatch.setattr(service, "recover_evidence_work_chunk", lambda **kw: pytest.fail("synchronous attachment work"))
+    created = []
+    real_thread = threading.Thread
+    def make_thread(**kwargs):
+        created.append(kwargs.get("name"))
+        return real_thread(**kwargs)
+    monkeypatch.setattr(runtime.threading, "Thread", make_thread)
+
     class Leases:
         def release_all(self):
             events.append("release")
@@ -44,7 +62,12 @@ def test_start_orders_recovery_before_heartbeat_and_stop_is_idempotent(
     runtime.start()
     assert worker_started.wait(1)
     runtime.start()
-    assert events[:5] == ["workspace", "pin", "library", "recovery", "heartbeat"]
+    assert events[:4] == ["workspace", "pin", "library", "recovery"]
+    for name, event in evidence_started.items():
+        assert event.wait(1)
+        assert events.index("recovery") < events.index(name)
+    assert created.index("ce-evidence-index") < created.index("ce-mirror-heartbeat")
+    assert created.index("ce-evidence-work") < created.index("ce-mirror-heartbeat")
 
     runtime.stop()
     runtime.stop()
@@ -52,6 +75,7 @@ def test_start_orders_recovery_before_heartbeat_and_stop_is_idempotent(
     assert events.count("recovery") == 1
     assert events.count("heartbeat") == 1
     assert events.count("release") == 1
+    assert all(event.wait(1) for event in evidence_stopped.values())
 
 
 def test_start_continues_after_recovery_failure_but_never_starts_heartbeat_early(

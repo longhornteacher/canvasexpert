@@ -16,6 +16,10 @@ def evidence_service_workspace(tmp_path, monkeypatch):
     root = tmp_path / "workspace"
     source = "a" * 64
     vault = SyntheticVault()
+    import threading
+    monkeypatch.setattr(service, "_maintenance_requested", False)
+    monkeypatch.setattr(service, "_index_wake", threading.Event())
+    monkeypatch.setattr(service, "_work_wake", threading.Event())
     locked = [False]
     monkeypatch.setattr(runtime_paths, "local_cache_dir", lambda: tmp_path / "local")
     monkeypatch.setattr(service.workspace, "workspace_root", lambda: str(root))

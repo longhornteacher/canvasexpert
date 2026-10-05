@@ -14,6 +14,10 @@ _heartbeat_stop: threading.Event | None = None
 _heartbeat_thread: threading.Thread | None = None
 _owner_stop: threading.Event | None = None
 _owner_thread: threading.Thread | None = None
+_index_stop: threading.Event | None = None
+_index_thread: threading.Thread | None = None
+_evidence_stop: threading.Event | None = None
+_evidence_thread: threading.Thread | None = None
 
 
 def _note(step: str, exc: Exception) -> None:
@@ -25,6 +29,7 @@ def _note(step: str, exc: Exception) -> None:
 def start() -> None:
     """Run process startup steps once, in safety order."""
     global _started, _stopped, _heartbeat_stop, _heartbeat_thread, _owner_stop, _owner_thread
+    global _index_stop, _index_thread, _evidence_stop, _evidence_thread
     with _lock:
         if _started:
             return
@@ -56,6 +61,21 @@ def start() -> None:
             _note("operation_recovery", exc)
 
         try:
+            from api.mirror.service import (
+                request_index_maintenance, index_maintenance_worker, attachment_work_worker)
+            request_index_maintenance("startup")
+            _index_stop = threading.Event()
+            _index_thread = threading.Thread(target=index_maintenance_worker,
+                args=(_index_stop,), name="ce-evidence-index", daemon=True)
+            _index_thread.start()
+            _evidence_stop = threading.Event()
+            _evidence_thread = threading.Thread(target=attachment_work_worker,
+                args=(_evidence_stop,), name="ce-evidence-work", daemon=True)
+            _evidence_thread.start()
+        except Exception as exc:
+            _note("evidence_workers", exc)
+
+        try:
             from api.mirror.service import mirror_heartbeat_worker, acquisition_owner_worker
 
             _owner_stop = threading.Event()
@@ -76,32 +96,19 @@ def start() -> None:
             _heartbeat_thread = None
             _note("mirror_heartbeat", exc)
 
-        # Resume interrupted attachment capture/extraction from the private
-        # local control store. One failure never stops unrelated runtime work.
-        try:
-            from api.mirror.service import recover_evidence_work_chunk
-            recover_evidence_work_chunk()
-        except Exception as exc:
-            _note("evidence_recovery", exc)
-
-        # Build the disposable local evidence projection before the first
-        # agent read; only validated synchronized facts enter SQLite.
-        try:
-            from api.mirror.service import run_index_maintenance
-            run_index_maintenance()
-        except Exception as exc:
-            _note("evidence_index", exc)
-
         _started = True
 
 
 def stop() -> None:
     """Stop background work and release process-wide work leases once."""
     global _stopped, _heartbeat_stop, _heartbeat_thread, _owner_stop, _owner_thread
+    global _index_stop, _index_thread, _evidence_stop, _evidence_thread
     with _lock:
         if _stopped:
             return
         _stopped = True
+        evidence_threads = ((_index_stop, _index_thread), (_evidence_stop, _evidence_thread))
+        _index_stop = _index_thread = _evidence_stop = _evidence_thread = None
         owner_stop, owner_thread = _owner_stop, _owner_thread
         _owner_stop = None
         _owner_thread = None
@@ -109,6 +116,14 @@ def stop() -> None:
         _heartbeat_stop = None
         _heartbeat_thread = None
     try:
+        for event, _worker in evidence_threads:
+            if event is not None:
+                event.set()
+        from api.mirror.service import wake_evidence_workers
+        wake_evidence_workers()
+        for _event, worker in evidence_threads:
+            if worker is not None and worker is not threading.current_thread():
+                worker.join(timeout=5.0)
         if owner_stop is not None:
             owner_stop.set()
         if owner_thread is not None and owner_thread is not threading.current_thread():

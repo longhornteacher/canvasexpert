@@ -182,3 +182,68 @@ def test_maintenance_binding_change_discards_scan_result(evidence_service_worksp
     monkeypatch.setattr(EvidenceStore, 'scan', scan)
     assert _maintain(env)['state'] == 'pending'
     assert not _index(env).path.exists()
+
+
+def test_requests_coalesce_and_are_not_lost_during_rebuild(evidence_service_workspace, monkeypatch):
+    import threading
+    stop = threading.Event()
+    calls = []
+    def rebuild():
+        calls.append(True)
+        if len(calls) == 1:
+            service.request_index_maintenance('during_rebuild')
+        else:
+            stop.set()
+    monkeypatch.setattr(service, 'run_index_maintenance', rebuild)
+    service.request_index_maintenance('one')
+    service.request_index_maintenance('two')
+    service.index_maintenance_worker(stop, wait=lambda _: pytest.fail('coalesced request was lost'))
+    assert len(calls) == 2
+    assert not service._maintenance_requested
+
+
+def test_synced_file_arrival_is_indexed_on_the_next_cycle(evidence_service_workspace, monkeypatch):
+    import threading
+    env = evidence_service_workspace
+    stop = threading.Event()
+    calls = []
+    original = service.run_index_maintenance
+    env['publish']()
+    def rebuild():
+        calls.append(original(root=env['root'], source_key=env['source']))
+        if len(calls) == 2:
+            stop.set()
+    def wait(seconds):
+        assert seconds == service.INDEX_MAINTENANCE_SECONDS
+        env['publish']('second_course')
+    monkeypatch.setattr(service, 'run_index_maintenance', rebuild)
+    service.request_index_maintenance('startup')
+    service.index_maintenance_worker(stop, wait=wait)
+    assert all(status['state'] == 'ready' for status in calls)
+    assert {row['course_id'] for row in _index(env).query_page('courses')['records']} == {'1', '2'}
+
+
+def test_owner_heartbeat_progresses_during_slow_rebuild(evidence_service_workspace, monkeypatch):
+    import threading
+    import time
+    env = evidence_service_workspace
+    env['publish']()
+    entered, release = threading.Event(), threading.Event()
+    original = EvidenceIndex.ingest_many
+    def slow(index, *args, **kwargs):
+        entered.set()
+        assert release.wait(2)
+        return original(index, *args, **kwargs)
+    monkeypatch.setattr(EvidenceIndex, 'ingest_many', slow)
+    monkeypatch.setattr(service.config, 'mirror_enabled', lambda: False)
+    worker = threading.Thread(target=lambda: _maintain(env))
+    worker.start()
+    try:
+        assert entered.wait(1)
+        before = time.monotonic()
+        assert service.acquisition_owner_status(tick=True) is None
+        assert time.monotonic() - before < 1
+    finally:
+        release.set()
+        worker.join(timeout=2)
+    assert not worker.is_alive()
