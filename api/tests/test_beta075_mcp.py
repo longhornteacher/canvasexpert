@@ -80,24 +80,25 @@ def _toolish_mentions(text):
 
 
 def test_mirror_doc_bound_tools_match_the_live_registry():
-    """The four mirror-bound MCP readers must remain registered and named here.
+    """The four evidence-bound MCP readers must remain registered and named here.
 
     Unlike the theme and calendar groups above, this group has no shared name
     substring or other structural marker that picks out exactly "the readers
-    that are mirror-bound (strict mirror-only, no live-Canvas fallback)" from
-    the other 41 registry tools -- e.g. get_course_assignments and
-    get_course_pages also read local state but are not mirror-bound in this
+    that are evidence-bound (strict local-evidence-only, no live-Canvas
+    fallback)" from the other registry tools -- e.g. get_course_assignments and
+    get_course_pages also read local state but are not evidence-bound in this
     sense, while these four are. That membership lives in each tool's
     implementation, not its name, so it cannot be derived from the registry
     by pattern-matching. The set below is therefore an explicit hardcode:
-    this test CANNOT catch a newly added mirror-bound tool that isn't listed
+    this test CANNOT catch a newly added evidence-bound tool that isn't listed
     here -- it only guards the four already named against being renamed or
     deregistered without the doc being updated.
     """
     path = Path(__file__).resolve().parents[2] / "docs" / "mirror.md"
     doc = path.read_text(encoding="utf-8")
     section = doc.split("## MCP reads and the refresh tool", 1)[1].split("## v1 non-goals", 1)[0]
-    expected = {"get_roster", "get_submissions", "get_gradebook_snapshot", "get_submissions"}
+    expected = {"get_roster", "get_submissions", "get_gradebook_snapshot",
+                "get_assignment_evidence"}
     named = set(re.findall(r"\b(?:get|list|preview|apply|save|delete|clear|archive|stage|refresh)_[a-z0-9_]+", section))
     assert expected <= named
     assert named - {"refresh_mirror"} == expected

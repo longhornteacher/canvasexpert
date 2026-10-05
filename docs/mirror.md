@@ -1,13 +1,13 @@
 # CanvasMirror
 
-This file documents the private legacy projection and its refresh behavior. The
-durable, pseudonymized evidence store is implemented for synthetic/local use;
-its named views, direct-reading rules, and activation checkpoint are specified
-in `docs/contracts/canvasmirror-evidence-contract.md` and
-`docs/guides/canvasmirror-agent-reading.md`. The teacher's private pilot store
-has not yet been imported or activated. Until that verified cutover, the MCP
-roster, submission, and gradebook reads continue to use the legacy projection.
-The 1.0-beta target architecture and migration program live in
+This file documents the private projection and its refresh behavior. The durable,
+pseudonymized evidence store is the read authority for the MCP student-data
+tools; its named views and direct-reading rules are specified in
+`docs/contracts/canvasmirror-evidence-contract.md` and
+`docs/guides/canvasmirror-agent-reading.md`. There is no activation checkpoint or
+historical import: the MCP roster, submission, and gradebook reads serve directly
+from the local evidence index, and background maintenance keeps it current. The
+1.0-beta target architecture lives in
 `docs/reference/canvasmirror-1.0beta-information-spine.md`; that vision does not supersede
 the current contracts until its individual implementation briefs are completed.
 
@@ -26,15 +26,18 @@ browser-first architecture.
 For the agent:
 
 - **The AI-facing MCP tools** (`get_roster`, `get_submissions`,
-  `get_gradebook_snapshot`) read from the mirror rather than from live Canvas. This is a
-  design choice, with reasons: mirror reads are fast, consistent from one call to the
+  `get_gradebook_snapshot`, `get_assignment_evidence`) read from the local
+  pseudonymized evidence index rather than from live Canvas. This is a
+  design choice, with reasons: index reads are fast, consistent from one call to the
   next, and go through the pseudonym gate on the way out; and Canvas Expert stays the
-  only thing that holds the token and talks to Canvas. When a read is outside the
-  freshness policy, the tool says so (a stale or missing mirror returns a clear error),
-  and the agent refreshes it itself (`refresh_mirror`, `refresh_mirror(course_id, structure_only=true)`, or
-  `refresh_scoring_session`) and reads again, without asking the teacher first. Data
-  already within policy needs no refresh, and skipping one saves time. Staleness is
-  still reported honestly in every read. See "MCP reads and the refresh tool" below.
+  only thing that holds the token and talks to Canvas. A read that has no evidence yet
+  refuses with `evidence_refresh_required`, and the agent refreshes it itself
+  (`refresh_mirror`, `refresh_mirror(course_id, structure_only=true)`, or
+  `refresh_scoring_session`) and reads again, without asking the teacher first. A read
+  whose index is still being built refuses with `evidence_index_pending` and asks the
+  agent to retry the read, not acquisition. Available evidence serves with honest
+  `coverage` and `warnings` even when partial or old. See "MCP reads and the refresh
+  tool" below.
 
 ## Design laws
 
@@ -54,11 +57,12 @@ For the agent:
    time (see law 6).
 5. **Foreground wins.** Sync runs on a background heartbeat and yields to
    whatever the teacher is doing.
-6. **Agent reads come from the mirror, and the agent refreshes it itself.**
-   `get_roster`, `get_submissions`, and `get_gradebook_snapshot` serve from the
-   mirror. That is a design choice: mirror reads are fast, consistent, and go
+6. **Agent reads come from the evidence index, and the agent refreshes it itself.**
+   `get_roster`, `get_submissions`, `get_gradebook_snapshot`, and
+   `get_assignment_evidence` serve from the local pseudonymized evidence index.
+   That is a design choice: index reads are fast, consistent, and go
    through the pseudonym gate, and Canvas Expert stays the only thing that
-   talks to Canvas. When a read is outside the freshness policy, the agent
+   talks to Canvas. When a read has no evidence yet, the agent
    refreshes it without asking the teacher: `refresh_mirror` triggers Canvas
    Expert's own sync engine (the same coordinator behind the console's **Refresh
    course data**) and reports a freshness status rather than Canvas data;
@@ -66,7 +70,7 @@ For the agent:
    student-free Course Catalog (assignments, assignment groups, modules, and pages); and
    `refresh_scoring_session` brings late or resubmitted work from the mirror
    into an open Scoring Session. The agent skips a refresh when the data is
-   already within policy, because a refresh costs time.
+   already available, because a refresh costs time.
    Canvas Expert does not relay live Canvas responses to the agent; newer data
    arrives by refreshing the mirror and reading what Canvas Expert wrote.
 
@@ -110,6 +114,27 @@ selected workspace's `_System/Archive/Submission History/<course>/<assignment>/`
 Its URL-free manifest keeps pseudonymized observations and references immutable
 original-file blobs; it is private teacher evidence, not a current Canvas
 projection.
+
+### Evidence store and local index
+
+The pseudonymized evidence store lives under the selected workspace's
+`CanvasMirror/sources/<source-key>/courses/<course-id>/` (immutable facts and
+scope commits). Its disposable read index is machine-local:
+
+```
+%LOCALAPPDATA%\CanvasExpert\cache\CanvasMirror\<workspace-key>\<source-key>\
+  query.sqlite3                    disposable SQLite read projection
+  reader.json                      local registry-derived descriptor (revision-bound)
+  maintenance.v1.json              per-source index maintenance status
+  control.sqlite3                  private attachment job queue
+```
+
+`reader.json` is generated beside the index after a successful rebuild and
+carries the index schema version and revision; the old shared `reader.v1.json`
+is ignored. `maintenance.v1.json` records the last attempt, last successful
+publication, index readiness, and sanitized failure stage/code. The attachment
+job queue has no extraction cache: each job's `extraction_state` is the single
+record of "done for this association".
 
 ## Sync passes (`api/mirror/sync.py`)
 
@@ -200,6 +225,21 @@ with it) ticks every 15 minutes for Current courses only:
   watermarks unchanged; the next ordinary delta remains the course-wide
   freshness authority.
 
+Two evidence workers run alongside the heartbeat, started by `api/runtime.py`
+after operation recovery and stopped with the runtime:
+
+- **Index maintenance** (`ce-evidence-index`): rebuilds the disposable local
+  index from safe files on a 30-second cadence, coalescing requests. It never
+  calls Canvas and never holds the Identity Vault lock while scanning (it
+  verifies against a short-lived vault snapshot). A publication or a read miss
+  requests maintenance; a request arriving during a rebuild runs on the next
+  cycle.
+- **Attachment work** (`ce-evidence-work`): continues capture and extraction in
+  bounded chunks. Capture runs only when this computer owns acquisition; local
+  extraction runs regardless. Downloads and adapters run outside vault
+  transactions. Newly created jobs run newest-first ahead of older backlog; a
+  successful explicit course refresh reopens that course's failed work once.
+
 Config (machine-local): `mirror_enabled` (default true),
 `mirror_serve_max_age_hours` (default 6; older than this, the private roster projection
 is not served, internal readers with a live fallback read Canvas instead, and the MCP
@@ -280,21 +320,15 @@ observable without exposing course names.
 
 Implements the `gradebook_queries` interface (`course_students`,
 `course_assignments`, `course_submissions`, `assignment`,
-`assignment_submissions`, each returning `(data, error)`) from the store.
-The MCP `get_roster` / `get_submissions` / `get_gradebook_snapshot` tools are
-served
-  from the mirror when fresh (zero Canvas calls, works offline),
-  pseudonymized and gated exactly as before; payloads carry `source` +
-  `synced_at`. These tools call
-  `mirror_queries` directly and refuse (a structured `{"ok": false, "error":
-  ...}`) rather than falling through to a live fetch when the mirror can't
-  serve; see "MCP reads and the refresh tool" below.
+`assignment_submissions`, each returning `(data, error)`) from the typed
+projection. This provider remains for internal consumers (Names, scoring
+preparation, operation adapters); it is **not** the authority for the MCP
+student-data reads, which serve from the pseudonymized evidence index instead
+(see "MCP reads and the refresh tool" below).
 
 Explicit `queries=` overrides and monkeypatched test seams always bypass the
 mirror in the control-console loader, so offline tests exercise the live path
-unchanged; the MCP tools' seam guard (`api/mcp_server/tools.py::_cache_safe`)
-instead makes a monkeypatched fetch seam a reason to *refuse*, since there is
-no live path left for it to fall into.
+unchanged.
 
 ## MCP reads and the refresh tool (`api/mcp_server/tools.py`, `server.py`)
 
@@ -308,28 +342,35 @@ attachment queue and query index are machine-local under
 directly (see `docs/guides/canvasmirror-agent-reading.md`) or through the
 assignment-evidence reader; both use the same named views.
 
-`get_roster`, `get_submissions`, and `get_gradebook_snapshot` are served from
-the mirror (design law 6): when it is outside the freshness policy they return
-`{"ok": false, "error": "..."}` naming the problem, rather than a live Canvas
-payload. `refresh_mirror(course_id)` is how the agent moves past that, and the
-agent calls it on its own, without asking the teacher. The tool calls
+`get_roster`, `get_submissions`, `get_gradebook_snapshot`, and
+`get_assignment_evidence` are served from the local pseudonymized evidence index
+(design law 6). One resolver (`tools._evidence_reader`) returns the reader or a
+typed refusal: `workspace_unconfigured`, `canvas_origin_unconfigured`,
+`evidence_update_required`, `evidence_index_pending` (retry the read, not
+acquisition), or `evidence_refresh_required` (call `refresh_mirror`). Reads
+return `coverage` and `warnings` and serve available evidence even when partial
+or old; only a scope with no evidence at all refuses. `refresh_mirror(course_id)`
+is how the agent moves past `evidence_refresh_required`, and the agent calls it
+on its own, without asking the teacher. The tool calls
 `api/mirror/service.py::enqueue_sync` (the same manual-priority
 coordinator plan behind the control console's **Refresh course data**) and waits up to
 `tools._REFRESH_TIMEOUT_SECONDS` (25s) via `wait_for_plan`,
 then reports `{"ok": true, "status": "synced"}`, `{"ok": true, "status":
 "syncing"}` (still running past the timeout, so retry shortly), or
-`{"ok": false, "status": "failed"}`. It never returns course, roster, or
+`{"ok": false, "status": "failed"}`. A non-empty `operation_id` observes an
+existing plan without dispatching, so a slow refresh can be polled without
+enqueuing another acquisition. It never returns course, roster, or
 submission data itself, so it opens no identity vault and runs no outbound
 safety scan; the response is a sync status. This keeps Canvas Expert the only
 thing that talks to Canvas: the agent asks it to sync, then reads whatever
-Canvas Expert wrote to disk. When the data is already within policy, the agent
+Canvas Expert wrote to disk. When the data is already available, the agent
 skips the refresh, because it only costs time.
 
-`get_submissions(history=true, ...)` reads the durable local archive independently of
-projection freshness and membership. It returns bounded, scrubbed observations
-with `coverage: observed_only`; it never refreshes Canvas or returns raw files.
-Approved text/DOCX originals may contribute scrubbed text; PDF and other
-formats remain local-only for teacher inspection in the private archive.
+`get_submissions(history=true, ...)` reads the indexed pseudonymized attempt
+history (`attempt_history` view) with its captured attachment metadata. It
+returns bounded, scrubbed observations with `coverage`; it never refreshes
+Canvas or returns raw files. Attachment text is read through
+`get_assignment_evidence`; unsupported or unreadable files are explicit gaps.
 
 Scoring Session continuation follows the same boundary. Once the teacher has
 selected an assignment, preparation reads fresh roster, assignment, and submission

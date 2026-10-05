@@ -1657,7 +1657,8 @@ def test_canvasmirror_guide_names_safe_locations_only(monkeypatch, tmp_path):
     guide = result["guide"]
     assert "CanvasMirror" in guide
     assert "query.sqlite3" in guide
-    assert "reader.v1.json" in guide
+    assert "reader.json" in guide
+    assert "reader.v1.json" not in guide
     # Never expose vault, original, or control paths.
     for forbidden in ("vault", "CanvasMirror Originals", "CanvasMirror Control"):
         assert forbidden not in guide

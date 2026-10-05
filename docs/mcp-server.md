@@ -47,14 +47,16 @@ authoring guidance, call `get_product_guide` with the relevant topic:
 - **stdio is the agent transport.** A loopback-only Streamable HTTP endpoint is mounted
   inside the lock-owning local runtime so a second CE entry point can attach to the same
   process. It is not exposed beyond `127.0.0.1` and is not a client configuration surface.
-- **Mirror-bounded, never a live relay.** `get_roster`, `get_submissions`, and
-  `get_gradebook_snapshot` serve exclusively from the local CanvasMirror
-  (`docs/mirror.md`). All three serve stale data with its freshness labeled and a
-  non-blocking hint, instead of fetching live from Canvas. Missing or malformed
-  data refuses with `refresh_mirror` as the repair. The agent can ask Canvas
-  Expert to sync and then read what Canvas Expert wrote to disk, but it can never
-  receive a live Canvas response directly. The assistant runs `refresh_mirror`
-  itself when the age matters and skips it when the data is within policy.
+- **Evidence-bounded, never a live relay.** `get_roster`, `get_submissions`,
+  `get_gradebook_snapshot`, and `get_assignment_evidence` serve exclusively from
+  the local pseudonymized evidence index (`docs/mirror.md`). They serve available
+  evidence with `coverage` and `warnings`, instead of fetching live from Canvas.
+  A scope with no evidence refuses with `evidence_refresh_required` (call
+  `refresh_mirror`); an index still being built refuses with
+  `evidence_index_pending` (retry the read, not acquisition). The agent can ask
+  Canvas Expert to sync and then read what Canvas Expert wrote to disk, but it can
+  never receive a live Canvas response directly. The assistant runs
+  `refresh_mirror` itself when needed and skips it when the data is available.
 
 ## Tools
 
@@ -370,12 +372,14 @@ Authorization never carries to later assignments, another session, SIS action, o
 arbitrary grade edit.
 Ordinary assignments may offer comment-only posting after the teacher answers its question.
 
-`get_roster`, `get_submissions`, and `get_gradebook_snapshot` only read the local
-CanvasMirror. None fall back to a live Canvas call. Stale data serves with its freshness
-labeled (`state`, `age_minutes`, `within_policy`, `policy_window_minutes`) and a
-non-blocking `refresh_mirror` hint. Missing or malformed data refuses with
-`{"ok": false, "error": "..."}` naming the problem; the agent calls `refresh_mirror(course_id)`
-itself and retries once it reports `"synced"`.
+`get_roster`, `get_submissions`, `get_gradebook_snapshot`, and
+`get_assignment_evidence` only read the local pseudonymized evidence index. None
+fall back to a live Canvas call. Available evidence serves with `coverage`
+(`complete`/`incomplete`/`unknown`) and `warnings`, even when partial or old. A
+scope with no evidence refuses with `evidence_refresh_required`; the agent calls
+`refresh_mirror(course_id)` itself and retries once it reports `"synced"`. An
+index still being built refuses with `evidence_index_pending`; the agent retries
+the read, not acquisition.
 
 Stale `get_course_content(kind="modules")` and `get_course_content(kind="pages")` results
 name `refresh_mirror(structure_only=true)` as their repair, which refreshes the whole
@@ -489,9 +493,10 @@ After registering, try `list_courses` first (no Canvas call, no student data; a 
 sanity check that the process starts and the interpreter resolves correctly), then
 `get_gradebook_snapshot` on a Current course. Every student name in the output should be a
 pseudonym you don't recognize from the real roster; that's the privacy boundary working as
-intended, not a bug. If the mirror hasn't synced this course yet, `get_gradebook_snapshot`
-(or `get_roster`/`get_submissions`) refuses instead; call `refresh_mirror` for that course
-and retry.
+intended, not a bug. If the evidence index has no data for this course yet,
+`get_gradebook_snapshot` (or `get_roster`/`get_submissions`) refuses with
+`evidence_refresh_required`; call `refresh_mirror` for that course and retry. If the
+index is still being built, it refuses with `evidence_index_pending`; retry the read.
 
 Merged options are mode-specific. Inapplicable options return `inapplicable_option` before
 side effects. `get_course_content` accepts `full_descriptions` for assignments,

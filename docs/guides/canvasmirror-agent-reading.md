@@ -5,16 +5,19 @@ agent-led ELA/CS scoring. It holds pseudonymized, scrubbed facts and commits.
 The private originals, identity mappings, and control state live elsewhere and
 are never part of this read surface.
 
-The local index is rebuilt from validated safe course files at runtime startup,
-after local publication, and as synchronized files arrive. A missing or partial
-index is a repair or synchronization state, not proof that course evidence is
-absent. Check `scope_status` and each query's coverage and revision before using
-the rows. Read activation for the teacher's private pilot has not yet occurred.
+The local index is rebuilt from validated safe course files by a background
+maintenance worker (30-second cadence), after local publication, and as
+synchronized files arrive. A missing or partial index is a repair or
+synchronization state, not proof that course evidence is absent. Check
+`scope_status` and each query's coverage and revision before using the rows.
+There is no activation checkpoint or historical import.
 
 ## Safe read locations
 
 - Safe evidence root: `<workspace>/CanvasMirror/` (synchronized, agent-readable).
-- Reader contract: `<workspace>/CanvasMirror/reader.v1.json`.
+- Reader descriptor: `reader.json` beside `query.sqlite3` (machine-local,
+  registry-derived, revision-bound). Compare its `index_revision` with
+  `index_metadata` in the same read transaction.
 - Safe query index:
   `<LOCALAPPDATA>/CanvasExpert/cache/CanvasMirror/<workspace_key>/<source_key>/query.sqlite3`.
 
@@ -22,12 +25,25 @@ Open the index read-only with SQLite URI `mode=ro` and `PRAGMA query_only=ON`.
 Do not use `immutable=1` for a database the runtime can update. Direct reads
 need no identity store, no Canvas, and no FastAPI.
 
+## Pending and refresh guidance
+
+- Index missing/mismatched/corrupt/busy while safe evidence exists: the MCP read
+  returns `evidence_index_pending`; retry the read, not acquisition. Local
+  maintenance rebuilds automatically.
+- No evidence acquired yet: the MCP read returns `evidence_refresh_required`;
+  call `refresh_mirror(course_id)`, then retry.
+- A newer Canvas Expert wrote some saved data: `evidence_update_required`; update
+  this computer. Supported last-good rows remain readable with a warning.
+- Available evidence serves with `coverage` (`complete`/`incomplete`/`unknown`)
+  and `warnings`; a partial read is success with gaps.
+
 ## Named views
 
-`courses`, `assignment_context`, `group_context`, `module_context`,
-`page_context`, `assignment_group_context`, `current_submissions`,
-`attempt_history`, `attachment_associations`, `attachment_extractions`,
-`attachment_blocks`, `scope_status`, `comparison_evidence`, `agent_notes`.
+`courses`, `roster`, `sections`, `assignment_context`, `group_context`,
+`module_context`, `page_context`, `assignment_group_context`,
+`current_submissions`, `attempt_history`, `attachment_associations`,
+`attachment_extractions`, `attachment_blocks`, `scope_status`,
+`comparison_evidence`, `agent_notes`.
 
 ## Example
 

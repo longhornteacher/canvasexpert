@@ -113,9 +113,29 @@ The durable synced CanvasMirror store is implemented: pseudonymized immutable
 facts and scope commits under `<workspace>/CanvasMirror/`, private verified
 originals under `_System/Archive/CanvasMirror Originals/`, and a machine-local
 query index. Agents read it directly (see
-`docs/guides/canvasmirror-agent-reading.md`) or through
-`get_assignment_evidence`; both use the same named views and meanings. See
+`docs/guides/canvasmirror-agent-reading.md`) or through the MCP reads
+(`get_roster`, `get_submissions`, `get_gradebook_snapshot`,
+`get_assignment_evidence`); both use the same named views and meanings. See
 `docs/reference/canvasmirror-synced-store-direction.md` for the decisions.
+
+There is no activation checkpoint or historical import. One evidence-reader
+resolver serves the MCP reads from the local index. It refuses with a typed code
+and actionable guidance: `workspace_unconfigured`, `canvas_origin_unconfigured`,
+`evidence_update_required` (a newer Canvas Expert wrote some saved data),
+`evidence_index_pending` (safe evidence exists but the local index is missing,
+mismatched, corrupt, or busy — retry the read, not acquisition), and
+`evidence_refresh_required` (nothing has been acquired yet — call
+`refresh_mirror`). Reads return `coverage` (`complete`/`incomplete`/`unknown`)
+and `warnings` (`membership_incomplete`, `membership_unknown`, `sync_pending`,
+`evidence_update_required`, `section_label_missing`,
+`assignment_context_missing`, `assignments_excluded_from_totals`) instead of a
+blanket coverage refusal. A useful partial read is success with gaps.
+
+Background maintenance keeps the index current: a 30-second index worker rebuilds
+from safe files (never Canvas), and an attachment worker continues capture and
+extraction in bounded chunks. `refresh_mirror(operation_id=...)` observes an
+existing plan without dispatching, so a slow refresh can be polled without
+enqueuing another acquisition.
 
 CanvasMirror and the Course Catalog are local projections, not authorities.
 Canvas remains truth. Agent-facing student-data reads stay indirect and obey

@@ -1145,7 +1145,7 @@ def _build_canvasmirror_guide() -> str:
         "## Safe read locations",
         "",
         "- Safe evidence root: `<workspace>/CanvasMirror/` (synchronized, agent-readable).",
-        "- Reader contract: `<workspace>/CanvasMirror/reader.v1.json`.",
+        "- Reader descriptor: `<LOCALAPPDATA>/CanvasExpert/cache/CanvasMirror/<workspace_key>/<source_key>/reader.json` (machine-local, beside the index).",
         "- Safe query index: `<LOCALAPPDATA>/CanvasExpert/cache/CanvasMirror/<workspace_key>/<source_key>/query.sqlite3`.",
         "",
         "Open the index read-only with SQLite URI `mode=ro` and `PRAGMA query_only=ON`;",

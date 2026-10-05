@@ -1,11 +1,11 @@
 # CanvasMirror: durable synced course store
 
 Status: teacher-approved direction, revised 2026-10-05. The functional-read-path
-brief has completed coding preflight and is ready for execution slicing; its
-baseline/environment findings remain YELLOW. Grading periods guide the agent
-rather than gate CE/CanvasMirror. No code or state reset has been performed. The
-teacher permits a fresh mirror start instead of a lossless
-pilot migration. Prior synthetic acceptance does not establish pilot functionality.
+brief is implemented through S11 (synthetic GREEN); S12/S13 field acceptance
+remains. Grading periods guide the agent rather than gate CE/CanvasMirror. No
+code or state reset has been performed. The teacher permits a fresh mirror start
+instead of a lossless pilot migration. Prior synthetic acceptance does not
+establish pilot functionality.
 
 ## Teacher-visible outcome
 
@@ -154,8 +154,8 @@ requirements in earlier briefs and contracts for this transition.
 ## Execution design
 
 The prior read-activation repair's lossless import/cutover scope is superseded
-by the 2026-10-05 decisions; its brief is retired to Git history.
-The current execution pointer is
+by the 2026-10-05 decisions; its brief is retired to Git history, and the
+activation/import/migration machinery is deleted. The current execution pointer is
 `docs/handoffs/canvasmirror-functional-read-path.md`. It fixes acquisition,
 safe-publication, replaceable-index, and agent-read boundaries and defines a bounded
 fresh-start procedure. The detailed staged implementation plan is
@@ -187,5 +187,14 @@ changes the plan, not claims about shipped behavior:
   loss of prepared work? Do not start another migration/cleanup project by default.
 
 Exact execution references: slice plan sections **4.5**, **4.7–4.9**, **5.1**,
-and **10–11**. Current runtime documentation is reconciled in S11 after code
-implements these changes; it must not describe this plan as already available.
+and **10–11**. Current runtime documentation was reconciled in S11 after the code
+implemented these changes.
+
+### Next senior assessment
+
+After S12/S13 field acceptance, the next senior assessment starts at scoring
+preparation and feedback revision: can available assignment evidence be consumed
+without a redundant refresh or loss of prepared work? The remaining private
+projections still consumed by Names, scoring, and operation adapters are the
+subject of that assessment, not a queued implementation brief. Do not start
+another migration/cleanup project by default.
