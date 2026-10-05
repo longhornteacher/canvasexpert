@@ -132,6 +132,26 @@
     say(card && card.querySelector("[data-mcp-detail]"), detail);
     return state;
   }
+  // Section 4.8 evidence detail text, with precedence
+  // update required > index failed > index pending > not arrived.
+  function evidenceDetail(data) {
+    var evidence = data && data.evidence;
+    if (!evidence || typeof evidence !== "object") return null;
+    var index = evidence.index || {};
+    var updateRequired = Array.isArray(index.update_required_courses) && index.update_required_courses.length;
+    var notArrived = Array.isArray(index.not_arrived_courses) && index.not_arrived_courses.length;
+    if (updateRequired) return { state: "attention", detail: "Some saved Canvas data was written by a newer Canvas Expert. Update Canvas Expert on this computer." };
+    if (index.state === "failed") return { state: "attention", detail: "The local index could not be rebuilt yet. Saved Canvas data is safe and will be retried automatically." };
+    if (index.state === "pending" || evidence.state === "pending") return { state: "attention", detail: "Saved Canvas data is waiting for local indexing. It updates automatically." };
+    if (notArrived) return { state: "attention", detail: "Some course data has not finished syncing to this computer yet." };
+    return null;
+  }
+  function backlogSentence(data) {
+    var attachments = data && data.evidence && data.evidence.attachments;
+    var remaining = attachments && Number(attachments.remaining);
+    if (!remaining) return "";
+    return " " + remaining + " attachment" + (remaining === 1 ? " is" : "s are") + " still being read.";
+  }
   function mirrorSummary(data) {
     if (data && data.error === "legacy_storage_reappeared") return {
       state: "unavailable", label: "Retired storage file found",
@@ -153,17 +173,32 @@
       if (!newest) { missing += 1; return; }
       if (oldest === null || newest < oldest) oldest = newest;
     });
-    if (missing === courses.length) return { state: "attention", label: "Not synced yet", detail: courses.length + " current " + (courses.length === 1 ? "course has" : "courses have") + " no successful sync yet.", sync: true };
-    if (missing) return { state: "attention", label: "Some courses not synced", detail: missing + " of " + courses.length + " current courses have no successful sync yet.", sync: true };
-    var date = new Date(oldest);
-    if (Number.isNaN(date.getTime())) return { state: "unavailable", label: "Status unavailable", detail: "CanvasMirror returned an unreadable sync time.", sync: false };
-    var fresh = Date.now() - date.getTime() <= (Number(data.serve_max_age_hours) || 6) * 3600000;
-    return {
-      state: fresh ? "ready" : "attention",
-      label: fresh ? "Current" : "Needs refresh",
-      detail: "Oldest current-course sync was " + relativeTime(date) + ".",
-      sync: true,
-    };
+    var backlog = backlogSentence(data);
+    var evidence = evidenceDetail(data);
+    var base;
+    if (missing === courses.length) {
+      base = { state: "attention", label: "Not synced yet", detail: courses.length + " current " + (courses.length === 1 ? "course has" : "courses have") + " no successful sync yet.", sync: true };
+    } else if (missing) {
+      base = { state: "attention", label: "Some courses not synced", detail: missing + " of " + courses.length + " current courses have no successful sync yet.", sync: true };
+    } else {
+      var date = new Date(oldest);
+      if (Number.isNaN(date.getTime())) return { state: "unavailable", label: "Status unavailable", detail: "CanvasMirror returned an unreadable sync time.", sync: false };
+      var fresh = Date.now() - date.getTime() <= (Number(data.serve_max_age_hours) || 6) * 3600000;
+      base = {
+        state: fresh ? "ready" : "attention",
+        label: fresh ? "Current" : "Needs refresh",
+        detail: "Oldest current-course sync was " + relativeTime(date) + ".",
+        sync: true,
+      };
+    }
+    // Keep the freshness summary, then apply the section 4.8 evidence detail
+    // (precedence update required > index failed > index pending > not arrived).
+    if (evidence) {
+      base.state = evidence.state;
+      base.detail = evidence.detail;
+    }
+    base.detail += backlog;
+    return base;
   }
   function renderMirror(data) {
     var result = mirrorSummary(data);
@@ -403,11 +438,27 @@
         var plans = result.body && result.body.plan && result.body.plan.plans;
         var plan = Array.isArray(plans) ? plans[0] : null;
         if (!result.response.ok || !plan) throw new Error("Could not read the refresh status.");
-        if (["succeeded", "failed", "cancelled"].indexOf(plan.state) !== -1) return plan;
+        if (["succeeded", "failed", "cancelled"].indexOf(plan.state) !== -1) {
+          return { plan: plan, stages: result.body.stages || {} };
+        }
         if (!attempts) throw new Error("Refresh is still running. Check Canvas data again shortly.");
         setResult(mirrorResult, "Refreshing Canvas data…", false);
         return new Promise(function (resolve) { setTimeout(resolve, 750); }).then(function () { return pollPlan(planId, attempts - 1); });
       });
+  }
+  // Section 4.8 refresh text, chosen from the plan's stages.
+  function refreshText(stages) {
+    var acquisition = (stages && stages.acquisition) || {};
+    var publication = (stages && stages.publication) || {};
+    var index = (stages && stages.index) || {};
+    var attachments = (stages && stages.attachments) || {};
+    if (acquisition.state === "failed") return { text: "Canvas refresh failed: Canvas could not be read. Check your Canvas connection and try again.", attention: true };
+    if (publication.state === "failed") return { text: "Canvas data was read, but some of it could not be saved safely. Try again; if it repeats, check Diagnostics.", attention: true };
+    if (index.state === "pending" || index.state === "failed") return { text: "Refresh saved. Local indexing is still finishing.", attention: false };
+    if (attachments.state === "pending") return { text: "Refresh saved. Submission text is available; some attachments are still being read.", attention: false };
+    if (attachments.state === "partial") return { text: "Refresh saved. Available work can be read; some attachments could not be read.", attention: false };
+    if (index.state === "ready" && (attachments.state === "ready" || attachments.state === "not_run")) return { text: "Refresh complete.", attention: false };
+    return { text: "Refresh saved.", attention: false };
   }
   if (refreshButton) refreshButton.addEventListener("click", function () {
     refreshButton.disabled = true;
@@ -416,9 +467,9 @@
       .then(responseJson).then(function (result) {
         if (!result.response.ok || !result.body.plan_id) throw new Error("Canvas refresh could not be started.");
         return pollPlan(result.body.plan_id, 160);
-      }).then(function (plan) {
-        if (plan.state === "failed") throw new Error("Canvas refresh failed. Check your Canvas connection and try again.");
-        setResult(mirrorResult, plan.state === "succeeded" ? "Refresh complete." : "Refresh stopped.", plan.state !== "succeeded");
+      }).then(function (outcome) {
+        var message = refreshText(outcome.stages);
+        setResult(mirrorResult, message.text, message.attention);
         return fetch("/api/mirror/status", { headers: { Accept: "application/json" } }).then(responseJson);
       }).then(function (result) { if (result.response.ok) { currentMirror = result.body; rerenderCurrent(); } })
       .catch(function (error) { setResult(mirrorResult, error.message || "Canvas refresh failed.", true); })

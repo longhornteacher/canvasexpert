@@ -165,6 +165,58 @@ def test_health_mapping_covers_client_mirror_privacy_and_overall_failure_paths()
         assert contract in script
 
 
+def test_mirror_status_has_no_side_effects_on_absent_stores(tmp_path, monkeypatch):
+    """LAW: a status GET creates no file and opens no write connection."""
+    from api.mirror import service as mirror_service
+    from api import runtime_paths
+
+    root = tmp_path / "workspace"
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(runtime_paths, "local_cache_dir", lambda: tmp_path / "local")
+    monkeypatch.setattr(mirror_service.config, "get_canvas_base",
+                        lambda: "https://canvas.example.test")
+    monkeypatch.setattr(mirror_service.config, "active_courses", lambda: [])
+    monkeypatch.setattr(mirror_service.config, "mirror_enabled", lambda: True)
+
+    payload = mirror_service.status()
+    assert payload["ok"] is True
+    assert payload["evidence"]["state"] in {"not_run", "pending", "unconfigured"}
+    # No cache directory or database was created by the status read.
+    assert not (tmp_path / "local").exists()
+
+
+def test_mirror_status_reports_failed_stage_and_last_success(tmp_path, monkeypatch):
+    """A failed refresh keeps last success and reports the failed stage."""
+    from api.mirror import service as mirror_service, store
+    from api import runtime_paths
+
+    root = tmp_path / "workspace"
+    monkeypatch.setattr(workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(runtime_paths, "local_cache_dir", lambda: tmp_path / "local")
+    monkeypatch.setattr(mirror_service.config, "get_canvas_base",
+                        lambda: "https://canvas.example.test")
+    monkeypatch.setattr(mirror_service.config, "active_courses",
+                        lambda: [{"id": "1", "name": "Course 1"}])
+    monkeypatch.setattr(mirror_service.config, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(mirror_service.config, "course_display_name", lambda _cid: "Course 1")
+
+    store.begin_refresh("1", operation_id="op-1", root=str(root))
+    store.finish_refresh("1", operation_id="op-1", ok=True,
+                         finished_at="2026-10-05T10:00:00Z", root=str(root))
+    store.begin_refresh("1", operation_id="op-2", root=str(root))
+    store.finish_refresh("1", operation_id="op-2", ok=False,
+                         finished_at="2026-10-05T11:00:00Z",
+                         error_code="publication_incomplete",
+                         failure_stage="publication", root=str(root))
+
+    payload = mirror_service.status()
+    refresh = payload["courses"][0]["refresh"]
+    assert refresh["state"] == "failed"
+    assert refresh["failure_stage"] == "publication"
+    assert refresh["last_success_at"] == "2026-10-05T10:00:00Z"
+    assert refresh["last_attempt_at"] == "2026-10-05T11:00:00Z"
+
+
 def test_student_reports_compatibility_routes_are_retired(monkeypatch):
     monkeypatch.setattr(pages.config, "token_is_set", lambda: True)
     monkeypatch.setattr(pages.config, "get_canvas_base", lambda: "https://canvas.example.test")

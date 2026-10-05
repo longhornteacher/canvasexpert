@@ -667,6 +667,7 @@ def evidence_status() -> dict:
 
 def evidence_stages(*, course_id=None, assignment_id=None) -> dict:
     """Read-only local index and attachment stages for status and MCP results."""
+    from api.mirror.evidence_jobs import AttachmentJobStore
     from api.mirror.evidence_paths import control_store_path, local_source_root, source_key_for_origin
     root = workspace.workspace_root()
     if root is None:
@@ -1195,12 +1196,18 @@ def status(plan_id: str | None = None) -> dict:
         if not course_id:
             continue
         state = store.read_sync(course_id)
+        refresh = store.read_refresh(course_id)
         courses.append({
             "course_id": course_id,
             "course_name": config.course_display_name(course_id),
             "passes": state["passes"],
             "watermarks": state["watermarks"],
             "context": store.read_course_context(course_id),
+            "refresh": {"state": refresh.get("state", ""),
+                        "last_attempt_at": refresh.get("finished_at", ""),
+                        "last_success_at": refresh.get("last_success_at", ""),
+                        "failure_stage": refresh.get("failure_stage", ""),
+                        "error_code": refresh.get("error_code", "")},
             "evidence": evidence_stages(course_id=course_id),
         })
     owner = acquisition_owner_status()
