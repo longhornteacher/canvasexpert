@@ -1,11 +1,16 @@
 """Exact acquisition scope proof, safe projection, and immutable history laws."""
+from pathlib import Path
+import json
+
 import pytest
 
 from api.mirror.evidence_acquisition import (
     CourseAcquisitionReceipt, ScopeReceipt, publish_course_receipt,
+    publish_attachment_status,
 )
 from api.mirror.evidence_publish import EvidencePublisher, PublicationRefused
 from api.tests.mirror.acquisition_samples import SyntheticVault
+from api.mirror.evidence_index import VIEW_COLUMNS
 
 
 def publish(tmp_path, scopes, *, run="run-a", publisher=None):
@@ -275,3 +280,168 @@ def test_scope_mismatch_top_level_has_no_safe_publication(tmp_path):
     with pytest.raises(PublicationRefused, match="scope_mismatch"):
         publish_course_receipt(publisher=publisher, receipt=receipt, writer_key="writer-a", run_id="run-a")
     assert not (tmp_path / "CanvasMirror").exists()
+
+
+@pytest.mark.parametrize("entry_point", ["receipt", "text"])
+def test_publication_ignores_conflicting_shared_descriptor(tmp_path, entry_point):
+    from api.platform_services import workspace
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key="a" * 64,
+                                  course_id="1", vault=SyntheticVault())
+    safe_root = Path(workspace.canvas_mirror_evidence_root(tmp_path))
+    safe_root.mkdir(parents=True)
+    old = safe_root / "reader.v1.json"
+    old_contract = {
+        "schema_version": 1,
+        "description": "Pseudonymized CanvasMirror evidence; read-only local SQLite projection",
+        "views": {name: list(columns) for name, columns in sorted(VIEW_COLUMNS.items())
+                  if name not in {"roster", "sections"}},
+        "read_mode": "SQLite URI mode=ro with PRAGMA query_only=ON; no immutable=1",
+        "sql_example": ("SELECT assignment_id, pseudonym, attempt, submitted_at, payload "
+                        "FROM attempt_history WHERE source_key = ? AND course_id = ? "
+                        "AND assignment_id = ? ORDER BY pseudonym, attempt, fact_ref LIMIT 50"),
+        "privacy": "Pseudonymized and scrubbed, not anonymous. Originals and identity mappings are outside this root.",
+    }
+    old_bytes = (json.dumps(old_contract, sort_keys=True, ensure_ascii=False,
+                            separators=(",", ":")) + "\n").encode("utf-8")
+    old.write_bytes(old_bytes)
+    if entry_point == "receipt":
+        _, result = publish(tmp_path, [
+            ScopeReceipt("course.roster", "1", ({"id": "991001", "name": "Avery Sample"},), True),
+            ScopeReceipt("assignment.submissions", "10",
+                         (submission(user_id="991001"),), True),
+        ], publisher=publisher)
+        assert result.gaps == ()
+        assert result.successful_scopes == (("course.roster", "1"),
+                                             ("assignment.submissions", "10"))
+    else:
+        result = publisher.publish_text_assignment(
+            course_title="ELA", assignment={"id": "10", "title": "Draft"},
+            roster=[{"id": "991001", "name": "Avery Sample"}],
+            submissions=[{"user_id": "991001", "attempt": 1, "body": "Synthetic."}],
+            roster_complete=True, submissions_complete=True,
+            writer_key="writer-a", run_id="run-a")
+        assert result.gaps == ()
+        scopes = publisher.store.scan().scopes
+        assert scopes[("a" * 64, "1", "course.roster", "1")].membership_complete
+        assert scopes[("a" * 64, "1", "assignment.submissions", "10")].membership_complete
+    assert old.read_bytes() == old_bytes
+    assert sorted(path.name for path in safe_root.glob("reader*.json")) == ["reader.v1.json"]
+
+
+@pytest.mark.parametrize("entry_point", ["receipt", "text"])
+def test_first_acquisition_scrubs_sis_id_and_nickname(tmp_path, entry_point):
+    vault = SyntheticVault()
+    vault.people.clear()
+    vault.sis_ids.clear()
+    vault.nicknames.clear()
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key="a" * 64,
+                                  course_id="1", vault=vault)
+    roster = [{"id": "synthetic-user-01", "name": "Synthetic Learner One",
+               "sis_user_id": "sis-private-991", "short_name": "Av-private"}]
+    body = "sis-private-991 Av-private"
+    if entry_point == "receipt":
+        receipt = CourseAcquisitionReceipt("1", "2026-01-04T00:00:00Z",
+            "2026-01-04T00:01:00Z", (
+                ScopeReceipt("course.roster", "1", tuple(roster), True),
+                ScopeReceipt("assignment.submissions", "10",
+                    (submission(user_id="synthetic-user-01", body=body),), True),
+            ))
+        publish_course_receipt(publisher=publisher, receipt=receipt,
+                               writer_key="writer-a", run_id="run-a")
+    else:
+        publisher.publish_text_assignment(
+            course_title="ELA", assignment={"id": "10", "title": "Draft"},
+            roster=roster, submissions=[{"user_id": "synthetic-user-01", "attempt": 1, "body": body}],
+            roster_complete=True, submissions_complete=True,
+            writer_key="writer-a", run_id="run-a")
+    safe_root = publisher.store.safe_root
+    safe_bytes = b"".join(path.read_bytes() for path in safe_root.rglob("*.json"))
+    assert b"sis-private-991" not in safe_bytes and b"Av-private" not in safe_bytes
+    snapshot = publisher.store.scan()
+    submissions = [row for row in snapshot.facts.values() if row["kind"] == "submission"]
+    assert len(submissions) == 1
+    assert "sis-private-991" not in submissions[0]["payload"]["body"]
+    assert "Av-private" not in submissions[0]["payload"]["body"]
+    entry = next(row for row in vault.entries() if row["canvas_id"] == "synthetic-user-01")
+    assert entry["sis_id"] == "sis-private-991"
+    assert "Av-private" in entry["nicknames"]
+
+
+@pytest.mark.parametrize("entry_point", ["receipt", "text"])
+def test_registration_failure_omits_student_scope_and_keeps_prior_safe_facts(
+        tmp_path, monkeypatch, entry_point):
+    from api import roster_service
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key="a" * 64,
+                                  course_id="1", vault=SyntheticVault())
+    if entry_point == "receipt":
+        publish(tmp_path, [
+            ScopeReceipt("course.roster", "1", ({"id": "991001", "name": "Avery Sample"},), True),
+            ScopeReceipt("assignment.submissions", "10",
+                (submission(user_id="991001", body="Prior safe student evidence."),), True),
+        ], publisher=publisher)
+        before = publisher.store.scan().scopes
+        previous_roster_refs = before[("a" * 64, "1", "course.roster", "1")].current_refs
+        previous_submission_refs = before[("a" * 64, "1", "assignment.submissions", "10")].current_refs
+        receipt = CourseAcquisitionReceipt("1", "2026-01-04T00:00:00Z",
+            "2026-01-04T00:01:00Z", (
+                ScopeReceipt("course.context", "1", ({"id": 1, "name": "Current course"},), True),
+                ScopeReceipt("course.roster", "1", ({"id": "991001", "name": "Avery Sample"},), True),
+                ScopeReceipt("assignment.submissions", "10",
+                    (submission(body="Student body must not publish."),), True),
+            ))
+        def fail_after_one(vault, rows):
+            vault.get_or_assign(rows[0]["id"], rows[0]["name"], rows[0].get("sis_user_id", ""))
+            raise RuntimeError("registration failure")
+        monkeypatch.setattr(roster_service, "upsert_roster", fail_after_one)
+        result = publish_course_receipt(publisher=publisher, receipt=receipt,
+                                        writer_key="writer-a", run_id="run-b")
+        assert "identity_registration_failed" in result.gaps
+        after = publisher.store.scan().scopes
+        assert after[("a" * 64, "1", "course.roster", "1")].current_refs == previous_roster_refs
+        assert after[("a" * 64, "1", "assignment.submissions", "10")].current_refs == previous_submission_refs
+    else:
+        publisher.publish_text_assignment(course_title="Prior safe course",
+            assignment={"id": "10", "title": "Prior"},
+            roster=[{"id": "991001", "name": "Avery Sample"}],
+            submissions=[{"user_id": "991001", "attempt": 1,
+                          "body": "Prior safe student evidence."}],
+            roster_complete=True, submissions_complete=True,
+            writer_key="writer-a", run_id="run-a")
+        before = publisher.store.scan().scopes
+        previous_roster_refs = before[("a" * 64, "1", "course.roster", "1")].current_refs
+        previous_submission_refs = before[("a" * 64, "1", "assignment.submissions", "10")].current_refs
+        def fail_after_one(vault, rows):
+            vault.get_or_assign(rows[0]["id"], rows[0]["name"], rows[0].get("sis_user_id", ""))
+            raise RuntimeError("registration failure")
+        monkeypatch.setattr(roster_service, "upsert_roster", fail_after_one)
+        result = publisher.publish_text_assignment(course_title="Current course",
+            assignment={"id": "10", "title": "Current"},
+            roster=[{"id": "991001", "name": "Avery Sample"}],
+            submissions=[{"user_id": "991001", "attempt": 1,
+                          "body": "Student body must not publish."}],
+            roster_complete=True, submissions_complete=True,
+            writer_key="writer-a", run_id="run-b")
+        assert "identity_registration_failed" in result.gaps
+        after = publisher.store.scan().scopes
+        assert after[("a" * 64, "1", "course.roster", "1")].current_refs == previous_roster_refs
+        assert after[("a" * 64, "1", "assignment.submissions", "10")].current_refs == previous_submission_refs
+    all_bytes = b"".join(path.read_bytes() for path in publisher.store.safe_root.rglob("*.json"))
+    assert b"Student body must not publish." not in all_bytes
+    assert any(b"Prior safe student evidence." in path.read_bytes()
+               for path in publisher.store.safe_root.rglob("*.json"))
+
+
+def test_attachment_status_republishes_gap_without_digest(tmp_path):
+    from types import SimpleNamespace
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key="a" * 64,
+                                  course_id="1", vault=SyntheticVault())
+    job = SimpleNamespace(assignment_id="10", pseudonym="Pikachu", attempt=1,
+                          attachment_key="f" * 64, media_type="application/pdf", size=123)
+    with pytest.raises(PublicationRefused, match="invalid_status"):
+        publish_attachment_status(publisher=publisher, job=job, status="pending",
+                                  writer_key="writer-a", run_id="run-a")
+    publish_attachment_status(publisher=publisher, job=job, status="unavailable",
+                             writer_key="writer-a", run_id="run-a")
+    fact = next(f for f in publisher.store.scan().facts.values() if f["kind"] == "attachment")
+    assert fact["payload"]["status"] == "unavailable"
+    assert fact["payload"]["original_digest"] is None

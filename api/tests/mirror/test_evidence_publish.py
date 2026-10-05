@@ -53,7 +53,7 @@ def test_complete_text_receipt_publishes_two_students_and_preserves_attempts(tmp
     assert context["rubric"][0]["ratings"][0]["description"] == "Strong"
 
     safe_root = root / "CanvasMirror"
-    assert (safe_root / "reader.v1.json").exists()
+    assert not (safe_root / "reader.v1.json").exists()
     safe_bytes = b"".join(path.read_bytes() for path in safe_root.rglob("*.json"))
     for forbidden in (b"Avery", b"Morgan", b"991001", b"991002", b"token=secret"):
         assert forbidden not in safe_bytes
@@ -67,7 +67,7 @@ def test_complete_text_receipt_publishes_two_students_and_preserves_attempts(tmp
     assert b"Avery" not in db_bytes and b"991001" not in db_bytes
 
 
-def test_unresolved_identity_keeps_siblings_and_marks_membership_incomplete(tmp_path):
+def test_unregistrable_roster_withholds_student_scopes_but_keeps_course_context(tmp_path):
     publisher, _ = _publisher(tmp_path)
     result = publisher.publish_text_assignment(
         course_title="ELA", assignment={"id": "10", "title": "Draft study"},
@@ -79,10 +79,10 @@ def test_unresolved_identity_keeps_siblings_and_marks_membership_incomplete(tmp_
         writer_key="writer-a", run_id="run-a",
         acquired_at="2026-01-04T00:00:00Z",
     )
-    assert "identity_unresolved" in result.gaps
-    scope = publisher.store.scan().scopes[("a" * 64, "1", "assignment.submissions", "10")]
-    assert scope.member_keys == ("submission:10:Pikachu",)
-    assert scope.membership_complete is False
+    assert "identity_registration_failed" in result.gaps
+    snapshot = publisher.store.scan()
+    assert ("a" * 64, "1", "assignment.submissions", "10") not in snapshot.scopes
+    assert any(f["kind"] == "course" for f in snapshot.facts.values())
 
 
 def test_receipt_completeness_is_scoped_separately(tmp_path):

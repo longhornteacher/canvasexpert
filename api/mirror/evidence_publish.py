@@ -18,7 +18,6 @@ from uuid import uuid4
 
 from api import feedback_scrub
 from api.mirror.evidence_paths import local_source_root
-from api.mirror.evidence_queries import publish_reader_contract
 from api.mirror.evidence_schema import canonical_bytes, validate_fact
 from api.mirror.evidence_store import EvidenceStore
 from api.mirror.evidence_schema import EvidenceValidationError
@@ -355,14 +354,28 @@ class EvidencePublisher:
                 observed_html = frozenset({"body"}) if observed.get(
                     "submission_type", row.get("submission_type")) == "online_text_entry" else frozenset()
                 planned.append(("attempt_observation", attempt_key, evidence, observed_html))
-        if hasattr(self.vault, "save"):
+        registration_failed = False
+        try:
+            from api.roster_service import upsert_roster
+            upsert_roster(self.vault, roster)
+        except Exception:
+            registration_failed = True
+            gaps.append("identity_registration_failed")
+        if not registration_failed and hasattr(self.vault, "save"):
             self.vault.save()
-        self._replacement_map = feedback_scrub.build_replacement_map(self.vault.entries(), set())
-        publish_reader_contract(workspace.canvas_mirror_evidence_root(self.workspace_root))
+        if not registration_failed:
+            for row in roster:
+                try:
+                    self.vault.require_stable(row.get("id") or row.get("user_id"))
+                except Exception:
+                    gaps.append("identity_unresolved")
+            self._replacement_map = feedback_scrub.build_replacement_map(self.vault.entries(), set())
         published: dict[str, list[tuple[str, str]]] = {"course": [], "assignment": [],
                                                        "student": [], "submission": [],
                                                        "attempt_observation": []}
         for kind, entity_key, payload, html_fields in planned:
+            if registration_failed and kind in {"student", "submission", "attempt_observation"}:
+                continue
             try:
                 _, digest = self._fact(kind, entity_key, payload,
                                       html_fields=html_fields)
@@ -376,23 +389,27 @@ class EvidencePublisher:
                          refs=[ref for _, ref in published["course"]],
                          members=[key for key, _ in published["course"]],
                          complete=True, writer_key=writer_key, run_id=run_id,
-                         acquired_at=acquired_at, gaps=gaps),
+                         acquired_at=acquired_at, gaps=[g for g in gaps
+                             if g != "identity_registration_failed"]),
             self._commit(scope="course.assignments", scope_id=self.course_id,
                          refs=[ref for _, ref in published["assignment"]],
                          members=[key for key, _ in published["assignment"]],
                          complete=False, writer_key=writer_key, run_id=run_id,
                          acquired_at=acquired_at, gaps=[]),
-            self._commit(scope="course.roster", scope_id=self.course_id,
+        ]
+        if not registration_failed:
+            commits.extend([
+                self._commit(scope="course.roster", scope_id=self.course_id,
                          refs=[ref for _, ref in published["student"]],
                          members=[key for key, _ in published["student"]],
                          complete=roster_complete, writer_key=writer_key, run_id=run_id,
                          acquired_at=acquired_at, gaps=gaps),
-            self._commit(scope="assignment.submissions", scope_id=assignment_id,
+                self._commit(scope="assignment.submissions", scope_id=assignment_id,
                          refs=[ref for _, ref in published["submission"] + published["attempt_observation"]],
                          members=[key for key, _ in published["submission"]],
                          complete=submissions_complete,
                          writer_key=writer_key, run_id=run_id,
                          acquired_at=acquired_at, gaps=gaps),
-        ]
+            ])
         return TextPublication(tuple(sorted({ref for rows in published.values() for _, ref in rows})),
                                tuple(commits), tuple(sorted(set(gaps))))
