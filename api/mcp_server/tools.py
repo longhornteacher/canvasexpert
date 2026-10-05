@@ -220,8 +220,7 @@ def _freshness_attention(envelope: dict) -> dict | None:
 
 
 def _activated_evidence_lane(course_id: str):
-    """Return the production evidence reader only after its verified cutover."""
-    from api.mirror.evidence_activation import read_activation
+    """Return the local evidence reader without an activation checkpoint."""
     from api.mirror.evidence_paths import local_source_root, source_key_for_origin
     from api.mirror.evidence_queries import EvidenceQueryService
     root = workspace.workspace_root()
@@ -230,21 +229,12 @@ def _activated_evidence_lane(course_id: str):
     try:
         source_key = source_key_for_origin(config.get_canvas_base())
     except Exception:
-        # An unset Canvas origin has never activated this source's read lane;
-        # retain the configured legacy behavior until one is selected.
         return None, None, None
     try:
-        state = read_activation(source_key=source_key, workspace_root=root)
-        if state.state == "repair_required":
-            return None, "evidence_activation_repair_required", "repair_required"
-        if state.state != "active":
-            return None, None, state.state
-        if str(course_id) not in (state.coverage.get("courses") or {}):
-            return None, "evidence_course_not_activated", "active"
         path = local_source_root(source_key, root) / "query.sqlite3"
         if not path.exists():
-            return None, "evidence_index_unavailable", state.state
-        return EvidenceQueryService(path), None, state.state
+            return None, "evidence_index_pending", "active"
+        return EvidenceQueryService(path), None, "active"
     except Exception:
         return None, "evidence_index_repair_required", "active"
 
@@ -2675,7 +2665,8 @@ def _refresh_identity(plan: dict) -> dict:
     return identity
 
 
-def refresh_mirror(course_id: str, include_comments: bool = False, structure_only: bool = False) -> dict:
+def refresh_mirror(course_id: str, include_comments: bool = False, structure_only: bool = False,
+                   operation_id: str = "") -> dict:
     """Ask Canvas Expert to sync this course's local CanvasMirror from Canvas
     (a submissions delta plus a roster refresh), then report freshness — the
     response is a sync STATUS, never Canvas data. Call this after
@@ -2692,6 +2683,26 @@ def refresh_mirror(course_id: str, include_comments: bool = False, structure_onl
     if not any(str(course.get("id")) == str(course_id)
                for course in config.active_courses()):
         return {"ok": False, "error": "Course is not Current; select it as Current before refreshing."}
+    if operation_id:
+        try:
+            plan = mirror_service.status(operation_id).get("plan")
+        except Exception:
+            plan = None
+        if not isinstance(plan, dict):
+            return {"ok": False, "code": "refresh_operation_unavailable",
+                    "error": "That refresh operation is no longer available."}
+        jobs = plan.get("jobs") or plan.get("plans") or []
+        scopes = {"course.structure_refresh"} if structure_only else (
+            {"course.feedback_refresh", "roster", "groups"} if include_comments else set(_REFRESH_SCOPES))
+        if any(str(job.get("course_id")) != str(course_id) or
+               (job.get("scope") and job.get("scope") not in scopes) for job in jobs):
+            return {"ok": False, "code": "refresh_operation_mismatch",
+                    "error": "That refresh operation does not match this course and mode."}
+        result = {"ok": plan.get("state") not in {"failed", "cancelled"},
+                  "status": "synced" if plan.get("state") == "succeeded" else plan.get("state", "syncing"),
+                  "operation_id": operation_id, "stages": plan.get("stages", {})}
+        result["fully_ready"] = bool(plan.get("state") == "succeeded")
+        return result
     # Counted before dispatch so structure-only refreshes join the same
     # per-course loop window as ordinary syncs.
     loop_attention = _refresh_loop_attention(course_id)
