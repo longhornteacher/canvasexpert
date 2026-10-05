@@ -109,15 +109,18 @@ needs it.
 
 ### Read spine
 
-The teacher-approved next direction is a durable synced CanvasMirror store with
-supported direct agent reads of pseudonymized records and MCP queries over the
-same information. See `docs/reference/canvasmirror-synced-store-direction.md` for
-the decisions and remaining design choices. This direction is not yet implemented;
-the following describes the existing read boundary.
+The durable synced CanvasMirror store is implemented: pseudonymized immutable
+facts and scope commits under `<workspace>/CanvasMirror/`, private verified
+originals under `_System/Archive/CanvasMirror Originals/`, and a machine-local
+query index. Agents read it directly (see
+`docs/guides/canvasmirror-agent-reading.md`) or through
+`get_assignment_evidence`; both use the same named views and meanings. See
+`docs/reference/canvasmirror-synced-store-direction.md` for the decisions.
 
 CanvasMirror and the Course Catalog are local projections, not authorities.
 Canvas remains truth. Agent-facing student-data reads stay indirect and obey
-the mirror freshness/refusal rules in `docs/mirror.md`.
+the mirror freshness/refusal rules in `docs/mirror.md`; age alone never makes
+readable evidence disappear.
 
 ### Action spine
 

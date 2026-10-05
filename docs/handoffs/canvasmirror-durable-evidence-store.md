@@ -1295,10 +1295,12 @@ independently maintained current-state store after cutover.
 
 ## 12. Execution result (lead updates in place)
 
-**Execution result:** S00–S07 are implemented and accepted on synthetic/local
+**Execution result:** S00–S08 are implemented and accepted on synthetic/local
 evidence. No teacher workspace migration, live Canvas call, production read
 activation, or public push was performed. The isolated OCR environment's full
 suite passes; the global `py` environment still lacks the S00 OCR wheels.
+Two-computer field acceptance (section 8.3) remains outstanding and is reported
+separately as YELLOW.
 
 | Slice | Status | Commit(s) | Files / focused gate counts | Deviations / remaining evidence |
 |---|---|---|---|---|
@@ -1310,12 +1312,14 @@ suite passes; the global `py` environment still lacks the S00 OCR wheels.
 | S05 required extraction | GREEN | `e753fdc` | 162 focused tests passed in the isolated OCR env; isolated full gate 2408 passed, 2 skipped, 0 failed | New `extraction/` package: strict result schema, format registry, supervised worker, and DOCX/PPTX/XLSX/PDF/JPG-PNG/text adapters. DOCX preserves order/formatting/tracked changes; PPTX follows relationship slide order + notes; XLSX keeps formulas vs cached values; PDF does native-then-OCR per page; images OCR with located blocks. `evidence_extraction.py` publishes scrubbed `assignment.extractions` facts with content/version-addressed caching. Global `py` shows the same 6 baseline failures plus the new real-OCR adapter test (same OCR-wheel category as S00's own tests). No live Canvas or teacher workspace activation. |
 | S06 reads/comparisons/notes | GREEN | `68901d1` | 359 MCP tests + 48 comparison/note tests passed; isolated full gate 2426 passed, 2 skipped, 0 failed | New `get_assignment_evidence(course_id, assignment_id, view)` MCP tool (views attachments/comparisons/notes) over the same query service as direct SQL; `evidence_comparisons.py` (exact-file equality, prompt-excluded wording overlap, successive-attempt changes); `evidence_notes.py` (append-only revisions, optimistic concurrency, stale marking, scrubbed publication); `canvasmirror` guide topic with a narrow `read_access` descriptor. Schema bumped v80→v81 (38 tools), snapshot regenerated, listing budget re-measured to 15300. Global `py` shows the same 6 baseline failures plus the OCR-wheel adapter test. No live Canvas or teacher workspace activation. |
 | S07 scoring consumption | GREEN | `73e0945` | 5 new scoring-consumption tests + 349 powergrader/feedback tests passed; isolated full gate 2431 passed, 2 skipped, 0 failed | New `evidence_scoring.py` reads published attachment/extraction facts into scoring-ready rows and merges extracted text into the SAFE bundle with explicit `_evidence_complete`/`_held` markers. `scoring_packet.build_packet` holds a marked response despite readable text; `feedback_results.validate_results` refuses a held item even with nonempty text. `scoring_artifacts` merges durable evidence before the safety scan. Global `py` shows the same 6 baseline failures plus the OCR-wheel adapter test. No live Canvas or teacher workspace activation. |
-| S08 activation/recovery | Not started | — | — | Two-machine field acceptance outstanding |
+| S08 activation/recovery | GREEN (automated) | `b1e80d8` | 15 new activation/recovery tests + route/runtime tests passed; isolated full gate 2436 passed, 2 skipped, 0 failed | New `evidence_activation.py` (machine-local activation checkpoint, rollback preserving evidence, resumable capture/extraction recovery); `service.evidence_status`/`recover_evidence_work_chunk`; runtime startup resumes interrupted work; `GET /api/mirror/evidence-status` route. Global `py` shows the same 6 baseline failures plus the OCR-wheel adapter test. Two-computer field acceptance (8.3) outstanding. |
 
-**Current traffic light:** YELLOW. S00–S07 are accepted against their
-synthetic/local gates. S08 activation/recovery is the next pointer.
-The private pilot import and production activation remain reserved for S08's
-announced acceptance run; two-computer field acceptance remains outstanding.
+**Current traffic light:** YELLOW. S00–S08 are accepted against their
+synthetic/local gates; the automated program is complete. The private pilot
+import and production activation remain reserved for S08's announced acceptance
+run, and two-computer field acceptance (section 8.3) is outstanding. The
+unrelated QF golden failure and the global-environment OCR-wheel gap remain the
+named baseline exceptions.
 
 For each completed slice record actual SHA, owned files, exact commands/counts,
 traffic light, deviations, baseline exception and remaining field evidence. Keep a

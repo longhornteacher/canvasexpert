@@ -292,6 +292,16 @@ no live path left for it to fall into.
 
 ## MCP reads and the refresh tool (`api/mcp_server/tools.py`, `server.py`)
 
+The durable evidence store (`<workspace>/CanvasMirror/`) is the teacher's
+cloud-synchronized, pseudonymized store for agent-led scoring. It holds
+immutable facts and scope commits, plus opaque attachment associations and
+scrubbed extraction blocks. Private originals live in
+`_System/Archive/CanvasMirror Originals/` as verified ZIP blobs; the live
+attachment queue and query index are machine-local under
+`%LOCALAPPDATA%\CanvasExpert\cache\CanvasMirror\`. Agents read the safe store
+directly (see `docs/guides/canvasmirror-agent-reading.md`) or through the
+assignment-evidence reader; both use the same named views.
+
 `get_roster`, `get_submissions`, and `get_gradebook_snapshot` are served from
 the mirror (design law 6): when it is outside the freshness policy they return
 `{"ok": false, "error": "..."}` naming the problem, rather than a live Canvas
@@ -318,8 +328,11 @@ formats remain local-only for teacher inspection in the private archive.
 Scoring Session continuation follows the same boundary. Once the teacher has
 selected an assignment, preparation reads fresh roster, assignment, and submission
 projections only. Ordinary submission text enters the existing SAFE pipeline;
-attachment-bearing, media-only, empty, or unreadable rows remain held for
-review, and no evidence bytes are downloaded. The assignment projection's
+ready safe evidence from the durable store (native/OCR text and block
+references) is merged in, so a student with readable attachment text is
+scorable. A required file that is not yet captured or fully extracted carries an
+explicit hold marker: the packet holds that item and the stage validator refuses
+it even when readable partial text exists. The assignment projection's
 student-free quiz classification stops a true New Quiz with
 `new_quiz_writing_requires_assignment` before norms or packet preparation.
 

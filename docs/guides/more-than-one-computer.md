@@ -10,7 +10,10 @@ Canvas Expert on the other computer.
 | `<workspace>/_Shared/vault/` | Immutable Identity Vault seed, per-machine identity journals, and the shared pseudonym registry. The seed preserves the existing vault fields, including names and SIS IDs. | OneDrive |
 | `<workspace>/_Shared/kv/` | Append-only settings and other shared key-value journals. | OneDrive |
 | `<workspace>/_Shared/work/` | Resumable scoring and operation work, with per-machine events and leases. | OneDrive |
-| `%LOCALAPPDATA%/CanvasExpert/cache/` | CanvasMirror and Course Catalog projections. Each computer refreshes its own cache from Canvas. | Local only |
+| `<workspace>/CanvasMirror/` | Durable, pseudonymized evidence store: immutable facts, scope commits, opaque attachment associations, and scrubbed extraction blocks. | OneDrive |
+| `<workspace>/_System/Archive/CanvasMirror Originals/` | Private verified ZIP originals and their filename/type associations. | OneDrive |
+| `<workspace>/_System/CanvasMirror Control/` | Private acquisition presence and bounded read-only requests. | OneDrive |
+| `%LOCALAPPDATA%/CanvasExpert/cache/` | CanvasMirror and Course Catalog projections, plus the machine-local evidence query index, attachment queue, and extraction cache. Each computer refreshes its own cache from Canvas. | Local only |
 | `%LOCALAPPDATA%/CanvasExpert/` | Machine identity, process lock, runtime settings, and machine-only files. | Local only |
 | `<workspace>/To Review/`, `Library/`, `Assignments/`, and teacher folders | Authored drafts and teacher-managed files. | OneDrive |
 
@@ -31,6 +34,24 @@ confirm the keys match. The key itself stays in each computer's Windows Credenti
 2. Save the same transfer key on each computer and confirm the fingerprints match.
 3. Let OneDrive finish syncing `_Shared/` before opening Canvas Expert on the other computer.
 4. Refresh CanvasMirror separately on each computer; its cache is local to that computer.
+
+## Durable evidence across computers
+
+The durable evidence store is cloud-synchronized, so the second computer reads the
+same pseudonymized facts and commits without a manual handoff. Acquisition ownership
+is automatic: one visible owner per workspace/source acquires, and a contender takes
+over only after the incumbent's presence stops advancing. Accidental overlap is safe
+because every commit is immutable and merges deterministically.
+
+The live attachment queue and query index are machine-local and never synced. On
+startup, Canvas Expert rebuilds the queue from the published association facts and
+resumes interrupted capture and extraction; a completed, validated original is reused
+rather than re-downloaded. Keep the designated store available on device using your
+cloud provider's setting; Canvas Expert does not control hydration.
+
+Automatic continuation covers evidence acquisition and reads. An already-open Scoring
+Session still uses its existing private work lease; transferring an in-progress
+posting action is a separate, explicit step.
 
 To transfer resumable work, find it with `list_work_items()` and inspect one item
 with `list_work_items(work_id=...)`. On the current computer, call
