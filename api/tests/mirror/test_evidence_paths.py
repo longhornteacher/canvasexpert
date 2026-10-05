@@ -3,7 +3,8 @@
 import pytest
 
 from api.mirror.evidence_paths import (
-    local_source_root, safe_course_root, source_key_for_origin, workspace_key,
+    local_source_root, maintenance_status_path, reader_descriptor_path,
+    safe_course_root, source_key_for_origin, workspace_key,
 )
 
 
@@ -31,6 +32,9 @@ def test_safe_and_local_paths_are_disjoint_and_partitioned(tmp_path):
     assert safe.is_relative_to(tmp_path / "CanvasMirror")
     assert not local.is_relative_to(tmp_path / "CanvasMirror")
     assert workspace_key(tmp_path) in local.parts
+    assert reader_descriptor_path(source, tmp_path) == local / "reader.json"
+    assert maintenance_status_path(source, tmp_path) == local / "maintenance.v1.json"
+    assert not local.exists()
     assert local_source_root(source, tmp_path / "other") != local
     with pytest.raises(ValueError, match="invalid_course_id"):
         safe_course_root(source, "../other", tmp_path)

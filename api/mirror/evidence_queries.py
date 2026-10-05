@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 from datetime import datetime, timezone
 
-from api.mirror.evidence_index import EvidenceIndex, IndexReadError, VIEW_COLUMNS
+from api.mirror.evidence_index import EvidenceIndex, IndexReadError, INDEX_SCHEMA_VERSION, VIEW_COLUMNS
 
 
 READER_SCHEMA_VERSION = 1
@@ -31,30 +31,34 @@ def reader_contract() -> dict:
     }
 
 
-def reader_contract_bytes() -> bytes:
-    return (json.dumps(reader_contract(), sort_keys=True, ensure_ascii=False,
-                       separators=(",", ":")) + "\n").encode("utf-8")
-
-
-def publish_reader_contract(safe_root: Path) -> Path:
-    """Publish exact versioned bytes once; never overwrite an incompatible peer."""
-    root = Path(safe_root)
-    payload = reader_contract_bytes()
-    root.mkdir(parents=True, exist_ok=True)
-    target = root / "reader.v1.json"
-    descriptor, temporary = tempfile.mkstemp(prefix=".reader-", suffix=".tmp", dir=root)
+def write_reader_descriptor(index_path: Path, *, revision: str) -> Path:
+    """Atomically write local read guidance bound to one committed index revision."""
+    index_path = Path(index_path)
+    target = index_path.parent / "reader.json"
+    payload = {
+        "descriptor_version": READER_SCHEMA_VERSION,
+        "index_schema_version": INDEX_SCHEMA_VERSION,
+        "index_revision": revision,
+        "index_file": "query.sqlite3",
+        "views": {name: list(columns) for name, columns in sorted(VIEW_COLUMNS.items())},
+        "read_mode": "SQLite URI mode=ro with PRAGMA query_only=ON; no immutable=1",
+        "revision_check": "SELECT value FROM index_metadata WHERE key='revision'",
+        "sql_example": SQL_EXAMPLE,
+        "privacy": "Pseudonymized and scrubbed, not anonymous. Originals and identity mappings are outside this root.",
+    }
+    raw = (json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                      separators=(",", ":")) + "\n").encode("utf-8")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".reader-", suffix=".tmp", dir=target.parent)
     try:
         with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
+            handle.write(raw)
             handle.flush()
             os.fsync(handle.fileno())
-        try:
-            os.link(temporary, target)
-        except FileExistsError:
-            if target.read_bytes() != payload:
-                raise IndexReadError("reader_contract_conflict") from None
+        os.replace(temporary, target)
     finally:
-        os.unlink(temporary)
+        if os.path.exists(temporary):
+            os.unlink(temporary)
     return target
 
 
@@ -157,6 +161,22 @@ class EvidenceQueryService:
                 "FROM scope_status WHERE source_key=? AND course_id=? AND scope_id=? "
                 "AND scope IN ('assignment.submissions','assignment.attachments','assignment.extractions')",
                 (source_key, course_id, assignment_id)).fetchall()
+            association_rows = db.execute(
+                "SELECT payload FROM attachment_associations WHERE source_key=? AND course_id=? AND assignment_id=?",
+                (source_key, course_id, assignment_id)).fetchall()
+            extraction_rows = db.execute(
+                "SELECT payload FROM attachment_extractions WHERE source_key=? AND course_id=? AND assignment_id=?",
+                (source_key, course_id, assignment_id)).fetchall()
+            association_statuses = [json.loads(row[0]).get("status") for row in association_rows]
+            extraction_availability = [json.loads(row[0]).get("availability") for row in extraction_rows]
+            attachment_summary = {
+                "associations": len(association_rows),
+                "captured": sum(status == "captured" for status in association_statuses),
+                "pending": sum(status == "pending" for status in association_statuses),
+                "gaps": sum(status in {"too_large", "unavailable", "foreign_origin"} for status in association_statuses),
+                "extracted": len(extraction_rows),
+                "extraction_gaps": sum(state in {"partial", "unavailable"} for state in extraction_availability),
+            }
             records = []
             for row in rows[:limit]:
                 records.append({"source_key": row["source_key"], "course_id": row["course_id"],
@@ -189,7 +209,8 @@ class EvidenceQueryService:
                                         for digest in json.loads(row["pending_commits"])],
                     "ambiguous_entities": [entity for row in coverage_rows
                                            for entity in json.loads(row["ambiguous_entities"])]},
-                "acquisition": {"state": "reported" if coverage_rows else "unknown"}}
+                "acquisition": {"state": "reported" if coverage_rows else "unknown"},
+                "attachment_summary": attachment_summary}
 
     def read(self, view: str, *, source_key: str, course_id: str,
              assignment_id: str | None = None, limit: int = 50,

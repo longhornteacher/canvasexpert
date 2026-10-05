@@ -13,6 +13,16 @@ from .evidence_schema import digest_record, validate_commit, validate_fact
 
 INDEX_SCHEMA_VERSION = 2
 MAX_PAGE_SIZE = 100
+
+
+@contextmanager
+def _write_connection(path):
+    db = sqlite3.connect(path, timeout=2)
+    try:
+        with db:
+            yield db
+    finally:
+        db.close()
 # This registry defines direct-read columns and generates the reader contract.
 VIEW_COLUMNS = {
     "courses": ("source_key", "course_id", "title", "selection_status"),
@@ -37,10 +47,34 @@ VIEW_COLUMNS = {
 class IndexReadError(ValueError):
     """A bounded, value-free query refusal."""
 
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
+class IndexBusy(IndexReadError):
+    """The local index is temporarily held by another process."""
+
+    def __init__(self):
+        super().__init__("index_busy")
+
 
 class EvidenceIndex:
     def __init__(self, path: Path):
         self.path = Path(path)
+        self._discard_allowed = False
+        self._discard_signature = None
+
+    def _file_signature(self):
+        try:
+            stat = self.path.stat()
+        except OSError:
+            return None
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+    def _mark_discardable(self):
+        self._discard_allowed = True
+        self._discard_signature = self._file_signature()
 
     def ingest(self, snapshot, *, selected_courses=()) -> str:
         """Replace the projection atomically; unchanged snapshots cost no rewrite.
@@ -71,8 +105,11 @@ class EvidenceIndex:
         snapshot = StoreSnapshot(facts=facts, commits=commits, issues=issues, revision=snapshot.revision, verify_safe=snapshot.verify_safe)
         selected = frozenset(str(value) for value in selected_courses)
         revision = hashlib.sha256(json.dumps([INDEX_SCHEMA_VERSION, snapshot.revision, sorted(facts), sorted(commits), sorted(json.dumps(asdict(issue), sort_keys=True) for issue in issues), sorted(selected)], separators=(",", ":")).encode()).hexdigest()
+        if self.path.exists():
+            with self.read_connection():
+                pass
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path, timeout=2) as db:
+        with _write_connection(self.path) as db:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA busy_timeout=2000")
@@ -103,6 +140,8 @@ class EvidenceIndex:
                         db.execute("INSERT OR IGNORE INTO history_refs VALUES (?,?)", (ref, stamp))
             db.execute("INSERT OR REPLACE INTO index_metadata VALUES ('revision',?)", (revision,))
             self._project_derived(db, facts, snapshot, revision)
+        self._discard_allowed = False
+        self._discard_signature = None
         return revision
 
     def ingest_many(self, snapshots, *, selected_courses=()) -> str:
@@ -240,40 +279,66 @@ class EvidenceIndex:
         CREATE TABLE IF NOT EXISTS scope_coverage(source_key TEXT,course_id TEXT,scope TEXT,scope_id TEXT,status TEXT,membership_complete INTEGER,heads TEXT,pending_commits TEXT,ambiguous_entities TEXT,last_success_at TEXT,PRIMARY KEY(source_key,course_id,scope,scope_id));
         CREATE TABLE IF NOT EXISTS attachment_block_rows(source_key TEXT,course_id TEXT,assignment_id TEXT,fact_ref TEXT,payload TEXT,PRIMARY KEY(source_key,course_id,assignment_id,fact_ref));
         CREATE TABLE IF NOT EXISTS comparison_rows(source_key TEXT,course_id TEXT,assignment_id TEXT,fact_ref TEXT,payload TEXT,PRIMARY KEY(source_key,course_id,assignment_id,fact_ref));
-        CREATE VIEW IF NOT EXISTS courses AS SELECT s.source_key,s.course_id,(SELECT json_extract(f.payload,'$.title') FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='course' AND f.source_key=s.source_key AND f.course_id=s.course_id ORDER BY fact_ref LIMIT 1) title,s.selection_status FROM course_selection s;
-        CREATE VIEW IF NOT EXISTS roster AS SELECT DISTINCT f.source_key,f.course_id,f.pseudonym,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='student';
-        CREATE VIEW IF NOT EXISTS sections AS SELECT DISTINCT f.source_key,f.course_id,json_extract(f.payload,'$.section_id') section_id,json_extract(f.payload,'$.name') name,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='section';
-        CREATE VIEW IF NOT EXISTS assignment_context AS SELECT DISTINCT f.source_key,f.course_id,f.assignment_id,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='assignment';
-        CREATE VIEW IF NOT EXISTS current_submissions AS SELECT DISTINCT f.source_key,f.course_id,f.assignment_id,f.pseudonym,f.attempt,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='submission';
-        CREATE VIEW IF NOT EXISTS attempt_history AS SELECT f.source_key,f.course_id,f.assignment_id,f.pseudonym,f.attempt,f.submitted_at,r.established_submitted_at,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN history_refs r USING(fact_ref) WHERE f.kind='attempt_observation';
-        CREATE VIEW IF NOT EXISTS attachment_associations AS SELECT DISTINCT f.source_key,f.course_id,f.assignment_id,f.pseudonym,f.attempt,json_extract(f.payload,'$.attachment_key') attachment_key,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='attachment';
-        CREATE VIEW IF NOT EXISTS attachment_extractions AS SELECT DISTINCT f.source_key,f.course_id,f.assignment_id,f.pseudonym,f.attempt,json_extract(f.payload,'$.attachment_key') attachment_key,json_extract(f.payload,'$.original_digest') original_digest,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='attachment_extraction';
-        CREATE VIEW IF NOT EXISTS scope_status AS SELECT * FROM scope_coverage;
         """)
-        for kind in ("group", "module", "page", "assignment_group"):
-            if kind == "group":
-                db.execute("CREATE VIEW IF NOT EXISTS group_context AS SELECT DISTINCT f.source_key,f.course_id,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind IN ('group','group_category')")
-                continue
-            db.execute(f"CREATE VIEW IF NOT EXISTS {kind}_context AS SELECT DISTINCT f.source_key,f.course_id,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='{kind}'")
-        for name in ("attachment_blocks", "comparison_evidence"):
-            db.execute(f"CREATE VIEW IF NOT EXISTS {name} AS SELECT source_key,course_id,assignment_id,fact_ref,payload FROM safe_facts WHERE 0")
-        db.execute("CREATE VIEW IF NOT EXISTS agent_notes AS SELECT DISTINCT f.source_key,f.course_id,f.assignment_id,json_extract(f.payload,'$.note_id') note_id,json_extract(f.payload,'$.revision') revision,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='note'")
-        db.execute("INSERT OR REPLACE INTO index_metadata VALUES ('schema_version',?)", (str(INDEX_SCHEMA_VERSION),))
+        db.execute("INSERT OR IGNORE INTO index_metadata VALUES ('schema_version',?)", (str(INDEX_SCHEMA_VERSION),))
         db.commit()
 
     @contextmanager
     def read_connection(self):
         """Pin a SQLite read transaction; direct agents use the same URI mode."""
+        if not self.path.is_file():
+            self._mark_discardable()
+            raise IndexReadError("index_missing")
         uri = self.path.resolve().as_uri() + "?mode=ro"
-        db = sqlite3.connect(uri, uri=True, timeout=2)
+        try:
+            db = sqlite3.connect(uri, uri=True, timeout=2)
+        except sqlite3.DatabaseError:
+            self._mark_discardable()
+            raise IndexReadError("index_corrupt") from None
         db.row_factory = sqlite3.Row
         try:
             db.execute("PRAGMA query_only=ON")
             db.execute("PRAGMA busy_timeout=2000")
             db.execute("BEGIN")
+            try:
+                row = db.execute("SELECT value FROM index_metadata WHERE key='schema_version'").fetchone()
+            except sqlite3.OperationalError as exc:
+                if "no such table: index_metadata" in str(exc).lower():
+                    self._mark_discardable()
+                    raise IndexReadError("index_schema_mismatch") from None
+                self._mark_discardable()
+                raise IndexReadError("index_corrupt") from None
+            except sqlite3.DatabaseError:
+                self._mark_discardable()
+                raise IndexReadError("index_corrupt") from None
+            if not row or row[0] != str(INDEX_SCHEMA_VERSION):
+                self._mark_discardable()
+                raise IndexReadError("index_schema_mismatch")
+            self._discard_allowed = False
+            self._discard_signature = None
             yield db
+        except sqlite3.DatabaseError:
+            self._mark_discardable()
+            raise IndexReadError("index_corrupt") from None
         finally:
             db.close()
+
+    def discard(self) -> None:
+        """Remove an unusable index and SQLite sidecars before a fresh rebuild."""
+        if self.path.exists() and (not self._discard_allowed
+                                   or self._file_signature() != self._discard_signature):
+            raise IndexReadError("index_healthy")
+        try:
+            self.path.unlink(missing_ok=True)
+        except PermissionError:
+            raise IndexBusy() from None
+        for suffix in ("-wal", "-shm"):
+            try:
+                Path(str(self.path) + suffix).unlink(missing_ok=True)
+            except PermissionError:
+                raise IndexBusy() from None
+        self._discard_allowed = False
+        self._discard_signature = None
 
     def query_page(self, view: str, *, limit=100, offset=0, revision=None, source_key=None, course_id=None, assignment_id=None, pseudonym=None, pseudonyms=None, connection=None):
         if view not in VIEW_COLUMNS:

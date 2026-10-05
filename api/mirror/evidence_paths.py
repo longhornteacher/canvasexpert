@@ -73,3 +73,13 @@ def local_source_root(source_key: str, root: str | Path | None = None) -> Path:
 def control_store_path(source_key: str, root: str | Path | None = None) -> Path:
     """Machine-local private job/checkpoint database; never cloud-synced."""
     return local_source_root(source_key, root) / "control.sqlite3"
+
+
+def reader_descriptor_path(source_key: str, root: str | Path | None = None) -> Path:
+    """Machine-local reader descriptor beside the disposable SQLite projection."""
+    return local_source_root(source_key, root) / "reader.json"
+
+
+def maintenance_status_path(source_key: str, root: str | Path | None = None) -> Path:
+    """Machine-local maintenance status; this helper performs no filesystem I/O."""
+    return local_source_root(source_key, root) / "maintenance.v1.json"

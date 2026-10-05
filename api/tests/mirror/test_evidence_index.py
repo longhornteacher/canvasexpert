@@ -1,9 +1,100 @@
 """Read-index contract and transaction laws over synthetic safe evidence."""
 import sqlite3
+from pathlib import Path
 
 import pytest
 
-from api.mirror.evidence_index import EvidenceIndex, IndexReadError, VIEW_COLUMNS
+from api.mirror.evidence_index import EvidenceIndex, IndexBusy, IndexReadError, VIEW_COLUMNS
+
+
+@pytest.mark.parametrize("kind", ["missing", "metadata_absent", "no_metadata_row", "mismatched", "corrupt"])
+def test_read_refuses_missing_mismatched_and_corrupt_index_without_writing(tmp_path, kind):
+    path = tmp_path / "query.sqlite3"
+    if kind == "mismatched":
+        with sqlite3.connect(path) as db:
+            db.execute("CREATE TABLE index_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            db.execute("INSERT INTO index_metadata VALUES ('schema_version','1')")
+    elif kind == "no_metadata_row":
+        with sqlite3.connect(path) as db:
+            db.execute("CREATE TABLE index_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+    elif kind == "metadata_absent":
+        with sqlite3.connect(path):
+            pass
+    elif kind == "corrupt":
+        path.write_bytes(b"not a sqlite database")
+    original = path.read_bytes() if path.exists() else None
+    with pytest.raises(IndexReadError) as error:
+        with EvidenceIndex(path).read_connection():
+            pass
+    assert error.value.code == {"missing": "index_missing", "metadata_absent": "index_schema_mismatch",
+        "no_metadata_row": "index_schema_mismatch", "mismatched": "index_schema_mismatch",
+        "corrupt": "index_corrupt"}[kind]
+    assert (path.read_bytes() if path.exists() else None) == original
+    assert path.exists() is (kind != "missing")
+
+
+def test_mismatch_ingest_refuses_and_discard_with_open_handle_is_busy(tmp_path, evidence_factory, monkeypatch):
+    path = tmp_path / "query.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE index_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+        db.execute("INSERT INTO index_metadata VALUES ('schema_version','1')")
+    before = path.read_bytes()
+    index = EvidenceIndex(path)
+    with pytest.raises(IndexReadError, match="index_schema_mismatch"):
+        index.ingest(evidence_factory["store"](tmp_path / "safe").scan())
+    assert path.read_bytes() == before
+
+    path.write_bytes(b"corrupt")
+    with pytest.raises(IndexReadError, match="index_corrupt"):
+        with index.read_connection():
+            pass
+    wal, shm = Path(str(path) + "-wal"), Path(str(path) + "-shm")
+    wal.write_bytes(b"wal")
+    shm.write_bytes(b"shm")
+    before_sidecars = wal.read_bytes(), shm.read_bytes()
+    unlink = Path.unlink
+    def denied(target, *args, **kwargs):
+        if target == path:
+            raise PermissionError("synthetic open-handle lock")
+        return unlink(target, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", denied)
+    with pytest.raises(IndexBusy) as error:
+        index.discard()
+    assert error.value.code == "index_busy"
+    assert path.read_bytes() == b"corrupt"
+    assert (wal.read_bytes(), shm.read_bytes()) == before_sidecars
+
+
+def test_discard_preserves_a_healthy_supported_index(tmp_path, evidence_factory):
+    path = tmp_path / "query.sqlite3"
+    index = EvidenceIndex(path)
+    index.ingest(evidence_factory["store"](tmp_path / "safe").scan())
+    before = path.read_bytes()
+    db = sqlite3.connect(path)
+    try:
+        assert db.execute("SELECT value FROM index_metadata WHERE key='schema_version'").fetchone()[0] == "2"
+    finally:
+        db.close()
+    with pytest.raises(IndexReadError, match="index_healthy"):
+        index.discard()
+    assert path.read_bytes() == before
+
+
+def test_interrupted_ingest_rolls_back(tmp_path, evidence_factory, monkeypatch):
+    store = evidence_factory["store"](tmp_path / "safe")
+    index = EvidenceIndex(tmp_path / "query.sqlite3")
+    original_revision = index.ingest(store.scan())
+    changed = evidence_factory["fact"](body="new indexed value")
+    ref = store.publish_fact(changed)
+    store.publish_commit(evidence_factory["commit"](refs=[ref], members=[changed["entity_key"]], run_id="new"))
+    snapshot = store.scan()
+    def interrupted(*args, **kwargs):
+        raise RuntimeError("interrupted")
+    monkeypatch.setattr(EvidenceIndex, "_project_derived", staticmethod(interrupted))
+    with pytest.raises(RuntimeError, match="interrupted"):
+        index.ingest(snapshot)
+    with index.read_connection() as db:
+        assert db.execute("SELECT value FROM index_metadata WHERE key='revision'").fetchone()[0] == original_revision
 
 
 def test_named_views_match_registry_and_no_private_control_tables(tmp_path, evidence_factory):

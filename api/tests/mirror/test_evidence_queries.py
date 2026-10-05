@@ -7,20 +7,71 @@ import pytest
 
 from api.mirror.evidence_index import EvidenceIndex, VIEW_COLUMNS
 from api.mirror.evidence_queries import (
-    EvidenceQueryService, publish_reader_contract, reader_contract,
+    EvidenceQueryService, write_reader_descriptor,
 )
 
 
-def test_generated_reader_contract_has_one_registry_and_refuses_conflict(tmp_path):
-    root = tmp_path / "safe"
-    path = publish_reader_contract(root)
-    assert json.loads(path.read_text(encoding="utf-8"))["views"] == {
-        name: list(columns) for name, columns in sorted(VIEW_COLUMNS.items())
+def test_descriptor_is_local_registry_derived_and_revision_bound(tmp_path, evidence_factory):
+    index = EvidenceIndex(tmp_path / "local" / "query.sqlite3")
+    revision = index.ingest(evidence_factory["store"](tmp_path / "safe").scan())
+    path = write_reader_descriptor(index.path, revision=revision)
+    descriptor = json.loads(path.read_text(encoding="utf-8"))
+    assert path == index.path.parent / "reader.json"
+    assert descriptor["views"] == {name: list(columns) for name, columns in sorted(VIEW_COLUMNS.items())}
+    assert {"roster", "sections"} <= descriptor["views"].keys()
+    assert descriptor["index_revision"] == revision
+    assert descriptor["index_schema_version"] == 2
+    assert descriptor["index_file"] == "query.sqlite3"
+
+
+@pytest.mark.parametrize("view", sorted(VIEW_COLUMNS))
+def test_direct_sql_matches_query_service(tmp_path, evidence_factory, view):
+    index = EvidenceIndex(tmp_path / "query.sqlite3")
+    revision = index.ingest(evidence_factory["store"](tmp_path / "safe").scan())
+    service_page = EvidenceQueryService(index.path).read(view, source_key="a" * 64, course_id="1")
+    uri = index.path.resolve().as_uri() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True) as db:
+        db.execute("PRAGMA query_only=ON")
+        rows = db.execute(f"SELECT * FROM {view} WHERE source_key=? AND course_id=?", ("a" * 64, "1")).fetchall()
+    assert service_page["revision"] == revision
+    assert len(service_page["records"]) == len(rows)
+
+
+def test_attachment_summary_counts_pending_gaps_and_extractions(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path / "safe")
+    association_refs, association_entities = [], []
+    for ordinal, status in enumerate(("pending", "captured", "unavailable")):
+        key = f"{ordinal + 1:016x}"
+        entity = f"attachment:10:Pikachu:1:{key}"
+        payload = {"assignment_id": "10", "pseudonym": "Pikachu", "attempt": 1,
+                   "attachment_key": key, "status": status, "revision": 1}
+        if status == "captured":
+            payload.update(original_digest="b" * 64, media_type="text/plain", size=12)
+        ref = store.publish_fact(evidence_factory["fact"]("attachment", entity, payload))
+        association_refs.append(ref)
+        association_entities.append(entity)
+    store.publish_commit(evidence_factory["commit"](scope="assignment.attachments", scope_id="10",
+        refs=association_refs, members=association_entities, run_id="attachments"))
+    extraction_refs, extraction_entities = [], []
+    for ordinal, availability in enumerate(("complete", "partial")):
+        key = f"{ordinal + 1:016x}"
+        entity = f"extraction:10:Pikachu:1:{key}"
+        payload = {"assignment_id": "10", "pseudonym": "Pikachu", "attempt": 1,
+                   "attachment_key": key, "original_digest": "c" * 64,
+                   "availability": availability, "method": "native", "blocks": []}
+        ref = store.publish_fact(evidence_factory["fact"]("attachment_extraction", entity, payload))
+        extraction_refs.append(ref)
+        extraction_entities.append(entity)
+    store.publish_commit(evidence_factory["commit"](scope="assignment.extractions", scope_id="10",
+        refs=extraction_refs, members=extraction_entities, run_id="extractions"))
+    index = EvidenceIndex(tmp_path / "local" / "query.sqlite3")
+    index.ingest(store.scan())
+    result = EvidenceQueryService(index.path).read_assignment_evidence(
+        "attachments", source_key="a" * 64, course_id="1", assignment_id="10")
+    assert result["attachment_summary"] == {
+        "associations": 3, "captured": 1, "pending": 1, "gaps": 1,
+        "extracted": 2, "extraction_gaps": 1,
     }
-    assert publish_reader_contract(root) == path
-    path.write_text("{}", encoding="utf-8")
-    with pytest.raises(ValueError, match="reader_contract_conflict"):
-        publish_reader_contract(root)
 
 
 def test_named_read_serves_pinned_revision_without_vault_or_canvas(tmp_path, evidence_factory):
