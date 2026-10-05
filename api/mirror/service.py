@@ -250,6 +250,88 @@ def run_extraction_chunk(*, limit: int = 20) -> dict:
                 "gaps": list(outcome.gaps)}
 
 
+def evidence_status() -> dict:
+    """Report durable-store phase, coverage, owner state, and actionable gaps.
+
+    Errors are sanitized codes; no private path, filename, or student value is
+    returned. Distinguishes local publication from cloud delivery and original
+    capture from complete extraction.
+    """
+    from api.mirror.evidence_activation import read_activation
+    from api.mirror.evidence_jobs import AttachmentJobStore
+    from api.mirror.evidence_paths import control_store_path, local_source_root, source_key_for_origin
+    root = workspace.workspace_root()
+    if root is None:
+        return {"state": "unconfigured", "reason": "workspace_unconfigured"}
+    try:
+        source_key = source_key_for_origin(config.get_canvas_base())
+    except Exception:
+        return {"state": "unconfigured", "reason": "canvas_origin_unconfigured"}
+    activation = read_activation(source_key=source_key, workspace_root=root)
+    jobs = AttachmentJobStore(control_store_path(source_key, root))
+    summary = jobs.summary()
+    index_path = local_source_root(source_key, root) / "query.sqlite3"
+    owner = acquisition_owner_status()
+    return {
+        "state": activation.state,
+        "coverage": activation.coverage,
+        "activated_at": activation.activated_at,
+        "rolled_back_at": activation.rolled_back_at,
+        "index_present": index_path.exists(),
+        "attachments": {"total": summary["total"], "captured": summary["captured"],
+                        "pending": summary["pending"]},
+        "acquisition_owner": {"state": owner.state if owner else "disabled",
+                              "is_owner": bool(owner and owner.is_owner)},
+        "gaps": list(owner.issues) if owner else [],
+    }
+
+
+def recover_evidence_work_chunk(*, extraction_limit: int = 20) -> dict:
+    """Resume interrupted attachment capture and extraction after a restart."""
+    from api import local_runtime
+    from api.mirror.evidence_activation import recover_evidence_work
+    from api.mirror.evidence_extraction import ExtractionCache
+    from api.mirror.evidence_jobs import AttachmentJobStore
+    from api.mirror.evidence_paths import control_store_path, local_source_root, source_key_for_origin
+    from api.mirror.evidence_publish import EvidencePublisher
+    from api.mirror.extraction.supervisor import run_adapter
+    from api.mirror.original_archive import recover_original
+    root = workspace.workspace_root()
+    if root is None:
+        raise ValueError("workspace_unconfigured")
+    source_key = source_key_for_origin(config.get_canvas_base())
+    jobs = AttachmentJobStore(control_store_path(source_key, root))
+    cache = ExtractionCache(local_source_root(source_key, root) / "extraction.sqlite3")
+    writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
+    run_id = uuid.uuid4().hex
+    with store._vault_transaction(root) as vault:
+        def publisher_for(course_id):
+            return EvidencePublisher(workspace_root=root, source_key=source_key,
+                                     course_id=course_id, vault=vault)
+
+        def adapter_runner(adapter_name, data, filename):
+            import tempfile
+            from pathlib import Path
+            staging = local_source_root(source_key, root) / "staging" / "extraction"
+            staging.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix or ".bin",
+                                             delete=False, dir=str(staging)) as handle:
+                handle.write(data)
+                path = Path(handle.name)
+            try:
+                return run_adapter(adapter_name, path)
+            finally:
+                path.unlink(missing_ok=True)
+
+        return recover_evidence_work(
+            source_key=source_key, workspace_root=root, jobs=jobs, cache=cache,
+            publisher_for=publisher_for,
+            recover_original=lambda digest: recover_original(root, digest),
+            run_adapter=adapter_runner, writer_key=writer, run_id=run_id,
+            capture_chunk=lambda: run_attachment_capture_chunk(),
+            extraction_limit=extraction_limit)
+
+
 def acquisition_owner_worker(stop_event):
     """Heartbeat independently of acquisition duration and the 900s cadence."""
     from api.mirror.acquisition_owner import HEARTBEAT_INTERVAL, STALE_AFTER

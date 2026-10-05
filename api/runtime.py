@@ -76,6 +76,14 @@ def start() -> None:
             _heartbeat_thread = None
             _note("mirror_heartbeat", exc)
 
+        # Resume interrupted attachment capture/extraction from the private
+        # local control store. One failure never stops unrelated runtime work.
+        try:
+            from api.mirror.service import recover_evidence_work_chunk
+            recover_evidence_work_chunk()
+        except Exception as exc:
+            _note("evidence_recovery", exc)
+
         _started = True
 
 

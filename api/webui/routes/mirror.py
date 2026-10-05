@@ -30,6 +30,15 @@ def mirror_status(plan_id: str = ""):
         return JSONResponse(refusal)
 
 
+@router.get("/api/mirror/evidence-status")
+def mirror_evidence_status():
+    """Durable evidence-store phase, coverage, owner state, and actionable gaps."""
+    try:
+        return JSONResponse(mirror_service.evidence_status())
+    except Exception:
+        return JSONResponse({"state": "unavailable", "reason": "status_unavailable"})
+
+
 @router.post("/api/mirror/sync-now", status_code=202)
 def mirror_sync_now(course_id: str = Form(""), scope: list[str] = Form([])):
     try:

@@ -29,6 +29,7 @@ EXPECTED = [
     ('/api/courses', ('GET',)),
     ('/api/download-contract', ('GET',)),
     ('/api/mirror/status', ('GET',)),
+    ('/api/mirror/evidence-status', ('GET',)),
     ('/api/mirror/sync-now', ('POST',)),
     ('/api/names', ('GET',)),
     ('/api/names/backup-vault', ('POST',)),
