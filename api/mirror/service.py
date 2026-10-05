@@ -14,11 +14,13 @@ reconcile), otherwise a delta every tick plus a daily roster refresh.
 from __future__ import annotations
 
 import os
+import sqlite3
 import hashlib
 import uuid
 import threading
 import time
 import requests
+from pathlib import Path
 
 from api import operational_log
 from api.mirror import coordinator, course_context, new_quizzes, store, sync
@@ -178,7 +180,7 @@ def run_attachment_capture_chunk(*, limit=None, max_bytes=None) -> dict:
             make_original_sink(workspace_root=root, publisher=publisher,
                                writer_key=writer, run_id=run_id)(job, digest, temp_path)
 
-        return run_attachment_chunk(
+        result = run_attachment_chunk(
             jobs,
             resolve_url=lambda job: resolve_canvas_file_url(job, canvas_get=canvas_get),
             stream_get=canvas_stream_get,
@@ -189,6 +191,8 @@ def run_attachment_capture_chunk(*, limit=None, max_bytes=None) -> dict:
             limit=limit or MAX_DOWNLOADS_PER_CHUNK,
             max_bytes=max_bytes or MAX_BYTES_PER_CHUNK,
         )
+    rebuild_evidence_index(root=root, source_key=source_key)
+    return result
 
 
 def _original_exists(root, digest) -> bool:
@@ -245,9 +249,94 @@ def run_extraction_chunk(*, limit: int = 20) -> dict:
             publisher_for=publisher_for, jobs=jobs, cache=cache,
             recover_original=lambda digest: recover_original(root, digest),
             run_adapter=adapter_runner, writer_key=writer, run_id=run_id, limit=limit)
-        return {"processed": outcome.processed, "published": outcome.published,
-                "cached": outcome.cached, "failed": outcome.failed,
-                "gaps": list(outcome.gaps)}
+        result = {"processed": outcome.processed, "published": outcome.published,
+                  "cached": outcome.cached, "failed": outcome.failed,
+                  "gaps": list(outcome.gaps)}
+    rebuild_evidence_index(root=root, source_key=source_key)
+    return result
+
+
+def rebuild_evidence_index(*, root=None, source_key=None) -> dict:
+    """Rebuild one complete local source index from every validated safe course."""
+    from api.mirror.evidence_index import EvidenceIndex
+    from api.mirror.evidence_paths import local_source_root, source_key_for_origin
+    from api.mirror.evidence_publish import EvidencePublisher
+    from api.mirror.evidence_store import EvidenceStore
+    root = root or workspace.workspace_root()
+    if root is None:
+        return {"state": "repair_required", "reason": "workspace_unconfigured"}
+    try:
+        source_key = source_key or source_key_for_origin(config.get_canvas_base())
+        evidence_root = Path(workspace.canvas_mirror_evidence_root(root))
+        course_root = evidence_root / "sources" / source_key / "courses"
+        course_ids = sorted(path.name for path in course_root.iterdir()
+                            if path.is_dir() and path.name.isdecimal()) if course_root.exists() else []
+        index_path = local_source_root(source_key, root) / "query.sqlite3"
+        if index_path.exists():
+            try:
+                with sqlite3.connect(index_path.resolve().as_uri() + "?mode=ro", uri=True) as db:
+                    indexed_courses = {row[0] for row in db.execute(
+                        "SELECT course_id FROM course_selection WHERE source_key=?", (source_key,))}
+                if indexed_courses - set(course_ids):
+                    return {"state": "pending", "reason": "course_evidence_not_arrived",
+                            "courses": len(course_ids)}
+            except sqlite3.DatabaseError:
+                # A corrupt disposable index is rebuilt from the safe files below.
+                pass
+        if not course_ids:
+            return {"state": "empty", "courses": 0}
+        selected = {str(course.get("id")) for course in config.active_courses()
+                    if str(course.get("id") or "").isdecimal()}
+        snapshots = []
+        with store._vault_transaction(root) as vault:
+            for course_id in course_ids:
+                publisher = EvidencePublisher(workspace_root=root, source_key=source_key,
+                                              course_id=course_id, vault=vault)
+                safe_store = EvidenceStore(evidence_root, source_key, course_id,
+                    verify_safe=publisher.verify_safe,
+                    private_diagnostics_root=local_source_root(source_key, root) / "staging" / "diagnostics")
+                snapshot = safe_store.scan()
+                # A privacy rejection can indicate that synced identity facts have
+                # not arrived yet. Keep the entire previous publication intact.
+                if any(issue.code in {"invalid_fact", "invalid_commit", "invalid_reference_graph"}
+                       for issue in snapshot.issues):
+                    return {"state": "pending", "reason": "safe_file_repair_required",
+                            "courses": len(course_ids)}
+                # A temporarily empty synchronized directory is indistinguishable
+                # from a delayed replica. Never replace the complete index with a
+                # snapshot that silently omits a previously indexed course.
+                if not (snapshot.facts or snapshot.commits or snapshot.issues):
+                    return {"state": "pending", "reason": "course_evidence_not_arrived",
+                            "courses": len(course_ids)}
+                if snapshot.facts or snapshot.commits or snapshot.issues:
+                    snapshots.append(snapshot)
+        if not snapshots:
+            return {"state": "pending", "reason": "safe_evidence_not_arrived",
+                    "courses": len(course_ids)}
+        index = EvidenceIndex(index_path)
+        try:
+            revision = index.ingest_many(snapshots, selected_courses=selected)
+        except sqlite3.DatabaseError:
+            # Remove local bytes only when SQLite confirms that the disposable
+            # index is corrupt. A healthy index plus a failed ingest keeps its
+            # last-good rows intact for repair and diagnosis.
+            corrupt = False
+            if index_path.exists():
+                try:
+                    with sqlite3.connect(f"file:{index_path.as_posix()}?mode=ro", uri=True) as check_db:
+                        result = check_db.execute("PRAGMA quick_check").fetchone()
+                    corrupt = not result or result[0] != "ok"
+                except sqlite3.DatabaseError:
+                    corrupt = True
+            if not corrupt:
+                raise
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(index_path) + suffix).unlink(missing_ok=True)
+            revision = index.ingest_many(snapshots, selected_courses=selected)
+        return {"state": "current", "revision": revision, "courses": len(course_ids)}
+    except Exception as exc:
+        operational_log.emit("mirror.evidence_index_rebuild", "failed", error_class=type(exc))
+        return {"state": "repair_required", "reason": "index_rebuild_failed"}
 
 
 def evidence_status() -> dict:
@@ -379,7 +468,8 @@ def _publish_acquisition(receipt):
                                  pseudonym_for=lambda raw: vault.get_or_assign(str(raw)))
         except Exception:
             operational_log.emit("mirror.attachment_enqueue", "failed")
-        return result
+    rebuild_evidence_index(root=root, source_key=source_key)
+    return result
 
 
 def due_passes(state: dict, now_iso: str, *,
@@ -702,8 +792,12 @@ def _refresh_groups_on_maintenance(course_id: str, *, load_groups, now: str) -> 
         from api.mirror.evidence_acquisition import CourseAcquisitionReceipt, ScopeReceipt
         rows = []
         for category in categories or []:
+            rows.append({"_category_only": True,
+                         "group_category_id": category.get("category_id"),
+                         "group_category_name": category.get("category_name")})
             for group in category.get("groups") or []:
                 rows.append({**group, "group_category_id": category.get("category_id"),
+                             "group_category_name": category.get("category_name"),
                              "user_ids": group.get("student_ids", [])})
         # Only the complete-client lane proves group and membership pagination.
         # Legacy injected loaders still publish useful, explicitly partial facts.
@@ -865,6 +959,7 @@ def mirror_heartbeat_worker(stop_event):
         return
     while not stop_event.is_set():
         try:
+            rebuild_evidence_index()
             run_coordinated_heartbeat_tick()
         except Exception as exc:
             operational_log.emit("mirror.heartbeat_tick", "failed", error_class=type(exc))

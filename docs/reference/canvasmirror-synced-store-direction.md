@@ -1,6 +1,8 @@
 # CanvasMirror: durable synced course store
 
-Status: teacher-approved architecture direction, 2026-10-04. Not yet implemented.
+Status: teacher-approved direction, 2026-10-04. Synthetic/local implementation
+is complete through the read-activation repair; private pilot import, live
+activation, and two-computer field acceptance remain separate checks.
 
 ## Teacher-visible outcome
 
@@ -41,7 +43,7 @@ behavior remains as implemented until an execution brief changes it.
 
 ## Teacher priorities and constraints
 
-Recorded 2026-10-04 during planning; no implementation commissioned.
+Recorded 2026-10-04 during planning; these decisions govern the implementation.
 
 - Primary use is agent-led ELA and CS scoring: writing assessment, authenticity
   and plagiarism investigation, and actionable feedback. Comparisons across
@@ -102,17 +104,15 @@ Recorded 2026-10-04 during planning; no implementation commissioned.
 
 ## Execution design
 
-The current detailed, multi-agent execution brief is
-`docs/handoffs/canvasmirror-durable-evidence-store.md`. It specifies immutable
-synced evidence, a machine-local SQLite query index, automatic advisory acquisition
-ownership, private ZIP originals, required file extraction, consistent direct/MCP
-reads, scoring consumption, and resumable additive migration in ordered slices.
-These are the senior's implementation choices under the teacher decisions above;
-the brief's dependency proof and acceptance gates remain to be executed.
+S00–S08 of the durable evidence store have passed their synthetic/local gates,
+but production pilot import and activation have not occurred. A senior review
+found index/cutover, incomplete-attachment hold, and comparison-view integration
+gaps. The current repair brief is
+`docs/handoffs/canvasmirror-read-activation-repair.md`; the original slice brief
+is retained under `docs/handoffs/retired/` as historical execution evidence.
 
 Agent-host prioritization is not yet specified; the teacher requested clarification
 of that question. This does not reopen the approved direct-read/MCP access model.
 
-The teacher requested the brief, not implementation in the planning chat. No live
-data has been moved or deleted. Dispatch an executor against the current brief to
-begin implementation; do not treat this reference as a parallel execution queue.
+No live pilot data has been moved or deleted. Complete the current repair brief
+and separately report its private import and two-computer field acceptance.

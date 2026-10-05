@@ -13,12 +13,15 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import re
 
 from api.mirror.evidence_paths import local_source_root
 from api.mirror.evidence_schema import canonical_bytes
 
 ACTIVATION_SCHEMA_VERSION = 1
-ACTIVATION_STATES = frozenset({"inactive", "active", "rolled_back"})
+ACTIVATION_STATES = frozenset({"inactive", "active", "rolled_back", "repair_required"})
+REQUIRED_ACTIVATION_SCOPES = frozenset({"course.context", "course.roster",
+    "course.sections", "course.assignments", "assignment.submissions"})
 
 
 @dataclass(frozen=True)
@@ -58,24 +61,77 @@ def read_activation(*, source_key: str, workspace_root) -> ActivationState:
         document = json.loads(path.read_text(encoding="utf-8"))
         if (document.get("schema_version") != ACTIVATION_SCHEMA_VERSION
                 or document.get("state") not in ACTIVATION_STATES):
-            return ActivationState("inactive", ACTIVATION_SCHEMA_VERSION, {})
+            return ActivationState("repair_required", ACTIVATION_SCHEMA_VERSION, {},
+                                   reason="invalid_checkpoint")
         return ActivationState(document["state"], document["schema_version"],
                                document.get("coverage") or {},
                                document.get("activated_at"), document.get("rolled_back_at"),
                                document.get("reason"))
     except (OSError, ValueError, TypeError):
-        return ActivationState("inactive", ACTIVATION_SCHEMA_VERSION, {})
+        return ActivationState("repair_required", ACTIVATION_SCHEMA_VERSION, {},
+                               reason="invalid_checkpoint")
 
 
-def activate_read_authority(*, source_key: str, workspace_root, coverage: dict,
-                            activated_at: str) -> ActivationState:
-    """Activate the new read owner only after verified coverage is recorded."""
-    if not isinstance(coverage, dict) or not coverage:
+def _write_verified_activation(*, source_key: str, workspace_root, coverage: dict,
+                               activated_at: str) -> ActivationState:
+    """Persist coverage that has already passed the CE-owned verification path."""
+    courses = coverage.get("courses") if isinstance(coverage, dict) else None
+    valid = isinstance(courses, dict) and bool(courses)
+    if valid:
+        for course_id, proof in courses.items():
+            if (not isinstance(course_id, str) or not course_id.isdecimal()
+                    or not isinstance(proof, dict)
+                    or proof.get("verification_state") != "verified"
+                    or proof.get("verified_import") is not True
+                    or not re.fullmatch(r"[0-9a-f]{64}", str(proof.get("index_revision") or ""))
+                    or not isinstance(proof.get("required_scopes"), list)
+                    or not REQUIRED_ACTIVATION_SCOPES.issubset(set(proof["required_scopes"]))):
+                valid = False
+                break
+    if not valid:
         raise ValueError("activation_requires_coverage")
     document = {"schema_version": ACTIVATION_SCHEMA_VERSION, "state": "active",
                 "coverage": coverage, "activated_at": activated_at}
     _write(_path(source_key, workspace_root), document)
     return read_activation(source_key=source_key, workspace_root=workspace_root)
+
+
+def activate_read_authority(*, source_key: str, workspace_root, report_path,
+                            activated_at: str) -> ActivationState:
+    """Activate only from a persisted migration report and current safe-index coverage."""
+    from api.mirror.evidence_activation_proof import build_activation_coverage
+    from api.mirror.evidence_index import EvidenceIndex
+    from api.mirror.evidence_paths import local_source_root
+    from api.mirror.service import rebuild_evidence_index
+
+    coverage = build_activation_coverage(report_path=report_path,
+        source_key=source_key, workspace_root=workspace_root)
+    rebuilt = rebuild_evidence_index(root=workspace_root, source_key=source_key)
+    if rebuilt.get("state") != "current":
+        raise ValueError("activation_index_not_current")
+    index = EvidenceIndex(local_source_root(source_key, workspace_root) / "query.sqlite3")
+    with index.read_connection() as db:
+        revision_row = db.execute("SELECT value FROM index_metadata WHERE key='revision'").fetchone()
+        revision = revision_row[0] if revision_row else None
+        if not re.fullmatch(r"[0-9a-f]{64}", str(revision or "")):
+            raise ValueError("activation_index_revision_missing")
+        for course_id, proof in coverage["courses"].items():
+            scopes = db.execute("SELECT scope,status,membership_complete,pending_commits,ambiguous_entities "
+                "FROM scope_coverage WHERE source_key=? AND course_id=?", (source_key, course_id)).fetchall()
+            ready = {row["scope"] for row in scopes if row["status"] == "ready"
+                and row["membership_complete"] and not json.loads(row["pending_commits"])
+                and not json.loads(row["ambiguous_entities"])}
+            submission_scopes = [row for row in scopes if row["scope"] == "assignment.submissions"]
+            if (not REQUIRED_ACTIVATION_SCOPES.issubset(ready)
+                    or not submission_scopes
+                    or any(row["status"] != "ready" or not row["membership_complete"]
+                           or json.loads(row["pending_commits"])
+                           or json.loads(row["ambiguous_entities"]) for row in submission_scopes)):
+                raise ValueError("activation_index_coverage_incomplete")
+            proof["index_revision"] = revision
+            proof["required_scopes"] = sorted(REQUIRED_ACTIVATION_SCOPES)
+    return _write_verified_activation(source_key=source_key,
+        workspace_root=workspace_root, coverage=coverage, activated_at=activated_at)
 
 
 def rollback_read_authority(*, source_key: str, workspace_root, reason: str,

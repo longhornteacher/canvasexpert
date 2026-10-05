@@ -170,6 +170,7 @@ def test_course_lifecycle_receipt_preserves_normalized_term_and_caller_state(tmp
 def test_structure_projection_supports_catalog_aliases_and_scrubs_nested_fields(tmp_path):
     scopes = [
         ScopeReceipt("course.groups", "1", ({"id": 2, "name": "Avery Sample group",
+                      "group_category_id": 8, "group_category_name": "Morgan Sample teams",
                       "users": [{"id": "991001"}, {"id": "991002"}]},), True),
         ScopeReceipt("course.modules", "1", ({"id": 3, "name": "Morgan Sample module", "position": 1,
                       "items": [{"id": 4, "type": "Assignment", "title": "Avery Sample draft",
@@ -190,6 +191,9 @@ def test_structure_projection_supports_catalog_aliases_and_scrubs_nested_fields(
     facts = list(publisher.store.scan().facts.values())
     group = next(f["payload"] for f in facts if f["kind"] == "group")
     assert group["student_pseudonyms"] == ["Eevee", "Pikachu"]
+    assert group["category_name"].endswith(" teams")
+    assert "Morgan Sample" not in group["category_name"]
+    assert len(group["category_key"]) == 64
     page = next(f["payload"] for f in facts if f["kind"] == "page")
     assert "List<string>" in page["body"]
     assignment = next(f["payload"] for f in facts if f["kind"] == "assignment")
@@ -197,6 +201,20 @@ def test_structure_projection_supports_catalog_aliases_and_scrubs_nested_fields(
     safe_bytes = b"".join(p.read_bytes() for p in (tmp_path / "CanvasMirror").rglob("*.json"))
     for forbidden in (b"991001", b"991002", b"Avery Sample", b"Morgan Sample", b"html_url", b"secret"):
         assert forbidden not in safe_bytes
+
+
+def test_empty_group_category_publishes_safe_current_fact(tmp_path):
+    publisher, result = publish(tmp_path, [ScopeReceipt("course.groups", "1", (
+        {"_category_only": True, "group_category_id": "8",
+         "group_category_name": "Teams"},), True)])
+    assert result.gaps == ()
+    snapshot = publisher.store.scan()
+    categories = [fact for fact in snapshot.facts.values()
+                  if fact["kind"] == "group_category"]
+    assert len(categories) == 1
+    assert categories[0]["payload"]["category_name"] == "Teams"
+    assert set(categories[0]["payload"]) == {"category_key", "category_name"}
+    assert snapshot.scopes[("a" * 64, "1", "course.groups", "1")].membership_complete
 
 
 @pytest.mark.parametrize("scope,row,gap", [

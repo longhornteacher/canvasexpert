@@ -71,3 +71,59 @@ def test_assignment_context_uses_assignment_scope_not_submission_scope(tmp_path,
     )
     assert len(result["records"]) == 1
     assert result["membership"]["state"] == "complete"
+
+
+def test_group_context_uses_group_scope_coverage(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path / "safe")
+    group = evidence_factory["fact"](
+        kind="group", entity_key="group:20",
+        payload={"group_id": "20", "title": "Blue", "student_pseudonyms": [],
+                 "category_key": "b" * 64, "category_name": "Teams"},
+    )
+    ref = store.publish_fact(group)
+    store.publish_commit(evidence_factory["commit"](
+        refs=[ref], members=["group:20"], scope="course.groups",
+        scope_id="1", run_id="groups",
+    ))
+    index = EvidenceIndex(tmp_path / "local" / "query.sqlite3")
+    index.ingest(store.scan())
+    result = EvidenceQueryService(index.path).read(
+        "group_context", source_key="a" * 64, course_id="1",
+    )
+    assert len(result["records"]) == 1
+    assert result["membership"]["state"] == "complete"
+    assert result["synchronization"]["state"] == "ready"
+
+
+def test_historical_attachment_read_keeps_captured_metadata_after_pending_refresh(
+        tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path / "safe")
+    key = "a" * 32
+    entity = f"attachment:10:Pikachu:1:{key}"
+    captured = evidence_factory["fact"](
+        kind="attachment", entity_key=entity,
+        payload={"assignment_id": "10", "pseudonym": "Pikachu", "attempt": 1,
+                 "attachment_key": key, "status": "captured",
+                 "original_digest": "b" * 64, "media_type": "text/plain",
+                 "size": 12, "revision": 1})
+    captured_ref = store.publish_fact(captured)
+    first = store.publish_commit(evidence_factory["commit"](
+        refs=[captured_ref], members=[entity], scope="assignment.attachments",
+        run_id="captured"))
+    pending = evidence_factory["fact"](
+        kind="attachment", entity_key=entity,
+        payload={"assignment_id": "10", "pseudonym": "Pikachu", "attempt": 1,
+                 "attachment_key": key, "status": "pending", "revision": 1})
+    pending_ref = store.publish_fact(pending)
+    store.publish_commit(evidence_factory["commit"](
+        refs=[pending_ref], members=[entity], scope="assignment.attachments",
+        parents=[first], run_id="pending"))
+    index = EvidenceIndex(tmp_path / "local" / "query.sqlite3")
+    revision = index.ingest(store.scan())
+    result = EvidenceQueryService(index.path).read_attempt_attachments(
+        source_key="a" * 64, course_id="1", assignment_id="10",
+        attempts=[("Pikachu", 1)], revision=revision, max_files=1)
+    assert result == {"records": [{"pseudonym": "Pikachu", "attempt": 1,
+        "attachment_key": key, "original_digest": "b" * 64,
+        "media_type": "text/plain", "size": 12, "status": "captured"}],
+        "truncated": False}

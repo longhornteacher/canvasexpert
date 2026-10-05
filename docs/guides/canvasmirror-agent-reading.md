@@ -5,6 +5,12 @@ agent-led ELA/CS scoring. It holds pseudonymized, scrubbed facts and commits.
 The private originals, identity mappings, and control state live elsewhere and
 are never part of this read surface.
 
+The local index is rebuilt from validated safe course files at runtime startup,
+after local publication, and as synchronized files arrive. A missing or partial
+index is a repair or synchronization state, not proof that course evidence is
+absent. Check `scope_status` and each query's coverage and revision before using
+the rows. Read activation for the teacher's private pilot has not yet occurred.
+
 ## Safe read locations
 
 - Safe evidence root: `<workspace>/CanvasMirror/` (synchronized, agent-readable).
@@ -42,5 +48,8 @@ view)` with view `attachments`, `comparisons`, or `notes`.
   never a filename or download URL.
 - Extraction facts carry scrubbed block text and locators, never raw pixels,
   EXIF, or internal OOXML packages.
+- Comparisons identify exact captured files, wording overlap, and changes
+  between attempts within one assignment. Their coverage and input revision
+  travel with the rows; they are evidence for teacher review, not a verdict.
 - Notes are provisional and teacher-only unless an explicit teacher direction
   marks them confirmed; they are never posted to Canvas automatically.

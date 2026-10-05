@@ -1,6 +1,9 @@
 # Execution brief: CanvasMirror durable evidence store
 
-**Status:** ready for executor preflight; implementation has not started.
+**Status:** superseded after synthetic S00–S08 execution by
+`docs/handoffs/canvasmirror-read-activation-repair.md`. The prior GREEN slice
+labels are historical executor reports, not final program acceptance; the repair
+brief owns the remaining integration findings and field acceptance.
 
 **Target:** `dev`. **Lead:** Sol. **Workers:** Sol for risky integration; Luna for
 bounded adapters, synthetic fixtures, and documentation.

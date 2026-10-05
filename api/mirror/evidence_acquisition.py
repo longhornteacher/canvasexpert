@@ -166,6 +166,12 @@ def _rows(publisher, scope, row, gaps):
         if isinstance(term, dict) and term.get("end_at") is not None:
             payload.update(_stamp_fields({"term_end_at": term["end_at"]}, ("term_end_at",)))
         yield "course", f"course:{sid}", payload, frozenset()
+    elif name == "course.sections":
+        section_id = _id(row.get("id", row.get("section_id")))
+        yield "section", f"section:{section_id}", {
+            "section_id": section_id,
+            "name": str(row.get("name") or f"Section {section_id}"),
+        }, frozenset()
     elif name == "course.roster":
         pseudo = publisher._pseudo(row.get("id", row.get("user_id")), str(row.get("name") or ""))
         sections = {_id(i) for i in row.get("section_ids", [])}
@@ -208,6 +214,20 @@ def _rows(publisher, scope, row, gaps):
                 payload["all_dates"].append(entry)
         yield "assignment", f"assignment:{aid}", payload, frozenset({"description"})
     elif name == "course.groups":
+        category_id = row.get("group_category_id")
+        category_name = row.get("group_category_name")
+        if category_id in (None, "") or not str(category_name or "").strip():
+            gaps.append("group_category_unavailable")
+        category_key = hashlib.sha256(
+            f"{publisher.source_key}:{publisher.course_id}:{category_id}".encode("utf-8")
+        ).hexdigest() if category_id not in (None, "") else None
+        if row.get("_category_only") is True:
+            if category_key is not None and str(category_name or "").strip():
+                yield "group_category", f"group_category:{category_key}", {
+                    "category_key": category_key,
+                    "category_name": str(category_name).strip(),
+                }, frozenset()
+            return
         gid = _id(row.get("id", row.get("group_id")))
         users = row.get("user_ids", row.get("student_ids", row.get("users")))
         if users is None:
@@ -220,9 +240,13 @@ def _rows(publisher, scope, row, gaps):
                                                   if isinstance(user, dict) else user))
             except PublicationRefused as exc:
                 gaps.append(exc.code)
-        yield "group", f"group:{gid}", {"group_id": gid,
+        payload = {"group_id": gid,
             "title": row.get("name", row.get("title", "")),
-            "student_pseudonyms": sorted(set(pseudos))}, frozenset()
+            "student_pseudonyms": sorted(set(pseudos))}
+        if category_key is not None and str(category_name or "").strip():
+            payload.update({"category_key": category_key,
+                            "category_name": str(category_name).strip()})
+        yield "group", f"group:{gid}", payload, frozenset()
     elif name == "course.modules":
         mid = _id(row.get("id", row.get("module_id")))
         if "items" not in row:

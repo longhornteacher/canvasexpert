@@ -1,7 +1,13 @@
 # CanvasMirror
 
-This file documents current implemented behavior. The 1.0-beta target architecture and
-migration program live in
+This file documents the private legacy projection and its refresh behavior. The
+durable, pseudonymized evidence store is implemented for synthetic/local use;
+its named views, direct-reading rules, and activation checkpoint are specified
+in `docs/contracts/canvasmirror-evidence-contract.md` and
+`docs/guides/canvasmirror-agent-reading.md`. The teacher's private pilot store
+has not yet been imported or activated. Until that verified cutover, the MCP
+roster, submission, and gradebook reads continue to use the legacy projection.
+The 1.0-beta target architecture and migration program live in
 `docs/reference/canvasmirror-1.0beta-information-spine.md`; that vision does not supersede
 the current contracts until its individual implementation briefs are completed.
 

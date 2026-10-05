@@ -14,7 +14,7 @@ def test_named_views_match_registry_and_no_private_control_tables(tmp_path, evid
         for view, columns in VIEW_COLUMNS.items():
             assert tuple(row[1] for row in db.execute(f"PRAGMA table_info({view})")) == columns
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert tables == {"index_metadata", "safe_facts", "current_refs", "history_refs", "scope_coverage", "course_selection"}
+        assert tables == {"index_metadata", "safe_facts", "current_refs", "history_refs", "scope_coverage", "course_selection", "attachment_block_rows", "comparison_rows"}
         with pytest.raises(sqlite3.OperationalError):
             db.execute("DELETE FROM safe_facts")
 
@@ -32,6 +32,53 @@ def test_rebuild_and_explicit_retention_converge(tmp_path, evidence_factory):
     assert first.query_page("courses")["records"][0]["selection_status"] == "retained"
     first.ingest(snapshot, selected_courses=[fact["course_id"]])
     assert first.query_page("courses")["records"][0]["selection_status"] == "selected"
+
+
+def test_multi_course_ingest_keeps_one_complete_source_projection(tmp_path, evidence_factory):
+    from api.mirror.evidence_store import EvidenceStore
+    first = evidence_factory["store"](tmp_path / "safe")
+    second = EvidenceStore(tmp_path / "safe", evidence_factory["source"], "2",
+        verify_safe=lambda record: None,
+        private_diagnostics_root=tmp_path / "diagnostics")
+    for store, course_id, title in ((first, "1", "First"), (second, "2", "Second")):
+        entity = f"course:{course_id}"
+        fact = {"schema_version": 1, "kind": "course", "source_key": evidence_factory["source"],
+                "course_id": course_id, "entity_key": entity, "payload": {"title": title}}
+        ref = store.publish_fact(fact)
+        commit = evidence_factory["commit"](
+            refs=[ref], members=[entity], scope="course.context", scope_id=course_id)
+        commit["course_id"] = course_id
+        store.publish_commit(commit)
+    snapshots = [first.scan(), second.scan()]
+    index = EvidenceIndex(tmp_path / "query.sqlite3")
+    revision = index.ingest_many(snapshots, selected_courses=["1"])
+    assert {row["course_id"] for row in index.query_page("courses")["records"]} == {"1", "2"}
+    assert {row["course_id"] for row in index.query_page("courses")["records"]
+            if row["selection_status"] == "selected"} == {"1"}
+    rebuilt = EvidenceIndex(tmp_path / "rebuilt.sqlite3")
+    assert rebuilt.ingest_many(snapshots, selected_courses=["1"]) == revision
+
+
+def test_attachment_blocks_are_indexed_per_block_with_locators(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path / "safe")
+    entity = "extraction:10:Pikachu:1:bbbbbbbbbbbbbbbb"
+    fact = evidence_factory["fact"]("attachment_extraction", entity, {
+        "assignment_id": "10", "pseudonym": "Pikachu", "attempt": 1,
+        "attachment_key": "b" * 64, "original_digest": "c" * 64,
+        "availability": "complete", "method": "native", "blocks": [
+            {"block_id": "b1", "kind": "paragraph", "text": "Opening text", "locator": {"page": 1}},
+            {"block_id": "b2", "kind": "paragraph", "text": "Closing text", "locator": {"page": 2}},
+        ]})
+    ref = store.publish_fact(fact)
+    store.publish_commit(evidence_factory["commit"](refs=[ref], members=[entity],
+        scope="assignment.extractions", scope_id="10"))
+    index = EvidenceIndex(tmp_path / "query.sqlite3")
+    index.ingest(store.scan())
+    blocks = index.query_page("attachment_blocks", course_id="1", assignment_id="10")["records"]
+    assert len(blocks) == 2
+    assert len({block["fact_ref"] for block in blocks}) == 2
+    import json
+    assert {json.loads(block["payload"])["locator"]["page"] for block in blocks} == {1, 2}
 
 
 def test_read_transaction_pins_revision_across_ingest(tmp_path, evidence_factory):

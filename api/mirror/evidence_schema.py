@@ -11,11 +11,13 @@ from datetime import datetime
 SCHEMA_VERSION = 1
 FACT_FIELDS = frozenset({"schema_version", "kind", "source_key", "course_id", "entity_key", "payload"})
 COMMIT_FIELDS = frozenset({"schema_version", "source_key", "course_id", "scope", "scope_id", "writer_key", "run_id", "parents", "acquisition_started_at", "acquisition_finished_at", "mode", "membership_complete", "record_refs", "member_keys", "gaps", "watermarks"})
-SUBMISSION_FIELDS = frozenset({"assignment_id", "pseudonym", "attempt", "submitted_at", "body", "score", "grade", "late", "missing", "workflow_state", "updated_at", "effective_due_at"})
+SUBMISSION_FIELDS = frozenset({"assignment_id", "pseudonym", "attempt", "submitted_at", "body", "score", "grade", "late", "missing", "excused", "workflow_state", "updated_at", "effective_due_at"})
 PAYLOAD_FIELDS = {
     "course": frozenset({"title", "workflow_state", "start_at", "end_at", "conclude_at", "term_end_at", "course_concluded", "enrollment_states", "restrict_enrollments_to_course_dates"}),
+    "section": frozenset({"section_id", "name"}),
     "assignment": frozenset({"assignment_id", "title", "description", "points_possible", "due_at", "unlock_at", "lock_at", "all_dates", "updated_at", "rubric", "assignment_group_id", "published", "submission_types"}),
-    "group": frozenset({"group_id", "title", "student_pseudonyms"}),
+    "group": frozenset({"group_id", "title", "student_pseudonyms", "category_key", "category_name"}),
+    "group_category": frozenset({"category_key", "category_name"}),
     "module": frozenset({"module_id", "title", "position", "published", "items"}),
     "page": frozenset({"page_id", "title", "body", "published", "front_page", "updated_at"}),
     "assignment_group": frozenset({"assignment_group_id", "title", "position", "group_weight"}),
@@ -53,9 +55,10 @@ NOTE_CATEGORIES = frozenset({"summary", "comparison", "feedback_draft", "teacher
 NOTE_STATUSES = frozenset({"provisional", "teacher_confirmed"})
 SCOPE_KINDS = {
     "course.context": frozenset({"course"}),
+    "course.sections": frozenset({"section"}),
     "course.roster": frozenset({"student"}),
     "course.assignments": frozenset({"assignment"}),
-    "course.groups": frozenset({"group"}),
+    "course.groups": frozenset({"group", "group_category"}),
     "course.modules": frozenset({"module"}),
     "course.pages": frozenset({"page"}),
     "course.assignment_groups": frozenset({"assignment_group"}),
@@ -188,7 +191,7 @@ def validate_fact(record: dict) -> dict:
     _entity(record["entity_key"])
     payload = record["payload"]
     required = {
-        "course": {"title"}, "assignment": {"assignment_id", "title"},
+        "course": {"title"}, "section": {"section_id", "name"}, "assignment": {"assignment_id", "title"},
         "student": {"pseudonym"}, "submission": {"assignment_id", "pseudonym", "attempt"},
         "attempt_observation": {"assignment_id", "pseudonym", "attempt", "submitted_at"},
         "comment": {"assignment_id", "pseudonym", "comment_id", "text"},
@@ -197,6 +200,7 @@ def validate_fact(record: dict) -> dict:
         "attachment_extraction": {"assignment_id", "pseudonym", "attachment_key", "original_digest", "availability", "method", "blocks"},
         "note": {"assignment_id", "note_id", "category", "status", "text", "revision"},
         "group": {"group_id", "title", "student_pseudonyms"},
+        "group_category": {"category_key", "category_name"},
         "module": {"module_id", "title", "position", "items"},
         "page": {"page_id", "title"},
         "assignment_group": {"assignment_group_id", "title", "position", "group_weight"},
@@ -225,6 +229,11 @@ def validate_fact(record: dict) -> dict:
         elif key == "attachment_key":
             if not isinstance(value, str) or not _ATTACHMENT_KEY.fullmatch(value):
                 _fail("invalid_attachment_key")
+        elif key == "category_key":
+            validate_digest(value)
+        elif key == "category_name":
+            if not isinstance(value, str) or not value.strip():
+                _fail("invalid_category_name")
         elif key == "original_digest":
             if value is not None:
                 validate_digest(value)
@@ -249,7 +258,7 @@ def validate_fact(record: dict) -> dict:
                 _fail()
             if value is not None and type(value) not in {int, float}:
                 _fail()
-        elif key in {"late", "missing", "published", "front_page", "course_concluded", "restrict_enrollments_to_course_dates"}:
+        elif key in {"late", "missing", "excused", "published", "front_page", "course_concluded", "restrict_enrollments_to_course_dates"}:
             if type(value) is not bool:
                 _fail()
         elif key == "position":

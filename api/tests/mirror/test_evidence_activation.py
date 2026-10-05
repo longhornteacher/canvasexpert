@@ -7,7 +7,7 @@ import pytest
 
 from api.mirror import evidence_activation
 from api.mirror.evidence_activation import (
-    activate_read_authority, read_activation, recover_evidence_work,
+    activate_read_authority, _write_verified_activation, read_activation, recover_evidence_work,
     rollback_read_authority,
 )
 from api.mirror.evidence_extraction import ExtractionCache
@@ -26,26 +26,33 @@ def test_activation_defaults_inactive_and_requires_coverage(tmp_path):
     assert state.state == "inactive"
     with pytest.raises(ValueError):
         activate_read_authority(source_key=SOURCE, workspace_root=tmp_path,
-                                coverage={}, activated_at="2026-01-01T00:00:00Z")
+                                report_path=tmp_path / "caller-coverage.json",
+                                activated_at="2026-01-01T00:00:00Z")
 
 
 def test_activation_and_rollback_preserve_coverage(tmp_path):
-    activate_read_authority(source_key=SOURCE, workspace_root=tmp_path,
-                            coverage={"courses": ["1"]}, activated_at="2026-01-01T00:00:00Z")
+    coverage = {"courses": {"1": {"verification_state": "verified",
+        "verified_import": True, "index_revision": "a" * 64,
+        "required_scopes": ["course.context", "course.roster", "course.sections",
+                             "course.assignments", "assignment.submissions"]}}}
+    _write_verified_activation(source_key=SOURCE, workspace_root=tmp_path,
+                               coverage=coverage, activated_at="2026-01-01T00:00:00Z")
     assert read_activation(source_key=SOURCE, workspace_root=tmp_path).state == "active"
     rolled = rollback_read_authority(source_key=SOURCE, workspace_root=tmp_path,
                                      reason="index_rebuild", rolled_back_at="2026-01-02T00:00:00Z")
     assert rolled.state == "rolled_back"
-    assert rolled.coverage == {"courses": ["1"]}
+    assert rolled.coverage == coverage
     assert rolled.activated_at == "2026-01-01T00:00:00Z"
 
 
-def test_corrupt_activation_record_reads_inactive(tmp_path):
+def test_corrupt_activation_record_requires_repair(tmp_path):
     from api.mirror.evidence_paths import local_source_root
     path = local_source_root(SOURCE, tmp_path) / "activation.v1.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not json", encoding="utf-8")
-    assert read_activation(source_key=SOURCE, workspace_root=tmp_path).state == "inactive"
+    state = read_activation(source_key=SOURCE, workspace_root=tmp_path)
+    assert state.state == "repair_required"
+    assert state.reason == "invalid_checkpoint"
 
 
 def test_recovery_resumes_capture_and_extraction(tmp_path, monkeypatch):

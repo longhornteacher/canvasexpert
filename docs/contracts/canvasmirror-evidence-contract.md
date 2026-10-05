@@ -1,7 +1,7 @@
 # CanvasMirror evidence contract
 
-Status: S01 text evidence boundary. Later slices add files, comparisons, notes,
-production acquisition, and Scoring Session consumption to the same store.
+Status: current synthetic/local evidence boundary. Production pilot import and
+read activation have not been performed on the teacher's private workspace.
 
 ## Storage
 
@@ -65,9 +65,12 @@ approval; CE remains the only Canvas client and the only publisher.
 
 `api/mirror/evidence_index.py` owns the named view/column registry. The generated
 `reader.v1.json` reflects that registry exactly. The named views are `courses`,
-`assignment_context`, `current_submissions`, `attempt_history`,
-`attachment_blocks`, `scope_status`, `comparison_evidence`, and `agent_notes`.
-The last three are empty in S01 until their supported records arrive.
+`assignment_context`, `group_context`, `module_context`, `page_context`,
+`assignment_group_context`, `current_submissions`, `attempt_history`,
+`attachment_associations`, `attachment_extractions`, `attachment_blocks`,
+`scope_status`, `comparison_evidence`, and `agent_notes`. Comparison rows are
+derived from validated safe facts and carry their input revision and coverage.
+They are evidence for teacher review, never an authenticity verdict.
 
 Agents open the local index with SQLite URI `mode=ro`, enable `query_only`, and
 use a read transaction for revision-stable pages. They do not use `immutable=1`.

@@ -69,6 +69,9 @@ class _AcquisitionCollector:
         elif path.endswith("/users") and (params or {}).get("enrollment_type[]") == ["student"]:
             self.scopes.append(ScopeReceipt("course.roster", self.course_id,
                                            values, proven, code))
+        elif path.endswith("/sections"):
+            self.scopes.append(ScopeReceipt("course.sections", self.course_id,
+                                           values, proven, code))
         elif path.endswith("/submissions"):
             parts = path.split("/")
             focused = parts[parts.index("assignments") + 1] if "assignments" in parts else None
@@ -247,9 +250,14 @@ def _roster_receipt_error(rows, error, complete) -> str:
     return ""
 
 
-def _fetch_sections(course_id, canvas_get_all):
-    sections, error = canvas_get_all(
-        f"/api/v1/courses/{course_id}/sections", {"per_page": 100})
+def _fetch_sections(course_id, canvas_get_all, complete_get=None):
+    path = f"/api/v1/courses/{course_id}/sections"
+    if complete_get is not None:
+        sections, error, complete = complete_get(path, {"per_page": 100})
+        if not complete and not error:
+            error = "pagination_incomplete"
+    else:
+        sections, error = canvas_get_all(path, {"per_page": 100})
     if error or not sections:
         return {}, error
     return {str(s["id"]): s.get("name", f"Section {s['id']}") for s in sections}, None
@@ -682,7 +690,8 @@ def full_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None, 
                           error_code="roster_wipe_refused", attempted_at=started, root=root)
         _publication_ok(collector)
         return {"ok": False, "error": "roster_wipe_refused"}
-    sections, sections_error = _fetch_sections(course_id, canvas_get_all)
+    sections, sections_error = _fetch_sections(course_id, canvas_get_all,
+        collector.complete if collector is not None and canvas_get_all_complete else None)
     if sections_error:
         # A failed sections fetch must not blank section names Canvas never
         # actually reported as gone; fall back to the last-good map.
@@ -868,7 +877,8 @@ def roster_pass(course_id, *, canvas_get_all, canvas_get_all_complete, root=None
                           error_code="roster_wipe_refused", attempted_at=started, root=root)
         _publication_ok(collector)
         return {"ok": False, "error": "roster_wipe_refused"}
-    sections, sections_error = _fetch_sections(course_id, canvas_get_all)
+    sections, sections_error = _fetch_sections(course_id, canvas_get_all,
+        collector.complete if collector is not None and canvas_get_all_complete else None)
     if sections_error:
         # A failed sections fetch must not blank section names Canvas never
         # actually reported as gone; fall back to the last-good map.

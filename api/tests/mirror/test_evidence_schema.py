@@ -77,7 +77,7 @@ def test_structure_fact_and_scope_contract(evidence_factory, kind, scope, payloa
     from api.mirror.evidence_schema import SCOPE_KINDS
     record = evidence_factory["fact"](kind, f"{kind}:10", payload)
     assert validate_fact(record) == record
-    assert SCOPE_KINDS[scope] == frozenset({kind})
+    assert kind in SCOPE_KINDS[scope]
     assert validate_commit(evidence_factory["commit"](scope=scope, scope_id="course"))["scope"] == scope
     record["payload"]["student_ids"] = ["123456"]
     with pytest.raises(EvidenceValidationError, match="unexpected_fields"):

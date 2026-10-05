@@ -1234,6 +1234,36 @@ def test_get_gradebook_snapshot_rejects_non_current_course(
     assert "not a Current course" in result["error"]
 
 
+def test_activated_gradebook_reports_ready_index_as_current(monkeypatch):
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).isoformat()
+    ready = {"synchronization": {"state": "ready"},
+             "membership": {"state": "complete"},
+             "freshness": {"last_success_at": stamp}}
+
+    class ReadyLane:
+        def read(self, view, **_filters):
+            records = ([{"payload": {"assignment_id": "700010", "title": "Quiz 1",
+                                      "points_possible": 10}}]
+                       if view == "assignment_context" else [])
+            return {**ready, "records": records, "revision": "a" * 64,
+                    "next_offset": None}
+
+    monkeypatch.setattr(tools, "_saved_course_gate_check", lambda _course: None)
+    monkeypatch.setattr(tools, "_course_gate_check", lambda _course: None)
+    monkeypatch.setattr(tools, "_activated_evidence_lane",
+                        lambda _course: (ReadyLane(), None, "active"))
+    monkeypatch.setattr(tools.config, "get_canvas_base",
+                        lambda: "https://canvas.example.edu")
+    monkeypatch.setattr(tools.config, "list_sis_grade_bridges", lambda _course: [])
+    monkeypatch.setattr(tools, "final_response_gate", lambda payload: payload)
+
+    result = tools.get_gradebook_snapshot("111")
+    assert result["ok"] is True, result
+    assert result["freshness"]["state"] == "current"
+
+
 # --- pseudonym round trip -----------------------------------------------------
 
 def test_pseudonym_reverse_round_trip(monkeypatch, tmp_path, _rows, _use_vault, _set_active_courses, _mount_mirror):
@@ -1743,6 +1773,119 @@ def test_get_assignment_evidence_refuses_missing_store(_mount_mirror, _set_activ
     assert result["ok"] is False
 
 
+def test_corrupt_activation_checkpoint_refuses_legacy_roster_fallback(monkeypatch, tmp_path):
+    from api.mirror.evidence_paths import local_source_root, source_key_for_origin
+
+    monkeypatch.setattr(tools.workspace, "workspace_root", lambda: str(tmp_path))
+    monkeypatch.setattr(tools.config, "get_canvas_base", lambda: "https://canvas.example.edu")
+    path = local_source_root(source_key_for_origin("https://canvas.example.edu"), tmp_path) / "activation.v1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{broken", encoding="utf-8")
+    lane, error, state = tools._activated_evidence_lane("111")
+    assert lane is None
+    assert state == "repair_required"
+    assert error == "evidence_activation_repair_required"
+
+
+def test_activated_roster_groups_and_sections_project_names_only(monkeypatch):
+    from datetime import datetime, timezone
+
+    ready = {"synchronization": {"state": "ready"},
+             "membership": {"state": "complete"},
+             "freshness": {"last_success_at": datetime.now(timezone.utc).isoformat()},
+             "revision": "a" * 64, "next_offset": None}
+
+    class ContextLane:
+        def read(self, view, **_filters):
+            records = ([{"section_id": "20", "name": "Section Blue"}]
+                       if view == "sections" else
+                       [{"payload": {"group_id": "30", "title": "Blue",
+                                      "category_key": "b" * 64,
+                                      "category_name": "Teams",
+                                      "student_pseudonyms": ["Pikachu"]}},
+                        {"payload": {"category_key": "c" * 64,
+                                     "category_name": "Unassigned"}}])
+            return {**ready, "records": records}
+
+    monkeypatch.setattr(tools, "_activated_evidence_lane",
+                        lambda _course: (ContextLane(), None, "active"))
+    monkeypatch.setattr(tools, "_saved_course_gate_check", lambda _course: None)
+    monkeypatch.setattr(tools, "_course_gate_check", lambda _course: None)
+    monkeypatch.setattr(tools.config, "get_canvas_base",
+                        lambda: "https://canvas.example.edu")
+    monkeypatch.setattr(tools, "final_response_gate", lambda payload: payload)
+
+    result = tools.get_roster("111", include=["sections", "groups"])
+    assert result["ok"] is True
+    assert result["sections"]["rows"] == [["20", "Section Blue"]]
+    assert result["group_sets"] == [
+        {"name": "Teams", "groups": [{"name": "Blue"}]},
+        {"name": "Unassigned", "groups": []},
+    ]
+    assert result["freshness"]["groups"]["state"] == "current"
+    assert "group_id" not in str(result) and "Pikachu" not in str(result)
+
+
+def test_activated_sections_only_keeps_saved_course_gate(monkeypatch):
+    class SectionsLane:
+        def read(self, _view, **_filters):
+            return {"records": [{"section_id": "20", "name": "Section Blue"}],
+                    "synchronization": {"state": "ready"},
+                    "membership": {"state": "complete"},
+                    "freshness": {"last_success_at": "2026-10-05T00:00:00Z"},
+                    "revision": "a" * 64, "next_offset": None}
+
+    monkeypatch.setattr(tools, "_activated_evidence_lane",
+                        lambda _course: (SectionsLane(), None, "active"))
+    monkeypatch.setattr(tools, "_saved_course_gate_check", lambda _course: None)
+    monkeypatch.setattr(tools, "_course_gate_check",
+                        lambda _course: (_ for _ in ()).throw(AssertionError("Current-course gate called")))
+    monkeypatch.setattr(tools.config, "get_canvas_base",
+                        lambda: "https://canvas.example.edu")
+    monkeypatch.setattr(tools, "final_response_gate", lambda payload: payload)
+
+    result = tools.get_roster("111", include=["sections"])
+    assert result["ok"] is True
+    assert result["sections"]["rows"] == [["20", "Section Blue"]]
+
+
+def test_activated_submission_history_returns_captured_safe_file_metadata(monkeypatch):
+    class HistoryLane:
+        def read(self, view, **_filters):
+            assert view == "attempt_history"
+            return {"records": [{"pseudonym": "Pikachu", "attempt": 1,
+                                 "submitted_at": "2026-10-01T00:00:00Z",
+                                 "payload": {"body": "Draft"}, "fact_ref": "a" * 64}],
+                    "synchronization": {"state": "ready"},
+                    "membership": {"state": "complete"},
+                    "freshness": {"last_success_at": "2026-10-05T00:00:00Z"},
+                    "revision": "b" * 64, "next_offset": None}
+
+        def read_attempt_attachments(self, **filters):
+            assert filters["attempts"] == [("Pikachu", 1)]
+            assert filters["revision"] == "b" * 64
+            return {"records": [{"pseudonym": "Pikachu", "attempt": 1,
+                                 "attachment_key": "c" * 32,
+                                 "original_digest": "d" * 64,
+                                 "media_type": "text/plain", "size": 12,
+                                 "status": "captured"}], "truncated": False}
+
+    monkeypatch.setattr(tools, "_activated_evidence_lane",
+                        lambda _course: (HistoryLane(), None, "active"))
+    monkeypatch.setattr(tools, "_saved_course_gate_check", lambda _course: None)
+    monkeypatch.setattr(tools, "_course_gate_check", lambda _course: None)
+    monkeypatch.setattr(tools.config, "get_canvas_base",
+                        lambda: "https://canvas.example.edu")
+    monkeypatch.setattr(tools, "final_response_gate", lambda payload: payload)
+
+    result = tools.get_submissions("111", "10", history=True)
+    assert result["files_truncated"] is False
+    assert result["attempts"][0]["files"] == [{
+        "label": "File 1", "status": "captured", "attachment_key": "c" * 32,
+        "original_digest": "d" * 64, "media_type": "text/plain", "size": 12}]
+    assert "filename" not in str(result) and "url" not in str(result)
+
+
 def test_get_assignment_evidence_reads_published_notes(
     monkeypatch, tmp_path, _mount_mirror, _set_active_courses,
 ):
@@ -1750,6 +1893,7 @@ def test_get_assignment_evidence_reads_published_notes(
     from api.mirror.evidence_paths import local_source_root, source_key_for_origin
     from api.mirror.evidence_publish import EvidencePublisher
     from api.mirror.evidence_index import EvidenceIndex
+    from api.mirror.evidence_activation import _write_verified_activation
     from api.feedback_vault import Vault
 
     _mount_mirror()
@@ -1768,6 +1912,13 @@ def test_get_assignment_evidence_reads_published_notes(
                  writer_key="writer-a", run_id="run-a")
     index_path = local_source_root(source_key, root) / "query.sqlite3"
     EvidenceIndex(index_path).ingest(publisher.store.scan(), selected_courses=["111"])
+    _write_verified_activation(source_key=source_key, workspace_root=root,
+                            coverage={"courses": {"111": {"verification_state": "verified",
+                                "verified_import": True, "index_revision": "a" * 64,
+                                "required_scopes": ["course.context", "course.roster",
+                                    "course.sections", "course.assignments",
+                                    "assignment.submissions"]}}},
+                            activated_at="2026-10-05T00:00:00Z")
 
     result = tools.get_assignment_evidence("111", "700010", view="notes")
     assert result["ok"] is True

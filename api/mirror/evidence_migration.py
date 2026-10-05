@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from datetime import datetime, timezone
 
 from api.mirror.evidence_import import collect_legacy_sources, MAX_SOURCE_BYTES
 from api.mirror.evidence_index import EvidenceIndex, IndexReadError
@@ -195,6 +196,7 @@ def migrate_legacy_evidence(*, workspace_root, mirror_cache_root, source_key,
                            "body": str(row.get("body") or ""),
                            "score": row.get("score"), "grade": row.get("grade"),
                            "late": bool(row.get("late")), "missing": bool(row.get("missing")),
+                           "excused": bool(row.get("excused")),
                            "workflow_state": str(row.get("workflow_state") or ""), "updated_at": updated}
                 key = f"attempt:{source.assignment_id}:{pseudo}:{number}"
                 if number is None:
@@ -381,8 +383,20 @@ def migrate_legacy_evidence(*, workspace_root, mirror_cache_root, source_key,
                "dry_run": dry_run, "activation": "inactive", "complete": not gaps}
     summary["semantic_verification"] = verification
     if not dry_run:
-        _write_private(report_path, {"schema_version": 1, "summary": summary,
+        _write_private(report_path, {"schema_version": 1, "activation": "inactive", "summary": summary,
                                     "mappings": mappings, "gaps": gaps})
+        # The migration report is the only accepted activation input. Rebuild
+        # from all safe course files, then let the activation owner re-check
+        # complete live-index coverage before writing the checkpoint.
+        try:
+            from api.mirror.evidence_activation import activate_read_authority
+            activate_read_authority(source_key=source_key, workspace_root=workspace_root,
+                                    report_path=report_path,
+                                    activated_at=_utc_stamp(datetime.now(timezone.utc)))
+        except (ValueError, OSError):
+            # Synthetic/local imports commonly lack context or section receipts;
+            # retain the report and legacy read owner until coverage is complete.
+            pass
         if on_checkpoint:
             on_checkpoint("report", summary)
     return MigrationResult(summary, None if dry_run else report_path, tuple(mappings), tuple(gaps))
