@@ -5,6 +5,8 @@ environment is YELLOW (baseline failures below). Grading periods are agent
 guidance, not a runtime gate. No implementation or reset performed.
 **Target:** `dev`. **Inspected baseline:** `30b9465`, 2026-10-05.
 **Owner:** one lead executor; senior accepts the integrated result.
+**Workflow review:** 2026-10-05 at `a9a3c03`, documentation only. Preserve the
+earlier baseline below; no implementation acceptance is implied by this review.
 This replaces `canvasmirror-read-activation-repair.md`. It implements the teacher's
 2026-10-05 decisions, not its mandatory historical-import requirement.
 
@@ -32,6 +34,13 @@ An agent reliably reads Current-course assignment context, submissions, and
 available attachment text through CE, with explicit age, completeness, and gaps.
 Restart and switching compatible computers require no import or activation ritual.
 Canvas remains authoritative. This is a reading milestone, not scoring acceptance.
+
+The practical test is whether the teacher can publish assignments/quizzes/pages
+and obtain student work for scoring/feedback without managing the mirror. Never
+introduce a mirror-wide readiness, OCR, attachment-backlog, or history-completeness
+gate on authoring or unrelated content operations. Keep the actual operation's
+privacy, target, review, and live verification requirements. A useful partial read
+is success with gaps; `fully_ready` is status, not permission to work.
 
 Teacher decisions: old/partial evidence remains readable; only work requiring
 missing evidence is held. Compatible computer switching is automatic; incompatible
@@ -102,6 +111,11 @@ Use a small additive stage-status result shared by service, MCP refresh, and con
 index failure or attachment backlog within the requested scope is explicitly
 reported and must not be labeled fully ready. An unrelated queue backlog is not a
 global readiness gate. Keep existing coordinator terminal states; no second job state machine.
+Refresh continuation observes the same coordinator plan through MCP; it does not
+enqueue again. Index pending/failure requests local repair, not another Canvas
+acquisition. Failed reads name their actual recovery action; do not send the
+teacher to an equivalent browser button or ask permission to repeat an authorized
+read. Plan section 4.9 defines the protocol.
 Persist last attempt, last successful publication, index readiness, and sanitized
 failure stage/code in the existing machine-local refresh/status owners. Status GETs
 must not create databases, acquire Canvas data, extract files, or rebuild indexes.
@@ -131,16 +145,20 @@ Replace `_activated_evidence_lane` with one evidence-reader resolver based on
 configured workspace/source, supported index schema, and index availability.
 MCP `get_roster`, `get_submissions` (including history), `get_gradebook_snapshot`,
 and `get_assignment_evidence` use that reader directly. Remove their legacy fallback
-branches and activation/checkpoint reporting. Keep tool parameters, tabular shapes,
-pagination, course selection, identity privacy, and final outbound gates.
+branches and activation/checkpoint reporting. Keep the four read tools' parameters,
+tabular shapes, pagination, course selection,
+identity privacy, and final outbound gates. `refresh_mirror` gains only optional
+`operation_id` for status-only continuation, as specified in plan section 4.9.
 Missing index means `refresh_required`/maintenance pending, not an empty course.
 Pure reads never fetch, open private originals, or extract; do not add per-read
 vault work (existing outbound privacy checks remain mandatory).
 
 Available supported records remain readable despite age or incomplete coverage;
 return warnings/coverage instead of the existing blanket coverage refusal. Uncertain
-membership is explicitly unknown, never a complete absence. Preserve revision-stable
-pagination. Do not return mixed revisions across related reads.
+membership is explicitly unknown, never a complete absence. Preserve existing
+revision pinning; related reads within one call must not mix revisions. For
+offset-only calls, expose revision changes and restart that collection; do not
+promise a cross-call snapshot without a revision/cursor input.
 
 Assignment discovery stays through existing Course Catalog/get_course_content;
 assignment context in submission results comes from the evidence index. They must
@@ -163,7 +181,12 @@ than claiming all old projections have been retired.
 Wake bounded attachment capture/extraction after new jobs are enqueued. Prioritize
 the explicitly requested assignment and newly observed work over existing backlog;
 use existing request/job metadata rather than a calendar classifier or a new
-scheduling framework. Do not enumerate and download historical attachments merely
+scheduling framework. Teacher decision, 2026-10-05: this is satisfied by
+newest-first job order for newly created jobs; no priority flag,
+because no production path publishes a single-assignment receipt. Inspection shows
+re-observed jobs retain their original order; requested older attachments are not
+guaranteed priority. Preserve this accepted approximation and report it honestly.
+Do not enumerate and download historical attachments merely
 to fill an archive. Existing backlog may progress in bounded maintenance chunks,
 but draining it is not a startup, current-read, or acceptance prerequisite. Do not
 cancel jobs simply because a calendar date passed. Continue pending work with
@@ -234,11 +257,12 @@ raw student output, Canvas writes, or operation retries. Report aggregates only.
 
 Detailed slice plan:
 [`docs/reference/canvasmirror-functional-read-path-slices.md`](../reference/canvasmirror-functional-read-path-slices.md).
-This brief remains execution authority. The plan is decision-complete: its
-section **4** locks names, signatures, state tables, codes, and console copy, and
-section **5** lists the defects it fixes. Lead reads plan sections **1–6** and the
+This brief remains execution authority. The plan's section **4** locks names,
+signatures, state tables, codes, and console copy, including **4.9** for refresh
+continuation; section **5** lists code findings and **5.1** distinguishes fixes
+from accepted workflow limits. Lead reads plan sections **1–6** and the
 stage being executed; each worker reads sections **1–5** and only its assigned
-slices in section **7**. Sections **10–12** govern integrated acceptance and closure.
+slices in sections **7–9**. Sections **10–12** govern integrated acceptance and closure.
 The plan stages the work within this batch; do not create queued slice handoffs.
 
 Lead owns `service.py`, `sync.py`, `coordinator.py`, `store.py` (refresh document
@@ -300,14 +324,22 @@ Required regression/integration evidence:
    triggered solely to satisfy readiness. Existing older records remain readable,
    and explicit older-work requests are not refused based on dates. These are
    behavioral regressions, not tests of source wording.
+8. A refresh exceeding its bounded wait can be observed through the same MCP
+   tool using `operation_id`; queued, completed, and failed continuation calls
+   make zero new Canvas calls and do not trigger loop-confirmation warnings.
+   Usable text does not wait for attachment completion. A second computer with
+   no queue still reports pending associations honestly. Preserve existing content
+   operation tests; add no global mirror-readiness gate to publishing.
 
-Run focused tests after each seam, then:
-`py -m pytest api/tests/mirror api/tests/mcp_server api/tests/test_desk_routes.py api/tests/test_route_contract.py api/tests/test_runtime_startup.py -p no:randomly -q`.
-These paths exist at the inspected baseline. Before synthetic GREEN run
+Run the plan's focused commands as each seam changes. At integration, before
+synthetic GREEN, run
 `py -m pytest api/tests engine/tests -p no:randomly -q` in a verified OCR-capable
 environment. The prior brief recorded 2,466 passed/2 skipped before its final
 contract assertion adjustment; that is context, not this batch's acceptance.
 Record interpreter, exact commands, counts, and any independently baselined failures.
+Reuse the recorded baseline instead of repeating the full suite before coding.
+Reuse a suitable isolated interpreter; OCR setup does not block independent
+index/publication work. The full integration and real-extraction gates remain.
 Synchronize MCP registry, generated inventory/schema snapshot, and listing budget
 when contracts change; lead takes the next free schema number at integration.
 
@@ -332,7 +364,19 @@ or a demonstrated privacy flaw requiring a different plan. Routine code/test cho
 the already authorized mirror reset within section 4, and dropping obsolete import
 tests do not need another permission round.
 
-### Coding preflight — 2026-10-05
+### Workflow-review amendment — 2026-10-05
+
+Planning updated at `a9a3c03`; application source and live state untouched.
+Existing pending edits to this brief and its slice plan were preserved. The plan
+now specifies refresh continuation, recovery without browser detours, scope-local
+readiness, attachment publication ordering, first-acquisition failure privacy,
+and honest queue/second-computer semantics. Removed duplicate preflight full-suite
+work, environment-wide coding stops, routine source-drift questions, reset
+re-approval, and zero-match documentation gates. Private scoring projections,
+newest-first scheduling, and New Quiz writing limits remain explicit; this read
+milestone does not claim to remove them.
+
+### Coding preflight — 2026-10-05 (original; not rerun by documentation review)
 
 **YELLOW for acceptance; coding scope and ownership are ready.** No new teacher
 scope decision was identified. This is preflight evidence, not implementation

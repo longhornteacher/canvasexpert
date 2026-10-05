@@ -164,3 +164,28 @@ the brief remains execution authority. Read only the sections it names. Two-comp
 needs field verification; synthetic gates alone do not establish it. Scoring
 consumption and remaining private projections are the next senior assessment after
 this milestone, not a queued implementation brief.
+
+### Workflow-review constraints — 2026-10-05
+
+The current brief and slice plan remain the only execution route. This review
+changes the plan, not claims about shipped behavior:
+
+- Publishing assignments/quizzes/pages must not acquire a new global mirror or
+  OCR readiness gate. Keep the owning operation's real safety checks.
+- A slow MCP refresh needs status-only continuation of the same operation.
+  Acquisition, local indexing, and attachment failures have different recovery
+  actions. The teacher should not be sent to an equivalent browser refresh button
+  or asked for permission to refresh read-only data.
+- Newest-first attachment ordering is retained. Existing job identities keep
+  their timestamps, so this does not guarantee priority for an older requested
+  assignment. The executor must not claim otherwise or add a priority system.
+- A second machine's empty job queue does not mean the shared evidence has no
+  missing files. Attachment availability comes from associations/extractions.
+- The remaining scoring/private-projection split is a real workflow limitation.
+  The next senior assessment starts at scoring preparation and feedback revision:
+  can available assignment evidence be consumed without a redundant refresh or
+  loss of prepared work? Do not start another migration/cleanup project by default.
+
+Exact execution references: slice plan sections **4.5**, **4.7–4.9**, **5.1**,
+and **10–11**. Current runtime documentation is reconciled in S11 after code
+implements these changes; it must not describe this plan as already available.

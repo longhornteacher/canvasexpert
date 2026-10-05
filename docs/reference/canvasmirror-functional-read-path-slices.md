@@ -1,7 +1,8 @@
 # CanvasMirror functional read path: implementation slices
 
-Status: decision-complete execution plan, 2026-10-05; simplified the same day to
-remove speculative machinery. **Implementation not started.**
+Status: execution plan, reviewed for teacher workflow friction on 2026-10-05.
+**Implementation not started.** Section 4.9 specifies refresh continuation;
+section 5.1 records remaining workflow limits without widening scoring scope.
 Target branch: `dev`. Inspected baseline: `30b9465`.
 Authority: [current execution brief](../handoffs/canvasmirror-functional-read-path.md).
 Preflight findings and baseline failures live in that brief, section 7.
@@ -10,8 +11,10 @@ This plan locks names, interfaces, state rules, copy, and tests so an executor
 implements rather than designs. It deliberately chooses the simplest mechanism
 that meets each brief requirement for one teacher on two computers before
 launch. Where this plan names a function, constant, column, code, or test, use
-that name. If the code at execution time contradicts a stated fact (section 5),
-stop and report it rather than improvising. Do not add mechanisms this plan
+that name. If code has moved, recheck the affected seam and update obsolete line
+references or equivalent helper names. Stop only if that changes a locked behavior,
+privacy boundary, or scope decision; source drift alone is not a teacher question.
+Do not add mechanisms this plan
 removed (section 12 lists them) without a measured need.
 
 ## 1. Deliverable, boundaries, and how to use this plan
@@ -24,6 +27,13 @@ historical gaps and attachment backlog. Canvas remains authoritative.
 
 The slices are reviewable units within one batch, not releases, handoffs, or
 permission checkpoints. Record execution results only in the brief.
+
+The job is publishing assignments/quizzes/pages and obtaining work for scoring
+and feedback. Mirror readiness is not a prerequisite for authoring or an unrelated
+content push. Preserve the owning write path's target, privacy, review, and live
+verification requirements. Return useful read evidence immediately; repair only
+the missing part. Course-wide `fully_ready` is display status, never permission
+to read, prepare unrelated work, or apply an authorized operation.
 
 Excluded:
 
@@ -53,26 +63,27 @@ Sessions/AssignmentForge resources in `AGENTS.md` and stop for a scope decision.
 
 | Stage | Slice | Result | Owner | Prerequisites |
 |---|---|---|---|---|
-| A | S00 | Baseline, OCR-capable test environment, shared synthetic fixture | Lead | Brief |
-| B | S01 | Shared descriptor cannot block publication | Publication worker | S00 |
+| A | S00 | Baseline inventory and fixture; prepare test environment | Lead | Brief |
+| B | S01 | Shared descriptor cannot block publication; first-acquisition scrub gap closed | Publication worker | S00 |
 | B | S02 | Future-version records get their own code, not "invalid" | Index worker | S00 |
 | B | S03 | Read-side index checks, safe replacement, local descriptor | Index worker | S02 |
 | B | S04 | Queue selection, retries, association-keyed extraction, cache removal | Publication worker | S01 |
 | C | S05 | Stage results, refresh persistence, per-course rebuild | Lead | S01–S03 |
 | C | S06 | Coalesced background index maintenance | Lead | S03, S05 |
 | C | S07 | Attachment continuation worker | Lead | S04–S06 |
-| D | S08 | MCP reads use one resolver; legacy fallbacks removed | Lead | S03, S05–S07 |
+| D | S08 | One read resolver and resumable MCP refresh; legacy fallbacks removed | Lead | S03, S05–S07 |
 | D | S09 | Activation/import/migration machinery deleted | Lead | S07, S08 |
 | D | S10 | Console shows stages; status is side-effect free | Lead | S05–S07, S09 |
 | E | S11 | Docs, MCP contract, integrated synthetic acceptance | Lead; senior reviews | S01–S10 |
 | F | S12 | Updated pilot runtime; optional bounded reset | Lead with teacher | S11 accepted |
 | F | S13 | Actual second computer; final acceptance and retirement | Lead; senior accepts | S12 |
 
-Parallel schedule: lead finishes S00; the index worker runs S02 → S03 while the
+Parallel schedule: lead finishes S00's inventory and fixture; the index worker runs S02 → S03 while the
 publication worker runs S01 → S04. The lead may draft S05 tests against section 4
 but merges no code that calls an unfinished worker interface. Join both workers
 before S05 code lands. S05–S11 are sequential and lead-owned. One executor may run
-everything alone.
+everything alone. OCR environment repair does not hold independent code or
+isolated tests; real-adapter checks must pass before attachment acceptance.
 
 ## 3. File ownership and agent handoff rules
 
@@ -137,8 +148,10 @@ Never place exception text, URLs, filenames, paths, or Canvas bodies in a stage.
 | Runner outcome | acquisition | publication |
 |---|---|---|
 | `ok` true | `ready` | `ready` |
+| `error_class`/`error` is `acquisition_owner_waiting` | `pending`, `acquisition_owner_waiting` | `not_run` |
 | `error_code`/`error` is `publication_incomplete` | `ready` | `failed`, `publication_incomplete` |
-| `error_class`/`error` is `course_not_selected`, `course_unavailable`, `acquisition_owner_waiting`, `acquisition_owner_repair_required`, `workspace not configured` | `failed`, `course_not_selected` or `acquisition_owner_waiting` (owner/workspace cases) | `not_run` |
+| `error_class`/`error` is `course_not_selected` or `course_unavailable` | `failed`, `course_not_selected` | `not_run` |
+| `error_class`/`error` is `acquisition_owner_repair_required` or `workspace not configured` | `failed`, `acquisition_failed`; specific configuration guidance accompanies the result outside the stage | `not_run` |
 | `error`/`error_code` is `pagination_incomplete` | `failed`, `pagination_incomplete` | `not_run` |
 | other `error` text: `course_catalog.error_code(error)` is `auth_unavailable`, `auth_failed`, or `forbidden` | `failed`, `auth_failed` | `not_run` |
 | any other error | `failed`, `canvas_unavailable` | `not_run` |
@@ -175,11 +188,14 @@ never an acquisition or index failure). `service._read_maintenance_status(root,
 source_key)` returns `{"state": "not_run", ...empty}` for absent/invalid files and
 never creates one. Course ids are Canvas navigation ids, not student data.
 
-Index stage (`service.index_stage(status, index_present)`), first match wins:
+Index stage (`service.index_stage(status, index_present, *, course_id=None)`),
+first match wins. Filter course lists to `course_id` for scoped results; only the
+whole-source console summary aggregates unrelated courses:
 
 1. A maintenance request is outstanding in this process → `pending`, `index_maintenance_pending`.
 2. `status["state"] == "failed"` → `failed` with its code.
-3. No index file → `not_run`.
+3. No index file → `pending`, `index_maintenance_pending` if safe evidence exists;
+   otherwise `not_run`. Absent data must not be reported as fully ready.
 4. `update_required_courses` non-empty → `partial`, `evidence_update_required`.
 5. `not_arrived_courses` non-empty → `partial`, `course_evidence_not_arrived`.
 6. Otherwise `ready`. Descriptor failures appear only in `descriptor`.
@@ -195,11 +211,16 @@ Index stage (`service.index_stage(status, index_present)`), first match wins:
   transaction. On an existing file it first reads metadata; a mismatch raises
   `IndexReadError("index_schema_mismatch")` instead of overwriting metadata.
 - `EvidenceIndex.discard() -> None` for mismatch/corruption: unlink `query.sqlite3`,
-  `-wal`, `-shm`. On `PermissionError` (open handle on Windows) raise `IndexBusy`
-  (subclass of `IndexReadError`, code `index_busy`) and leave every file in
-  place. The caller then calls `ingest_many` to build fresh. A reader that opens
+  then `-wal`, then `-shm`, under the maintenance lock after closing this worker's
+  connections. Never discard a healthy supported index; rebuild it transactionally.
+  If main-file unlink fails, touch no sidecar. Any `PermissionError` raises
+  `IndexBusy` (subclass of `IndexReadError`, code `index_busy`). If a later sidecar
+  unlink fails, retry cleanup on the next cycle before creating a database; do
+  not promise rollback of three filesystem deletes. Then call `ingest_many` to
+  build fresh. A reader that opens
   between `discard` and the first commit gets `index_missing`, which the MCP
-  resolver reports as pending (acceptable; seconds at most).
+  resolver reports as pending. Persistent file locks remain explicit; do not
+  promise a fixed recovery time or delete a healthy index to break the lock.
 - `_initialize` writes `schema_version` only when no metadata row exists. Remove its
   duplicated `CREATE VIEW` block; views are created by `_project_derived` inside the
   ingest transaction.
@@ -224,7 +245,9 @@ Index stage (`service.index_stage(status, index_present)`), first match wins:
 - `EvidenceQueryService._read_attachment_page` adds an assignment-wide
   `attachment_summary` from the same transaction: `{"associations", "captured",
   "pending", "gaps", "extracted", "extraction_gaps"}` (`gaps`: association status in
-  `too_large|unavailable|foreign_origin`; `extraction_gaps`: availability `unavailable`).
+  `too_large|unavailable|foreign_origin`; `extraction_gaps`: availability `partial`
+  or `unavailable`). Preserve readable blocks and reasons; extracted is not
+  necessarily completely read.
 
 ### 4.4 Future evidence versions (index worker)
 
@@ -247,22 +270,30 @@ Columns added to `attachment_jobs` in `_initialize` (check `PRAGMA table_info`;
 
 | Column | Type/default | Meaning |
 |---|---|---|
-| `focused` | `INTEGER NOT NULL DEFAULT 0` | 1 when observed by a single-assignment acquisition |
 | `extraction_state` | `TEXT NOT NULL DEFAULT 'needed'` | `needed`, `done`, `gap` |
 | `extraction_error` | `TEXT` | sanitized code for `gap` |
 | `extracted_with` | `TEXT` | adapter `EXTRACTOR_VERSION` + `:` + `PRIVACY_POLICY_REVISION` at `done`/`gap` |
 
-Ordering everywhere: `focused DESC, created_at DESC, job_id` (focused first, then
-newest). No dates, no calendar.
+Ordering everywhere: `created_at DESC, job_id` (newest first). Newly created jobs
+run ahead of older backlog. Re-observing an association does not make it new:
+`AttachmentJobStore.ensure` returns an existing row unchanged. Preserve that
+idempotency, captured bytes, and extraction completion; do not rewrite `created_at`
+to manufacture priority. There is no priority flag. At `30b9465` no production
+path publishes a single-assignment receipt (PowerGrader's focused fetch passes no
+receipt sink), so a flag would have no trigger. Newest-first is the teacher's
+selected approximation, not a guarantee that a requested older job jumps the
+queue. Report this limit; no dates, calendar, or scheduling framework.
 
-- `enqueue_from_receipt`: when the receipt has exactly one `assignment.submissions`
-  scope, new rows get `focused=1` and existing rows for the same identities are set
-  to `focused=1`. Otherwise `focused=0`.
 - `claim`: SQL-bounded — `status IN ('pending','failed') AND file_id != '' AND
   (next_attempt_at IS NULL OR next_attempt_at <= :now)`, ordered as above,
   `LIMIT :limit * 4`; byte budgeting stays in Python over that set.
 - Retry exhaustion: in `record(status="failed")`, at `attempts >= MAX_ATTEMPTS`
   persist `status="unavailable"`, `last_error="retry_exhausted"`, no due time.
+  `AttachmentJobStore.reopen_exhausted_captures(*, course_id=None) -> int`, called
+  once per process start and once after a successful explicit course refresh,
+  resets those rows (only `last_error='retry_exhausted'`) to `pending` with
+  `attempts=0`, so a long Canvas outage is not permanent. `too_large`,
+  `foreign_origin`, and URL-unavailable rows stay terminal.
 - Rows without `file_id` (only `reconstruct_from_facts` creates them; it has no
   production caller) are never claimed and are excluded from every count.
 - `run_attachment_chunk(..., stop_event=None, publish_terminal=None)`: checks
@@ -282,15 +313,19 @@ Extraction:
 
   | Outcome | Publish | State |
   |---|---|---|
-  | Adapter succeeds | extraction fact | `done` |
+  | Adapter returns a validated result | extraction fact preserving availability/reasons | `done` for `complete`/`empty`; `gap` for `partial`/`unavailable` |
   | No adapter for the type | `unavailable` fact, reasons `["unsupported_type"]`, `extractor_version="unsupported"` | `gap` |
-  | `ExtractionError` / exception / timeout | `unavailable` fact, reasons `["missing_dependency"]`, `["timeout"]`, else `["corruption"]` | `gap` |
-  | `recover_original` fails | nothing | `gap`, error `original_missing` |
+  | `ExtractionError` / exception / timeout | `unavailable` fact; preserve allowlisted reason, map recognition failure to `recognition_gap`, unclassified adapter failure to `corruption` | `gap` |
+  | `recover_original` fails | terminal association `unavailable` through `publish_attachment_status`; no invented extraction text | `gap`, local error `original_missing` |
 
-- `AttachmentJobStore.reopen_extractions(current_version: Callable[[str], str | None]) -> int`,
-  called once per process start: resets to `needed` every `gap` row, and every
+- `AttachmentJobStore.reopen_extractions(current_version: Callable[[str], str | None], *, course_id=None) -> int`,
+  called once per process start and once after a successful explicit course
+  refresh: resets to `needed` every `gap` row, and every
   `done` row whose `extracted_with` differs from `current_version(filename)`. That
   covers a later dependency install and an extractor upgrade with no backoff table.
+  `course_id` filters both helpers for an explicit refresh; startup uses all local
+  rows. No reopening on heartbeat, status polling, read retries, or worker chunks.
+  One refresh gives failed files one new bounded opportunity, not a retry loop.
 - `ExtractionOutcome` fields: `processed`, `published`, `gaps` (tuple of codes).
 - Extraction identity is the association:
   `extraction_entity_key(assignment_id, pseudonym, attempt, attachment_key)` →
@@ -308,16 +343,20 @@ Extraction:
 Read-only summary: `AttachmentJobStore.summary(*, course_id=None,
 assignment_id=None) -> dict`. Absent file → zeros, nothing created. Open with
 `file:...?mode=ro` and `PRAGMA query_only=ON`; missing new columns read as
-`focused=0`, `extraction_state='needed'`. Keys: `total`, `by_status`, `pending`,
+`extraction_state='needed'`. Keys: `total`, `by_status`, `pending`,
 `captured` (the three existing ones keep their meaning), `capture_gaps`,
 `extraction_needed`, `extraction_done`, `extraction_gaps`, `remaining` (capture
-retryable + extraction needed), `focused_remaining`.
+retryable + extraction needed).
 
 `service.attachment_stage(summary)`: `not_run` if `total == 0`; `pending`,
 `attachments_pending` if `remaining > 0`; `partial`, `attachment_gaps` if
 `capture_gaps + extraction_gaps > 0`; else `ready`. Use a course- or
 assignment-scoped summary for refresh results, so unrelated courses never affect
-them. Requested work progresses ahead of backlog through ordering, not stage math.
+them. New jobs progress ahead of backlog through ordering, not stage math.
+An empty queue on computer B does not prove attachments ready: use indexed
+association/extraction summaries for evidence availability. Queue counts describe
+this computer's work only. Pending associations without local jobs mean pending
+synced evidence, never zero missing attachments.
 
 ### 4.6 Maintenance and worker lifecycle (lead)
 
@@ -329,7 +368,7 @@ def run_attachment_capture_chunk(*, limit=None, max_bytes=None, stop_event=None)
 def run_extraction_chunk(*, limit=20, stop_event=None) -> dict
 def attachment_work_worker(stop_event) -> None           # thread "ce-evidence-work"
 def wake_evidence_workers() -> None
-def prepare_evidence_work() -> None                      # startup: reopen_extractions
+def prepare_evidence_work(*, course_id=None) -> None      # reopen gaps and exhausted captures
 def evidence_stages(*, course_id=None, assignment_id=None) -> dict   # read-only
 def evidence_status() -> dict                                        # read-only
 ```
@@ -351,13 +390,22 @@ is deleted. Constants: `INDEX_MAINTENANCE_SECONDS = 30.0`,
   is enabled. Extraction of local originals runs regardless of ownership.
 - Vault transactions are opened per job publication, never across a download or
   adapter run.
+- Index maintenance never holds the vault lock while scanning. At the start of each
+  run, take one short `store._vault_transaction(root)` and copy what verification
+  needs into `service._VaultSnapshot` (frozen: `entries()` and
+  `all_real_identifiers()` returning copies). Build each course's
+  `EvidencePublisher(vault=snapshot)` from it and scan and verify outside the lock.
+  The snapshot supports only those two methods; any other vault call raises, which
+  proves maintenance never assigns or mutates identities. The privacy check is
+  unchanged; only lock duration changes.
 - `_publish_acquisition` stops rebuilding inline; it calls
   `request_index_maintenance("publication")` and `wake_evidence_workers()`. Chunks
   request maintenance only when they published something. `mirror_heartbeat_worker`
   stops rebuilding.
 - `runtime.start()`: after operation recovery and before the heartbeat thread, call
-  `request_index_maintenance("startup")` and `prepare_evidence_work()` (exceptions
-  noted, never fatal), then start both evidence threads. Nothing runs synchronously.
+  `request_index_maintenance("startup")`, then start both evidence threads.
+  `prepare_evidence_work()` runs once inside the attachment worker (exceptions
+  noted, never fatal); database migration/reopening must not delay MCP readiness.
   `runtime.stop()` sets both stop events, calls `wake_evidence_workers()`, and joins
   each thread with `timeout=5.0`.
 - Second computers do not rebuild a capture queue. They read synced extraction facts
@@ -376,7 +424,8 @@ def _evidence_reader() -> tuple[EvidenceQueryService | None, str | None, dict | 
 |---|---|---|
 | No workspace | `workspace_unconfigured` | teacher sets workspace in Settings |
 | Canvas origin unset/invalid | `canvas_origin_unconfigured` | teacher configures Canvas |
-| `index_missing`/`index_schema_mismatch`/`index_corrupt`/`index_busy`, safe evidence exists for the source | `evidence_index_pending` | call again in a few seconds; resolver calls `request_index_maintenance("read_miss")` |
+| No supported readable index and maintenance reports unsupported evidence | `evidence_update_required` | update this computer; do not retry acquisition/indexing in a loop; last-good supported rows, if available, remain readable with a warning |
+| `index_missing`/`index_schema_mismatch`/`index_corrupt`/`index_busy`, safe evidence exists for the source | `evidence_index_pending` | signal `request_index_maintenance("read_miss")`; retry this read, not acquisition; include sanitized last maintenance code and `retry_after_seconds: 5` |
 | Index missing and no safe evidence for the source | `evidence_refresh_required` | call `refresh_mirror(course_id)` |
 
 The resolver writes nothing to disk. Add `_evidence_coverage(page) -> dict`:
@@ -389,7 +438,8 @@ The resolver writes nothing to disk. Add `_evidence_coverage(page) -> dict`:
 and a `warnings` list from: `membership_incomplete`, `membership_unknown`,
 `sync_pending`, `evidence_update_required` (course is in
 `update_required_courses`, read from the maintenance status file read-only),
-`section_label_missing`, `assignment_context_missing`.
+`section_label_missing`, `assignment_context_missing`,
+`assignments_excluded_from_totals`.
 
 Refuse only when nothing for the requested scope has ever been indexed:
 
@@ -398,8 +448,14 @@ Refuse only when nothing for the requested scope has ever been indexed:
 | `get_roster` | roster coverage `unknown` and zero rows | serve; missing section label → `"Unknown section"` + `section_label_missing`; incomplete group labels → omit that group |
 | `get_submissions` | submission coverage `unknown` and zero rows | serve; missing assignment row → `{"id": <id>, "title": ""}` + `assignment_context_missing` |
 | `get_submissions(history=True)` | history coverage `unknown` and zero rows | serve with coverage |
-| `get_gradebook_snapshot` | roster and assignment coverage both `unknown` | serve; add `coverage.incomplete_assignment_ids` |
+| `get_gradebook_snapshot` | roster and assignment coverage both `unknown` | serve per-assignment rows with coverage; compute `class_avg`, `total_missing`, `total_ungraded`, and per-student stats only over assignments whose submission coverage is `complete`; list the others in `coverage.excluded_assignment_ids` and add warning `assignments_excluded_from_totals` |
 | `get_assignment_evidence` | never | add `coverage`, `warnings` |
+
+Here "never" means a valid query with an available supported index may return
+unknown coverage; configuration, privacy, invalid-input, and index refusals still
+apply. Unknown coverage includes the exact course refresh hint. Missing history
+means "not observed", not "refresh until history is complete". After one successful
+acquisition, do not prescribe repeated refreshes for attempts Canvas did not return.
 
 Zero rows with coverage not `complete` always carry `membership_unknown` or
 `membership_incomplete`; never present them as a complete empty set. `freshness`
@@ -409,6 +465,12 @@ Revision pinning: related reads in one call pass `revision=<first revision>`. On
 `IndexReadError("revision_changed")` retry the evidence section once; a second
 change returns `{"ok": False, "code": "evidence_revision_changed", "error":
 "CanvasMirror updated during this read. Call the same tool again."}`.
+
+Pin related views within a call. Across separate calls, preserve any existing
+revision/cursor contract. Where a tool accepts only offsets, expose its revision
+and instruct the agent to restart that collection at offset zero if it changes;
+do not promise a cross-call snapshot the signature cannot request. No acquisition
+or teacher approval is needed to repeat a read.
 
 ### 4.8 Console copy (lead, S10)
 
@@ -422,7 +484,58 @@ change returns `{"ok": False, "code": "evidence_revision_changed", "error":
 | Refresh: acquisition failed | "Canvas refresh failed: Canvas could not be read. Check your Canvas connection and try again." |
 | Refresh: publication failed | "Canvas data was read, but some of it could not be saved safely. Try again; if it repeats, check Diagnostics." |
 | Refresh: ok, index not ready | "Refresh saved. Local indexing is still finishing." |
+| Refresh: index ready, attachments pending | "Refresh saved. Submission text is available; some attachments are still being read." |
+| Refresh: index ready, attachment gaps | "Refresh saved. Available work can be read; some attachments could not be read." |
 | Refresh: fully ready | "Refresh complete." |
+
+### 4.9 MCP refresh continuation and recovery (lead, S08)
+
+Add one parameter to the existing tool and its `server.py` wrapper:
+
+```python
+def refresh_mirror(course_id: str, include_comments: bool = False,
+                   structure_only: bool = False, operation_id: str = "") -> dict:
+    ...
+```
+
+- Empty `operation_id`: retain acquisition dispatch and the existing 25-second
+  bounded wait. Return the coordinator `plan_id` as continuation `operation_id`,
+  not a reused job's originating operation id.
+- Non-empty `operation_id`: look up that plan through coordinator status; verify
+  every job belongs to the requested course and the scopes for the specified
+  `include_comments`/`structure_only` mode. Return current status immediately.
+  No enqueue, wait loop, Canvas call, vault access, rebuild, or refresh-loop
+  counter increment. Keep Current-course selection checks. Unknown/expired plan
+  returns `refresh_operation_unavailable`; mismatched course/mode returns
+  `refresh_operation_mismatch`, without exposing another course's details.
+- Plans remain process-local. After restart/eviction, guidance is "Read requested
+  evidence first; start one refresh if still needed." Do not add durable plans or
+  silently enqueue from the status branch.
+- Both branches return sanitized `stages`, `fully_ready`, `operation_id`, and
+  existing identity fields. `syncing` means acquisition queued/running; `synced`
+  means acquisition/publication finished, even if attachments remain pending.
+  Include `retry_after_seconds: 5` while work is pending. Status combines the
+  retained acquisition result with current course-scoped index/attachment state.
+  Structure-only results retain catalog diagnostics and leave unrequested
+  submission/attachment stages `not_run`.
+- Recovery: transient Canvas or safe-publication failure permits one agent retry
+  when needed; recurring failure stops automatic acquisition retries. Index
+  failure requests local maintenance/read retry, never another Canvas fetch.
+  Attachment gaps affect only the items needing those files. Auth/configuration
+  and version errors name the actual teacher action. Ownership waiting is pending
+  coordination, not evidence of failed credentials.
+- Remove generic `ask_teacher_confirmation` from failed read-only refreshes in
+  both `refresh_mirror` and `_refresh_catalog`. The browser button runs the same
+  machinery and is not a repair. Keep repeated-acquisition detection as advisory
+  `refresh_not_progressing`; count new dispatches only, not status calls. Explain
+  the recurring failure and continue unaffected work. Read-only refresh needs no
+  permission. Existing Canvas-write approvals remain unchanged.
+
+Connected-agent guidance: start one refresh when needed, check that operation
+after the suggested delay, and retry the original read when usable. Do not poll
+until all course attachments finish. After two unchanged delayed checks, explain
+the pending stage and proceed with available work instead of monopolizing the
+conversation. This is host guidance, not a new runtime refusal or cancellation.
 
 ## 5. Defects found during planning (what the slices fix)
 
@@ -446,6 +559,32 @@ Verified by reading `30b9465`.
 | D14 | `get_submissions` reads three views without cross-view revision pinning | `tools.get_submissions` | S08 |
 | D15 | Startup tests enforce the synchronous recovery ordering S06 replaces | `test_runtime_startup.py` | S06 |
 | D16 | `test_rebuild_preserves_all_courses_until_delayed_files_arrive` enforces the whole-source pending rule | `test_service_evidence.py` | S05 |
+| D17 | On a course's first acquisition, scrubbing happens before SIS IDs and nicknames are in the vault (`publish_course_receipt` registers only Canvas id + name; `store.write_roster` adds the rest after publication), so they can reach the safe store unscrubbed | `evidence_acquisition.publish_course_receipt`, `evidence_publish.publish_text_assignment` | S01 |
+| D18 | Rebuilding the index holds the Identity Vault's inter-process lock for the whole scan; at a 30 s cadence this would stall vault-dependent MCP reads | `service.rebuild_evidence_index` | S05 |
+| D19 | Slow refresh says retry but offers no MCP status-only continuation; after completion another call can enqueue another acquisition | `tools.refresh_mirror`, `server.refresh_mirror`, `coordinator.submit` | S08, section 4.9 |
+| D20 | Both refresh modes label failure as needing teacher confirmation and send the teacher to an equivalent browser refresh | `tools.refresh_mirror`, `_refresh_catalog`, `_refresh_loop_attention` | S08 |
+| D21 | Plan assumed every refresh makes attachment jobs new; `ensure` preserves existing rows and their original creation time | `evidence_jobs.AttachmentJobStore.ensure` | S04: preserve idempotency and test the actual guarantee |
+
+### 5.1 Workflow audit and residual limits
+
+These are execution consequences, not additional permission gates. D1–D21 are
+code findings; the following include risks in the proposed implementation.
+
+| Teacher's job / hang-up | Required treatment | Acceptance / remaining limit |
+|---|---|---|
+| Publish an assignment, quiz, or page while mirror/OCR is unhealthy | No new mirror-wide prerequisite; use existing content preparation, review, and verified apply | S11 checks existing content-operation tests; no live write needed for this read milestone |
+| Refresh finishes but reads still say pending | Section 4.9 status continuation and read-side maintenance hint; never refresh Canvas to repair an index | S08 proves status calls enqueue nothing, including after plan completion |
+| One unavailable PDF stalls the class | Return other text and explicit attachment gaps; only existing scoring holds decide affected rows | S07/S11 preserve scoring-hold tests; `fully_ready` is never a global workflow gate |
+| Second computer has no jobs and claims files are ready | Read availability from synced associations/extractions, not local queue size | S11 checks a pending association in partition B with no local jobs |
+| Requested attachment already deep in backlog | Newest-first helps newly created jobs only; existing job keeps its place | Accepted scheduling approximation. Do not claim assignment-targeted priority or add a flag |
+| Missing original or failed publication leaves attachment forever "pending" | Publish a typed gap when bytes are unavailable; persist completion only after safe publication succeeds | S04 failure-order tests below; no infinite retry on a malformed file |
+| A resolved download/extraction problem requires an app restart | One successful explicit course refresh reopens its failed work and wakes the worker | S07 tests course scoping and that status/heartbeat do not reopen failures |
+| Agent reads evidence, but scoring preparation rejects its private projection | State explicitly that read readiness is not scoring readiness; refresh once through existing scoring guidance | Private scoring consumers and publication gate stay; next senior assessment owns convergence |
+| Teacher asks to score writing inside New Quizzes | Keep current supported boundary explicit | Existing writing remains in Canvas; future writing uses a separate assignment. This batch adds no New Quiz scoring |
+
+Do not reopen teacher decisions to solve these remaining limits covertly. The
+next assessment should start from the scoring preparation failure the teacher
+actually encounters, not another storage cleanup or historical-import project.
 
 ## 6. Stage A — S00: baseline and execution preparation
 
@@ -463,7 +602,9 @@ Verified by reading `30b9465`.
    git grep -n -E "evidence_activation|evidence_import|evidence_migration|evidence_activation_proof|_activated_evidence_lane|read_activation|recover_evidence_work|rebuild_evidence_index|publish_reader_contract|reader_contract_bytes|reader\.v1|captured_jobs|ExtractionCache" -- api docs tools
    ```
 
-3. Test environment: a repo-local, gitignored `.venv`. Never touch `%CE_DATA%\venv`.
+3. Reuse a working repo-local, gitignored `.venv`; create it only if absent. Never
+   touch `%CE_DATA%\venv`. Use that interpreter for every command in this plan
+   (the later `py -m pytest` examples are shorthand, not a second environment).
 
    ```powershell
    py -3.13 -m venv .venv
@@ -471,14 +612,20 @@ Verified by reading `30b9465`.
    .venv\Scripts\python -m pytest api/tests/mirror/extraction -p no:randomly -q
    ```
 
-   Install `pytest-randomly` if `-p no:randomly` errors. Record interpreter, versions,
-   and counts. If installation is impossible, record the exact error, code with `py`,
-   and treat acceptance as blocked on this gate.
-4. Run the full suite once in `.venv`; record the failing nodes (expected: the
-   QuizForge golden plan; possibly the readiness probe). Do not edit golden data.
+   Record interpreter, versions, and counts. If installation is impossible,
+   continue independent implementation/tests and record the exact blocker. Real
+   extraction acceptance remains unverified until the supported environment works.
+4. Reuse the brief's baseline; do not rerun the whole suite just to start coding.
+   Reproduce an affected failure only if the environment/source change makes its
+   old baseline inapplicable. S11 owns the integrated full run. Do not edit golden
+   data to hide the known QuizForge mismatch.
 5. Shared fixture in `api/tests/mirror/acquisition_samples.py`:
-   - Move `SyntheticVault` there from `test_evidence_publish.py` and re-export it from
-     the old module. Map `synthetic-user-01` → `Pikachu`, `synthetic-user-02` → `Eevee`.
+   - Move `SyntheticVault` there from `test_evidence_publish.py` and update its
+     test imports; no compatibility re-export. Map `synthetic-user-01` → `Pikachu`, `synthetic-user-02` → `Eevee`.
+     Extend it to the real vault surface `roster_service.upsert_roster` uses:
+     `get_or_assign(raw, real_name="", sis_id="")`, `remember_identity(raw, name, sis_id)`,
+     and `add_nicknames(raw, names)`, with SIS IDs and nicknames appearing in
+     `entries()` and SIS IDs in `all_real_identifiers()`. Existing callers keep working.
    - `course_receipt_sample("read_path")`: the `full` scopes plus `course.sections`
      (section `500`) and two attachments on `synthetic-user-01` attempt 3:
      `{"id": "9001", "filename": "essay.docx", ...}` and
@@ -487,7 +634,8 @@ Verified by reading `30b9465`.
      containing "Synthetic thesis sentence.">, "9002": b"%PDF-1.4 not a real pdf"}`.
    - `course_receipt_sample("second_course")`: course `"2"`, assignment `20`, one
      submission from `synthetic-user-02`.
-6. Send worker assignments only after steps 1–5.
+6. Workers can start after inventory and fixture setup; extraction environment
+   preparation need not block index/publication work.
 
 ## 7. Stage B — foundation workstreams
 
@@ -501,6 +649,19 @@ Verified by reading `30b9465`.
 2. Add `publish_attachment_status` (section 4.5) to `evidence_acquisition.py`;
    `status` outside `{"too_large", "unavailable", "foreign_origin"}` raises
    `PublicationRefused("invalid_status")`.
+3. Close D17. In `publish_course_receipt`, replace the roster pre-registration
+   loop (the `publisher._pseudo(...)` calls before `vault.save()`) with
+   `roster_service.upsert_roster(publisher.vault, rows)`, where `rows` are the
+   `course.roster` scope's dict rows; this is the call `store.write_roster` already
+   makes. Then call `publisher.vault.require_stable(...)` per row, recording
+   `identity_unresolved` gaps exactly as today. Do the same with the `roster`
+   argument of `publish_text_assignment` before its replacement map is rebuilt.
+   If upsert raises, record `identity_registration_failed` and omit that receipt's
+   student-bearing scopes; do not proceed with a partially populated replacement
+   map. Preserve independently verifiable student-free context and prior safe
+   evidence. Return publication incomplete; never claim complete membership for
+   omitted scopes. The successful path rebuilds the replacement map after
+   registration, as today. This closes D17 without weakening the privacy boundary.
 
 Tests:
 
@@ -509,7 +670,14 @@ Tests:
   `VIEW_COLUMNS` minus `roster`/`sections`; publish; every scope succeeds; the old
   bytes are unchanged; no other `reader*.json` appears.
 - `test_evidence_acquisition.py::test_attachment_status_republishes_gap_without_digest`.
+- `test_evidence_acquisition.py::test_first_acquisition_scrubs_sis_id_and_nickname`
+  (parametrize both entry points): an empty `SyntheticVault`; a roster row with
+  `sis_user_id` and `short_name`; a submission body containing both. No safe file
+  contains either value, and the vault now holds both.
 - Change `test_evidence_publish.py:81` to assert `reader.v1.json` does **not** exist.
+- Extend the first-acquisition privacy test with an upsert failure after one
+  identity: no student text from that receipt is published and prior safe facts
+  survive. A caught registration exception must never become unsafe success.
 
 ```powershell
 py -m pytest api/tests/mirror/test_evidence_acquisition.py api/tests/mirror/test_evidence_publish.py -p no:randomly -q
@@ -551,8 +719,9 @@ Tests:
 - `test_evidence_index.py::test_read_refuses_missing_mismatched_and_corrupt_index_without_writing`
   (parametrize; assert code, unchanged bytes, and no file created when missing).
 - `test_evidence_index.py::test_mismatch_ingest_refuses_and_discard_with_open_handle_is_busy`
-  (simulate the Windows handle by monkeypatching `os.unlink` to raise `PermissionError`;
-  old rows stay readable).
+  (simulate the Windows handle by monkeypatching the main-file unlink to raise
+  `PermissionError`; all existing files remain; malformed/schema-old files are
+  still refused by reads, never described as readable).
 - `test_evidence_index.py::test_interrupted_ingest_rolls_back` (`_project_derived` raises).
 - `test_evidence_queries.py::test_descriptor_is_local_registry_derived_and_revision_bound`
   (views equal `VIEW_COLUMNS` including `roster`/`sections`; revision matches).
@@ -578,10 +747,21 @@ Implement section 4.5. `summary()` uses a separate read-only connection helper.
 Replace `test_extraction_entity_key_is_content_and_version_addressed` and
 `test_stale_extractor_version_reprocesses_only_affected` (both tested the cache).
 
+Durable ordering: publish extraction/terminal association first, then record its
+job completion. Compute terminal capture outcomes (including retry exhaustion)
+before saving them; `record` must not strand a terminal job whose publication
+failed. If publication fails, leave work eligible for a later bounded
+chunk. If the process stops after publication but before completion, retry the
+same fact idempotently and then mark complete. For a missing original, publish
+the unavailable association specified in section 4.5; do not leave
+other computers with an indefinitely pending association. Preserve adapter-provided
+`partial`/`unavailable` availability and reasons; a returned result is not necessarily
+complete text. Sanitize exception codes; do not call every failure corruption.
+
 Tests:
 
-- `test_evidence_jobs.py::test_retry_exhausted_capture_becomes_terminal_unavailable` (D2).
-- `test_evidence_jobs.py::test_claim_orders_focused_then_newest_and_skips_rows_without_file_id` (D3).
+- `test_evidence_jobs.py::test_retry_exhausted_capture_is_terminal_until_reopened_at_start` (D2).
+- `test_evidence_jobs.py::test_claim_orders_newest_first_and_skips_rows_without_file_id` (D3).
 - `test_evidence_jobs.py::test_summary_creates_nothing_and_reads_old_schema_unaltered` (D12).
 - `test_evidence_jobs.py::test_terminal_capture_status_is_published_once`.
 - `test_evidence_extraction.py::test_identical_files_for_two_students_publish_two_extractions` (D5, D6).
@@ -591,6 +771,10 @@ Tests:
   (unsupported type, missing dependency, timeout → `unavailable` facts with reasons;
   `reopen_extractions` resets them and version-changed `done` rows).
 - `test_evidence_extraction.py::test_adapter_runs_outside_publisher_scope`.
+- `test_evidence_jobs.py::test_ensure_preserves_existing_job_and_new_jobs_sort_first`.
+- `test_evidence_extraction.py::test_publication_failure_never_marks_extraction_done`
+  (also retry after publication succeeds but completion recording fails).
+- `test_evidence_extraction.py::test_missing_original_publishes_gap_for_peer_reader`.
 
 ```powershell
 py -m pytest api/tests/mirror/test_evidence_jobs.py api/tests/mirror/test_evidence_extraction.py -p no:randomly -q
@@ -614,13 +798,22 @@ Return final signatures and whether the service-chunk test broke.
    passes `"publication"` for `publication_incomplete`, else `"acquisition"` on failure.
    The pass-level publication gate in `sync.py` is otherwise unchanged.
 5. `run_index_maintenance`:
+   - Take the vault snapshot (section 4.6) in one short transaction; build
+     publishers from it. No vault lock is held from here on.
    - Scan each course directory in its own `try`. A course with any facts or commits
      is healthy. An empty or unreadable directory, or one that raises, is not indexed
      and is listed in `not_arrived_courses`. A previously indexed course whose
      directory is absent simply drops out and is listed there too.
    - Collect `update_required_courses` from `unsupported_schema` issues.
-   - No healthy courses: write status `ready` with the lists and return
-     `{"state": "empty", ...}` without touching the index.
+   - No healthy courses: report `partial`/`course_evidence_not_arrived` (or
+     `evidence_update_required` for unsupported records). Do not advertise an
+     existing index's old rows as current evidence. With a usable index, ingest
+     an empty validated `StoreSnapshot` through `EvidenceIndex.ingest` (not
+     `ingest_many`, which rejects an empty aggregate). Its verifier refuses any
+     record, its facts/commits/issues are empty, and its revision is a stable
+     empty-source digest. This transaction removes absent whole-course rows
+     under the already chosen rule. With no usable index, return missing
+     evidence guidance; never write `ready` merely because no work was ingested.
    - `ingest_many(healthy, selected_courses=...)`. On `index_schema_mismatch`,
      `index_corrupt`, or `sqlite3.DatabaseError`: `discard()` then `ingest_many`
      again. On `IndexBusy`: status `failed`/`index_busy`, keep the old file.
@@ -644,6 +837,11 @@ Tests:
 - `test_service_evidence.py::test_index_failure_after_publication_keeps_safe_files`
   (ingest raises once → status `failed`, files unchanged, rerun → `ready`).
 - `test_service_evidence.py::test_descriptor_failure_keeps_index_ready`.
+- Extend the missing-course example to all course directories absent: no stale
+  rows returned as current, `not_arrived` reported, no Canvas calls.
+- `test_service_evidence.py::test_maintenance_scans_without_holding_vault_lock` (D18):
+  the vault transaction context records enter/exit; the scan stub asserts it is
+  not inside; a privacy-trap record is still refused by the snapshot verifier.
 - `test_sync.py::test_refresh_failure_records_stage_and_keeps_last_success`.
 - `test_service_selection.py::test_runner_outcomes_map_to_stage_table` (parametrized
   over the section 4.1 table; also covers coordinator stage copying).
@@ -689,18 +887,25 @@ py -m pytest api/tests/test_runtime_startup.py api/tests/mirror/test_service_evi
    for one job. Request maintenance when `published > 0`.
 3. `run_extraction_chunk`: `publisher_scope` is a `contextmanager` opening the vault
    transaction; request maintenance when `published > 0`.
-4. `prepare_evidence_work()` calls `reopen_extractions` only when the control store
-   exists.
+4. `prepare_evidence_work(course_id=...)` calls `reopen_extractions` and
+   `reopen_exhausted_captures` only when the control store exists. Startup calls it
+   once in the worker. After a successful manual `course.refresh` or
+   `course.feedback_refresh`, call it once for that course and wake the worker;
+   do not hook individual receipts (one pass can publish several), roster/groups,
+   structure-only refresh, background refresh, or continuation/status calls.
 
 Tests:
 
 - `test_service_evidence.py::test_attachments_drain_across_chunks_in_one_lifetime`:
   45 capture jobs and their extractions with synthetic transport/adapter; drive the
-  worker with an injected wait until idle; all terminal; focused jobs finished first.
+  worker with an injected wait until idle; all terminal; the newest refresh's jobs
+  finish before older backlog.
 - `test_service_evidence.py::test_vault_is_not_held_during_download_or_adapter`.
 - `test_service_evidence.py::test_restart_resumes_without_redownloading_captured_original`
   (the recovery law moved from `test_evidence_activation.py`).
 - `test_service_evidence.py::test_non_owner_extracts_but_never_downloads`.
+- `test_service_evidence.py::test_explicit_refresh_retries_course_gaps_without_restart`
+  (other course untouched; heartbeat and repeated status calls reopen nothing).
 - `test_evidence_scoring.py` unchanged and green.
 
 ```powershell
@@ -715,6 +920,8 @@ py -m pytest api/tests/mirror/test_evidence_jobs.py api/tests/mirror/test_eviden
 false), MCP tests and fixtures.
 
 1. Implement section 4.7; delete `_activated_evidence_lane`.
+   Implement section 4.9 in `tools.py` and `server.py`; adjust refresh-loop
+   guidance and `_SERVER_INSTRUCTIONS` for status continuation and partial reads.
 2. Rewrite the evidence paths of `get_roster` (non-settings), `get_submissions`
    (current and history), `get_gradebook_snapshot`, and `get_assignment_evidence`.
    Keep parameters, gate order (`_saved_course_gate_check`, `_course_gate_check`),
@@ -743,6 +950,10 @@ false), MCP tests and fixtures.
    | Settings path, writes, other tools | Leave unchanged |
    | `test_submission_history.py` cases bound to `_submission_history` | Keep laws that apply to evidence history (never blank an attempt, omitted text marked); delete private-file extraction cases |
 
+   Tie-break: if a test might protect a privacy or pseudonym rule, convert it;
+   never delete it. Summarize removed tests by file/category in the brief; enumerate
+   individual cases only when the reason is not obvious from the diff.
+
 New tests:
 
 - `test_tools.py::test_reads_need_no_checkpoint_and_distinguish_missing_index`
@@ -752,7 +963,17 @@ New tests:
   (parametrize `partial_submissions`, `empty_submissions`, nothing published).
 - `test_tools.py::test_revision_change_between_related_reads_retries_then_refuses`.
 - `test_tools.py::test_old_assignment_is_served_with_age_not_refused`.
+- `test_tools.py::test_gradebook_totals_exclude_incomplete_assignments`
+  (two assignments, one `partial_submissions`; class average and missing totals
+  equal the complete assignment's alone; the other id is listed and warned).
 - `test_tools.py::test_catalog_and_submission_assignment_ids_agree_after_one_refresh`.
+- `test_tools.py::test_refresh_continuation_never_enqueues_or_counts_a_retry`
+  (queued, running, succeeded with index pending, fully ready, failed; both modes).
+- `test_tools.py::test_refresh_continuation_rejects_wrong_course_mode_and_expired_id`.
+- `test_tools.py::test_refresh_failure_guidance_is_stage_specific_without_browser_detour`.
+- `test_tools.py::test_unrelated_course_gap_does_not_block_requested_evidence`.
+- Extend future-version coverage with no supported index: actionable update
+  refusal rather than perpetual `evidence_index_pending`.
 
 ```powershell
 py -m pytest api/tests/mcp_server api/tests/mirror/test_evidence_queries.py api/tests/mirror/test_evidence_index.py api/tests/test_beta075_mcp.py api/tests/test_beta075_runtime.py api/tests/test_vault_conflict.py api/tests/test_roster_mcp_write.py -p no:randomly -q
@@ -776,7 +997,7 @@ Do not change `TOOL_SCHEMA_VERSION` here; S11 settles it.
 5. Do not delete `activation.v1.json` or `extraction.sqlite3` on disk.
 
 ```powershell
-py -m pytest api/tests/mirror api/tests/mcp_server api/tests/test_runtime_startup.py api/tests/test_retired_paths.py -p no:randomly -q
+py -m pytest api/tests/test_runtime_startup.py api/tests/test_retired_paths.py -p no:randomly -q
 ```
 
 Record the remaining private-projection consumers from
@@ -794,6 +1015,10 @@ status functions, tests. Read the brief's named console reference sections first
    acquisition/publication as the worst across plan jobs
    (`failed > partial > pending > not_run > ready`) plus course-scoped `index` and
    `attachments` from `evidence_stages(course_id=...)`.
+   Queued/running jobs without an outcome contribute `pending` acquisition, not
+   `not_run` or success. Do not let the terminal plan state erase owner-waiting or
+   partial stage information. `not_run` means an unrequested stage, never a
+   completed stage whose work has not started.
 2. `status()` and `evidence_status()` open no write connection and create no file
    (existing acquisition-owner observation is out of scope). Corrupt status JSON
    reads as defaults.
@@ -810,13 +1035,18 @@ Tests:
 - `test_desk_routes.py::test_mirror_status_reports_failed_stage_and_last_success`.
 - `test_route_contract.py` and `test_readiness_routes.py` unchanged and green.
 
-Browser gate: start the app via `.claude/launch.json` with a scratch synthetic
-workspace selected through Settings (never the teacher's). Load `/` and
+Browser gate: use an isolated launch environment (config, local cache, credentials,
+and workspace) before starting the app. `.claude/launch.json` alone does not isolate
+the teacher's stores; do not switch the live teacher configuration in Settings to
+set up a test. Reuse the pytest isolation conventions in a test-only launch helper
+if needed, with a fake Canvas transport. Load `/` and
 `/settings` in two states: fully ready (publish `course_receipt_sample("full")`,
 let maintenance run) and failed refresh stage (seed `_refresh.v1.json` with
 `state: "failed"`, `failure_stage: "publication"`, a `last_success_at`). Confirm
 the section 4.8 text, required globals, and zero new console errors; screenshot
-both; remove the scratch workspace.
+both. Verify the ready, indexing-pending, and attachment-pending text through route
+tests; the two rendered states above suffice unless a different route changes.
+Clean up only the scratch files created for this run.
 
 ## 10. Stage E — S11: integration, documents, synthetic acceptance
 
@@ -837,14 +1067,17 @@ both; remove the scratch workspace.
   next-assessment pointer (finalized in S13).
 - `docs/mcp-server.md` where it describes these reads.
 
-Then `git grep -n -E "reader\.v1|activation checkpoint|activate_read_authority|import proof|migrate_legacy" -- docs api`
-returns only retired-handoff history.
+Then search `git grep -n -E "reader\.v1|activation checkpoint|activate_read_authority|import proof|migrate_legacy" -- docs api`.
+Classify hits: current runtime references must be removed; regression fixtures,
+retired-path assertions, and this plan's explicit removal instructions are valid.
+Do not require zero text matches or delete useful regression coverage to get them.
 
 ### 10.2 MCP contract settlement
 
 `git fetch origin`; take the next free `TOOL_SCHEMA_VERSION` above `origin/dev`
 (81 at baseline; never pre-reserve). Regenerate the snapshot through the existing
-pytest path, confirm parameters are unchanged, re-measure the listing budget in
+pytest path, confirm the only intended input change is optional `operation_id`
+on `refresh_mirror`, re-measure the listing budget in
 `test_server_instructions.py`, and update the inventory.
 
 ### 10.3 Integrated scenarios
@@ -859,21 +1092,34 @@ and adapters are stubbed. Five examples cover the brief's criteria together:
 | `test_second_course_delay_and_corrupt_index_recover_locally` — `second_course` absent while course 1 updates; corrupt the index; maintenance restores both after arrival with zero Canvas calls | 1, 3 |
 | `test_partial_and_future_version_evidence_reads_honestly` — partial submissions, a v2 record, empty-complete vs never acquired, paginated history pinned to one revision | 4 |
 | `test_switching_partitions_and_restart_need_no_activation` — two local cache roots over one safe root; partition B indexes A's evidence; stop/start runtime; identity traps seeded in receipts are absent from safe files, index, and outputs | 5 |
-| `test_failure_after_success_and_no_calendar_backlog` — failed refresh keeps last success and shows the stage in `refresh_mirror` and `/api/mirror/status`; focused assignment progresses ahead of 30 backlog jobs; old assignment served | 6, 7 |
+| `test_failure_after_success_and_no_calendar_backlog` — failed refresh keeps last success and shows the stage in `refresh_mirror` and `/api/mirror/status`; newly created attachment jobs progress ahead of 30 older backlog jobs; gradebook totals exclude an incomplete assignment and say so; old assignment served | 6, 7 |
 
 The existing scoring-hold tests remain the proof that read availability does not
 authorize unsafe scoring (criterion 5).
 
+Extend the partition example with pending associations and an empty local job
+store on B: availability remains pending. Extend the failure example with
+section 4.9 continuation: after acquisition completes, polling causes zero new
+Canvas calls and text reads proceed before every attachment completes.
+Reuse `test_content_push_tools.py` coverage in the MCP/full gate to guard the
+publishing workflow; do not add live pushes or require mirror/OCR readiness for it.
+
 ### 10.4 Gate and accounting
 
+Slice commands provide focused feedback while implementing. Run the full suite
+once on the integrated tree; do not precede it with another overlapping broad
+subset merely to obtain a second check mark. Repeat only after relevant edits or
+a failure. S09 deletion checks supplement S08 rather than rerunning all its tests.
+
 ```powershell
-.venv\Scripts\python -m pytest api/tests/mirror api/tests/mcp_server api/tests/test_desk_routes.py api/tests/test_route_contract.py api/tests/test_runtime_startup.py -p no:randomly -q
 .venv\Scripts\python -m pytest api/tests engine/tests -p no:randomly -q
 git diff --check
 ```
 
 Real DOCX/PDF/PPTX/XLSX/JPG adapters and local OCR must pass in `.venv`. Remaining
-failures must be exactly S00's baselined QuizForge node. Confirm no private
+failures must be independently baselined and outside changed behavior (the brief
+records the QuizForge node). New or relevant failures prevent synthetic GREEN;
+do not assume a predetermined failure count. Confirm no private
 fixtures, manifests, or logs in `git status`. Senior reviews the MCP contract diff
 and the failure, idempotency, and revision seams. Overall stays YELLOW until S12/S13.
 
@@ -889,8 +1135,9 @@ and the failure, idempotency, and revision seams. Overall stays YELLOW until S12
 3. Try without reset first: existing safe files should index; old
    `activation.v1.json`, `reader.v1.json`, and `extraction.sqlite3` are ignored.
 4. Reset only if step 3 fails in a way the code cannot repair: private manifest
-   outside the repo per brief section 4, containment and reparse checks, teacher's
-   go on the listed targets, both runtimes stopped, sync settled after deletion.
+   outside the repo per brief section 4, containment and reparse checks, announce
+   the listed targets, both runtimes stopped, sync settled after deletion. The
+   bounded reset is already authorized; ask only if a target falls outside it.
 5. Acquire one Current course; verify assignment context, text, supported
    attachment blocks, gaps, coverage/age, and stages. Restart once; verify. Sample
    one assignment in each remaining Current course.
@@ -921,7 +1168,8 @@ and free of unrelated work.
 
 Stop for the senior/teacher only at the brief's boundaries: Canvas write/scoring
 changes, an unlisted destructive target, replacing the evidence format/storage
-engine, a demonstrated privacy flaw, or a section 5 fact that no longer holds.
+engine, a demonstrated privacy flaw requiring a different plan, or changed code
+that invalidates a locked behavior. Routine source drift is not a stop condition.
 
 Settled:
 
@@ -933,16 +1181,31 @@ Settled:
   directory is absent is reported `not_arrived`, not retained from old index rows.
 - Future-version records get code `unsupported_schema` and the course is listed as
   update required; the reducer treats them like any other issue.
-- Queue order is focused first, then newest. No priority tiers, dates, or calendar.
+- Queue order is newest first for newly created jobs. Existing associations keep
+  their original order; no assignment-targeted priority is promised. No priority
+  flag, tiers, dates, or calendar (teacher, 2026-10-05; clarified by code inspection).
 - No extraction cache. One `extraction_state` per job; any failure is an explicit
-  gap, reopened once per process start. Extraction identity is the association.
-- Retry-exhausted capture becomes terminal `unavailable` and is published as a gap.
+  gap, reopened at startup or once per successful explicit course refresh.
+  Extraction identity is the association.
+- Retry-exhausted capture becomes `unavailable`, is published as a gap, and is
+  reopened at startup or once per successful explicit course refresh.
 - Second computers read synced extraction facts; they do not rebuild a capture queue.
 - The maintenance worker rebuilds every 30 s, relying on the unchanged-revision
-  skip; add a cheaper change check only if measured slow.
+  skip; add a cheaper change check only if measured slow. It verifies against a
+  short-lived vault snapshot and never holds the vault lock while scanning
+  (teacher, 2026-10-05).
+- Gradebook totals use only assignments with complete submission coverage; the rest
+  are listed and warned, never silently averaged in (teacher, 2026-10-05).
+- First acquisition registers name, SIS ID, and nickname before scrubbing (D17;
+  teacher, 2026-10-05).
 - The pass-level publication gate in `sync.py` is preserved; reads no longer depend on it.
+- Agent reads (evidence index) and scoring (private projections) can disagree
+  after a refresh with a publication problem. Accepted for this milestone; the
+  next senior assessment owns it.
 - Legacy MCP read fallbacks and their helpers are deleted; `_mirror_roster_doc` and
   `_freshness_attention` stay.
+- `refresh_mirror(operation_id=...)` observes an existing plan without dispatch;
+  generic browser detours and confirmation for read-only refresh are removed.
 - Switching is proven synthetically with two local partitions in one process; the
   actual second computer (S13) is the real proof.
 
