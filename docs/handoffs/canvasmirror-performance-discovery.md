@@ -382,3 +382,15 @@ untimed tool time 17.6 s -> 6.2 s per 100 calls; ping p95/max 1.85-3.07/3.3 s ->
 discovery p95 2.25 s, max **8.87 s**, median 0.39 s. The two remaining walks per call
 are the vault check and the resume inventory, both used. The largest remaining
 stage is resume (manifest/event/blob reads), still measured under background load.
+
+### Discovery I/O slice (teacher-approved 2026-10-06): results unchanged
+
+Synthetic profile (`0d1d46e`, spinner load): each GIL-releasing call costs ~16-94 ms
+under load, so cost tracks syscall count. Reader 137 ops, resume 237 ops per call.
+Approved, all exact: (1) in-memory memo of the work store's per-item reads on the
+resume path, keyed by path plus (size, mtime_ns) with the 2 s racy rule (W8,
+`api/shared_work.py`); (2) `scan_conflicts` walks with `os.scandir` entries instead of
+`os.walk` plus `islink` (W9, `api/shared_storage.py`); (3) `workspace._machine_config`
+memoized on the config file's signature (W10, `api/platform_services/workspace.py`).
+Held unless the gate still misses: reuse one conflict inventory per discovery call,
+skip `blobs/` in the walk, and a sub-millisecond GIL switch interval.

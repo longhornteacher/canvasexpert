@@ -9,6 +9,7 @@ state outside ``_System/``.
 
 from __future__ import annotations
 
+import copy
 import fnmatch
 import hashlib
 import glob
@@ -17,6 +18,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -218,15 +220,41 @@ def needs_compact_layout(base_dir: str, *deepest_child: str, budget: int = TEACH
     return len(projected) > budget
 
 
+# ``workspace_root()`` runs many times per agent call, so the parsed machine
+# config is memoized on the file's signature.  One ``os.stat`` per call replaces
+# the old exists-check plus open/read/parse.  The key carries the path string
+# used at call time, so a test (or a moved config) can never be served another
+# file's value.  A file modified within the last ``_CONFIG_RACY_NS`` is never
+# cached: a rewrite landing in the same mtime tick with the same size would
+# otherwise be missed.  The entry is one immutable tuple swapped atomically, so
+# readers on other threads never see a half-written memo.
+_CONFIG_RACY_NS = 2_000_000_000
+_machine_config_memo = None  # ((path, size, mtime_ns), parsed dict)
+
+
 def _machine_config():
-    if not os.path.exists(CONFIG_PATH):
-        return {}
+    global _machine_config_memo
+    path = CONFIG_PATH
     try:
-        with open(CONFIG_PATH, encoding="utf-8") as f:
+        info = os.stat(path)
+    except OSError:
+        return {}
+    signature = (path, info.st_size, info.st_mtime_ns)
+    memo = _machine_config_memo
+    if memo is not None and memo[0] == signature:
+        return copy.deepcopy(memo[1])
+    now_ns = time.time_ns()
+    try:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+    if not isinstance(data, dict):
+        data = {}
+    if now_ns - info.st_mtime_ns < _CONFIG_RACY_NS:
+        return data
+    _machine_config_memo = (signature, data)
+    return copy.deepcopy(data)
 
 
 def onedrive_root():

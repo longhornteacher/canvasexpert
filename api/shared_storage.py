@@ -64,6 +64,55 @@ def reappeared_legacy_storage(root=None) -> list[str]:
     return result
 
 
+def _walk_file_names(top: str):
+    """Yield ``(directory, file names)`` exactly as ``os.walk(top)`` yields them.
+
+    ``os.walk`` (3.13, topdown, no ``followlinks``) spends one extra ``islink`` syscall per
+    subdirectory, which is slow under CPU load; the ``DirEntry`` objects from ``scandir`` carry the
+    same facts for free. Semantics mirrored: an entry is a directory when ``entry.is_dir()``
+    (follows links; an ``OSError`` counts as a non-directory); it is descended unless it is a
+    symlink (``entry.is_symlink()`` matches ``os.path.islink``; a Windows junction is not a
+    symlink and is descended); an unreadable directory, or one whose listing fails part-way, is
+    skipped whole and silently.
+    """
+    stack = [os.fspath(top)]
+    while stack:
+        directory = stack.pop()
+        names: list[str] = []
+        subdirectories: list[str] = []
+        try:
+            iterator = os.scandir(directory)
+        except OSError:
+            continue
+        failed = False
+        with iterator:
+            while True:
+                try:
+                    entry = next(iterator)
+                except StopIteration:
+                    break
+                except OSError:
+                    failed = True
+                    break
+                try:
+                    is_directory = entry.is_dir()
+                except OSError:
+                    is_directory = False
+                if not is_directory:
+                    names.append(entry.name)
+                    continue
+                try:
+                    is_link = entry.is_symlink()
+                except OSError:
+                    is_link = False
+                if not is_link:
+                    subdirectories.append(entry.path)
+        if failed:
+            continue
+        yield directory, names
+        stack.extend(subdirectories)
+
+
 def scan_conflicts(root=None) -> list[dict]:
     """Find OneDrive ``name-MACHINE.ext`` siblings throughout ``_Shared``.
 
@@ -76,7 +125,7 @@ def scan_conflicts(root=None) -> list[dict]:
     if base is None or not os.path.isdir(_extended(base)):
         return []
     found: list[dict] = []
-    for directory, _, names in os.walk(_extended(base)):
+    for directory, names in _walk_file_names(_extended(base)):
         # No stat per dash: test the walk's own file list; normcase mirrors the Windows
         # case-insensitive is_file() (only a dangling same-named symlink differs; OneDrive has none).
         present = {os.path.normcase(name) for name in names}

@@ -13,6 +13,7 @@ import re
 import copy
 import threading
 import time
+from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -83,6 +84,99 @@ def _parse_time(value: str) -> datetime | None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+# --- Exact read memo for the advisory summary path ---------------------------
+# Under CPU load every file open costs tens of milliseconds, and discovery's
+# resume read repeats byte-identical reads on every call. The memo reuses the
+# *validated result* of a read for a file whose ``(st_size, st_mtime_ns)`` is
+# unchanged, so every check the read helpers perform still ran once on those
+# exact bytes. Only the summary read uses it; mutating owners always read the
+# files themselves.
+
+# A file modified this close to the read's start can still be rewritten without
+# a visible change (git's "racy clean"), so its result is never reused later.
+_MEMO_RACY_NS = 2_000_000_000
+_MEMO_MAX_ENTRIES = 8192
+_MEMO_MAX_BYTES = 64 * 1024 * 1024
+
+
+class _SummaryReadMemo:
+    """Thread-safe LRU of validated per-file results, one entry per file path.
+
+    An entry holds the file signature and the result serialized as JSON text,
+    so a hit returns a fresh object graph that no caller can use to corrupt
+    the memo. A changed signature simply misses; ``remember`` then replaces it.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._entries: OrderedDict[str, tuple[tuple[int, int], str]] = OrderedDict()
+        self._bytes = 0
+
+    def get(self, key: str, signature: tuple[int, int]) -> str | None:
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None or entry[0] != signature:
+                return None
+            self._entries.move_to_end(key)
+            return entry[1]
+
+    def remember(self, key: str, signature: tuple[int, int], text: str) -> None:
+        with self._lock:
+            previous = self._entries.pop(key, None)
+            if previous is not None:
+                self._bytes -= len(previous[1])
+            if len(text) > _MEMO_MAX_BYTES // 4:
+                return
+            self._entries[key] = (signature, text)
+            self._bytes += len(text)
+            while len(self._entries) > _MEMO_MAX_ENTRIES or self._bytes > _MEMO_MAX_BYTES:
+                _, (_, dropped) = self._entries.popitem(last=False)
+                self._bytes -= len(dropped)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+            self._bytes = 0
+
+
+_SUMMARY_MEMO = _SummaryReadMemo()
+
+
+def _entry_signature(entry) -> tuple[int, int] | None:
+    try:
+        stat = entry.stat()
+    except OSError:
+        return None
+    return stat.st_size, stat.st_mtime_ns
+
+
+def clear_summary_read_memo() -> None:
+    """Forget every memoized summary read (tests; a new process starts empty)."""
+    _SUMMARY_MEMO.clear()
+
+
+def _memoized_read(path, signature, started_ns: int, read):
+    """Return ``read()``, reusing its result for an unchanged, settled file.
+
+    ``signature`` is the file's ``(st_size, st_mtime_ns)`` taken before the
+    read (``None`` when unknown: always read). ``read`` returns the validated
+    result, or ``None`` for an outcome that must not be remembered; an
+    exception (unreadable, invalid, refused) propagates and is never stored.
+    A file whose mtime is not at least ``_MEMO_RACY_NS`` older than
+    ``started_ns`` is read again next time.
+    """
+    if signature is None:
+        return read()
+    key = str(path)
+    cached = _SUMMARY_MEMO.get(key, signature)
+    if cached is not None:
+        return json.loads(cached)
+    value = read()
+    if value is not None and signature[1] <= started_ns - _MEMO_RACY_NS:
+        _SUMMARY_MEMO.remember(key, signature, json.dumps(value))
+    return value
 
 
 class SharedWorkStore:
@@ -618,32 +712,37 @@ class SharedWorkStore:
 
     @staticmethod
     def _list_item_dir(directory: Path) -> dict | None:
-        """One directory listing: manifest presence, journals, leases, signature."""
+        """One directory listing: manifest presence, journals, leases, signatures.
+
+        ``stats`` maps each manifest/journal/lease file name to its
+        ``(st_size, st_mtime_ns)`` from the listing's own ``DirEntry`` (free on
+        Windows), or ``None`` when it could not be read. They key the read memo.
+        """
         try:
             with os.scandir(directory) as scanner:
                 entries = list(scanner)
         except OSError:
             return None
         has_manifest = False
-        events, leases, signature = [], [], []
+        events, leases, signature, stats = [], [], [], {}
         for entry in entries:
             name = entry.name
             if name == "manifest.json":
                 has_manifest = True
+                stats[name] = _entry_signature(entry)
             elif (name.startswith("events.") and name.endswith(".jsonl")
                   and len(name) >= 13 and not name.endswith(".orphan.jsonl")):
                 events.append(directory / name)
-                try:
-                    stat = entry.stat()
-                    signature.append((name, stat.st_size, stat.st_mtime_ns))
-                except OSError:
-                    signature.append((name, -1, -1))
+                stats[name] = _entry_signature(entry)
+                size, mtime_ns = stats[name] or (-1, -1)
+                signature.append((name, size, mtime_ns))
             elif name.startswith("lease.") and name.endswith(".json") and len(name) >= 10:
                 leases.append(directory / name)
+                stats[name] = _entry_signature(entry)
         return {"total": len(entries), "has_manifest": has_manifest,
                 "events": sorted(events, key=lambda path: path.name),
                 "leases": sorted(leases, key=lambda path: path.name),
-                "signature": tuple(sorted(signature))}
+                "signature": tuple(sorted(signature)), "stats": stats}
 
     @staticmethod
     def _read_manifest_file(path: Path, work_id: str) -> dict | None:
@@ -657,12 +756,50 @@ class SharedWorkStore:
             return None
         return value
 
-    def _read_item_state(self, work_id: str, listing: dict, project) -> dict:
-        """Read one item's leases, events and latest snapshot blob exactly once."""
+    def _read_manifest_memoized(self, directory: Path, work_id: str, listing: dict,
+                                started_ns: int) -> dict | None:
+        path = directory / "manifest.json"
+        return _memoized_read(path, listing["stats"].get("manifest.json"), started_ns,
+                              lambda: self._read_manifest_file(path, work_id))
+
+    def _read_blob_memoized(self, work_id: str, digest: str, started_ns: int) -> dict:
+        """``_read_blob`` reusing its verified result while the blob file is unchanged.
+
+        The content-addressed name is not trusted on its own: the read verifies
+        integrity, so the memo is keyed on one ``os.stat`` of the blob instead.
+        """
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            return self._read_blob(work_id, digest)
+        path = self._item_dir(work_id) / "blobs" / digest
         try:
-            leases = self._read_lease_files(listing["leases"])
+            stat = os.stat(workspace.extended_path(str(path)))
+        except OSError:
+            return self._read_blob(work_id, digest)
+        return _memoized_read(path, (stat.st_size, stat.st_mtime_ns), started_ns,
+                              lambda: self._read_blob(work_id, digest))
+
+    def _read_item_state(self, work_id: str, listing: dict, project,
+                         started_ns: int | None = None) -> dict:
+        """Read one item's leases, events and latest snapshot blob exactly once.
+
+        Unchanged, settled files are served from the read memo instead of being
+        opened (see ``_memoized_read``); results are identical either way.
+        """
+        if started_ns is None:
+            started_ns = time.time_ns()
+        stats = listing.get("stats") or {}
+        try:
+            leases = []
+            for path in listing["leases"]:
+                leases.extend(_memoized_read(
+                    path, stats.get(path.name), started_ns,
+                    lambda path=path: self._read_lease_files([path]) or None) or [])
             lease = self._select_effective_lease(leases)
-            events = self._read_event_files(listing["events"])
+            events = []
+            for path in listing["events"]:
+                events.extend(_memoized_read(
+                    path, stats.get(path.name), started_ns,
+                    lambda path=path: self._read_event_files([path])))
             events, late = self._classify_late_events(events, leases)
             selected = self._select_events(events)
         except WorkItemError as exc:
@@ -690,7 +827,8 @@ class SharedWorkStore:
         if not selected:
             return outcome
         try:
-            blob = self._read_blob(work_id, str(selected[-1]["blob_sha256"]))
+            blob = self._read_blob_memoized(work_id, str(selected[-1]["blob_sha256"]),
+                                            started_ns)
         except WorkItemError as exc:
             outcome["error"] = self._SUMMARY_ERROR_CODES.get(str(exc), "snapshot_unavailable")
             return outcome
@@ -718,9 +856,15 @@ class SharedWorkStore:
         A conflict copy inside a relevant item directory raises
         ``SharedStoreConflictError``. ``course_ids=None`` means every course;
         an empty collection means none.
+
+        Unchanged, settled files (same size and mtime, at least 2 s old) are
+        served from a process-lifetime read memo instead of being reopened; the
+        result is identical to an unmemoized read, and failures are never kept.
         """
         allowed = None if course_ids is None else {str(c or "") for c in course_ids}
         result = {"items": [], "unclassified": []}
+        # Files settled for 2 s before this instant may be served from the read memo.
+        started_ns = time.time_ns()
         # One whole-tree inventory per pass; refusals are scoped to items.
         conflicts = scan_conflicts(self.workspace_root)
         if not self.root.is_dir():
@@ -743,7 +887,7 @@ class SharedWorkStore:
                 if listing["total"]:
                     result["unclassified"].append("manifest_missing")
                 continue
-            manifest = self._read_manifest_file(directory / "manifest.json", name)
+            manifest = self._read_manifest_memoized(directory, name, listing, started_ns)
             if manifest is None:
                 result["unclassified"].append("manifest_unreadable")
                 continue
@@ -755,13 +899,13 @@ class SharedWorkStore:
                 continue
             if by_item.get(name.casefold()):
                 raise SharedStoreConflictError(by_item[name.casefold()])
-            outcome = self._read_item_state(name, listing, project)
+            outcome = self._read_item_state(name, listing, project, started_ns)
             if outcome.get("error"):
                 # At most one bounded reread, only when the journals visibly
                 # changed (sync in progress) since the first listing.
                 relisted = self._list_item_dir(directory)
                 if relisted is not None and relisted["signature"] != listing["signature"]:
-                    outcome = self._read_item_state(name, relisted, project)
+                    outcome = self._read_item_state(name, relisted, project, started_ns)
             error = outcome.get("error")
             result["items"].append({
                 "work_id": name, "course_id": course_id,
