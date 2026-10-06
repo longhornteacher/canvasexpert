@@ -1,8 +1,10 @@
 # Execution brief: CanvasMirror functional read path
 
 **Status:** S11 synthetic gate passed; S12 desktop section repair is field
-verified. Overall acceptance remains YELLOW pending the unexplained earlier MCP
-delay and S13 second-computer verification. Grading
+verified. An actual S13 laptop check provided partial read/restart evidence, but
+did not exercise the required direct submission and attachment reads across both
+cycles. Overall acceptance remains YELLOW; the earlier MCP delay also remains
+unexplained. Grading
 periods are agent guidance, not a runtime gate. No reset performed.
 **Target:** `dev`. **Inspected baseline:** `30b9465`, 2026-10-05.
 **Owner:** one lead executor; senior accepts the integrated result.
@@ -627,7 +629,20 @@ group read remained active for several minutes and the runtime was restarted to
 load the fix; its accepted safe evidence remained intact. These durations are
 workflow friction to measure on recurrence, not evidence that local
 `get_submissions` queued behind the coordinator. The actual second computer has
-not yet been checked.
+not yet been checked at this desktop checkpoint.
+
+**S13 laptop follow-up:** The actual second computer passed workspace/key/sync
+preflight and several direct reads before a manual refresh. Roster and other
+local reads also worked after restart. The field report did not document a
+direct `get_submissions` call in either cycle, and `get_assignment_evidence`
+was checked only before restart for an attachment view with zero records.
+Diagnostic `refresh_mirror` requests occurred before the restart cycle, so that
+cycle cannot by itself prove the no-refresh synced-evidence path. Separate
+`discover_scoring_work` calls returned `mirror_projection_unavailable`; this
+generic scoring-projection refusal has no established root cause from the
+reported evidence. The aggregate-only record and bounded remaining check are
+in `docs/reference/s13-laptop-field-results.md`. Overall S13 remains YELLOW;
+do not retire this brief yet.
 
 S00 commit: `036ab61`; S02: `caf7b22`; S01: `c2439a8`; S03: `22d4d10`;
 S05: `51b917e`; S06: `952788e`.
