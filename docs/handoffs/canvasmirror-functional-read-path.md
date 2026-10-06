@@ -1,8 +1,8 @@
 # Execution brief: CanvasMirror functional read path
 
-**Status:** S11 synthetic gate passed; S12 desktop field acceptance is YELLOW
-pending live verification of the section fix, an unexplained MCP delay, and S13
-second-computer verification. Grading
+**Status:** S11 synthetic gate passed; S12 desktop section repair is field
+verified. Overall acceptance remains YELLOW pending the unexplained earlier MCP
+delay and S13 second-computer verification. Grading
 periods are agent guidance, not a runtime gate. No reset performed.
 **Target:** `dev`. **Inspected baseline:** `30b9465`, 2026-10-05.
 **Owner:** one lead executor; senior accepts the integrated result.
@@ -509,6 +509,9 @@ No live runtime, Canvas acquisition, reset, or deployment performed.
 | S10 | GREEN slice | `7184607`, `51d747f` + follow-up; `service.py` (`status()` per-course `refresh` + `evidence_status()` shape), `canvasagent.js` (§4.8 detail + backlog + `refreshText`), `test_desk_routes.py` | `.venv\Scripts\python -m pytest api/tests/test_desk_routes.py api/tests/test_route_contract.py api/tests/test_readiness_routes.py api/tests/mirror/test_service_evidence.py api/tests/mcp_server -p no:randomly -q` — 396 passed | `status()` adds per-course `refresh` and top-level `evidence`; `canvasagent.js` applies §4.8 detail with precedence update required > index failed > index pending > not arrived, appends the backlog sentence, and chooses refresh text from `plan.stages`; status GETs create no file; browser gate passed on `/` and `/settings` in fully-ready and failed-refresh states with zero console errors | Fixed a latent `AttachmentJobStore` NameError in `evidence_stages()` |
 | S11 | GREEN slice | Commit containing this row; new `api/tests/mcp_server/test_evidence_read_path.py`; `tools.py` guide descriptor line; `test_beta075_mcp.py` evidence-bound set; `test_tools.py` guide assertion; docs `canvasmirror-evidence-contract.md`, `agent-runtime-product-contract.md`, `mirror.md`, `canvasmirror-agent-reading.md`, `canvasmirror-synced-store-direction.md`, `mcp-server.md` | `.venv\Scripts\python -m pytest api/tests engine/tests -p no:randomly -q` — 2499 passed, 1 skipped, 0 failed | Five composed scenarios over the real publisher/index/queue/query/MCP path (only Canvas transport and the adapter subprocess stubbed): old descriptor + fresh workspace reaches MCP with text, docx blocks, and an explicit pdf gap; delayed second course and corrupt index recover locally with zero Canvas calls; partial/future-version/empty-complete/history read honestly; two partitions over one safe root and restart need no activation with no seeded identity in safe files/index/output; failed refresh keeps last success and reports the stage, newest-first jobs beat backlog, gradebook excludes an incomplete assignment and says so. Docs reconciled to actual behavior; `reader.v1.json` guide line replaced with the local `reader.json`; `get_assignment_evidence` added to the evidence-bound doc set | None |
 
+| S12 diagnostic | GREEN code; field YELLOW | `d456136`; `api/mcp_server/tools.py`, `api/mirror/sync.py`, `api/mirror/evidence_acquisition.py`, matching tests, this brief and slice-plan status | Focused mirror 102 passed; MCP timing/history 6 passed; full suite 2510 passed, 1 skipped | Aggregate-only, fail-safe events separated section acquisition/publication and MCP read stages; current brief redacted course identifiers | Root causes not yet established at this checkpoint |
+| S12 section repair | GREEN desktop; overall YELLOW | `a63440f`; `api/mirror/evidence_publish.py`, matching test, this brief | Focused publisher/acquisition/sync 116 passed; full suite 2512 passed, 1 skipped | Live complete section receipt produced `privacy_refused`; existing scrubber removed the matching name token; publisher now scrubs `name`. Post-fix GET-only refresh and indexed roster read passed in all three Current courses | Earlier four-minute MCP delay did not recur; S13 laptop check remains |
+
 ### Field acceptance — 2026-10-05 (desktop only; laptop battery died)
 
 Both computers were updated by `git pull` from `dev` (the in-app self-updater is
@@ -611,6 +614,20 @@ inside the Python tool; its vault, index, and outbound-gate stages all completed
 This did not reproduce the earlier four-minute symptom. Keep the diagnostic
 timings for a recurrence; do not change coordinator or vault-lock behavior on
 this evidence.
+
+**Post-fix desktop field check:** Restarted the local runtime to load the
+verified publisher change. GET-only roster refreshes through CE succeeded for
+all three Current courses; after local indexing, `get_roster` returned `ok:true`,
+complete coverage, and no `section_label_missing` warning on each. The first
+course's acquisition and safe publication each accepted one section; the other
+two did likewise. No reset, Canvas write, operation retry, or private row output
+was performed. The two later asynchronous roster/index checks took about 194
+and 222 seconds end to end. During the preceding diagnostic run, a separate
+group read remained active for several minutes and the runtime was restarted to
+load the fix; its accepted safe evidence remained intact. These durations are
+workflow friction to measure on recurrence, not evidence that local
+`get_submissions` queued behind the coordinator. The actual second computer has
+not yet been checked.
 
 S00 commit: `036ab61`; S02: `caf7b22`; S01: `c2439a8`; S03: `22d4d10`;
 S05: `51b917e`; S06: `952788e`.
