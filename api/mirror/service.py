@@ -336,6 +336,12 @@ def run_extraction_chunk(*, limit: int = 20, stop_event=None) -> dict:
 
 
 def prepare_evidence_work(*, course_id=None) -> None:
+    """Reopen extraction work that can change; an explicit course refresh retries all.
+
+    Worker start (no course) reopens only version-changed or transient work. A
+    manual course refresh also reopens that course's settled gaps and exhausted
+    captures once.
+    """
     from api.mirror.evidence_jobs import AttachmentJobStore
     from api.mirror.evidence_paths import control_store_path, source_key_for_origin
     from api.mirror.extraction import registry
@@ -348,16 +354,17 @@ def prepare_evidence_work(*, course_id=None) -> None:
     if not path.exists():
         return
     def current_version(filename):
-        name = registry.adapter_name(filename)
-        if name is None:
-            return None
         try:
-            return f"{registry.extractor_version(name)}:{PRIVACY_POLICY_REVISION}"
+            version = registry.extractor_version(filename)
         except Exception:
             return None
+        return None if version is None else f"{version}:{PRIVACY_POLICY_REVISION}"
     jobs = AttachmentJobStore(path)
-    jobs.reopen_exhausted_captures(course_id=course_id)
-    jobs.reopen_extractions(current_version, course_id=course_id)
+    explicit = course_id is not None
+    if explicit:
+        jobs.reopen_exhausted_captures(course_id=course_id)
+    jobs.reopen_extractions(current_version, course_id=course_id,
+                            retry_settled_gaps=explicit)
 
 
 _MAINTENANCE_LOCK = threading.Lock()

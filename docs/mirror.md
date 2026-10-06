@@ -242,8 +242,12 @@ after operation recovery and stopped with the runtime:
 - **Attachment work** (`ce-evidence-work`): continues capture and extraction in
   bounded chunks. Capture runs only when this computer owns acquisition; local
   extraction runs regardless. Downloads and adapters run outside vault
-  transactions. Newly created jobs run newest-first ahead of older backlog; a
-  successful explicit course refresh reopens that course's failed work once.
+  transactions. Newly created jobs run newest-first ahead of older backlog. A
+  runtime start retries only what can change: it reopens an extraction whose
+  extractor or privacy-policy version changed, or whose gap is transient
+  (`timeout`, `missing_dependency`, `resource_limit`, `original_missing`), and it
+  leaves deterministic gaps and exhausted captures as they are. A successful
+  explicit course refresh reopens that course's gaps and exhausted captures once.
 
 Config (machine-local): `mirror_enabled` (default true),
 `mirror_serve_max_age_hours` (default 6; older than this, the private roster projection

@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from api.mirror.evidence_jobs import TRANSIENT_EXTRACTION_GAPS
+
 
 @pytest.fixture
 def attachment_world(evidence_service_workspace, monkeypatch):
@@ -216,3 +218,146 @@ def test_explicit_course_retry_reopens_only_that_courses_gaps(attachment_world, 
     assert world["jobs"].get(course_one_done.job_id).extraction_state == "done"
     assert world["jobs"].get(course_two_gap.job_id).extraction_state == "gap"
     assert world["jobs"].get(course_two_exhausted.job_id).status == "unavailable"
+
+
+# --- Runtime start retries only what can change (decision 10) -----------------
+
+@pytest.fixture
+def current_extractor(monkeypatch):
+    """Pin one extractor version for supported types; return the job stamp for it."""
+    from api.mirror.extraction import registry
+    from api.mirror.extraction.schema import PRIVACY_POLICY_REVISION
+
+    monkeypatch.setattr(registry, "extractor_version",
+                        lambda filename: "synthetic-text-1" if registry.adapter_name(filename) else None)
+    return f"synthetic-text-1:{PRIVACY_POLICY_REVISION}"
+
+
+def _settle(world, key, *, state, error=None, extracted_with=None, filename="essay.txt", course="1"):
+    job = _ensure(world, key, course=course, filename=filename)
+    world["jobs"].record(job.job_id, status="captured", digest="d" * 64)
+    world["jobs"].record_extraction(job.job_id, state=state, error=error,
+                                    extracted_with=extracted_with)
+    return job
+
+
+def _exhaust_capture(world, key, *, course="1"):
+    job = _ensure(world, key, course=course)
+    for _ in range(5):
+        world["jobs"].record(job.job_id, status="failed", error="transport_failed",
+                             now="2026-01-01T00:00:00Z")
+    assert world["jobs"].get(job.job_id).status == "unavailable"
+    return job
+
+
+@pytest.mark.parametrize(("reason", "filename"), [
+    ("corruption", "essay.txt"),
+    ("no_extractable_text", "essay.txt"),
+    ("encryption", "essay.txt"),
+    ("truncated", "essay.txt"),
+    ("partial_result", "essay.txt"),
+    ("unsupported_type", "notes.xyz"),
+])
+def test_worker_start_leaves_settled_gap_until_explicit_refresh(
+        attachment_world, current_extractor, reason, filename):
+    from api.mirror import service
+    from api.mirror.extraction.schema import PRIVACY_POLICY_REVISION
+
+    world = attachment_world
+    stamp = current_extractor if filename.endswith(".txt") else f"unsupported:{PRIVACY_POLICY_REVISION}"
+    job = _settle(world, 9201, state="gap", error=reason, extracted_with=stamp, filename=filename)
+
+    service.prepare_evidence_work()
+    settled = world["jobs"].get(job.job_id)
+    assert (settled.extraction_state, settled.extraction_error) == ("gap", reason)
+
+    service.prepare_evidence_work(course_id="1")
+    assert world["jobs"].get(job.job_id).extraction_state == "needed"
+
+
+def test_worker_start_leaves_exhausted_capture_until_explicit_refresh(
+        attachment_world, current_extractor):
+    from api.mirror import service
+
+    world = attachment_world
+    job = _exhaust_capture(world, 9202)
+
+    service.prepare_evidence_work()
+    exhausted = world["jobs"].get(job.job_id)
+    assert (exhausted.status, exhausted.last_error) == ("unavailable", "retry_exhausted")
+
+    service.prepare_evidence_work(course_id="1")
+    reopened = world["jobs"].get(job.job_id)
+    assert (reopened.status, reopened.attempts) == ("pending", 0)
+
+
+@pytest.mark.parametrize("reason", sorted(TRANSIENT_EXTRACTION_GAPS))
+def test_worker_start_reopens_transient_gap_with_unchanged_version(
+        attachment_world, current_extractor, reason):
+    from api.mirror import service
+
+    world = attachment_world
+    job = _settle(world, 9203, state="gap", error=reason, extracted_with=current_extractor)
+
+    service.prepare_evidence_work()
+    reopened = world["jobs"].get(job.job_id)
+    assert (reopened.extraction_state, reopened.extraction_error) == ("needed", None)
+
+
+@pytest.mark.parametrize(("state", "error", "stamp", "reopens"), [
+    pytest.param("gap", "corruption", "synthetic-text-0:{rev}", True, id="gap-extractor-bumped"),
+    pytest.param("gap", "unsupported_type", "unsupported:{rev}", True, id="gap-type-newly-supported"),
+    pytest.param("done", None, "synthetic-text-0:{rev}", True, id="done-extractor-bumped"),
+    pytest.param("gap", "corruption", "{current}", False, id="gap-unchanged"),
+    pytest.param("done", None, "{current}", False, id="done-unchanged"),
+])
+def test_worker_start_reopens_only_version_changed_extractions(
+        attachment_world, current_extractor, state, error, stamp, reopens):
+    from api.mirror import service
+    from api.mirror.extraction.schema import PRIVACY_POLICY_REVISION
+
+    world = attachment_world
+    job = _settle(world, 9204, state=state, error=error,
+                  extracted_with=stamp.format(rev=PRIVACY_POLICY_REVISION, current=current_extractor))
+
+    service.prepare_evidence_work()
+    expected = "needed" if reopens else state
+    assert world["jobs"].get(job.job_id).extraction_state == expected
+
+
+@pytest.mark.parametrize("state", ["gap", "done"])
+def test_worker_start_reopens_extraction_when_policy_revision_changes(
+        attachment_world, current_extractor, monkeypatch, state):
+    from api.mirror import service
+    from api.mirror.extraction import schema
+
+    world = attachment_world
+    job = _settle(world, 9205, state=state, error="corruption" if state == "gap" else None,
+                  extracted_with=current_extractor)
+    monkeypatch.setattr(schema, "PRIVACY_POLICY_REVISION", schema.PRIVACY_POLICY_REVISION + 1)
+
+    service.prepare_evidence_work()
+    assert world["jobs"].get(job.job_id).extraction_state == "needed"
+
+
+def test_worker_start_trusts_the_real_registry_version_stamp(attachment_world):
+    """A job stamped by the real extractor is current, so start leaves it alone.
+
+    Regression: the version lookup once went through the adapter name rather than
+    the filename, so every supported file looked changed and every start re-ran
+    all extraction.
+    """
+    from api.mirror import service
+    from api.mirror.extraction import registry
+    from api.mirror.extraction.schema import PRIVACY_POLICY_REVISION
+
+    world = attachment_world
+    version = registry.extractor_version("essay.txt")
+    assert version
+    stamp = f"{version}:{PRIVACY_POLICY_REVISION}"
+    done = _settle(world, 9206, state="done", extracted_with=stamp)
+    gap = _settle(world, 9207, state="gap", error="corruption", extracted_with=stamp)
+
+    service.prepare_evidence_work()
+    assert world["jobs"].get(done.job_id).extraction_state == "done"
+    assert world["jobs"].get(gap.job_id).extraction_state == "gap"

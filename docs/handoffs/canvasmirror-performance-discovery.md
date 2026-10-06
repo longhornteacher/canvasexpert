@@ -102,6 +102,13 @@ runtime source and loaded revision; shell checkout identity alone is insufficien
    private local area), and it must include a validation-code digest so a code
    change forces one full pass.
 
+10. **Runtime start retries only what can change (teacher-approved 2026-10-06).**
+   Worker start reopens an extraction only when its extractor or privacy-policy
+   version changed, or its gap was transient (`timeout`, `missing_dependency`,
+   `resource_limit`, `original_missing`). Deterministic gaps and exhausted captures
+   wait for an explicit course refresh, which still reopens that course's gaps and
+   captures once, as before.
+
 No evidence format/index schema change is planned. No new safe fact fields are
 needed for discovery's current counting rules. MCP result changes in the slice
 plan are explicit; the lead owns version/snapshot/inventory/budget settlement.

@@ -37,6 +37,12 @@ BACKOFF_SECONDS = (30, 120, 600, 1800)
 TERMINAL_STATUSES = frozenset({"captured", "too_large", "unavailable", "foreign_origin"})
 RETRYABLE_STATUSES = frozenset({"pending", "failed"})
 CAPTURE_GAP_STATUSES = frozenset({"too_large", "unavailable", "foreign_origin"})
+# Extraction gaps whose cause is the environment or the original's location, not
+# the bytes, so a later attempt can differ without any version change. Every
+# member is a reason code the extraction path records (see evidence_extraction).
+TRANSIENT_EXTRACTION_GAPS = frozenset({
+    "timeout", "missing_dependency", "resource_limit", "original_missing",
+})
 CHUNK_BYTES = 64 * 1024
 
 
@@ -386,9 +392,19 @@ class AttachmentJobStore:
             return cursor.rowcount
 
     def reopen_extractions(self, current_version: Callable[[str], str | None], *,
-                           course_id: str | None = None) -> int:
+                           course_id: str | None = None,
+                           retry_settled_gaps: bool = False) -> int:
+        """Reopen extractions that can now produce a different result.
+
+        The same bytes under the same extractor and policy version give the same
+        gap, so a ``done`` row reopens only when its version changed, and a ``gap``
+        row reopens only when its reason is transient or an adapter now exists
+        with a different version. ``retry_settled_gaps`` (an explicit course
+        refresh) reopens every gap regardless.
+        """
         with self._connect() as db:
-            query = "SELECT job_id,filename,extraction_state,extracted_with FROM attachment_jobs WHERE status='captured'"
+            query = ("SELECT job_id,filename,extraction_state,extraction_error,extracted_with "
+                     "FROM attachment_jobs WHERE status='captured'")
             args = ()
             if course_id is not None:
                 query += " AND course_id=?"
@@ -396,10 +412,17 @@ class AttachmentJobStore:
             rows = db.execute(query, args).fetchall()
             reopen = []
             for row in rows:
+                state = row["extraction_state"]
+                if state == "gap" and (retry_settled_gaps or
+                                       row["extraction_error"] in TRANSIENT_EXTRACTION_GAPS):
+                    reopen.append(row["job_id"])
+                    continue
+                if state not in {"gap", "done"}:
+                    continue
                 expected = current_version(row["filename"])
-                if row["extraction_state"] == "gap" or (
-                        row["extraction_state"] == "done" and
-                        row["extracted_with"] != expected):
+                # A gap for a type with no adapter stays a gap; a done row whose
+                # adapter has since vanished still reopens (it records the new gap).
+                if (state == "done" or expected is not None) and row["extracted_with"] != expected:
                     reopen.append(row["job_id"])
             db.executemany("UPDATE attachment_jobs SET extraction_state='needed',"
                            "extraction_error=NULL,extracted_with=NULL,updated_at=? WHERE job_id=?",

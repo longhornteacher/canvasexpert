@@ -446,6 +446,47 @@ def test_extraction_progress_is_association_scoped(tmp_path):
     assert store.summary()["extraction_needed"] == 2
 
 
+def test_transient_extraction_gaps_are_recordable_reason_codes():
+    """Contract: every transient gap is a code the extraction path can record."""
+    from api.mirror.extraction.schema import PARTIAL_REASONS
+
+    assert evidence_jobs.TRANSIENT_EXTRACTION_GAPS
+    assert evidence_jobs.TRANSIENT_EXTRACTION_GAPS <= PARTIAL_REASONS | {"original_missing"}
+
+
+@pytest.mark.parametrize(("state", "error", "stamp", "retry_settled", "reopens"), [
+    pytest.param("gap", "corruption", "text-1:1", False, False, id="settled-gap-stays"),
+    pytest.param("gap", "corruption", "text-1:1", True, True, id="settled-gap-explicit-retry"),
+    pytest.param("gap", "corruption", "text-0:1", False, True, id="gap-extractor-bumped"),
+    pytest.param("gap", "corruption", "text-1:0", False, True, id="gap-policy-bumped"),
+    pytest.param("gap", "unsupported_type", "unsupported:1", False, True, id="gap-newly-supported"),
+    pytest.param("done", None, "text-1:1", False, False, id="done-unchanged"),
+    pytest.param("done", None, "text-0:1", False, True, id="done-extractor-bumped"),
+    *[pytest.param("gap", reason, "text-1:1", False, True, id=f"transient-{reason}")
+      for reason in sorted(evidence_jobs.TRANSIENT_EXTRACTION_GAPS)],
+])
+def test_reopen_extractions_retries_only_what_can_change(
+        tmp_path, state, error, stamp, retry_settled, reopens):
+    store = _store(tmp_path)
+    job = _ensure(store, "a" * 64)
+    store.record(job.job_id, status="captured", digest="d" * 64)
+    store.record_extraction(job.job_id, state=state, error=error, extracted_with=stamp)
+    reopened = store.reopen_extractions(lambda filename: "text-1:1", retry_settled_gaps=retry_settled)
+    assert reopened == int(reopens)
+    assert store.get(job.job_id).extraction_state == ("needed" if reopens else state)
+
+
+def test_reopen_extractions_keeps_gap_for_type_without_adapter(tmp_path):
+    store = _store(tmp_path)
+    job = _ensure(store, "a" * 64)
+    store.record(job.job_id, status="captured", digest="d" * 64)
+    store.record_extraction(job.job_id, state="gap", error="unsupported_type",
+                            extracted_with="unsupported:1")
+    assert store.reopen_extractions(lambda filename: None, retry_settled_gaps=False) == 0
+    assert store.get(job.job_id).extraction_state == "gap"
+    assert store.reopen_extractions(lambda filename: None, retry_settled_gaps=True) == 1
+
+
 def test_terminal_status_never_regresses(tmp_path):
     store = _store(tmp_path)
     key = "9" * 64
