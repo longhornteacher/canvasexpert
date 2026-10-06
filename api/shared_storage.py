@@ -77,6 +77,9 @@ def scan_conflicts(root=None) -> list[dict]:
         return []
     found: list[dict] = []
     for directory, _, names in os.walk(_extended(base)):
+        # No stat per dash: test the walk's own file list; normcase mirrors the Windows
+        # case-insensitive is_file() (only a dangling same-named symlink differs; OneDrive has none).
+        present = {os.path.normcase(name) for name in names}
         for name in names:
             candidate = Path(directory) / name
             stem, extension = os.path.splitext(name)
@@ -85,9 +88,9 @@ def scan_conflicts(root=None) -> list[dict]:
             canonical = None
             split_at = stem.find("-")
             while split_at >= 0:
-                possible = Path(directory) / (stem[:split_at] + extension)
-                if possible.is_file():
-                    canonical = possible
+                possible_name = stem[:split_at] + extension
+                if os.path.normcase(possible_name) in present:
+                    canonical = Path(directory) / possible_name
                     break
                 split_at = stem.find("-", split_at + 1)
             if canonical is not None:

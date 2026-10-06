@@ -352,3 +352,16 @@ worst calls were `discovery_resume` (5.4 s) plus `discovery_reader` (up to 3.2 s
 file-I/O stages overlapping post-refresh maintenance (13 s passes) and extraction.
 Light **YELLOW**: that borderline max, plus the desktop check and S12 carry-over,
 which are still not done.
+
+### Lead design: cheaper `scan_conflicts` (teacher go-ahead 2026-10-06)
+
+Field sampling of 100 loaded discovery calls: `shared_storage.scan_conflicts` was
+~2 s of the reader stage (vault open) and ~2.5 s of resume (shared work), because
+for every file whose stem contains a dash it stats one candidate canonical name per
+dash (`possible.is_file()`), and timestamped session/event names have many dashes.
+Narrow change, all callers preserved: the whole-tree walk and its result stay
+identical (still every `_Shared` read, per the vault's comment), but the canonical
+check uses the walk's own file-name list for that directory (`os.path.normcase`d,
+matching the case-insensitive `is_file()` on Windows) instead of a stat. Only
+edge difference: a dangling symlink named like a canonical file would now count;
+OneDrive never produces those.
