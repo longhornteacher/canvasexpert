@@ -330,3 +330,25 @@ attachment-work semantics, outside this batch; awaiting a decision.
 
 D08 is **not started**: a persisted pass fingerprint only skips an unchanged pass
 after restart, and the missing case is restart plus refresh (changed inputs).
+
+### Decision 10: startup retry policy (commit `9599953`, 2026-10-06)
+
+W5 also found that `prepare_evidence_work()` looked up extractor versions by adapter
+name instead of filename, so every supported file read as `None:1` and each start
+re-extracted every `done` attachment as well as every gap. Fixed with the policy.
+Gate: full suite **2743 passed, 1 skipped, 0 failed**.
+
+Field (laptop, no other CE runtimes, harness from `9599953`):
+
+| Run | Discovery p95 / max / median | Ping p95 / max | Startup work |
+|---|---|---|---|
+| Idle 150 s | - | median 0.03 s; p95 1.79 s (heartbeat delta refreshes ran) | one extraction chunk, then none; idle ticks 0.4-0.5 s |
+| Background 100, course A | 1.10 / **9.52** / 0.24 s | 2.08 / 2.66 s | extraction idle; cold maintenance 19.6 s (was 96 s); refresh `synced` in 9.1 s |
+| Background 100, course B | 0.76 / **10.52** / 0.30 s | 2.76 / 3.48 s | refresh `synced` in 12.0 s; one 25 s extraction chunk for new work |
+
+Section 5 discovery gates: warm, first-after-restart and background p95 are met with
+wide margin; background max met in one run and missed by 0.5 s in the other. Both
+worst calls were `discovery_resume` (5.4 s) plus `discovery_reader` (up to 3.2 s),
+file-I/O stages overlapping post-refresh maintenance (13 s passes) and extraction.
+Light **YELLOW**: that borderline max, plus the desktop check and S12 carry-over,
+which are still not done.
