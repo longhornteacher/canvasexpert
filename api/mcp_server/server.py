@@ -490,11 +490,12 @@ def abandon_operation(operation_id: str) -> str:
 
 
 @mcp.tool(structured_output=False)
-def refresh_mirror(course_id: str, include_comments: bool=False, structure_only: bool=False,
-                   operation_id: str = "") -> str:
+async def refresh_mirror(course_id: str, include_comments: bool=False, structure_only: bool=False,
+                         operation_id: str = "") -> str:
     'Refresh a saved course mirror, or its catalog with structure_only.'
-    return _compact(tools.refresh_mirror(course_id=course_id, include_comments=include_comments,
-                                         structure_only=structure_only, operation_id=operation_id))
+    return _compact(await asyncio.to_thread(
+        tools.refresh_mirror, course_id=course_id, include_comments=include_comments,
+        structure_only=structure_only, operation_id=operation_id))
 
 
 

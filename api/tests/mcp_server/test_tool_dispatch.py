@@ -72,3 +72,23 @@ def test_slow_discovery_does_not_block_other_event_loop_work(monkeypatch, fails)
     if not fails:
         assert len(result) == 1
         assert result[0].text == json.dumps(expected_payload, separators=(",", ":"))
+
+
+def test_refresh_mirror_runs_off_the_event_loop_thread(monkeypatch):
+    from api.mcp_server import server, tools
+
+    seen: dict[str, int] = {}
+
+    def fake_refresh(**kwargs):
+        seen["worker"] = threading.get_ident()
+        return {"ok": True, "status": "syncing"}
+
+    monkeypatch.setattr(tools, "refresh_mirror", fake_refresh)
+
+    async def call():
+        seen["loop"] = threading.get_ident()
+        return await server.mcp.call_tool("refresh_mirror", {"course_id": "1"})
+
+    result = asyncio.run(call())
+    assert seen["worker"] != seen["loop"]
+    assert json.loads(result[0].text)["status"] == "syncing"

@@ -195,3 +195,14 @@ Findings:
 5. A teacher-requested clarification: late/resubmitted-work notices stay quiet `notices`, not attention.
 
 Not done: second computer (desktop) discovery/restart check, S12 attachment evidence carry-over, per-computer fingerprint matched/unverified, D00 conftest fixtures. Light stays **YELLOW**: background-overlap gate missed with responsible stage identified.
+
+### D06 re-measurement after yield + refresh dispatch (laptop, `77891dd` + `refresh_mirror` off-loop, 2026-10-06)
+
+Found: earlier harness runs attached as a stdio proxy to an already-running older runtime, so they did not exercise the fixes; that runtime was stopped (teacher-approved) and runs repeated on current code. `refresh_mirror` was a sync tool run on the event loop for its 25 s wait, so it stalled every other tool; it now dispatches via `asyncio.to_thread` (`test_refresh_mirror_runs_off_the_event_loop_thread`; `api/tests/mcp_server` 369 passed).
+
+| Gate | Result | Target |
+|---|---|---|
+| Warm, 20 sequential | p95 2.06 s, max 3.46 s, median 1.57 s | p95 <=2, max <=5: p95 marginal miss |
+| Background (refresh + maintenance overlap) | discovery p95 8.2 s, max 20.6 s; ping p95 3.3 s, max 9.8 s | p95 <=5, max <=10, ping p95 <=1: **missed**, improved from 14.4/35/9.5 |
+
+Light stays **YELLOW**. Remaining stall is index maintenance after publication (yield slices did not remove it); candidates: larger sleep share, yield in the SQLite insert/projection loop, or skip-unchanged-scope maintenance (needs senior decision). Desktop check and S12 carry-over still not done. Finding for senior: receipt publication drops Canvas `excused` (`evidence_acquisition._submission`), so the index cannot apply the non-excused counting rule.
