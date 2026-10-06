@@ -12,7 +12,13 @@ first cross-device read. Do not edit repository files as part of this check.
 1. Read `AGENTS.md`, the current brief's S12/S13 field result, and S13 in
    `docs/reference/canvasmirror-functional-read-path-slices.md`. Preserve any
    laptop worktree changes. Run `git status --short --branch`, then
-   `git pull --ff-only origin dev` only if it can fast-forward cleanly. Verify
+   `git pull --ff-only origin dev` only if it can fast-forward cleanly. The S13
+   field-report history was replaced to remove private details. If the laptop
+   already has that earlier commit and fast-forward fails, run `git fetch origin`,
+   inspect `git status` and `git log origin/dev..dev`, then use
+   `git reset --hard origin/dev` only when there are no uncommitted changes or
+   independent local commits. Otherwise stop and report the local work. Do not
+   merge the replaced history back in. Verify
    `d4df247` is an ancestor of `HEAD` with
    `git merge-base --is-ancestor d4df247 HEAD`. Stop and report if not.
 2. Confirm that the laptop Canvas Expert runtime actually uses this updated
