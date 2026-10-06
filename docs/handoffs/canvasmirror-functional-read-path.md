@@ -1,7 +1,8 @@
 # Execution brief: CanvasMirror functional read path
 
 **Status:** S11 synthetic gate passed; S12 desktop field acceptance is YELLOW
-pending two unresolved field observations and S13 second-computer verification. Grading
+pending live verification of the section fix, an unexplained MCP delay, and S13
+second-computer verification. Grading
 periods are agent guidance, not a runtime gate. No reset performed.
 **Target:** `dev`. **Inspected baseline:** `30b9465`, 2026-10-05.
 **Owner:** one lead executor; senior accepts the integrated result.
@@ -591,6 +592,25 @@ the integrated `.venv\Scripts\python -m pytest api/tests engine/tests -p no:rand
 passed **2,510**, skipped **1**, failed **0**. No live Canvas call or reset was
 performed for this slice. Diagnostics cannot observe host delay before MCP tool
 dispatch or after its return, and they do not themselves prove a root cause.
+
+**Desktop follow-up:** After loading the diagnostic build, a GET-only refresh
+acquired one section with complete pagination, then safe publication accepted
+zero with `privacy_refused`. An aggregate-only in-memory check confirmed the
+section `name` contained a token matching a vault student name; the existing
+text scrubber removed that token, and neither the section entity key nor its
+numeric ID matched a student identifier. The publisher's text-key allowlist
+omitted `name`, so that field reached the final privacy check unsanitized.
+Adding `name` to the existing scrub path is the bounded fix. A synthetic
+regression proves complete section coverage and no raw identity in safe JSON
+or the index, while an unmappable name still fails closed. The full isolated
+suite passed **2,512**, skipped **1**, failed **0**. A live refresh under the
+updated code, runtime restart, and second-computer check remain pending.
+
+The live `get_submissions` call completed in 1.95 seconds, with 1.58 seconds
+inside the Python tool; its vault, index, and outbound-gate stages all completed.
+This did not reproduce the earlier four-minute symptom. Keep the diagnostic
+timings for a recurrence; do not change coordinator or vault-lock behavior on
+this evidence.
 
 S00 commit: `036ab61`; S02: `caf7b22`; S01: `c2439a8`; S03: `22d4d10`;
 S05: `51b917e`; S06: `952788e`.

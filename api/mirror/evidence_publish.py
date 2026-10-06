@@ -24,7 +24,7 @@ from api.mirror.evidence_schema import EvidenceValidationError
 from api.platform_services import workspace
 
 
-_TEXT_KEYS = frozenset({"title", "description", "body", "text", "category_name"})
+_TEXT_KEYS = frozenset({"title", "description", "body", "text", "category_name", "name"})
 _URL = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 _PRIVATE_PATH = re.compile(r"(?<![\w])(?:[A-Za-z]:[\\/]|\\\\|/(?:Users|home)/)[^\s<>]+")
 _NAVIGATION_KEYS = frozenset({

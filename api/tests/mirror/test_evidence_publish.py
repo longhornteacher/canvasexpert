@@ -3,6 +3,9 @@
 from api.mirror.evidence_index import EvidenceIndex
 from api.mirror.evidence_paths import local_source_root
 from api.mirror.evidence_publish import EvidencePublisher
+from api.mirror.evidence_acquisition import (
+    CourseAcquisitionReceipt, ScopeReceipt, publish_course_receipt,
+)
 import pytest
 
 
@@ -65,6 +68,59 @@ def test_complete_text_receipt_publishes_two_students_and_preserves_attempts(tmp
     assert len(page["records"]) == 3
     db_bytes = index_path.read_bytes()
     assert b"Avery" not in db_bytes and b"991001" not in db_bytes
+
+
+def test_section_name_is_scrubbed_before_complete_publication_and_index(tmp_path):
+    publisher, root = _publisher(tmp_path)
+    label = "Avery Sample's Seminar"
+    receipt = CourseAcquisitionReceipt("1", "2026-01-04T00:00:00Z",
+        "2026-01-04T00:01:00Z", (ScopeReceipt("course.sections", "1",
+            ({"id": "800001", "name": label},), True),))
+
+    result = publish_course_receipt(publisher=publisher, receipt=receipt,
+                                    writer_key="writer-a", run_id="run-a")
+
+    assert result.gaps == ()
+    assert result.successful_scopes == (("course.sections", "1"),)
+    snapshot = publisher.store.scan()
+    scope = snapshot.scopes[("a" * 64, "1", "course.sections", "1")]
+    assert scope.membership_complete is True
+    section = next(f for f in snapshot.facts.values() if f["kind"] == "section")
+    assert section["payload"]["name"] == "Pikachu's Seminar"
+    safe_bytes = b"".join(path.read_bytes() for path in (root / "CanvasMirror").rglob("*.json"))
+    for forbidden in (b"Avery", b"Sample", b"991001"):
+        assert forbidden not in safe_bytes
+
+    index_path = local_source_root("a" * 64, root) / "query.sqlite3"
+    index = EvidenceIndex(index_path)
+    index.ingest(snapshot, selected_courses=["1"])
+    page = index.query_page("sections", source_key="a" * 64,
+                             course_id="1", limit=10)
+    assert page["records"][0]["name"] == "Pikachu's Seminar"
+    index_bytes = index_path.read_bytes()
+    for forbidden in (b"Avery", b"Sample", b"991001"):
+        assert forbidden not in index_bytes
+
+
+def test_section_name_that_scrubber_cannot_map_still_fails_closed(tmp_path):
+    root = tmp_path / "teacher-workspace"
+    root.mkdir()
+    vault = SyntheticVault()
+    vault.people["991001"] = ("", "Avery Sample")
+    publisher = EvidencePublisher(workspace_root=root, source_key="a" * 64,
+                                  course_id="1", vault=vault)
+    receipt = CourseAcquisitionReceipt("1", "2026-01-04T00:00:00Z",
+        "2026-01-04T00:01:00Z", (ScopeReceipt("course.sections", "1",
+            ({"id": "800001", "name": "Avery's Seminar"},), True),))
+
+    result = publish_course_receipt(publisher=publisher, receipt=receipt,
+                                    writer_key="writer-a", run_id="run-a")
+
+    assert result.successful_scopes == ()
+    assert "privacy_refused" in result.gaps
+    assert not any(f["kind"] == "section" for f in publisher.store.scan().facts.values())
+    safe_bytes = b"".join(path.read_bytes() for path in (root / "CanvasMirror").rglob("*.json"))
+    assert b"Avery" not in safe_bytes and b"Sample" not in safe_bytes
 
 
 def test_unregistrable_roster_withholds_student_scopes_but_keeps_course_context(tmp_path):
