@@ -508,6 +508,44 @@ No live runtime, Canvas acquisition, reset, or deployment performed.
 | S10 | GREEN slice | `7184607`, `51d747f` + follow-up; `service.py` (`status()` per-course `refresh` + `evidence_status()` shape), `canvasagent.js` (§4.8 detail + backlog + `refreshText`), `test_desk_routes.py` | `.venv\Scripts\python -m pytest api/tests/test_desk_routes.py api/tests/test_route_contract.py api/tests/test_readiness_routes.py api/tests/mirror/test_service_evidence.py api/tests/mcp_server -p no:randomly -q` — 396 passed | `status()` adds per-course `refresh` and top-level `evidence`; `canvasagent.js` applies §4.8 detail with precedence update required > index failed > index pending > not arrived, appends the backlog sentence, and chooses refresh text from `plan.stages`; status GETs create no file; browser gate passed on `/` and `/settings` in fully-ready and failed-refresh states with zero console errors | Fixed a latent `AttachmentJobStore` NameError in `evidence_stages()` |
 | S11 | GREEN slice | Commit containing this row; new `api/tests/mcp_server/test_evidence_read_path.py`; `tools.py` guide descriptor line; `test_beta075_mcp.py` evidence-bound set; `test_tools.py` guide assertion; docs `canvasmirror-evidence-contract.md`, `agent-runtime-product-contract.md`, `mirror.md`, `canvasmirror-agent-reading.md`, `canvasmirror-synced-store-direction.md`, `mcp-server.md` | `.venv\Scripts\python -m pytest api/tests engine/tests -p no:randomly -q` — 2499 passed, 1 skipped, 0 failed | Five composed scenarios over the real publisher/index/queue/query/MCP path (only Canvas transport and the adapter subprocess stubbed): old descriptor + fresh workspace reaches MCP with text, docx blocks, and an explicit pdf gap; delayed second course and corrupt index recover locally with zero Canvas calls; partial/future-version/empty-complete/history read honestly; two partitions over one safe root and restart need no activation with no seeded identity in safe files/index/output; failed refresh keeps last success and reports the stage, newest-first jobs beat backlog, gradebook excludes an incomplete assignment and says so. Docs reconciled to actual behavior; `reader.v1.json` guide line replaced with the local `reader.json`; `get_assignment_evidence` added to the evidence-bound doc set | None |
 
+### Field acceptance — 2026-10-05 (desktop only; laptop battery died)
+
+Both computers were updated by `git pull` from `dev` (the in-app self-updater is
+not the supported path; its `REPO_SLUG` also disagrees with the git remote). A
+desktop MCP agent ran the field check against three Current courses (120669 ELA 7
+PAP, 121046 CS 8, 120638 ELA 7). The laptop was unavailable, so two-machine
+acceptance is deferred.
+
+**Read path — PASS.** `get_gradebook_snapshot`, `get_roster`, and
+`get_assignment_evidence` returned `ok:true` with `coverage`, `warnings`, and
+`revision`; restart needed no activation/import; no `evidence_index_pending`,
+`evidence_refresh_required`, or `evidence_update_required` was observed. Direct
+timing against the real workspace: `get_submissions` 0.24s (29 rows),
+`final_response_gate` 0.15s, server wrapper 0.38s, history 0.11s; with the
+runtime's workers running, `get_submissions` 2.73s `ok:true`. A full pass in
+isolation: 83s, `ok:true`, 24 assignments, 551 rows.
+
+**Defect 1 — `get_submissions` appeared to hang (4 min) in the live agent.**
+Not a read-path bug. The operational log shows coordinator `queue_wait_ms` of
+637,533–1,484,808 ms (10–25 min) and `mirror.refresh` "full" passes failing after
+501–1,218 s. The coordinator runs exactly two workers; long background full passes
+occupy both, so manual reads queue behind them. Compounded by the vault lock:
+`storage_support.interprocess_lock` uses a blocking `msvcrt.locking(LK_LOCK)` with
+no timeout, and every mirror write (`write_roster`, `merge_submissions`, capture,
+extraction `publisher_scope`) takes it, so a slow vault op blocks all others.
+A thread dump with the runtime running showed `ce-evidence-work` blocked in
+`run_extraction_chunk` → `publisher_scope` → `vault.transaction()` →
+`msvcrt.locking`. (An earlier "persistently held lock" reading was the
+investigator's own stray server processes, not a code defect.)
+
+**Defect 2 — `section_label_missing` on every roster.** The live index has
+`roster` rows (79) but **zero** `section` facts, and `course.sections` scope_status
+is `ready` with `membership_complete=0`. `_fetch_sections` returns 1 section live,
+so the empty-but-ready scope is a publication/coverage bug, not a Canvas problem.
+
+**Not yet fixed.** Both defects are code fixes, not field resets. No reset was
+performed. Overall remains YELLOW.
+
 S00 commit: `036ab61`; S02: `caf7b22`; S01: `c2439a8`; S03: `22d4d10`;
 S05: `51b917e`; S06: `952788e`.
 The repo-local `.venv` is ready: Python 3.13.14, pytest 9.0.1, dependencies
