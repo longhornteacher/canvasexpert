@@ -1,10 +1,11 @@
 # Execution brief: CanvasMirror functional read path
 
 **Status:** S11 synthetic gate passed; S12 desktop section repair is field
-verified. An actual S13 laptop check provided partial read/restart evidence, but
-did not exercise the required direct submission and attachment reads across both
-cycles. Overall acceptance remains YELLOW; the earlier MCP delay also remains
-unexplained. Grading
+verified. S13 laptop direct submission/extracted-text reads now pass before and
+after restart without an explicit refresh. A demonstrated discovery dispatch
+blockage has a bounded fix. Overall acceptance remains YELLOW pending the
+broader desktop S12 text/attachment/restart evidence; the precise original
+four-minute symptom remains unproven. Grading
 periods are agent guidance, not a runtime gate. No reset performed.
 **Target:** `dev`. **Inspected baseline:** `30b9465`, 2026-10-05.
 **Owner:** one lead executor; senior accepts the integrated result.
@@ -513,6 +514,43 @@ No live runtime, Canvas acquisition, reset, or deployment performed.
 
 | S12 diagnostic | GREEN code; field YELLOW | `d456136`; `api/mcp_server/tools.py`, `api/mirror/sync.py`, `api/mirror/evidence_acquisition.py`, matching tests, this brief and slice-plan status | Focused mirror 102 passed; MCP timing/history 6 passed; full suite 2510 passed, 1 skipped | Aggregate-only, fail-safe events separated section acquisition/publication and MCP read stages; current brief redacted course identifiers | Root causes not yet established at this checkpoint |
 | S12 section repair | GREEN desktop; overall YELLOW | `a63440f`; `api/mirror/evidence_publish.py`, matching test, this brief | Focused publisher/acquisition/sync 116 passed; full suite 2512 passed, 1 skipped | Live complete section receipt produced `privacy_refused`; existing scrubber removed the matching name token; publisher now scrubs `name`. Post-fix GET-only refresh and indexed roster read passed in all three Current courses | Earlier four-minute MCP delay did not recur; S13 laptop check remains |
+
+### Laptop read acceptance and dispatch repair — 2026-10-06
+
+Aggregate evidence: [S13 field result](../reference/s13-laptop-field-results.md).
+Lead integrated two Luna reviews and Luna's registered-tool regression. Clean
+`dev` was safely resynced to `9dda1a1`; no superseded private report was merged.
+No reset, Canvas write, operation retry, or explicit refresh occurred. Normal
+runtime workers continued maintenance/acquisition and advanced revisions.
+
+| Slice | State | Files | Gate/evidence | Remaining |
+|---|---|---|---|---|
+| S13 laptop reads | GREEN bounded field check; overall YELLOW | This brief and aggregate result | Actual laptop, same assignment before/after orderly restart: 27 submissions with context, 61 attachment records (28 associations, 8 extractions, 25 blocks), extracted text, complete coverage, no warnings. Supplemental text/sections read in all three Current courses | Broader desktop S12 samples/restart still need recorded evidence; no fresh desktop fingerprint comparison |
+| S12 discovery dispatch repair | GREEN integration and dispatch field gate | `api/mcp_server/server.py`, `api/tests/mcp_server/test_tool_dispatch.py` | Discovery's synchronous wrapper blocked concurrent ping for over 10 s during a 63.685 s refusal. `asyncio.to_thread` now preserves its existing local owner and result contract. Post-reload concurrent ping 0.077 s; separate gated reads completed during discovery | Private discovery still exceeded the 200 s client bound; exact original four-minute cause unproven |
+
+Focused command: `.venv\Scripts\python -m pytest
+api/tests/mcp_server/test_tool_dispatch.py
+api/tests/mcp_server/test_scoring_discovery.py
+api/tests/mcp_server/test_server_instructions.py -p no:randomly -q` — **25 passed**.
+Public tool shape is unchanged; no schema counter/snapshot/budget update needed.
+No scoring policy, Canvas write, vault lock, or coordinator change was made.
+
+Full isolated integration gate: `.venv\Scripts\python -m pytest api/tests
+engine/tests -p no:randomly -q` — **2,514 passed, 1 skipped, 0 failed**, 292.16 s.
+The post-fix live discovery call exceeded its 200 s client bound; CE logged
+an error at 200.182 s. Ping and the separate complete evidence reads succeeded
+while it ran, so responsiveness is verified and discovery completion is not.
+Keep that private-consumer latency open rather than claiming it is repaired.
+Commit: the commit containing this result; changed files are the two code/test
+owners above, this brief, the slice-plan status, and the aggregate field report.
+
+The desktop section-repair sub-slice and earlier broad reads remain valid.
+The laptop result does not fill the desktop's unrecorded supported attachment/text
+samples and restart recheck. Finish that bounded S12 evidence before overall
+GREEN/retirement. Private refresh status showed syncing/failed lifecycle states
+despite ready evidence indexes; preserve those producers for the already-designated
+next scoring-consumer assessment. The dispatch fix proves one real source of host
+delay, without attributing the original four-minute call to it.
 
 ### Field acceptance — 2026-10-05 (desktop only; laptop battery died)
 

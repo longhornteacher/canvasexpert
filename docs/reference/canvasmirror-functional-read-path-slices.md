@@ -1,7 +1,8 @@
 # CanvasMirror functional read path: implementation slices
 
-Status: S11 synthetic implementation complete; S12 desktop field acceptance and
-follow-up investigation are in progress. Section 4.9 specifies refresh
+Status: S11 synthetic implementation complete; S13 laptop direct read/restart
+check and S12 dispatch responsiveness repair passed. Broader desktop field
+acceptance remains open; see the current brief for evidence. Section 4.9 specifies refresh
 continuation; section 5.1 records remaining workflow limits without widening
 scoring scope.
 Target branch: `dev`. Inspected baseline: `30b9465`.

@@ -17,6 +17,7 @@ Wire character counts are a transport measure, not a per-turn token promise.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 import threading
@@ -501,9 +502,9 @@ def list_feedback_contracts() -> str:
 
 
 @mcp.tool(structured_output=False)
-def discover_scoring_work() -> str:
+async def discover_scoring_work() -> str:
     """Discover grading work without preparing or writing."""
-    return _compact(tools.discover_scoring_work())
+    return _compact(await asyncio.to_thread(tools.discover_scoring_work))
 
 
 @mcp.tool(structured_output=False)
