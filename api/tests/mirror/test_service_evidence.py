@@ -347,3 +347,91 @@ def test_maintenance_yields_between_records_with_identical_results(evidence_serv
     assert paced == baseline
     assert paced['revision'] == baseline_revision
     assert _index(env).query_page('assignment_context', course_id='1')['records'] == baseline_records
+
+
+def _age_evidence(env, seconds=3600):
+    """Move every safe file past the scan memo's racy window."""
+    import os
+    import time
+    stamp = time.time() - seconds
+    for path in (env['root'] / 'CanvasMirror').rglob('*.json'):
+        os.utime(path, (stamp, stamp))
+
+
+@pytest.fixture
+def verifier_spy(monkeypatch):
+    from api.mirror.evidence_publish import EvidencePublisher
+    seen = []
+    real = EvidencePublisher.verify_safe
+
+    def verify(publisher, record):
+        seen.append(record.get('course_id'))
+        return real(publisher, record)
+
+    monkeypatch.setattr(EvidencePublisher, 'verify_safe', verify)
+    return seen
+
+
+def test_unchanged_maintenance_pass_verifies_and_rewrites_nothing(
+        evidence_service_workspace, verifier_spy, monkeypatch):
+    """D07: an idle tick costs a listing, not a re-validation or an index rewrite."""
+    env = evidence_service_workspace
+    env['publish']()
+    env['publish']('second_course')
+    _maintain(env)
+    _age_evidence(env)
+    warm = _maintain(env)
+    verifier_spy.clear()
+    rewrites = []
+    real_project = EvidenceIndex._project_derived
+    monkeypatch.setattr(EvidenceIndex, '_project_derived',
+                        staticmethod(lambda *a, **k: (rewrites.append(1), real_project(*a, **k))[1]))
+    idle = _maintain(env)
+    assert verifier_spy == []
+    assert rewrites == []
+    assert idle == warm
+
+
+def test_publication_reverifies_only_the_changed_course(evidence_service_workspace, verifier_spy):
+    env = evidence_service_workspace
+    env['publish']()
+    env['publish']('second_course')
+    _maintain(env)
+    _age_evidence(env)
+    _maintain(env)
+    receipt = course_receipt_sample()
+    scopes = list(receipt.scopes)
+    rows = [dict(row) for row in scopes[1].rows]
+    rows[0]['name'] = 'Changed classroom writing'
+    scopes[1] = replace(scopes[1], rows=tuple(rows))
+    env['publish'](receipt=replace(receipt, scopes=tuple(scopes)))
+    verifier_spy.clear()
+    assert _maintain(env)['state'] == 'ready'
+    assert verifier_spy and set(verifier_spy) == {'1'}
+    page = _index(env).query_page('assignment_context', course_id='1')
+    assert any(json.loads(row['payload'])['title'] == 'Changed classroom writing' for row in page['records'])
+
+
+def test_vault_change_reverifies_every_record_and_refuses_newly_identifying_text(
+        evidence_service_workspace, verifier_spy):
+    """Law: a memoized safe verdict never survives a change to the identities it was judged against."""
+    env = evidence_service_workspace
+    receipt = course_receipt_sample()
+    scopes = list(receipt.scopes)
+    rows = [dict(row) for row in scopes[1].rows]
+    rows[0]['name'] = 'Changed classroom writing'
+    scopes[1] = replace(scopes[1], rows=tuple(rows))
+    env['publish'](receipt=replace(receipt, scopes=tuple(scopes)))
+    _maintain(env)
+    _age_evidence(env)
+    _maintain(env)
+    titles = lambda: {json.loads(row['payload'])['title'] for row in  # noqa: E731
+                      _index(env).query_page('assignment_context', course_id='1')['records']}
+    assert 'Changed classroom writing' in titles()
+    with _index(env).read_connection() as db:
+        indexed = db.execute('SELECT COUNT(*) FROM safe_facts').fetchone()[0]
+    verifier_spy.clear()
+    env['vault'].add_nicknames('991001', ['Classroom'])
+    _maintain(env)
+    assert len(verifier_spy) >= indexed
+    assert 'Changed classroom writing' not in titles()

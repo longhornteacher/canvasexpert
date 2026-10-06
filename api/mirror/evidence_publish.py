@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 from html import unescape
+import json
 from types import MappingProxyType
 from typing import Mapping
 from html.parser import HTMLParser
@@ -211,7 +212,8 @@ class EvidencePublisher:
         private = local_source_root(source_key, self.workspace_root) / "staging" / "diagnostics"
         self.store = EvidenceStore(safe_root, source_key, self.course_id,
                                    verify_safe=self.verify_safe,
-                                   private_diagnostics_root=private)
+                                   private_diagnostics_root=private,
+                                   verification_key=self.verification_key)
 
     def _scrub_text(self, value: str | None, *, html: bool = False) -> str:
         source = _visible_text(value or "") if html else unescape(value or "")
@@ -237,19 +239,19 @@ class EvidencePublisher:
                     for item in value]
         return value
 
-    def _privacy_context(self):
-        """Stable pseudonyms plus one combined matcher for name tokens and identifiers.
+    def _privacy_inputs(self) -> tuple[frozenset, frozenset, tuple]:
+        """The only place verifier inputs are computed: ``(stable_pseudonyms,
+        folded_name_tokens, identifiers_of_len_3_or_more_sorted)``.
 
-        Same decisions as ``feedback_scrub.find_token_matches`` (any accent-folded,
-        case-insensitive word-bounded token match) and the identifier word-bounded
-        search, compiled once instead of one regex per token per string. A frozen
-        vault snapshot is cached; a live vault is rebuilt on every call so a
+        Both the matcher (``_privacy_context``) and ``verification_key`` derive
+        from this, so the key can never miss an input the matcher uses. A frozen
+        vault snapshot is cached; a live vault is re-read on every call so a
         changed identity can never be missed.
         """
         vault = self.vault
         frozen = getattr(vault, "frozen_verification", False)
-        if frozen and getattr(self, "_privacy_cache", None) is not None:
-            return self._privacy_cache
+        if frozen and getattr(self, "_privacy_inputs_cache", None) is not None:
+            return self._privacy_inputs_cache
         if isinstance(vault, IdentitySnapshot):
             names, ids = vault._names, vault._identifiers
             stable = vault.stable_pseudonyms
@@ -260,15 +262,56 @@ class EvidencePublisher:
                 if entry.get("pseudonym") and not entry.get("provisional")
             }
         tokens = {feedback_scrub._fold(token) for name in names if name for token in name.split()}
+        long_ids = tuple(sorted({identifier for identifier in ids if len(identifier) >= 3}))
+        inputs = (frozenset(stable), frozenset(tokens), long_ids)
+        if frozen:
+            self._privacy_inputs_cache = inputs
+        return inputs
+
+    def _privacy_context(self):
+        """Stable pseudonyms plus one combined matcher for name tokens and identifiers.
+
+        Same decisions as ``feedback_scrub.find_token_matches`` (any accent-folded,
+        case-insensitive word-bounded token match) and the identifier word-bounded
+        search, compiled once instead of one regex per token per string. A frozen
+        vault snapshot is cached; a live vault is rebuilt on every call so a
+        changed identity can never be missed.
+        """
+        frozen = getattr(self.vault, "frozen_verification", False)
+        if frozen and getattr(self, "_privacy_cache", None) is not None:
+            return self._privacy_cache
+        stable, tokens, long_ids = self._privacy_inputs()
         token_re = (re.compile(r"\b(?:" + "|".join(re.escape(t) for t in sorted(tokens, key=len, reverse=True)) + r")\b",
                                re.IGNORECASE) if tokens else None)
-        long_ids = sorted({identifier for identifier in ids if len(identifier) >= 3}, key=len, reverse=True)
-        id_re = (re.compile(r"\b(?:" + "|".join(re.escape(i) for i in long_ids) + r")\b")
+        id_re = (re.compile(r"\b(?:" + "|".join(re.escape(i) for i in sorted(long_ids, key=len, reverse=True)) + r")\b")
                  if long_ids else None)
         context = (stable, token_re, id_re)
         if frozen:
             self._privacy_cache = context
         return context
+
+    def verification_key(self) -> str:
+        """Exact digest of everything ``verify_safe`` depends on.
+
+        Lets the store memoize per-file validation in process memory and re-verify
+        every file whenever this string changes. It is derived from
+        ``_privacy_inputs`` (one source of truth) and contains name tokens and
+        identifiers only as a one-way sha256. In-memory only: never log it,
+        emit it in operational events, return it from a tool, or persist it.
+        Frozen vault snapshots compute it once; a live vault recomputes per call.
+        """
+        frozen = getattr(self.vault, "frozen_verification", False)
+        if frozen and getattr(self, "_verification_key_cache", None) is not None:
+            return self._verification_key_cache
+        stable, tokens, long_ids = self._privacy_inputs()
+        canonical = json.dumps(
+            {"v": 1, "source_key": self.source_key, "course_id": self.course_id,
+             "stable": sorted(stable), "tokens": sorted(tokens), "ids": sorted(long_ids)},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+        key = hashlib.sha256(canonical.encode("ascii")).hexdigest()
+        if frozen:
+            self._verification_key_cache = key
+        return key
 
     def verify_safe(self, record: dict) -> None:
         """Recheck synced records before local indexing as well as publication."""

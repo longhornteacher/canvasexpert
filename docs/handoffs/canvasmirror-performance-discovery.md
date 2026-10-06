@@ -87,6 +87,21 @@ runtime source and loaded revision; shell checkout identity alone is insufficien
    return while unbounded abandoned work continues. Retain current coordinator
    and ownership semantics; fix work amplification rather than masking it.
 
+8. **Validate each immutable file once per verifier state (D07, teacher-approved
+   2026-10-06).** A runtime process may memoize, in memory only, the outcome of
+   validating one evidence file under an exact verification key: a digest of
+   every input `verify_safe` depends on (scope, stable pseudonyms, folded name
+   tokens, identifiers). A new, changed (size/mtime) or removed file, a racy file
+   (mtime within 2 s of the scan start), or any key change is re-read and fully
+   re-checked. Graph validation and reduction still run over the whole set. This
+   is an exact memo of a pure result, not a speculative cache under decision 7.
+9. **Persisted pass fingerprint (D08, pre-approved 2026-10-06, conditional).**
+   Only if the restart/background gates still miss after D07: persist a per-course
+   input fingerprint so a restart skips an unchanged pass. It must not put any
+   identifier-derived value in the agent-readable index (keyed digest in the
+   private local area), and it must include a validation-code digest so a code
+   change forces one full pass.
+
 No evidence format/index schema change is planned. No new safe fact fields are
 needed for discovery's current counting rules. MCP result changes in the slice
 plan are explicit; the lead owns version/snapshot/inventory/budget settlement.
@@ -113,7 +128,8 @@ Excluded: new Web UI surfaces, live Canvas writes, scoring semantics/holds,
 session replacement or cleanup, full scoring-preparation migration, general
 shared-work redesign, retirement of private projections with remaining consumers,
 evidence resets/deletion, calendar eligibility, attachment/history backfill,
-new storage engines, and persistent incremental-validation caches.
+new storage engines, and persistent incremental-validation caches (except D08
+under decision 9).
 Keep the 30-second maintenance mechanism and its current validation guarantees;
 measure it, but do not turn this batch into a general indexing rewrite.
 
@@ -165,6 +181,43 @@ metrics, field environment/loaded revision (no private identifiers), deviations
 and unresolved questions. On actual GREEN the senior accepts and retires this
 brief in the same batch; mark the plan completed and leave one current pointer
 to the scoring-input assessment described in investigation section **6**.
+
+## 6A. Amendment (2026-10-06): work proportional to change (D07, D08)
+
+Why: the background gate misses because whole-course re-validation runs in
+four places: every 30 s maintenance tick even when nothing changed, each
+publication context, two unpaced scans per extracted attachment, and notes.
+`EvidenceIndex.ingest` then re-validates every record the scan just validated,
+and `StoreSnapshot.scopes` re-reduces every scope on each access (once per
+assignment in `_project_derived`). I/O-heavy tools (discovery resume: 10.7 s)
+stall behind these CPU-bound threads; more yielding cannot fix that.
+
+**D07 (decision 8).** Interface already on `dev` worktree in `evidence_store.py`:
+`EvidenceStore(..., verification_key=callable|None)`, `StoreSnapshot.sealed`,
+`is_validated_scan`, `seal_if_validated`; `scan()` seals its result.
+
+| Owner | Exclusive files | Work |
+|---|---|---|
+| W1 (Sonnet) | `api/mirror/evidence_store.py`, `api/tests/mirror/test_evidence_store*.py` | Process-lifetime memo in `scan()` keyed by course root, diagnostics root and `verification_key()`; listing by `os.scandir` (size, mtime_ns); racy rule; containment for every read; memoize `scopes` per snapshot; full graph validation each scan. `verification_key=None` keeps today's behavior. |
+| W2 (Sonnet) | `api/mirror/evidence_publish.py`, `api/tests/mirror/test_evidence_publish.py` | `EvidencePublisher.verification_key()` derived from the same inputs as `_privacy_context` (one source of truth); pass it to the publisher's `EvidenceStore`. Never logged or persisted. |
+| W3 (Sonnet) | `api/mirror/evidence_index.py`, `api/tests/mirror/test_evidence_index.py` | Skip per-record re-validation only for `is_validated_scan` snapshots; `ingest_many` seals the aggregate via `seal_if_validated`; read `scopes` once per ingest. Unsealed input keeps every check. |
+| Lead | `api/mirror/service.py`, `api/tests/mirror/test_service_evidence.py`, conftests, docs, this brief | Maintenance passes `verification_key`; integration laws; full gate; field re-measurement. |
+
+D07 acceptance:
+- **Law:** memoized scan equals a full scan (facts, commits, issues, revision) for
+  unchanged, added, removed, rewritten, invalid, unsupported-schema and
+  graph-invalid files, and after a key change in either direction (new name
+  refuses a cached-safe record; new stable pseudonym admits a cached-refused one).
+- **Law:** an unsealed snapshot with an unsafe or malformed record is still refused by `ingest`.
+- Repeat scan with nothing changed: zero file reads, zero verifier calls. One new
+  file: one read, one verify. A second maintenance pass with nothing changed: zero
+  verifier calls, same revision, no SQLite rewrite.
+- `reduce_scope` runs once per scope per snapshot.
+- Full suite green; field: idle maintenance tick duration, then the background
+  gate in section 5 re-measured on the laptop.
+
+**D08 (decision 9)** starts only if the D07 field run still misses the restart or
+background gate; the lead records the measurement here first.
 
 ## 7. Execution result
 

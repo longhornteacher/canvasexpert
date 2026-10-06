@@ -233,7 +233,12 @@ after operation recovery and stopped with the runtime:
   calls Canvas and never holds the Identity Vault lock while scanning (it
   verifies against a short-lived vault snapshot). A publication or a read miss
   requests maintenance; a request arriving during a rebuild runs on the next
-  cycle.
+  cycle. Every course scan in the process (maintenance, publication, extraction,
+  notes) shares an in-memory memo: an unchanged file (same size and mtime, older
+  than 2 s) keeps its validation result, while a new or changed file, or any
+  change to the identities the privacy check uses, is read and checked again.
+  An idle tick therefore costs a directory listing, and the index is rewritten
+  only when its inputs change. The memo is never written to disk.
 - **Attachment work** (`ce-evidence-work`): continues capture and extraction in
   bounded chunks. Capture runs only when this computer owns acquisition; local
   extraction runs regardless. Downloads and adapters run outside vault

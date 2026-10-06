@@ -83,31 +83,37 @@ class EvidenceIndex:
         Callers supply EvidenceStore.scan() output, never raw Canvas records.
         Selection is explicit application metadata, independent of store presence.
         """
-        from .evidence_store import StoreSnapshot, validate_reference_graph, validate_store_issue
+        from .evidence_store import (StoreSnapshot, is_validated_scan, validate_reference_graph,
+                                     validate_store_issue)
         if not isinstance(snapshot, StoreSnapshot) or not callable(getattr(snapshot, "verify_safe", None)):
             raise ValueError("validated_snapshot_required")
         pacer = pacer or NoSlice()
         issues = tuple(validate_store_issue(issue) for issue in snapshot.issues)
-        facts = {}
-        for ref, fact in snapshot.facts.items():
-            pacer.checkpoint()
-            validated = validate_fact(fact)
-            if digest_record(validated) != ref:
-                raise ValueError("fact_digest_mismatch")
-            self._verify(snapshot.verify_safe, validated)
-            facts[ref] = validated
-        commits = {}
-        for ref, commit in snapshot.commits.items():
-            pacer.checkpoint()
-            validated = validate_commit(commit)
-            if digest_record(validated) != ref:
-                raise ValueError("commit_digest_mismatch")
-            self._verify(snapshot.verify_safe, validated)
-            commits[ref] = validated
-        for commit in commits.values():
-            pacer.checkpoint()
-            validate_reference_graph(commit, facts, commits)
-        snapshot = StoreSnapshot(facts=facts, commits=commits, issues=issues, revision=snapshot.revision, verify_safe=snapshot.verify_safe)
+        if is_validated_scan(snapshot):
+            # EvidenceStore.scan already ran schema, digest, privacy and graph checks
+            # on exactly these records. They are shared, never mutated here.
+            facts, commits = snapshot.facts, snapshot.commits
+        else:
+            facts = {}
+            for ref, fact in snapshot.facts.items():
+                pacer.checkpoint()
+                validated = validate_fact(fact)
+                if digest_record(validated) != ref:
+                    raise ValueError("fact_digest_mismatch")
+                self._verify(snapshot.verify_safe, validated)
+                facts[ref] = validated
+            commits = {}
+            for ref, commit in snapshot.commits.items():
+                pacer.checkpoint()
+                validated = validate_commit(commit)
+                if digest_record(validated) != ref:
+                    raise ValueError("commit_digest_mismatch")
+                self._verify(snapshot.verify_safe, validated)
+                commits[ref] = validated
+            for commit in commits.values():
+                pacer.checkpoint()
+                validate_reference_graph(commit, facts, commits)
+            snapshot = StoreSnapshot(facts=facts, commits=commits, issues=issues, revision=snapshot.revision, verify_safe=snapshot.verify_safe)
         selected = frozenset(str(value) for value in selected_courses)
         revision = hashlib.sha256(json.dumps([INDEX_SCHEMA_VERSION, snapshot.revision, sorted(facts), sorted(commits), sorted(json.dumps(asdict(issue), sort_keys=True) for issue in issues), sorted(selected)], separators=(",", ":")).encode()).hexdigest()
         if self.path.exists():
@@ -125,18 +131,19 @@ class EvidenceIndex:
                 return revision
             for table in ("current_refs", "history_refs", "scope_coverage", "safe_facts", "course_selection", "attachment_block_rows", "comparison_rows"):
                 db.execute(f"DELETE FROM {table}")
+            scopes = snapshot.scopes  # one reduction per scope for this ingest
             for ref, fact in sorted(facts.items()):
                 pacer.checkpoint()
                 p = fact["payload"]
                 db.execute("INSERT INTO safe_facts VALUES (?,?,?,?,?,?,?,?,?,?)", (ref, fact["source_key"], fact["course_id"], fact["kind"], fact["entity_key"], p.get("assignment_id"), p.get("pseudonym"), p.get("attempt"), p.get("submitted_at"), json.dumps(p, sort_keys=True, ensure_ascii=False, separators=(",", ":"))))
             courses = {(f["source_key"], f["course_id"]) for f in facts.values()}
-            courses.update((c["source_key"], c["course_id"]) for c in snapshot.commits.values())
+            courses.update((c["source_key"], c["course_id"]) for c in commits.values())
             for source, course in sorted(courses):
                 db.execute("INSERT INTO course_selection VALUES (?,?,?)", (source, course, "selected" if course in selected else "retained"))
-            for key, state in sorted(snapshot.scopes.items()):
+            for key, state in sorted(scopes.items()):
                 pacer.checkpoint()
                 source, course, scope, scope_id = key
-                finished = [snapshot.commits[h]["acquisition_finished_at"] for h in state.heads if h in snapshot.commits and snapshot.commits[h]["mode"] != "import"]
+                finished = [commits[h]["acquisition_finished_at"] for h in state.heads if h in commits and commits[h]["mode"] != "import"]
                 db.execute("INSERT INTO scope_coverage VALUES (?,?,?,?,?,?,?,?,?,?)", (*key, state.status, int(state.membership_complete), json.dumps(state.heads), json.dumps(state.pending_commits), json.dumps(state.ambiguous_entities), max(finished, default=None)))
                 for ref in state.current_refs:
                     if ref in facts:
@@ -146,14 +153,14 @@ class EvidenceIndex:
                         stamp = state.established_submitted_at.get(facts[ref]["entity_key"])
                         db.execute("INSERT OR IGNORE INTO history_refs VALUES (?,?)", (ref, stamp))
             db.execute("INSERT OR REPLACE INTO index_metadata VALUES ('revision',?)", (revision,))
-            self._project_derived(db, facts, snapshot, revision, pacer)
+            self._project_derived(db, facts, scopes, revision, pacer)
         self._discard_allowed = False
         self._discard_signature = None
         return revision
 
     def ingest_many(self, snapshots, *, selected_courses=(), pacer=None) -> str:
         """Build one complete source projection from all safely scanned courses."""
-        from .evidence_store import StoreSnapshot
+        from .evidence_store import StoreSnapshot, seal_if_validated
         snapshots = tuple(snapshots)
         if not snapshots or any(not isinstance(item, StoreSnapshot) for item in snapshots):
             raise ValueError("validated_snapshot_required")
@@ -181,10 +188,11 @@ class EvidenceIndex:
 
         aggregate_revision = hashlib.sha256(json.dumps(sorted(s.revision for s in snapshots), separators=(",", ":")).encode()).hexdigest()
         aggregate = StoreSnapshot(facts, commits, tuple(issues), aggregate_revision, verify)
+        aggregate = seal_if_validated(aggregate, snapshots)  # sealed only if every part is a validated scan
         return self.ingest(aggregate, selected_courses=selected_courses, pacer=pacer)
 
     @staticmethod
-    def _project_derived(db, facts, snapshot, revision, pacer=None):
+    def _project_derived(db, facts, scopes, revision, pacer=None):
         """Materialize extracted blocks and comparison evidence from safe facts."""
         pacer = pacer or NoSlice()
         for name in ("courses", "roster", "sections", "assignment_context", "current_submissions", "attempt_history",
@@ -217,13 +225,13 @@ class EvidenceIndex:
                 continue
             db.execute(f"CREATE VIEW {kind}_context AS SELECT DISTINCT f.source_key,f.course_id,f.entity_key,f.fact_ref,f.payload FROM safe_facts f JOIN current_refs r USING(fact_ref) WHERE f.kind='{kind}'")
         blocks_by_assignment = {}
-        active_extractions = {ref for (source, course, scope, _scope_id), state in snapshot.scopes.items()
+        active_extractions = {ref for (source, course, scope, _scope_id), state in scopes.items()
                               if scope == "assignment.extractions" for ref in state.current_refs}
-        active_attachments = {ref for (source, course, scope, _scope_id), state in snapshot.scopes.items()
+        active_attachments = {ref for (source, course, scope, _scope_id), state in scopes.items()
                               if scope == "assignment.attachments" for ref in state.current_refs}
-        active_submissions = {ref for (source, course, scope, _scope_id), state in snapshot.scopes.items()
+        active_submissions = {ref for (source, course, scope, _scope_id), state in scopes.items()
                               if scope == "assignment.submissions" for ref in state.current_refs}
-        history_attempts = {ref for (source, course, scope, _scope_id), state in snapshot.scopes.items()
+        history_attempts = {ref for (source, course, scope, _scope_id), state in scopes.items()
                             if scope == "assignment.submissions" for ref in state.history_refs}
         for ref, fact in facts.items():
             pacer.checkpoint()
@@ -258,7 +266,7 @@ class EvidenceIndex:
             bucket[{"submission": "submission_rows", "attempt_observation": "attempt_rows", "attachment": "attachment_rows", "attachment_extraction": "extraction_block_rows"}[fact["kind"]]].append(row)
         for (source, course, assignment), bucket in buckets.items():
             pacer.checkpoint()
-            cov = snapshot.scopes.get((source, course, "assignment.submissions", assignment))
+            cov = scopes.get((source, course, "assignment.submissions", assignment))
             coverage_state = ("complete" if cov and cov.status == "ready"
                               and cov.membership_complete and not cov.pending_commits
                               and not cov.ambiguous_entities else "incomplete" if cov else "unknown")

@@ -589,6 +589,7 @@ def run_index_maintenance(*, root=None, source_key=None) -> dict:
                                                   course_id=cid, vault=snapshot_vault)
                     snapshot = EvidenceStore(evidence_root, source_key, cid,
                         verify_safe=publisher.verify_safe,
+                        verification_key=publisher.verification_key,
                         private_diagnostics_root=index.path.parent / "staging" / "diagnostics").scan(pacer=pacer)
                     if any(issue.code == "unsupported_schema" for issue in snapshot.issues):
                         status["update_required_courses"].append(cid)

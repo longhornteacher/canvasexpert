@@ -10,12 +10,16 @@ import json
 import os
 import re
 import tempfile
+import threading
 import time
 from collections import defaultdict, deque
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
-from typing import Callable
+from types import MappingProxyType
+from typing import Callable, NamedTuple
 
 from api.platform_services import workspace
 from api.mirror.cooperative import NoSlice
@@ -73,15 +77,126 @@ class StoreSnapshot:
     issues: tuple[StoreIssue, ...]
     revision: str
     verify_safe: Callable[[dict], None] | None = field(default=None, repr=False, compare=False)
+    # Set only by EvidenceStore.scan (or seal_if_validated over sealed parts):
+    # every record already passed schema, digest, privacy and graph checks.
+    # init=False, so neither the constructor nor dataclasses.replace() can carry
+    # a seal onto a snapshot whose contents were changed.
+    sealed: object = field(default=None, init=False, repr=False, compare=False)
 
-    @property
-    def scopes(self) -> dict[tuple[str, str, str, str], ScopeState]:
+    @cached_property
+    def scopes(self) -> Mapping[tuple[str, str, str, str], ScopeState]:
+        """Reduced state of every scope, computed once per snapshot (read-only)."""
         keys = {(c["source_key"], c["course_id"], c["scope"], c["scope_id"]) for c in self.commits.values()}
         for issue in self.issues:
             validate_store_issue(issue)
             if issue.scope is not None:
                 keys.add((issue.source_key, issue.course_id, issue.scope, issue.scope_id))
-        return {key: reduce_scope(self, key[2], key[3], source_key=key[0], course_id=key[1]) for key in sorted(keys)}
+        return MappingProxyType({key: reduce_scope(self, key[2], key[3], source_key=key[0], course_id=key[1]) for key in sorted(keys)})
+
+
+_SCAN_SEAL = object()
+
+
+def is_validated_scan(snapshot) -> bool:
+    """True only for a snapshot produced by EvidenceStore.scan (or sealed parts)."""
+    return isinstance(snapshot, StoreSnapshot) and snapshot.sealed is _SCAN_SEAL
+
+
+def _seal(snapshot: StoreSnapshot) -> StoreSnapshot:
+    object.__setattr__(snapshot, "sealed", _SCAN_SEAL)
+    return snapshot
+
+
+def seal_if_validated(snapshot: StoreSnapshot, parts) -> StoreSnapshot:
+    """Seal an aggregate built only from validated scans' records; else unchanged."""
+    from dataclasses import replace
+    parts = tuple(parts)
+    if parts and all(is_validated_scan(part) for part in parts):
+        return _seal(replace(snapshot))  # replace() resets the seal, so seal the copy
+    return snapshot
+
+
+class _Outcome(NamedTuple):
+    """What the full per-file check concluded: one accepted record, or issues."""
+    digest: str | None
+    record: dict | None
+    issues: tuple[StoreIssue, ...]
+    volatile: bool  # depends on more than file content + verifier (I/O error, diagnostics write)
+
+
+class _Entry(NamedTuple):
+    size: int
+    mtime_ns: int
+    outcome: _Outcome
+
+
+class _CourseMemo:
+    """Process-lifetime outcomes for one course, valid only under one verification key."""
+    __slots__ = ("lock", "key", "entries")
+
+    def __init__(self):
+        self.lock = threading.Lock()  # concurrent scans of one course serialize
+        self.key: str | None = None
+        self.entries: dict[str, _Entry] = {}  # file path -> latest settled outcome
+
+
+# An mtime this close to a scan's start can still be rewritten without a visible
+# change (git's "racy clean"), so such an outcome is never trusted on a later scan.
+_RACY_NS = 2_000_000_000
+_FOLD_CASE = os.path.normcase("A") != "A"
+_MEMOS: dict[tuple, _CourseMemo] = {}
+_MEMOS_GUARD = threading.Lock()
+
+
+def _course_memo(course_key: tuple) -> _CourseMemo:
+    with _MEMOS_GUARD:
+        memo = _MEMOS.get(course_key)
+        if memo is None:
+            memo = _MEMOS[course_key] = _CourseMemo()
+        return memo
+
+
+def clear_scan_memo() -> None:
+    """Forget every memoized scan outcome (tests; a new process starts empty)."""
+    with _MEMOS_GUARD:
+        _MEMOS.clear()
+
+
+def _is_json_name(name: str) -> bool:
+    return (name.lower() if _FOLD_CASE else name).endswith(".json")
+
+
+def _walk_json(base: Path) -> list[tuple[Path, os.stat_result | None]]:
+    """``sorted(base.rglob("*.json"))`` with a stat for each memoizable entry.
+
+    Only a regular file reached without crossing a symlink or junction carries a
+    stat; links, junction contents and directories named ``*.json`` carry None
+    and always take the full per-file path.
+    """
+    found: list[tuple[Path, os.stat_result | None]] = []
+    pending = [(str(base), False)]
+    while pending:
+        directory, linked = pending.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    stat = None
+                    try:
+                        junction = entry.is_junction()
+                        is_dir = entry.is_dir(follow_symlinks=False)
+                        if (not linked and not junction and _is_json_name(entry.name)
+                                and entry.is_file(follow_symlinks=False)):
+                            stat = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        junction = is_dir = False
+                    if _is_json_name(entry.name):
+                        found.append((Path(entry.path), stat))
+                    if is_dir:
+                        pending.append((entry.path, linked or junction))
+        except OSError:
+            continue  # rglob also skips a directory it cannot list
+    found.sort(key=lambda item: item[0])
+    return found
 
 
 def _scope_key(commit):
@@ -209,9 +324,14 @@ class PublicationContext:
 
 
 class EvidenceStore:
-    def __init__(self, safe_root: Path, source_key: str, course_id: str, *, verify_safe: Callable[[dict], None], private_diagnostics_root: Path):
+    def __init__(self, safe_root: Path, source_key: str, course_id: str, *, verify_safe: Callable[[dict], None], private_diagnostics_root: Path,
+                 verification_key: Callable[[], str] | None = None):
         if not callable(verify_safe):
             raise TypeError("privacy_verifier_required")
+        if verification_key is not None and not callable(verification_key):
+            raise TypeError("verification_key_must_be_callable")
+        # Digest of every input verify_safe depends on; None disables scan memoization.
+        self.verification_key = verification_key
         self.safe_root = Path(safe_root).resolve()
         self.private_diagnostics_root = Path(private_diagnostics_root).resolve()
         if self.private_diagnostics_root.is_relative_to(self.safe_root) or self.safe_root.is_relative_to(self.private_diagnostics_root):
@@ -221,6 +341,8 @@ class EvidenceStore:
         self.verify_safe = verify_safe
         self.course_root = self.safe_root / "sources" / source_key / "courses" / course_id
         self._contained(self.course_root)
+        self._memo_course_key = (os.path.normcase(str(self.safe_root)), self.source_key, self.course_id,
+                                 os.path.normcase(str(self.private_diagnostics_root)))
 
     def _contained(self, path):
         try:
@@ -320,61 +442,117 @@ class EvidenceStore:
             context._record("commits", digest, checked, size)
         return digest
 
+    def _verification_state(self) -> str | None:
+        """The verifier's exact key now, or None when scans must not use the memo."""
+        if self.verification_key is None:
+            return None
+        try:
+            key = self.verification_key()
+        except Exception:
+            return None  # an unusable key costs speed, never a check
+        return key if isinstance(key, str) and key else None
+
+    def _check_file(self, path: Path, is_commit: bool) -> _Outcome:
+        """Full, uncached check of one synced file; refused bytes go to diagnostics."""
+        expected_match = re.match(r"^([0-9a-f]{64})(?:$|[^0-9a-f])", path.stem)
+        expected = expected_match.group(1) if expected_match else None
+        issue_scope = issue_scope_id = None
+        issue_source = issue_course = None
+        raw = record = None
+        try:
+            self._contained(path)
+            raw = path.read_bytes()
+            record = json.loads(raw, object_pairs_hook=_unique_pairs)
+            if is_commit:
+                structured = validate_commit(record)
+                if (structured["source_key"], structured["course_id"]) == (self.source_key, self.course_id):
+                    issue_scope, issue_scope_id = structured["scope"], structured["scope_id"]
+                    issue_source, issue_course = self.source_key, self.course_id
+            checked = self._validate(record, commit=is_commit)
+            canonical = canonical_bytes(checked)
+            digest = hashlib.sha256(canonical).hexdigest()
+            if raw != canonical:
+                raise EvidenceValidationError("noncanonical_object")
+            if expected and digest != expected:
+                raise EvidenceValidationError("digest_mismatch")
+            return _Outcome(digest, checked, (), False)
+        except (OSError, UnicodeError, json.JSONDecodeError, EvidenceValidationError, TypeError, RecursionError) as exc:
+            unsupported_schema = isinstance(exc, EvidenceValidationError) and exc.code == "unsupported_schema"
+            if unsupported_schema and is_commit and isinstance(record, dict):
+                raw_scope = record.get("scope")
+                raw_scope_id = record.get("scope_id")
+                if isinstance(raw_scope, str) and raw_scope in SCOPE_KINDS:
+                    try:
+                        validate_component(raw_scope_id)
+                        issue_scope, issue_scope_id = raw_scope, raw_scope_id
+                        issue_source, issue_course = self.source_key, self.course_id
+                    except EvidenceValidationError:
+                        pass
+            found = [StoreIssue(("unsupported_schema" if unsupported_schema else "invalid_commit" if is_commit else "invalid_fact"), expected, issue_scope, issue_scope_id, issue_source, issue_course)]
+            volatile = isinstance(exc, OSError)  # a read error may be transient
+            if raw is not None and not unsupported_schema:
+                try:
+                    self._diagnose(raw)
+                except (OSError, EvidenceValidationError):
+                    found.append(StoreIssue("diagnostics_failed", expected, issue_scope, issue_scope_id, issue_source, issue_course))
+                    volatile = True  # retry the diagnostics write on the next scan
+            return _Outcome(None, None, tuple(found), volatile)
+
     def scan(self, *, pacer=None) -> StoreSnapshot:
         """Verify synced files, preserving refused bytes in private diagnostics.
 
         ``pacer`` (optional ``TimeSlice``) is checkpointed between records so a
         background pass yields to other threads; it never skips a check.
+
+        With a ``verification_key`` the per-file outcome is memoized in process
+        memory (see ``_CourseMemo``): an unchanged, settled, regular file under
+        the same key reuses its outcome without being read; a new, changed,
+        racy, link or removed file, or any key change, takes the full check.
+        Reference-graph validation and the revision are always recomputed over
+        the whole set, so the result equals a full scan. Without a key every
+        file is fully checked every time.
         """
         pacer = pacer or NoSlice()
-        facts, commits = {}, {}
+        key = self._verification_state()
+        if key is None:
+            return self._scan(pacer, None, None)
+        memo = _course_memo(self._memo_course_key)
+        # verify_safe and verification_key must not take a lock that a thread
+        # already inside scan() for this course could hold while waiting here.
+        with memo.lock:  # a concurrent scan of this course waits, then mostly reuses
+            return self._scan(pacer, memo, key)
+
+    def _scan(self, pacer, memo: _CourseMemo | None, key: str | None) -> StoreSnapshot:
+        started_ns = time.time_ns()
+        known = memo.entries if memo is not None and memo.key == key else {}
+        kept: dict[str, _Entry] = {}
+        facts, commits = {}, {}  # new dicts per scan; the record values may be shared with the memo, read-only
         issues = []
         for namespace, destination, is_commit in (("objects", facts, False), ("commits", commits, True)):
             base = self._contained(self.course_root / namespace)
             if not base.exists():
                 continue
-            for path in sorted(base.rglob("*.json")):
+            listing = _walk_json(base) if memo is not None else ((p, None) for p in sorted(base.rglob("*.json")))
+            for path, stat in listing:
                 pacer.checkpoint()
-                expected_match = re.match(r"^([0-9a-f]{64})(?:$|[^0-9a-f])", path.stem)
-                expected = expected_match.group(1) if expected_match else None
-                issue_scope = issue_scope_id = None
-                issue_source = issue_course = None
-                raw = None
-                try:
-                    self._contained(path)
-                    raw = path.read_bytes()
-                    record = json.loads(raw, object_pairs_hook=_unique_pairs)
-                    if is_commit:
-                        structured = validate_commit(record)
-                        if (structured["source_key"], structured["course_id"]) == (self.source_key, self.course_id):
-                            issue_scope, issue_scope_id = structured["scope"], structured["scope_id"]
-                            issue_source, issue_course = self.source_key, self.course_id
-                    checked = self._validate(record, commit=is_commit)
-                    canonical = canonical_bytes(checked)
-                    digest = hashlib.sha256(canonical).hexdigest()
-                    if raw != canonical:
-                        raise EvidenceValidationError("noncanonical_object")
-                    if expected and digest != expected:
-                        raise EvidenceValidationError("digest_mismatch")
-                    destination[digest] = checked
-                except (OSError, UnicodeError, json.JSONDecodeError, EvidenceValidationError, TypeError, RecursionError) as exc:
-                    unsupported_schema = isinstance(exc, EvidenceValidationError) and exc.code == "unsupported_schema"
-                    if unsupported_schema and is_commit and isinstance(record, dict):
-                        raw_scope = record.get("scope")
-                        raw_scope_id = record.get("scope_id")
-                        if isinstance(raw_scope, str) and raw_scope in SCOPE_KINDS:
-                            try:
-                                validate_component(raw_scope_id)
-                                issue_scope, issue_scope_id = raw_scope, raw_scope_id
-                                issue_source, issue_course = self.source_key, self.course_id
-                            except EvidenceValidationError:
-                                pass
-                    issues.append(StoreIssue(("unsupported_schema" if unsupported_schema else "invalid_commit" if is_commit else "invalid_fact"), expected, issue_scope, issue_scope_id, issue_source, issue_course))
-                    if raw is not None and not unsupported_schema:
-                        try:
-                            self._diagnose(raw)
-                        except (OSError, EvidenceValidationError):
-                            issues.append(StoreIssue("diagnostics_failed", expected, issue_scope, issue_scope_id, issue_source, issue_course))
+                outcome = entry = None
+                name = str(path)
+                if stat is not None:
+                    entry = known.get(name)
+                    if entry is not None and (entry.size, entry.mtime_ns) == (stat.st_size, stat.st_mtime_ns):
+                        outcome = entry.outcome
+                    else:
+                        entry = None
+                if outcome is None:
+                    outcome = self._check_file(path, is_commit)
+                    if (stat is not None and not outcome.volatile
+                            and stat.st_mtime_ns <= started_ns - _RACY_NS):
+                        entry = _Entry(stat.st_size, stat.st_mtime_ns, outcome)
+                if entry is not None:
+                    kept[name] = entry
+                if outcome.record is not None:
+                    destination[outcome.digest] = outcome.record
+                issues.extend(outcome.issues)
         # A missing dependency retains the commit so the reducer reports pending.
         # An invalid reference graph is refused, even when every file is valid JSON.
         for digest, commit in list(commits.items()):
@@ -390,7 +568,9 @@ class EvidenceStore:
                 del commits[digest]
         issue_tuple = tuple(sorted(set(issues), key=lambda issue: (issue.code, issue.digest or "", issue.scope or "", issue.scope_id or "", issue.source_key or "", issue.course_id or "")))
         revision = digest_record({"facts": sorted(facts), "commits": sorted(commits), "issues": [{"code": i.code, "digest": i.digest, "scope": i.scope, "scope_id": i.scope_id, "source_key": i.source_key, "course_id": i.course_id} for i in issue_tuple]})
-        return StoreSnapshot(facts, commits, issue_tuple, revision, self.verify_safe)
+        if memo is not None and self._verification_state() == key:
+            memo.key, memo.entries = key, kept  # the verifier did not change mid-scan
+        return _seal(StoreSnapshot(facts, commits, issue_tuple, revision, self.verify_safe))
 
 
 def _publish_exclusive(target: Path, payload: bytes) -> None:

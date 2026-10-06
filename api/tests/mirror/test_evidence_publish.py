@@ -2,10 +2,12 @@
 
 from api.mirror.evidence_index import EvidenceIndex
 from api.mirror.evidence_paths import local_source_root
-from api.mirror.evidence_publish import EvidencePublisher
+from api.mirror.evidence_publish import EvidencePublisher, IdentitySnapshot
 from api.mirror.evidence_acquisition import (
     CourseAcquisitionReceipt, ScopeReceipt, publish_course_receipt,
 )
+import re
+
 import pytest
 
 
@@ -236,3 +238,145 @@ def test_structure_navigation_identifiers_are_ascii_decimal(tmp_path, field):
               "payload": {field: "١٠"}}
     with pytest.raises(ValueError, match="invalid_navigation_id"):
         publisher.verify_safe(record)
+
+
+# --- Verification key: one exact digest of every input verify_safe depends on ----------
+
+class _KeyVault(SyntheticVault):
+    """Synthetic vault whose pseudonyms can be provisional (not yet stable)."""
+
+    frozen_verification = False
+
+    def __init__(self):
+        super().__init__()
+        self.provisional = set()
+
+    def entries(self):
+        rows = super().entries()
+        for row in rows:
+            row["provisional"] = row["canvas_id"] in self.provisional
+        return rows
+
+
+def _key_publisher(tmp_path, vault, *, source_key="a" * 64, course_id="1"):
+    return EvidencePublisher(workspace_root=tmp_path, source_key=source_key,
+                             course_id=course_id, vault=vault)
+
+
+def _add_name_token(vault):
+    vault.add_nicknames("991001", ["Zedmund"])
+
+
+def _add_identifier(vault):
+    vault.sis_ids["991001"] = "S-424242"
+
+
+def _add_short_identifier(vault):
+    vault.sis_ids["991001"] = "ab"  # len < 3 is ignored by verify_safe
+
+
+def _add_duplicate_token(vault):
+    vault.add_nicknames("991001", ["Avery", "Sample"])  # already-known tokens
+
+
+def _make_provisional(vault):
+    vault.provisional.add("991001")
+
+
+@pytest.mark.parametrize("mutate, changes", [
+    (_add_name_token, True),
+    (_add_identifier, True),
+    (_make_provisional, True),
+    (_add_short_identifier, False),
+    (_add_duplicate_token, False),
+], ids=["name-token", "identifier", "pseudonym-unstable", "short-identifier",
+        "duplicate-token"])
+def test_verification_key_changes_exactly_with_verifier_inputs(tmp_path, mutate, changes):
+    vault = _KeyVault()
+    before = _key_publisher(tmp_path, vault).verification_key()
+    assert _key_publisher(tmp_path, vault).verification_key() == before
+    mutate(vault)
+    assert (_key_publisher(tmp_path, vault).verification_key() != before) is changes
+
+
+def test_provisional_pseudonym_becoming_stable_changes_the_key(tmp_path):
+    vault = _KeyVault()
+    vault.provisional.add("991001")
+    provisional = _key_publisher(tmp_path, vault).verification_key()
+    vault.provisional.clear()
+    assert _key_publisher(tmp_path, vault).verification_key() != provisional
+
+
+@pytest.mark.parametrize("kwargs", [{"source_key": "b" * 64}, {"course_id": "2"}],
+                         ids=["source_key", "course_id"])
+def test_verification_key_covers_scope(tmp_path, kwargs):
+    vault = _KeyVault()
+    assert (_key_publisher(tmp_path, vault).verification_key()
+            != _key_publisher(tmp_path, vault, **kwargs).verification_key())
+
+
+@pytest.mark.parametrize("inputs, refusal", [
+    ((frozenset({"Pikachu"}), frozenset({"zorblax"}), ()), "privacy_refused"),
+    ((frozenset({"Pikachu"}), frozenset(), ("QX-7788",)), "privacy_refused"),
+    ((frozenset(), frozenset(), ()), "identity_refused"),
+], ids=["token", "identifier", "no-stable-pseudonym"])
+def test_matcher_and_key_share_one_set_of_inputs(tmp_path, monkeypatch, inputs, refusal):
+    publisher = _key_publisher(tmp_path, _KeyVault())
+    record = {
+        "schema_version": 1, "kind": "submission", "source_key": "a" * 64,
+        "course_id": "1", "entity_key": "submission:10:Pikachu",
+        "payload": {"assignment_id": "10", "pseudonym": "Pikachu", "attempt": 1,
+                    "body": "zorblax QX-7788 wrote this"},
+    }
+    publisher.verify_safe(record)  # nothing in the vault matches yet
+    baseline_key = publisher.verification_key()
+    monkeypatch.setattr(publisher, "_privacy_inputs", lambda: inputs)
+    assert publisher.verification_key() != baseline_key
+    with pytest.raises(ValueError, match=refusal):
+        publisher.verify_safe(record)
+
+
+def test_frozen_vault_key_is_computed_once_and_live_vault_is_not_cached(tmp_path):
+    frozen = _KeyVault()
+    frozen.frozen_verification = True
+    calls = []
+    real = frozen.all_real_identifiers
+    frozen.all_real_identifiers = lambda: (calls.append(1), real())[1]
+    publisher = _key_publisher(tmp_path, frozen)
+    first = publisher.verification_key()
+    publisher._privacy_context()
+    _add_name_token(frozen)  # a frozen vault is by contract immutable; never re-read
+    assert publisher.verification_key() == first
+    assert len(calls) == 1
+
+    live = _KeyVault()
+    publisher = _key_publisher(tmp_path, live)
+    before = publisher.verification_key()
+    _add_name_token(live)
+    assert publisher.verification_key() != before
+
+
+def test_identity_snapshot_key_matches_live_vault_key(tmp_path):
+    vault = _KeyVault()
+    vault.provisional.add("991002")
+    live = _key_publisher(tmp_path, vault).verification_key()
+    snapshot = IdentitySnapshot.freeze(vault, source_key="a" * 64, course_id="1", pseudonyms={})
+    publisher = _key_publisher(tmp_path, snapshot)
+    assert publisher.verification_key() == live
+    assert publisher.verification_key() == live  # cached for the frozen snapshot
+
+
+def test_publisher_wires_verification_key_into_its_store(tmp_path):
+    publisher = _key_publisher(tmp_path, _KeyVault())
+    assert callable(publisher.store.verification_key)
+    assert publisher.store.verification_key() == publisher.verification_key()
+
+
+def test_verification_key_is_an_opaque_digest_without_identity_values(tmp_path):
+    vault = _KeyVault()
+    vault.sis_ids["991001"] = "S-424242"
+    key = _key_publisher(tmp_path, vault).verification_key()
+    assert re.fullmatch(r"[0-9a-f]{64}", key)
+    names, ids = vault.all_real_identifiers()
+    forbidden = {token.lower() for name in names for token in name.split()} | set(ids)
+    assert not any(value in key for value in forbidden if len(value) >= 4)

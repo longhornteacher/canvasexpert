@@ -194,8 +194,9 @@ def test_queries_refuse_unbounded_or_inapplicable_options(tmp_path, options):
 
 def test_unsafe_snapshot_is_refused_before_sqlite_bytes(tmp_path, evidence_factory):
     from api.mirror.evidence_schema import digest_record
+    from dataclasses import replace
     store = evidence_factory["store"](tmp_path / "safe")
-    snapshot = store.scan()
+    snapshot = replace(store.scan())  # a sealed scan is trusted; unsealed input is fully checked
     unsafe = evidence_factory["fact"](payload={"student_id": "synthetic-private-id"})
     snapshot.facts[digest_record(unsafe)] = unsafe
     path = tmp_path / "query.sqlite3"
@@ -283,3 +284,179 @@ def test_structure_views_rebuild_and_tombstone_current_only(tmp_path, evidence_f
     assert index.query_page(f"{kind}_context")["records"] == []
     with index.read_connection() as db:
         assert db.execute("SELECT COUNT(*) FROM safe_facts WHERE fact_ref=?", (ref,)).fetchone()[0] == 1
+
+
+# --- Validated-scan seal: skip duplicate per-record checks, never for unsealed input ---
+
+
+def _counting_verifier():
+    calls = {"n": 0}
+
+    def verify(record):
+        calls["n"] += 1
+    return verify, calls
+
+
+def _populate(store, factory):
+    """Two assignments (two submission scopes), history, an extraction and course context."""
+    def publish(facts, **commit):
+        refs = [store.publish_fact(fact) for fact in facts]
+        members = [f["entity_key"] for f in facts if f["kind"] != "attempt_observation"]
+        store.publish_commit(factory["commit"](refs=refs, members=members, **commit))
+    publish([factory["fact"]("assignment", "assignment:10", {"assignment_id": "10", "title": "Task A"}),
+             factory["fact"]("assignment", "assignment:11", {"assignment_id": "11", "title": "Task B"})],
+            scope="course.assignments", scope_id="course")
+    publish([factory["fact"](), factory["fact"](entity_key="submission:10:Eevee", pseudonym="Eevee"),
+             factory["fact"]("attempt_observation", "attempt:10:Pikachu:1")],
+            scope="assignment.submissions", scope_id="10")
+    publish([factory["fact"](entity_key="submission:11:Pikachu", assignment_id="11")],
+            scope="assignment.submissions", scope_id="11")
+    publish([factory["fact"]("attachment_extraction", "extraction:10:Pikachu:1:bbbbbbbbbbbbbbbb", {
+        "assignment_id": "10", "pseudonym": "Pikachu", "attempt": 1, "attachment_key": "b" * 64,
+        "original_digest": "c" * 64, "availability": "complete", "method": "native",
+        "blocks": [{"block_id": "b1", "kind": "paragraph", "text": "Opening", "locator": {"page": 1}}]})],
+            scope="assignment.extractions", scope_id="10")
+
+
+def _dump(index):
+    with index.read_connection() as db:
+        return {view: sorted((tuple(row) for row in db.execute(f"SELECT {','.join(columns)} FROM {view}")), key=repr)
+                for view, columns in VIEW_COLUMNS.items()}
+
+
+def _counted_store(factory, root):
+    verify, calls = _counting_verifier()
+    store = factory["store"](root, verify_safe=verify)
+    _populate(store, factory)
+    return store, calls
+
+
+def test_sealed_and_unsealed_ingest_agree_on_revision_and_every_view(tmp_path, evidence_factory):
+    from dataclasses import replace
+    from api.mirror.evidence_store import is_validated_scan
+    store, _ = _counted_store(evidence_factory, tmp_path / "safe")
+    sealed = store.scan()
+    unsealed = replace(sealed)
+    assert is_validated_scan(sealed) and not is_validated_scan(unsealed)
+    fast, full = EvidenceIndex(tmp_path / "fast.sqlite3"), EvidenceIndex(tmp_path / "full.sqlite3")
+    assert fast.ingest(sealed, selected_courses=["1"]) == full.ingest(unsealed, selected_courses=["1"])
+    dumped = _dump(fast)
+    assert dumped == _dump(full)
+    for view in ("courses", "assignment_context", "current_submissions", "attempt_history", "attachment_blocks", "scope_status"):
+        assert dumped[view], view
+
+
+def test_sealed_ingest_never_mutates_the_snapshot_records(tmp_path, evidence_factory):
+    from copy import deepcopy
+    store, _ = _counted_store(evidence_factory, tmp_path / "safe")
+    snapshot = store.scan()
+    before = deepcopy((snapshot.facts, snapshot.commits))
+    EvidenceIndex(tmp_path / "query.sqlite3").ingest(snapshot)
+    assert (snapshot.facts, snapshot.commits) == before
+
+
+def test_sealed_ingest_runs_no_per_record_validation(tmp_path, evidence_factory, monkeypatch):
+    from dataclasses import replace
+    import api.mirror.evidence_index as module
+    store, calls = _counted_store(evidence_factory, tmp_path / "safe")
+    snapshot = store.scan()
+    seen = {"validate_fact": 0, "validate_commit": 0, "digest_record": 0}
+    for name in seen:
+        def spy(record, real=getattr(module, name), name=name):
+            seen[name] += 1
+            return real(record)
+        monkeypatch.setattr(module, name, spy)
+    calls["n"] = 0
+    EvidenceIndex(tmp_path / "query.sqlite3").ingest(snapshot)
+    assert calls["n"] == 0 and set(seen.values()) == {0}
+    EvidenceIndex(tmp_path / "other.sqlite3").ingest(replace(snapshot))  # control: full checks
+    assert calls["n"] == len(snapshot.facts) + len(snapshot.commits)
+    assert (seen["validate_fact"], seen["validate_commit"]) == (len(snapshot.facts), len(snapshot.commits))
+
+
+@pytest.mark.parametrize("sealed", [True, False])
+def test_ingest_reduces_each_scope_at_most_once(tmp_path, evidence_factory, monkeypatch, sealed):
+    from dataclasses import replace
+    import api.mirror.evidence_store as store_module
+    store, _ = _counted_store(evidence_factory, tmp_path / "safe")
+    snapshot = store.scan()
+    if not sealed:
+        snapshot = replace(snapshot)
+    real, runs = store_module.reduce_scope, []
+
+    def counting(snap, scope, scope_id, **kwargs):
+        runs.append((kwargs.get("source_key"), kwargs.get("course_id"), scope, scope_id))
+        return real(snap, scope, scope_id, **kwargs)
+    monkeypatch.setattr(store_module, "reduce_scope", counting)
+    EvidenceIndex(tmp_path / "query.sqlite3").ingest(snapshot)
+    assert len(runs) == len(set(runs)) <= 4  # four scopes; the scan may already hold their reductions
+
+
+@pytest.mark.parametrize("seal", [None, "forged"])
+def test_unsealed_or_forged_seal_keeps_every_check(tmp_path, evidence_factory, seal):
+    from dataclasses import replace
+    from api.mirror.evidence_store import is_validated_scan
+    store, calls = _counted_store(evidence_factory, tmp_path / "safe")
+    scanned = store.scan()
+    candidate = replace(scanned)
+    if seal is not None:
+        object.__setattr__(candidate, "sealed", object())  # forged, not the module seal
+    assert not is_validated_scan(candidate)
+    calls["n"] = 0
+    EvidenceIndex(tmp_path / "ok.sqlite3").ingest(candidate)
+    assert calls["n"] == len(scanned.facts) + len(scanned.commits)
+    path = tmp_path / "refused.sqlite3"
+    with pytest.raises(ValueError, match="privacy_refusal"):
+        EvidenceIndex(path).ingest(replace(candidate, verify_safe=lambda record: False))
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("kind", ["fact", "commit"])
+def test_unsealed_digest_mismatch_is_refused(tmp_path, evidence_factory, kind):
+    from dataclasses import replace
+    store, _ = _counted_store(evidence_factory, tmp_path / "safe")
+    snapshot = replace(store.scan())
+    facts, commits = dict(snapshot.facts), dict(snapshot.commits)
+    if kind == "fact":
+        facts["f" * 64] = evidence_factory["fact"](entity_key="submission:10:Misfiled", pseudonym="Misfiled")
+    else:
+        commits["f" * 64] = evidence_factory["commit"](scope="assignment.submissions", scope_id="10", run_id="other")
+    path = tmp_path / "query.sqlite3"
+    with pytest.raises(ValueError, match=f"{kind}_digest_mismatch"):
+        EvidenceIndex(path).ingest(replace(snapshot, facts=facts, commits=commits))
+    assert not path.exists()
+
+
+def test_ingest_many_seals_only_when_every_part_is_a_validated_scan(tmp_path, evidence_factory, monkeypatch):
+    from dataclasses import replace
+    from api.mirror.evidence_store import EvidenceStore, is_validated_scan
+    first_verify, first_calls = _counting_verifier()
+    second_verify, second_calls = _counting_verifier()
+    first = evidence_factory["store"](tmp_path / "safe", verify_safe=first_verify)
+    second = EvidenceStore(tmp_path / "safe", evidence_factory["source"], "2", verify_safe=second_verify,
+                           private_diagnostics_root=tmp_path / "diagnostics")
+    for store, course_id in ((first, "1"), (second, "2")):
+        entity = f"course:{course_id}"
+        fact = {"schema_version": 1, "kind": "course", "source_key": evidence_factory["source"],
+                "course_id": course_id, "entity_key": entity, "payload": {"title": f"Course {course_id}"}}
+        ref = store.publish_fact(fact)
+        commit = evidence_factory["commit"](refs=[ref], members=[entity], scope="course.context", scope_id=course_id)
+        commit["course_id"] = course_id
+        store.publish_commit(commit)
+    scans = [first.scan(), second.scan()]
+    aggregates, real = [], EvidenceIndex.ingest
+
+    def spy(self, snapshot, **kwargs):
+        aggregates.append(snapshot)
+        return real(self, snapshot, **kwargs)
+    monkeypatch.setattr(EvidenceIndex, "ingest", spy)
+
+    first_calls["n"] = second_calls["n"] = 0
+    fast = EvidenceIndex(tmp_path / "fast.sqlite3").ingest_many(scans)
+    assert is_validated_scan(aggregates[-1])
+    assert first_calls["n"] == second_calls["n"] == 0
+
+    full = EvidenceIndex(tmp_path / "full.sqlite3").ingest_many([scans[0], replace(scans[1])])
+    assert not is_validated_scan(aggregates[-1])
+    assert first_calls["n"] > 0 and second_calls["n"] > 0  # one unsealed part taints the whole aggregate
+    assert fast == full
