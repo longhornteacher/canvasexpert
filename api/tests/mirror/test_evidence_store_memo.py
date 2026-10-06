@@ -275,6 +275,30 @@ def test_keyless_store_checks_every_file_every_time(course, reads):
         assert reads.count == files
 
 
+def test_a_cold_memoized_scan_resolves_paths_a_constant_number_of_times(course, monkeypatch):
+    course.policy.refused.clear()  # a refused file would add a diagnostics resolve
+    for number in range(40):
+        course.plant(course.factory["fact"](body=f"Extra {number}", attempt=10 + number))
+    course.settle(61)
+    files = len(course.files())
+    clear_scan_memo()
+    resolves = SimpleNamespace(count=0)
+    real = Path.resolve
+
+    def counted(self, *args, **kwargs):
+        resolves.count += 1
+        return real(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "resolve", counted)
+    counts = []
+    for store in (course.keyed, course.keyed, course.plain):  # cold, warm, key-less
+        resolves.count = 0
+        store.scan()
+        counts.append(resolves.count)
+    cold, warm, keyless = counts
+    assert cold <= 4 and warm <= 4  # the namespace roots only, not one per file
+    assert keyless >= files
+
+
 @pytest.mark.parametrize("age_seconds, trusted", [(0, False), (1, False), (3, True), (60, True)])
 def test_only_files_older_than_the_racy_window_are_trusted(course, reads, age_seconds, trusted):
     files = len(course.files())
@@ -339,6 +363,45 @@ def test_files_reached_through_a_junction_always_take_the_full_path(course, read
     assert reads.count == 1  # only the file seen through the junction is read again
     reads.count = 0
     assert_equivalent(course)
+
+
+def _outside_fact(course, tmp_path):
+    record = course.factory["fact"](body="Outside", attempt=9)
+    digest = digest_record(record)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / f"{digest}.json").write_bytes(canonical_bytes(record))
+    return digest, outside
+
+
+def _file_symlink(course, outside, digest):
+    link = course.keyed._path("objects", digest)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(outside / f"{digest}.json")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+
+
+def _junction_directory(course, outside, digest):
+    if sys.platform != "win32":
+        pytest.skip("junction directories are a Windows feature")
+    _junction(course.keyed.course_root / "objects" / "jct", outside)
+
+
+@pytest.mark.parametrize("make_link", [_file_symlink, _junction_directory],
+                         ids=lambda make: make.__name__.strip("_"))
+def test_a_link_leaving_the_safe_root_is_refused_cold_and_warm_without_reading_it(
+        course, tmp_path, reads, make_link):
+    digest, outside = _outside_fact(course, tmp_path)
+    make_link(course, outside, digest)
+    for _ in range(2):  # the first memoized scan is cold, the second warm
+        snapshot = assert_equivalent(course)
+        assert digest not in snapshot.facts
+        assert any(i.code == "invalid_fact" and i.digest == digest for i in snapshot.issues)
+    reads.count = 0
+    course.keyed.scan()
+    assert reads.count == 0  # refused by containment before any bytes were read
 
 
 def test_the_walk_lists_exactly_what_rglob_lists_in_the_same_order(course):

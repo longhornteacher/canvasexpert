@@ -62,6 +62,23 @@ def write_reader_descriptor(index_path: Path, *, revision: str) -> Path:
     return target
 
 
+def _read_rows(db, columns, source: str, params, order: str = "") -> list[dict]:
+    """Read ``source`` through ONE SQLite row and decode it into dicts.
+
+    ``sqlite3`` drops and re-takes the GIL around every row step, and behind a CPU-bound
+    thread each re-take can wait a full switch interval, so a row-by-row read costs time
+    proportional to row count. ``columns`` is names, or ``{name: expression}`` over the
+    source columns; ``order`` is applied inside the aggregate input. Numbers that may be
+    fractional use ``payload->'$.key'`` (verbatim JSON text): ``json_array`` would
+    round a ``json_extract`` REAL to 15 digits.
+    """
+    columns = columns if isinstance(columns, dict) else {name: name for name in columns}
+    raw = db.execute(
+        f"SELECT json_group_array(json_array({','.join(columns.values())})) FROM "
+        f"(SELECT * FROM {source}{' ORDER BY ' + order if order else ''})", params).fetchone()[0]
+    return [dict(zip(columns, values)) for values in json.loads(raw or "[]")]
+
+
 class EvidenceQueryService:
     """Semantic read envelope over the same named views exposed to direct SQL."""
 
@@ -297,27 +314,25 @@ class EvidenceQueryService:
         with self.index.read_connection() as db:
             row = db.execute("SELECT value FROM index_metadata WHERE key='revision'").fetchone()
             revision = row[0] if row else None
-            coverage_rows = db.execute(
-                "SELECT course_id,scope,scope_id,status,membership_complete,pending_commits,"
-                f"ambiguous_entities,last_success_at FROM scope_status WHERE {where}", params).fetchall()
-            titles = {r["course_id"]: (r["title"], r["selection_status"]) for r in db.execute(
-                f"SELECT course_id,title,selection_status FROM courses WHERE {where}", params)}
+            coverage_rows = _read_rows(db, ("course_id", "scope", "scope_id", "status", "membership_complete",
+                "pending_commits", "ambiguous_entities", "last_success_at"), f"scope_status WHERE {where}", params)
+            titles = {r["course_id"]: (r["title"], r["selection_status"]) for r in _read_rows(
+                db, ("course_id", "title", "selection_status"), f"courses WHERE {where}", params)}
             roster = {}
-            for r in db.execute(f"SELECT course_id,pseudonym FROM roster WHERE {where}", params):
+            for r in _read_rows(db, ("course_id", "pseudonym"), f"roster WHERE {where}", params):
                 roster.setdefault(r["course_id"], set()).add(r["pseudonym"])
-            assignments = db.execute(
-                "SELECT course_id,assignment_id,fact_ref,"
-                "json_extract(payload,'$.title') title,json_extract(payload,'$.due_at') due_at,"
-                "json_extract(payload,'$.points_possible') points,"
-                f"json_extract(payload,'$.published') published FROM assignment_context WHERE {where} "
-                "ORDER BY course_id,assignment_id,fact_ref", params).fetchall()
-            submissions = db.execute(
-                "SELECT course_id,assignment_id,pseudonym,entity_key,"
-                "json_extract(payload,'$.submitted_at') submitted_at,"
-                "json_extract(payload,'$.workflow_state') workflow_state,"
-                "json_extract(payload,'$.excused') excused,json_extract(payload,'$.score') score,"
-                f"json_extract(payload,'$.late') late FROM current_submissions WHERE {where}",
-                params).fetchall()
+            assignments = _read_rows(db, {
+                "course_id": "course_id", "assignment_id": "assignment_id",
+                "title": "json_extract(payload,'$.title')", "due_at": "json_extract(payload,'$.due_at')",
+                "points": "payload->'$.points_possible'",
+                "published": "json_extract(payload,'$.published')"},
+                f"assignment_context WHERE {where}", params, order="course_id,assignment_id,fact_ref")
+            submissions = _read_rows(db, {
+                "course_id": "course_id", "assignment_id": "assignment_id", "pseudonym": "pseudonym",
+                "entity_key": "entity_key", "submitted_at": "json_extract(payload,'$.submitted_at')",
+                "workflow_state": "json_extract(payload,'$.workflow_state')",
+                "excused": "json_extract(payload,'$.excused')", "score": "payload->'$.score'",
+                "late": "json_extract(payload,'$.late')"}, f"current_submissions WHERE {where}", params)
 
         scopes = {}
         for r in coverage_rows:

@@ -452,15 +452,21 @@ class EvidenceStore:
             return None  # an unusable key costs speed, never a check
         return key if isinstance(key, str) and key else None
 
-    def _check_file(self, path: Path, is_commit: bool) -> _Outcome:
-        """Full, uncached check of one synced file; refused bytes go to diagnostics."""
+    def _check_file(self, path: Path, is_commit: bool, *, listed_regular: bool = False) -> _Outcome:
+        """Full, uncached check of one synced file; refused bytes go to diagnostics.
+
+        ``listed_regular``: the memo-path listing returned this as a regular file
+        reached through no symlink or junction below a namespace root that
+        ``scan`` already resolved, so the per-file ``_contained`` resolve is skipped.
+        """
         expected_match = re.match(r"^([0-9a-f]{64})(?:$|[^0-9a-f])", path.stem)
         expected = expected_match.group(1) if expected_match else None
         issue_scope = issue_scope_id = None
         issue_source = issue_course = None
         raw = record = None
         try:
-            self._contained(path)
+            if not listed_regular:  # same listing-to-read window as a resolve-then-read
+                self._contained(path)
             raw = path.read_bytes()
             record = json.loads(raw, object_pairs_hook=_unique_pairs)
             if is_commit:
@@ -544,7 +550,7 @@ class EvidenceStore:
                     else:
                         entry = None
                 if outcome is None:
-                    outcome = self._check_file(path, is_commit)
+                    outcome = self._check_file(path, is_commit, listed_regular=stat is not None)
                     if (stat is not None and not outcome.volatile
                             and stat.st_mtime_ns <= started_ns - _RACY_NS):
                         entry = _Entry(stat.st_size, stat.st_mtime_ns, outcome)

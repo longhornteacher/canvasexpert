@@ -2,12 +2,13 @@
 
 import json
 import sqlite3
+from contextlib import contextmanager
 
 import pytest
 
 from api.mirror.evidence_index import EvidenceIndex, VIEW_COLUMNS
 from api.mirror.evidence_queries import (
-    EvidenceQueryService, write_reader_descriptor,
+    EvidenceQueryService, _read_rows, write_reader_descriptor,
 )
 
 
@@ -184,8 +185,10 @@ def test_historical_attachment_read_keeps_captured_metadata_after_pending_refres
 
 def _discovery_index(tmp_path, evidence_factory, *, roster=("Pikachu", "Eevee"),
                      roster_complete=True, assignments=(("10", True),),
-                     submissions=(), submissions_complete=True, with_roster=True):
+                     submissions=(), submissions_complete=True, with_roster=True,
+                     assignment_extra=None):
     """Publish a synthetic course and index it; ``submissions`` rows are dicts."""
+    assignment_extra = assignment_extra or {}
     fact, commit = evidence_factory["fact"], evidence_factory["commit"]
     store = evidence_factory["store"](tmp_path / "safe")
     if with_roster:
@@ -195,7 +198,7 @@ def _discovery_index(tmp_path, evidence_factory, *, roster=("Pikachu", "Eevee"),
                                     complete=roster_complete, run_id="roster"))
     arefs = [store.publish_fact(fact("assignment", f"assignment:{a}", {
         "assignment_id": a, "title": f"Task {a}", "points_possible": 10, "published": pub,
-        "due_at": "2026-02-01T00:00:00Z"})) for a, pub in assignments]
+        "due_at": "2026-02-01T00:00:00Z", **assignment_extra.get(a, {})})) for a, pub in assignments]
     store.publish_commit(commit(scope="course.assignments", scope_id="1", refs=arefs,
                                 members=[f"assignment:{a}" for a, _ in assignments], run_id="assignments"))
     by_assignment = {}
@@ -343,4 +346,159 @@ def test_discovery_query_cost_is_constant_in_assignments_and_students(tmp_path, 
     small = select_count(tmp_path / "s", 2, 2)
     large = select_count(tmp_path / "l", 12, 8)
     assert small == large <= 8
+
+
+# --- read_scoring_discovery: row-heavy reads cross SQLite as one row each ------
+
+def _add_rival_fact(service, *, kind, key_value, **payload_changes):
+    """Index-copy tamper: a second current fact for one entity (fact_ref sorts before any digest)."""
+    column = "pseudonym" if kind == "submission" else "assignment_id"
+    db = sqlite3.connect(service.index.path)
+    ref, payload = db.execute(f"SELECT fact_ref,payload FROM safe_facts WHERE kind=? AND {column}=?",
+                              (kind, key_value)).fetchone()
+    db.execute("INSERT INTO safe_facts SELECT '!rival',source_key,course_id,kind,entity_key,assignment_id,"
+               "pseudonym,attempt,submitted_at,? FROM safe_facts WHERE fact_ref=?",
+               (json.dumps({**json.loads(payload), **payload_changes}), ref))
+    db.execute("INSERT INTO current_refs SELECT '!rival',scope,scope_id FROM current_refs WHERE fact_ref=?", (ref,))
+    db.commit()
+    db.close()
+
+
+def test_discovery_pinned_result_covers_every_counting_rule(tmp_path, evidence_factory):
+    """Law: the one-row reads return exactly the structure the row-by-row reads did."""
+    names = ("Pikachu", "Eevee", "Mew", "Ditto", "Snorlax", "Togepi", "Jigglypuff", "Abra")
+    service = _discovery_index(tmp_path, evidence_factory, roster=names,
+        assignments=(("10", True), ("11", False), ("12", True), ("13", True)),
+        assignment_extra={"10": {"points_possible": 8.333333333333334}},
+        submissions=[
+            {"pseudonym": "Pikachu", "score": 0, "late": True},                   # zero still partially scored
+            {"pseudonym": "Eevee"},                                               # plain ungraded
+            {"pseudonym": "Mew", "workflow_state": "graded", "score": 9.5},       # graded: not counted
+            {"pseudonym": "Ditto", "excused": True},                              # excused: not counted
+            {"pseudonym": "Snorlax", "workflow_state": "unsubmitted", "submitted_at": None},
+            {"pseudonym": "Togepi", "late": True, "score": 7.25},                 # float score
+            {"pseudonym": "Jigglypuff"},                                          # made ambiguous below
+            {"pseudonym": "Abra", "workflow_state": "pending_review"},
+            {"pseudonym": "Outsider"},                                            # unknown roster pseudonym
+            {"pseudonym": "Pikachu", "assignment_id": "11"},                      # unpublished: skipped
+            {"pseudonym": "Pikachu", "assignment_id": "13"},                      # NULL published: counted
+        ])
+    _add_rival_fact(service, kind="submission", key_value="Jigglypuff", workflow_state="graded")
+    db = sqlite3.connect(service.index.path)  # keys the store refuses to publish: missing means SQL NULL
+    db.execute("UPDATE safe_facts SET payload=json_remove(payload,'$.published') WHERE assignment_id='13' AND kind='assignment'")
+    db.execute("UPDATE safe_facts SET payload=json_remove(payload,'$.title','$.due_at') WHERE assignment_id='12' AND kind='assignment'")
+    db.commit()
+    db.close()
+    result = _discover(service, evidence_factory)
+    revision, stamp = result["revision"], "2026-01-01T00:00:00Z"
+    scope = {"coverage": "complete", "observed_at": stamp, "status": "ready"}
+    item = {"submissions_observed_at": stamp, "ungraded": None, "partially_scored": None, "late_ungraded": None}
+    assert result == {"revision": revision, "courses": [{
+        "course_id": "1", "title": None, "selection_status": result["courses"][0]["selection_status"],
+        "revision": revision,
+        "roster": {"coverage": "complete", "observed_at": stamp, "known_members": 8},
+        "assignments_scope": scope,
+        "assignments": [
+            {**item, "assignment_id": "10", "name": "Task 10", "due_at": "2026-02-01T00:00:00Z",
+             "points": 8.333333333333334, "published": True, "coverage": "incomplete",
+             "counts_complete": False, "ambiguous_entities": 1,
+             "ungraded": 4, "partially_scored": 2, "late_ungraded": 2},
+            {**item, "assignment_id": "12", "name": "", "due_at": None, "points": 10, "published": True,
+             "coverage": "unknown", "counts_complete": False, "ambiguous_entities": 0,
+             "submissions_observed_at": None},
+            {**item, "assignment_id": "13", "name": "Task 13", "due_at": "2026-02-01T00:00:00Z",
+             "points": 10, "published": False, "coverage": "complete", "counts_complete": True,
+             "ambiguous_entities": 0, "ungraded": 1, "partially_scored": 0, "late_ungraded": 0},
+        ]}]}
+    assert type(result["courses"][0]["assignments"][0]["points"]) is float
+    assert type(result["courses"][0]["assignments"][1]["points"]) is int
+
+
+def test_discovery_first_assignment_fact_by_fact_ref_wins_inside_the_aggregate(tmp_path, evidence_factory):
+    """Law: ORDER BY applies to the aggregate's input, so competing facts resolve as before."""
+    service = _discovery_index(tmp_path, evidence_factory, submissions=[{"pseudonym": "Pikachu"}])
+    _add_rival_fact(service, kind="assignment", key_value="10", title="Rival title")
+    assert _discover(service, evidence_factory)["courses"][0]["assignments"][0]["name"] == "Rival title"
+
+
+def test_read_rows_decodes_json_values_to_what_row_reads_gave():
+    """Law: int/float/str/None round-trip with identical Python types; empty sets give []."""
+    payloads = [
+        {"i": 7, "f": 8.333333333333334, "w": 10.0, "b": True, "z": False, "n": None, "s": 'q"uote é\n',
+         "big": 2 ** 62, "x": 1e300},
+        {"i": 0, "f": 0.1 + 0.2},                       # keys missing: SQL NULL
+    ]
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE t(id INTEGER, payload TEXT)")
+    db.executemany("INSERT INTO t VALUES (?,?)", [(n, json.dumps(p)) for n, p in enumerate(payloads)])
+    exact = {"i", "b", "z", "n", "s", "big"}            # values json_extract already returns exactly
+    keys = sorted({key for p in payloads for key in p})
+    columns = {"id": "id", **{key: f"json_extract(payload,'$.{key}')" if key in exact
+                              else f"payload->'$.{key}'" for key in keys}}
+    rows = _read_rows(db, columns, "t", (), order="id DESC")
+    assert [r["id"] for r in rows] == [1, 0]            # ordering applied inside the aggregate
+    for row in rows:
+        for key in keys:
+            if key in exact:  # same value and type as the plain per-row json_extract read
+                expected = db.execute(f"SELECT json_extract(payload,'$.{key}') FROM t WHERE id=?",
+                                      (row["id"],)).fetchone()[0]
+            else:             # same value and type as the stored JSON number
+                expected = payloads[row["id"]].get(key)
+            assert row[key] == expected and type(row[key]) is type(expected), key
+    assert rows[1]["f"] == 8.333333333333334 and rows[0]["f"] == 0.1 + 0.2
+    assert _read_rows(db, columns, "t WHERE id > ?", (99,)) == []
+
+
+class _RowCounter:
+    """Connection proxy counting every row SQLite hands back to Python."""
+
+    def __init__(self, db):
+        self._db, self.rows = db, 0
+
+    def execute(self, sql, params=()):
+        cursor, counter = self._db.execute(sql, params), self
+
+        class Counted:
+            def fetchone(self):
+                row = cursor.fetchone()
+                counter.rows += row is not None
+                return row
+
+            def fetchall(self):
+                rows = cursor.fetchall()
+                counter.rows += len(rows)
+                return rows
+
+            def __iter__(self):
+                for row in cursor:
+                    counter.rows += 1
+                    yield row
+        return Counted()
+
+
+def _rows_fetched_by_discovery(service, source, monkeypatch, courses=("1",)):
+    counters, real = [], service.index.read_connection
+
+    @contextmanager
+    def counted():
+        with real() as db:
+            counters.append(_RowCounter(db))
+            yield counters[-1]
+    monkeypatch.setattr(service.index, "read_connection", counted)
+    result = service.read_scoring_discovery(source_key=source, course_ids=list(courses))
+    return sum(counter.rows for counter in counters), result
+
+
+def test_discovery_fetches_a_constant_number_of_rows_however_many_submissions(
+        tmp_path, evidence_factory, pilot_evidence_workspace, monkeypatch):
+    """Law: GIL handoffs scale with rows fetched, so the row count must not scale with the data."""
+    small, _ = _rows_fetched_by_discovery(
+        _discovery_index(tmp_path, evidence_factory, submissions=[{"pseudonym": "Pikachu"}]),
+        evidence_factory["source"], monkeypatch)
+    pilot = pilot_evidence_workspace  # 3 courses, 90 roster rows, 90 assignments, 2,700 submissions
+    large, result = _rows_fetched_by_discovery(
+        EvidenceQueryService(pilot.index.path), pilot.source, monkeypatch, courses=pilot.courses)
+    assert small == large <= 8
+    published = {r["assignment_id"]: r["ungraded"] for r in result["courses"][0]["assignments"]}
+    assert published == pilot.expected_ungraded(pilot.courses[0])  # real data crossed the one-row reads
 
