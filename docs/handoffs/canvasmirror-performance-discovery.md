@@ -206,3 +206,7 @@ Found: earlier harness runs attached as a stdio proxy to an already-running olde
 | Background (refresh + maintenance overlap) | discovery p95 8.2 s, max 20.6 s; ping p95 3.3 s, max 9.8 s | p95 <=5, max <=10, ping p95 <=1: **missed**, improved from 14.4/35/9.5 |
 
 Light stays **YELLOW**. Remaining stall is index maintenance after publication (yield slices did not remove it); candidates: larger sleep share, yield in the SQLite insert/projection loop, or skip-unchanged-scope maintenance (needs senior decision). Desktop check and S12 carry-over still not done. Finding for senior: receipt publication drops Canvas `excused` (`evidence_acquisition._submission`), so the index cannot apply the non-excused counting rule.
+
+### D06 option 1 (yield inside index ingest insert/projection loops, 2026-10-06)
+
+`EvidenceIndex.ingest`/`_project_derived` now checkpoint per fact, scope, projection record and comparison bucket (`api/tests/mirror` 633 passed). Field, current code: warm p95 1.46 s, max 1.57 s, median 1.27 s (**met**). Background: discovery p95 8.26 s, max 21.1 s (median 2.5 s); ping p95 4.52 s, max 5.6 s (max improved from 9.8 s, p95 not). **Background gate still missed**, so the stall is not only GIL starvation in the ingest loops; a single discovery call still takes about 21 s once. Next step is stage timing (the `mcp.discovery_*` and `mirror.publication_identity_lock` events) to see whether discovery waits on the vault lock held by publication's identity step or on another lock, before choosing between that and skip-unchanged-scope maintenance.

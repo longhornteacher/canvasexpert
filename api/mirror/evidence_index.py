@@ -126,6 +126,7 @@ class EvidenceIndex:
             for table in ("current_refs", "history_refs", "scope_coverage", "safe_facts", "course_selection", "attachment_block_rows", "comparison_rows"):
                 db.execute(f"DELETE FROM {table}")
             for ref, fact in sorted(facts.items()):
+                pacer.checkpoint()
                 p = fact["payload"]
                 db.execute("INSERT INTO safe_facts VALUES (?,?,?,?,?,?,?,?,?,?)", (ref, fact["source_key"], fact["course_id"], fact["kind"], fact["entity_key"], p.get("assignment_id"), p.get("pseudonym"), p.get("attempt"), p.get("submitted_at"), json.dumps(p, sort_keys=True, ensure_ascii=False, separators=(",", ":"))))
             courses = {(f["source_key"], f["course_id"]) for f in facts.values()}
@@ -133,6 +134,7 @@ class EvidenceIndex:
             for source, course in sorted(courses):
                 db.execute("INSERT INTO course_selection VALUES (?,?,?)", (source, course, "selected" if course in selected else "retained"))
             for key, state in sorted(snapshot.scopes.items()):
+                pacer.checkpoint()
                 source, course, scope, scope_id = key
                 finished = [snapshot.commits[h]["acquisition_finished_at"] for h in state.heads if h in snapshot.commits and snapshot.commits[h]["mode"] != "import"]
                 db.execute("INSERT INTO scope_coverage VALUES (?,?,?,?,?,?,?,?,?,?)", (*key, state.status, int(state.membership_complete), json.dumps(state.heads), json.dumps(state.pending_commits), json.dumps(state.ambiguous_entities), max(finished, default=None)))
@@ -144,7 +146,7 @@ class EvidenceIndex:
                         stamp = state.established_submitted_at.get(facts[ref]["entity_key"])
                         db.execute("INSERT OR IGNORE INTO history_refs VALUES (?,?)", (ref, stamp))
             db.execute("INSERT OR REPLACE INTO index_metadata VALUES ('revision',?)", (revision,))
-            self._project_derived(db, facts, snapshot, revision)
+            self._project_derived(db, facts, snapshot, revision, pacer)
         self._discard_allowed = False
         self._discard_signature = None
         return revision
@@ -182,8 +184,9 @@ class EvidenceIndex:
         return self.ingest(aggregate, selected_courses=selected_courses, pacer=pacer)
 
     @staticmethod
-    def _project_derived(db, facts, snapshot, revision):
+    def _project_derived(db, facts, snapshot, revision, pacer=None):
         """Materialize extracted blocks and comparison evidence from safe facts."""
+        pacer = pacer or NoSlice()
         for name in ("courses", "roster", "sections", "assignment_context", "current_submissions", "attempt_history",
                      "attachment_associations", "attachment_extractions", "scope_status",
                      "attachment_blocks", "comparison_evidence", "agent_notes", "group_context",
@@ -223,6 +226,7 @@ class EvidenceIndex:
         history_attempts = {ref for (source, course, scope, _scope_id), state in snapshot.scopes.items()
                             if scope == "assignment.submissions" for ref in state.history_refs}
         for ref, fact in facts.items():
+            pacer.checkpoint()
             if fact["kind"] != "attachment_extraction" or ref not in active_extractions:
                 continue
             p = fact["payload"]
@@ -236,6 +240,7 @@ class EvidenceIndex:
         assignment_facts = {(f["source_key"], f["course_id"], f["payload"]["assignment_id"]): f["payload"] for f in facts.values() if f["kind"] == "assignment"}
         buckets = {}
         for ref, fact in facts.items():
+            pacer.checkpoint()
             p = fact["payload"]
             if fact["kind"] not in {"submission", "attempt_observation", "attachment", "attachment_extraction"} or not p.get("assignment_id"):
                 continue
@@ -252,6 +257,7 @@ class EvidenceIndex:
             row = {**p, "fact_ref": ref, "payload": p}
             bucket[{"submission": "submission_rows", "attempt_observation": "attempt_rows", "attachment": "attachment_rows", "attachment_extraction": "extraction_block_rows"}[fact["kind"]]].append(row)
         for (source, course, assignment), bucket in buckets.items():
+            pacer.checkpoint()
             cov = snapshot.scopes.get((source, course, "assignment.submissions", assignment))
             coverage_state = ("complete" if cov and cov.status == "ready"
                               and cov.membership_complete and not cov.pending_commits
