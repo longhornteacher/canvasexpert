@@ -252,15 +252,61 @@ def _roster_receipt_error(rows, error, complete) -> str:
 
 def _fetch_sections(course_id, canvas_get_all, complete_get=None):
     path = f"/api/v1/courses/{course_id}/sections"
-    if complete_get is not None:
-        sections, error, complete = complete_get(path, {"per_page": 100})
-        if not complete and not error:
-            error = "pagination_incomplete"
-    else:
-        sections, error = canvas_get_all(path, {"per_page": 100})
-    if error or not sections:
-        return {}, error
-    return {str(s["id"]): s.get("name", f"Section {s['id']}") for s in sections}, None
+    started = time.monotonic()
+    complete = None
+    sections = None
+    error = None
+    try:
+        if complete_get is not None:
+            sections, error, complete = complete_get(path, {"per_page": 100})
+            if not complete and not error:
+                error = "pagination_incomplete"
+        else:
+            sections, error = canvas_get_all(path, {"per_page": 100})
+        if error or not sections:
+            result = ({}, error)
+        else:
+            result = ({str(s["id"]): s.get("name", f"Section {s['id']}")
+                       for s in sections}, None)
+        if error:
+            if error == "pagination_incomplete":
+                diagnostic_scope, outcome = "pagination_incomplete", "blocked"
+            elif complete is False:
+                diagnostic_scope = f"incomplete_error_{error_code(error)}"
+                outcome = "failed"
+            elif complete is True:
+                diagnostic_scope = f"complete_error_{error_code(error)}"
+                outcome = "failed"
+            else:
+                diagnostic_scope = f"error_{error_code(error)}"
+                outcome = "failed"
+        elif complete is True:
+            diagnostic_scope, outcome = "complete", "ok"
+        elif complete is False:
+            diagnostic_scope, outcome = "pagination_incomplete", "blocked"
+        else:
+            diagnostic_scope, outcome = "completeness_unavailable", "blocked"
+        try:
+            operational_log.emit(
+                "mirror.sections_acquisition", outcome,
+                count=len(sections) if isinstance(sections, list) else 0,
+                duration_ms=max(0, int((time.monotonic() - started) * 1000)),
+                scope=diagnostic_scope,
+            )
+        except Exception:
+            pass
+        return result
+    except Exception:
+        try:
+            operational_log.emit(
+                "mirror.sections_acquisition", "failed",
+                count=len(sections) if isinstance(sections, list) else 0,
+                duration_ms=max(0, int((time.monotonic() - started) * 1000)),
+                scope="fetch_or_shape_error",
+            )
+        except Exception:
+            pass
+        raise
 
 
 def _fetch_submissions(course_id, canvas_get_all, *, submitted_since=None,

@@ -1,8 +1,8 @@
 # Execution brief: CanvasMirror functional read path
 
-**Status:** Coding preflight complete; ready for execution slicing. Acceptance
-environment is YELLOW (baseline failures below). Grading periods are agent
-guidance, not a runtime gate. No implementation or reset performed.
+**Status:** S11 synthetic gate passed; S12 desktop field acceptance is YELLOW
+pending two unresolved field observations and S13 second-computer verification. Grading
+periods are agent guidance, not a runtime gate. No reset performed.
 **Target:** `dev`. **Inspected baseline:** `30b9465`, 2026-10-05.
 **Owner:** one lead executor; senior accepts the integrated result.
 **Workflow review:** 2026-10-05 at `a9a3c03`, documentation only. Preserve the
@@ -512,9 +512,8 @@ No live runtime, Canvas acquisition, reset, or deployment performed.
 
 Both computers were updated by `git pull` from `dev` (the in-app self-updater is
 not the supported path; its `REPO_SLUG` also disagrees with the git remote). A
-desktop MCP agent ran the field check against three Current courses (120669 ELA 7
-PAP, 121046 CS 8, 120638 ELA 7). The laptop was unavailable, so two-machine
-acceptance is deferred.
+desktop MCP agent ran the field check against three Current courses. The laptop
+was unavailable, so two-machine acceptance is deferred.
 
 **Read path — PASS.** `get_gradebook_snapshot`, `get_roster`, and
 `get_assignment_evidence` returned `ok:true` with `coverage`, `warnings`, and
@@ -525,26 +524,73 @@ timing against the real workspace: `get_submissions` 0.24s (29 rows),
 runtime's workers running, `get_submissions` 2.73s `ok:true`. A full pass in
 isolation: 83s, `ok:true`, 24 assignments, 551 rows.
 
-**Defect 1 — `get_submissions` appeared to hang (4 min) in the live agent.**
-Not a read-path bug. The operational log shows coordinator `queue_wait_ms` of
-637,533–1,484,808 ms (10–25 min) and `mirror.refresh` "full" passes failing after
-501–1,218 s. The coordinator runs exactly two workers; long background full passes
-occupy both, so manual reads queue behind them. Compounded by the vault lock:
-`storage_support.interprocess_lock` uses a blocking `msvcrt.locking(LK_LOCK)` with
-no timeout, and every mirror write (`write_roster`, `merge_submissions`, capture,
-extraction `publisher_scope`) takes it, so a slow vault op blocks all others.
-A thread dump with the runtime running showed `ce-evidence-work` blocked in
-`run_extraction_chunk` → `publisher_scope` → `vault.transaction()` →
-`msvcrt.locking`. (An earlier "persistently held lock" reading was the
-investigator's own stray server processes, not a code defect.)
+**Observation 1 — `get_submissions` appeared to hang (4 min) in the live agent.**
+The operational log shows coordinator `queue_wait_ms` of 637,533–1,484,808 ms
+(10–25 min) and `mirror.refresh` "full" passes failing after 501–1,218 s.
+The coordinator runs exactly two workers; long background full passes can
+delay queued refresh jobs. `get_submissions` itself reads the local index and
+does not enter that coordinator, so these timings do not explain the observed
+MCP delay. `storage_support.interprocess_lock` uses blocking
+`msvcrt.locking(LK_LOCK)` on Windows. A thread dump showed `ce-evidence-work`
+blocked in `run_extraction_chunk` → `publisher_scope` → `vault.transaction()` →
+`msvcrt.locking`; the MCP read does not enter that transaction. Its delay needs
+its own stage timings or thread stack. (An earlier "persistently held lock"
+reading was the investigator's own stray server processes, not a code defect.)
 
-**Defect 2 — `section_label_missing` on every roster.** The live index has
+**Observation 2 — `section_label_missing` on every roster.** The live index has
 `roster` rows (79) but **zero** `section` facts, and `course.sections` scope_status
-is `ready` with `membership_complete=0`. `_fetch_sections` returns 1 section live,
-so the empty-but-ready scope is a publication/coverage bug, not a Canvas problem.
+is `ready` with `membership_complete=0`. `_fetch_sections` returned one section
+in a separate live check. The affected acquisition receipt and publication
+outcome were not captured, so the failing boundary remains unknown.
 
-**Not yet fixed.** Both defects are code fixes, not field resets. No reset was
-performed. Overall remains YELLOW.
+**Not yet fixed.** Neither observation calls for a field reset. The exact code
+boundary for each remains to be established. No reset was performed. Overall
+remains YELLOW.
+
+### S12 follow-up investigation — 2026-10-05
+
+**Objective:** resolve the missing section labels and unexplained long MCP read
+without expanding the mirror architecture or weakening privacy. The S12 desktop
+observations are evidence, not proof of either root cause.
+
+**Established so far:** `get_submissions` reads the local index and never enters
+the two-worker coordinator. Long `queue_wait_ms` values explain delayed refresh
+jobs, not the four-minute MCP read by themselves. A worker blocked on the vault
+lock is established, but the MCP read opens the vault without entering that
+transaction. For sections, the source passes a complete-pagination callback to
+`_fetch_sections`, and the publisher supports `course.sections`; synthetic
+publication succeeds. The field's empty, incomplete section scope needs the
+affected acquisition/publication stage identified before a behavioral fix.
+
+**Workstreams and file ownership:** A section investigator owns `sync.py`,
+`evidence_acquisition.py`, and their matching mirror tests. A latency investigator
+owns `mcp_server/tools.py` and its matching MCP tests. Diagnostic additions may
+emit only fixed machine codes, aggregate counts, and durations through the
+allowlisted operational log. No course/assignment/student identifiers, names,
+content, paths, or raw exceptions may enter diagnostics. Neither workstream
+changes Canvas writes, scoring policy, worker count, vault lock semantics,
+evidence format, or the public MCP result contract. The senior owns this brief,
+integration, and the test gate. No live Canvas call, reset, or teacher-data fixture
+is part of the coding slice.
+
+**Acceptance:** focused synthetic tests prove the diagnostic stage boundaries and
+privacy of emitted records; the full suite passes after integration. Then perform
+an announced GET-only field check against one Current course, recording aggregate
+timings and section acquisition/publication facts. Fix only a demonstrated failing
+boundary, add its regression, rerun the gate, and repeat the field check. S13
+still requires the actual second computer. No synthetic or diagnostic result alone
+turns overall acceptance GREEN.
+
+**Diagnostic slice result:** Both Luna workstreams landed aggregate-only,
+best-effort events. Section acquisition records row count, completeness/error
+class, and duration; safe publication records accepted count, completion state,
+and duration. `get_submissions` records total, vault-open, index-query, and
+outbound-gate durations. A logger failure cannot change a read or publication
+result. The focused mirror gate passed 102 tests; MCP timing/history passed 6;
+the integrated `.venv\Scripts\python -m pytest api/tests engine/tests -p no:randomly -q`
+passed **2,510**, skipped **1**, failed **0**. No live Canvas call or reset was
+performed for this slice. Diagnostics cannot observe host delay before MCP tool
+dispatch or after its return, and they do not themselves prove a root cause.
 
 S00 commit: `036ab61`; S02: `caf7b22`; S01: `c2439a8`; S03: `22d4d10`;
 S05: `51b917e`; S06: `952788e`.

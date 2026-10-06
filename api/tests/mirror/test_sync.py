@@ -11,6 +11,7 @@ import json
 import pytest
 
 from api import course_catalog
+from api import operational_log
 from api.mirror import read_service, store, sync
 
 COURSE = "111"
@@ -1176,3 +1177,53 @@ def test_failed_roster_still_publishes_acquired_assignment_sibling(tmp_path):
     assert receipts[0].scopes[0].scope == "course.assignments"
     assert receipts[0].scopes[0].complete
     assert not receipts[0].scopes[1].complete
+
+
+@pytest.mark.parametrize(
+    "complete,error,expected_outcome,expected_scope",
+    [(True, None, "ok", "complete"),
+     (False, None, "blocked", "pagination_incomplete"),
+     (True, "HTTP 503: PRIVATE DETAIL", "failed", "complete_error_canvas_unavailable")],
+)
+def test_fetch_sections_logs_aggregate_acquisition_diagnostics(
+    complete, error, expected_outcome, expected_scope
+):
+    section_name = "PRIVATE SECTION LABEL DO NOT LOG"
+
+    def complete_get(_path, _params):
+        return ([{"id": "800001", "name": section_name}], error, complete)
+
+    sections, fetch_error = sync._fetch_sections(
+        COURSE, lambda *_args: ([], None), complete_get)
+
+    records = [record for record in operational_log.tail()
+               if record["event"] == "mirror.sections_acquisition"]
+    record = records[-1]
+    assert record["outcome"] == expected_outcome
+    assert record["scope"] == expected_scope
+    assert record["count"] == 1
+    assert isinstance(record["duration_ms"], int)
+    assert set(record) <= {"timestamp", "app_version", "event", "outcome",
+                           "duration_ms", "count", "scope"}
+    log_text = operational_log._log_path().read_text(encoding="utf-8")
+    assert section_name not in log_text
+    assert "PRIVATE DETAIL" not in log_text
+    if expected_outcome == "ok":
+        assert sections == {"800001": section_name}
+        assert fetch_error is None
+    else:
+        assert sections == {}
+        assert fetch_error
+
+
+def test_fetch_sections_keeps_success_when_diagnostic_logger_raises(monkeypatch):
+    def fail_emit(*_args, **_kwargs):
+        raise OSError("PRIVATE LOG PATH")
+
+    monkeypatch.setattr(operational_log, "emit", fail_emit)
+    sections, error = sync._fetch_sections(
+        COURSE, lambda *_args: ([], None),
+        lambda *_args: ([{"id": "800001", "name": "Synthetic Section"}], None, True))
+
+    assert sections == {"800001": "Synthetic Section"}
+    assert error is None

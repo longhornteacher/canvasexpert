@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from api import operational_log
 from api.mirror.evidence_acquisition import (
     CourseAcquisitionReceipt, ScopeReceipt, publish_course_receipt,
     publish_attachment_status,
@@ -280,6 +281,69 @@ def test_scope_mismatch_top_level_has_no_safe_publication(tmp_path):
     with pytest.raises(PublicationRefused, match="scope_mismatch"):
         publish_course_receipt(publisher=publisher, receipt=receipt, writer_key="writer-a", run_id="run-a")
     assert not (tmp_path / "CanvasMirror").exists()
+
+
+@pytest.mark.parametrize(
+    "scope_id,complete,section_id,expected_outcome,expected_scope",
+    [("1", True, "800001", "ok", "complete"),
+     ("1", False, "800001", "blocked", "pagination_incomplete"),
+     ("2", True, "800001", "failed", "invalid_scope")],
+)
+def test_sections_publication_logs_stage_and_aggregate_only(
+    tmp_path, scope_id, complete, section_id, expected_outcome, expected_scope
+):
+    section_name = "PRIVATE SECTION LABEL DO NOT LOG"
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key="a" * 64,
+                                  course_id="1", vault=SyntheticVault())
+    receipt = CourseAcquisitionReceipt("1", "2026-01-04T00:00:00Z",
+        "2026-01-04T00:01:00Z", (ScopeReceipt("course.sections", scope_id,
+            ({"id": section_id, "name": section_name},), complete),))
+
+    result = publish_course_receipt(publisher=publisher, receipt=receipt,
+                                    writer_key="writer-a", run_id="run-a")
+
+    records = [record for record in operational_log.tail()
+               if record["event"] == "mirror.sections_publication"]
+    record = records[-1]
+    assert record["outcome"] == expected_outcome
+    assert record["scope"] == expected_scope
+    assert record["count"] == (0 if scope_id == "2" else 1)
+    assert isinstance(record["duration_ms"], int)
+    assert set(record) <= {"timestamp", "app_version", "event", "outcome",
+                           "duration_ms", "count", "scope"}
+    log_text = operational_log._log_path().read_text(encoding="utf-8")
+    assert section_name not in log_text
+    if expected_outcome == "ok":
+        assert result.successful_scopes == (("course.sections", "1"),)
+        assert len(result.fact_refs) == 1
+        assert next(iter(publisher.store.scan().facts.values()))["kind"] == "section"
+    elif expected_outcome == "blocked":
+        assert result.successful_scopes == ()
+        assert result.gaps == ("pagination_incomplete",)
+        assert len(result.fact_refs) == 1
+    else:
+        assert result.successful_scopes == ()
+
+
+def test_sections_publication_keeps_commit_when_diagnostic_logger_raises(
+    tmp_path, monkeypatch
+):
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key="a" * 64,
+                                  course_id="1", vault=SyntheticVault())
+    receipt = CourseAcquisitionReceipt("1", "2026-01-04T00:00:00Z",
+        "2026-01-04T00:01:00Z", (ScopeReceipt("course.sections", "1",
+            ({"id": "800001", "name": "Synthetic Section"},), True),))
+
+    def fail_emit(*_args, **_kwargs):
+        raise OSError("PRIVATE LOG PATH")
+
+    monkeypatch.setattr(operational_log, "emit", fail_emit)
+    result = publish_course_receipt(publisher=publisher, receipt=receipt,
+                                    writer_key="writer-a", run_id="run-a")
+
+    assert result.successful_scopes == (("course.sections", "1"),)
+    assert len(result.fact_refs) == 1
+    assert next(iter(publisher.store.scan().facts.values()))["kind"] == "section"
 
 
 @pytest.mark.parametrize("entry_point", ["receipt", "text"])

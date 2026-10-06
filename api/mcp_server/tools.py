@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import copy
+import contextvars
 import hashlib
 import json
 import math
@@ -63,6 +64,56 @@ _enqueue_sync = mirror_service.enqueue_sync
 _wait_for_plan = mirror_service.wait_for_plan
 
 _pseudonym_gate = pseudonym_boundary.gate
+
+# Active only while get_submissions is running. The fixed event names and the
+# operational log's duration-only fields keep these timings free of arguments
+# and returned student data.
+_SUBMISSIONS_TIMING = contextvars.ContextVar("mcp_get_submissions_timing", default=False)
+
+
+def _emit_submissions_timing(stage: str, started: float, outcome: str = "ok") -> None:
+    if not _SUBMISSIONS_TIMING.get():
+        return
+    try:
+        operational_log.emit(
+            f"mcp.get_submissions.stage.{stage}", outcome,
+            duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
+        )
+    except Exception:
+        # Instrumentation must never change a read result.
+        pass
+
+
+def _timed_submissions_index_read(call, *args, **kwargs):
+    """Time one bounded index query while the submissions tool is active."""
+    if not _SUBMISSIONS_TIMING.get():
+        return call(*args, **kwargs)
+    started = time.perf_counter()
+    outcome = "ok"
+    try:
+        return call(*args, **kwargs)
+    except Exception:
+        outcome = "failed"
+        raise
+    finally:
+        _emit_submissions_timing("index_page", started, outcome)
+
+
+def _timed_submissions_vault_open():
+    if not _SUBMISSIONS_TIMING.get():
+        return _open_vault()
+    started = time.perf_counter()
+    outcome = "ok"
+    try:
+        result = _open_vault()
+        if result[1]:
+            outcome = "failed"
+        return result
+    except Exception:
+        outcome = "failed"
+        raise
+    finally:
+        _emit_submissions_timing("vault_open", started, outcome)
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +298,7 @@ def _evidence_reader():
     from api.mirror.evidence_index import IndexReadError
     # Fail closed on a forked shared vault before serving any pseudonymized
     # evidence; the outbound gate re-checks, but the read must not proceed.
-    _vault, vault_error = _open_vault()
+    _vault, vault_error = _timed_submissions_vault_open()
     if vault_error:
         return None, None, {"ok": False, "error": vault_error}
     root = workspace.workspace_root()
@@ -324,14 +375,14 @@ def _read_all_evidence(service, view: str, *, source_key: str, course_id: str,
                        pseudonyms: list[str] | None = None,
                        limit: int = 100) -> dict:
     """Read all pages from one pinned revision using bounded index requests."""
-    first = service.read(view, source_key=source_key, course_id=course_id,
+    first = _timed_submissions_index_read(service.read, view, source_key=source_key, course_id=course_id,
                          assignment_id=assignment_id, pseudonym=pseudonym,
                          pseudonyms=pseudonyms,
                          limit=limit, offset=0)
     records = list(first["records"])
     offset = first["next_offset"]
     while offset is not None:
-        page = service.read(view, source_key=source_key, course_id=course_id,
+        page = _timed_submissions_index_read(service.read, view, source_key=source_key, course_id=course_id,
                             assignment_id=assignment_id, limit=limit,
                             pseudonym=pseudonym, offset=offset,
                             pseudonyms=pseudonyms,
@@ -374,12 +425,21 @@ def final_response_gate(payload: dict) -> dict:
     this second chokepoint catches a new or changed wrapper that forgets that
     step. Public/course-only results pass through without requiring a vault.
     """
-    if not _contains_student_result(payload):
-        return payload
-    vault, error = _open_vault()
-    if error:
-        return {"ok": False, "error": error}
-    return pseudonym_boundary.gate(payload, vault)
+    started = time.perf_counter() if _SUBMISSIONS_TIMING.get() else None
+    outcome = "ok"
+    try:
+        if not _contains_student_result(payload):
+            return payload
+        vault, error = _timed_submissions_vault_open()
+        if error:
+            return {"ok": False, "error": error}
+        return pseudonym_boundary.gate(payload, vault)
+    except Exception:
+        outcome = "failed"
+        raise
+    finally:
+        if started is not None:
+            _emit_submissions_timing("outbound_gate", started, outcome)
 
 
 
@@ -838,8 +898,6 @@ def _open_vault():
             return None, "pseudonym_secret_missing: configure the shared key for this device in Settings"
         return None, "The private Identity Vault could not be opened safely. Review Local workspace & privacy in Canvas Expert."
     return vault, _vault_conflict_check(vault)
-
-
 def list_courses() -> dict:
     """All saved courses (Current + Previous). No Canvas call, no student
     data — no course gate, no safety gate."""
@@ -1677,7 +1735,7 @@ def get_assignment_evidence(course_id: str, assignment_id: str, view: str = "att
     return final_response_gate(payload)
 
 
-def get_submissions(course_id: str, assignment_id: str,
+def _get_submissions_impl(course_id: str, assignment_id: str,
                     include_text: bool = True, pseudonyms: str = "",
                     max_text_chars: int | None = None, history: bool = False,
                     offset: int | None = None, limit: int | None = None) -> dict:
@@ -1709,13 +1767,13 @@ def get_submissions(course_id: str, assignment_id: str,
             return refusal
         wanted = [value.strip() for value in str(pseudonyms or "").split(",") if value.strip()]
         try:
-            page = service.read("attempt_history", source_key=source_key,
+            page = _timed_submissions_index_read(service.read, "attempt_history", source_key=source_key,
                 course_id=str(course_id), assignment_id=str(assignment_id),
                 pseudonyms=wanted or None, limit=history_limit, offset=history_offset)
             if (page["membership"].get("state") in (None, "unknown")) and not page["records"]:
                 return {"ok": False, "code": "evidence_not_acquired",
                         "error": "No attempt history has been acquired for this assignment. Call refresh_mirror(course_id), then retry."}
-            attachment_page = service.read_attempt_attachments(
+            attachment_page = _timed_submissions_index_read(service.read_attempt_attachments,
                 source_key=source_key, course_id=str(course_id), assignment_id=str(assignment_id),
                 attempts=[(record["pseudonym"], record["attempt"])
                           for record in page["records"] if type(record["attempt"]) is int],
@@ -1769,7 +1827,7 @@ def get_submissions(course_id: str, assignment_id: str,
     if refusal:
         return refusal
     try:
-        assignment_page = service.read("assignment_context", source_key=source_key,
+        assignment_page = _timed_submissions_index_read(service.read, "assignment_context", source_key=source_key,
             course_id=str(course_id), assignment_id=str(assignment_id))
         assignment = assignment_page["records"][0]["payload"] if assignment_page["records"] else None
         page = _read_all_evidence(service, "current_submissions", source_key=source_key,
@@ -1812,6 +1870,36 @@ def get_submissions(course_id: str, assignment_id: str,
     except Exception:
         return {"ok": False, "code": "evidence_index_repair_required",
                 "error": "The local CanvasMirror evidence index needs repair."}
+
+
+def get_submissions(course_id: str, assignment_id: str,
+                    include_text: bool = True, pseudonyms: str = "",
+                    max_text_chars: int | None = None, history: bool = False,
+                    offset: int | None = None, limit: int | None = None) -> dict:
+    """Read submissions and history, recording privacy-safe local stage times."""
+    started = time.perf_counter()
+    token = _SUBMISSIONS_TIMING.set(True)
+    outcome = "ok"
+    try:
+        result = _get_submissions_impl(
+            course_id, assignment_id, include_text, pseudonyms, max_text_chars,
+            history, offset, limit,
+        )
+        if isinstance(result, dict) and result.get("ok") is False:
+            outcome = "refused"
+        return result
+    except Exception:
+        outcome = "failed"
+        raise
+    finally:
+        _SUBMISSIONS_TIMING.reset(token)
+        try:
+            operational_log.emit(
+                "mcp.get_submissions.total", outcome,
+                duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
+            )
+        except Exception:
+            pass
 
 
 # A student's writing history has no session lookback of its own to borrow, and

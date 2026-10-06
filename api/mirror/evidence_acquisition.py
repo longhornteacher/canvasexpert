@@ -23,8 +23,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
+import time
 
-from api import feedback_scrub
+from api import feedback_scrub, operational_log
 from api.mirror.evidence_publish import EvidencePublisher, PublicationRefused, _utc_now, _utc_stamp
 from api.mirror.evidence_schema import (
     EvidenceValidationError, SCOPE_KINDS, canonical_bytes, validate_component,
@@ -65,6 +66,19 @@ _STUDENT_BEARING_SCOPES = frozenset({
     "assignment.comments", "assignment.overrides", "assignment.attachments",
     "assignment.extractions", "assignment.notes",
 })
+
+
+def _log_section_publication(state: str, scope_code: str, count: int, started: float) -> None:
+    outcome = {"complete": "ok", "partial": "blocked", "failed": "failed"}[state]
+    try:
+        operational_log.emit(
+            "mirror.sections_publication", outcome,
+            count=max(0, count),
+            duration_ms=max(0, int((time.monotonic() - started) * 1000)),
+            scope=scope_code,
+        )
+    except Exception:
+        pass
 
 
 def _id(value):
@@ -474,6 +488,8 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
     attachment_members: dict[str, list[str]] = {}
     attachment_complete: dict[str, bool] = {}
     for scope in receipt.scopes:
+        section_publication = scope.scope == "course.sections"
+        section_started = time.monotonic() if section_publication else 0.0
         gaps, refs, members, current, student_payloads = [], [], [], {}, {}
         if registration_failed and scope.scope in _STUDENT_BEARING_SCOPES:
             all_gaps.append("identity_registration_failed")
@@ -482,6 +498,8 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
             gaps.append("identity_unresolved")
         if scope.scope not in SCOPE_KINDS:
             all_gaps.append("unsupported_scope")
+            if section_publication:
+                _log_section_publication("failed", "unsupported_scope", 0, section_started)
             continue
         try:
             sid = _id(scope.scope_id)
@@ -493,6 +511,8 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
                 raise PublicationRefused("invalid_completeness")
         except PublicationRefused as exc:
             all_gaps.append(exc.code)
+            if section_publication:
+                _log_section_publication("failed", "invalid_scope", 0, section_started)
             continue
         if scope.error_code:
             # Never echo arbitrary transport exception text/URLs.
@@ -563,12 +583,19 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
             digest = publisher.store.publish_commit(record)
         except (EvidenceValidationError, PublicationRefused, AttributeError, TypeError):
             all_gaps.extend(gaps + ["commit_refused"])
+            if section_publication:
+                _log_section_publication("failed", "commit_refused", len(members), section_started)
             continue
         commits.append(digest)
         heads[(publisher.source_key, publisher.course_id, scope.scope, sid)] = [digest]
         if proven:
             success.append((scope.scope, sid))
         all_gaps.extend(gaps)
+        if section_publication:
+            publication_state = "complete" if proven else "partial"
+            code = "complete" if proven else (
+                "pagination_incomplete" if not scope.complete else "safe_projection_incomplete")
+            _log_section_publication(publication_state, code, len(members), section_started)
     # Publish one attachment scope per assignment that observed attachments.
     for aid in sorted(attachment_refs):
         record = {
