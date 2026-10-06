@@ -286,12 +286,14 @@ def _safe_evidence_exists(source_key: str, root) -> bool:
         return False
 
 
-def _evidence_reader():
+def _evidence_reader(*, scoped_updates: list | None = None):
     """Resolve the local evidence reader without an activation checkpoint.
 
     Returns ``(service, source_key, None)`` on success or
     ``(None, None, refusal)`` where ``refusal`` is a ready-to-return dict.
     Writes nothing to disk; a read miss only requests local maintenance.
+    A caller that can serve healthy courses passes ``scoped_updates``: courses
+    needing a newer Canvas Expert are appended to it instead of refusing the read.
     """
     from api.mirror.evidence_paths import local_source_root, source_key_for_origin
     from api.mirror.evidence_queries import EvidenceQueryService
@@ -312,9 +314,11 @@ def _evidence_reader():
                             "error": "Configure your Canvas address in Canvas Expert Settings, then try again."}
     maintenance = mirror_service._read_maintenance_status(root, source_key)
     if maintenance.get("update_required_courses"):
-        return None, None, {"ok": False, "code": "evidence_update_required",
-                            "error": ("Some saved Canvas data was written by a newer Canvas Expert. "
-                                      "Update Canvas Expert on this computer.")}
+        if scoped_updates is None:
+            return None, None, {"ok": False, "code": "evidence_update_required",
+                                "error": ("Some saved Canvas data was written by a newer Canvas Expert. "
+                                          "Update Canvas Expert on this computer.")}
+        scoped_updates.extend(maintenance["update_required_courses"])
     path = local_source_root(source_key, root) / "query.sqlite3"
     if not path.exists():
         if _safe_evidence_exists(source_key, root):
@@ -2124,31 +2128,56 @@ def list_feedback_contracts() -> dict:
     return {"ok": True, "contracts": rows}
 
 
+def _emit_stage(event: str, started: float) -> None:
+    """Fixed-name stage timing; a logging failure never changes the result."""
+    try:
+        operational_log.emit(f"mcp.{event}", "ok", duration_ms=int((time.perf_counter() - started) * 1000))
+    except Exception:
+        pass
+
+
 def discover_scoring_work() -> dict:
     """Read every Current course locally and return a student-free grading digest."""
+    from api.mirror.evidence_index import IndexReadError
     from api.powergrader import session_store
 
     try:
         active_courses = config.active_courses()
         if not active_courses:
             return scoring_discovery.discover_scoring_work(
-                active_courses,
-                load_snapshot=_load_scoring_snapshot,
-                actionable_sessions=(),
-                tier_tags=config.get_tier_tags(),
-                registrations_by_course={},
-            )
-        sessions = session_store.current_actionable_sessions(
-            course_ids={str(course.get("id") or "") for course in active_courses}
-        )
+                active_courses, evidence={"revision": None, "courses": []})
+        course_ids = [str(course.get("id") or "") for course in active_courses]
+        updates: list[str] = []
+        stage = time.perf_counter()
+        service, source_key, refusal = _evidence_reader(scoped_updates=updates)
+        _emit_stage("discovery_reader", stage)
+        if refusal:
+            return refusal
+        try:
+            stage = time.perf_counter()
+            evidence = service.read_scoring_discovery(source_key=source_key, course_ids=course_ids)
+            _emit_stage("discovery_query", stage)
+        except IndexReadError:
+            mirror_service.request_index_maintenance("read_miss")
+            return {"ok": False, "code": "evidence_index_pending",
+                    "error": "Saved Canvas data is waiting for local indexing. It updates automatically.",
+                    "retry_after_seconds": 5}
+        try:
+            stage = time.perf_counter()
+            resume = session_store.discovery_session_summaries(course_ids=set(course_ids))
+            _emit_stage("discovery_resume", stage)
+            sessions, resume_incomplete = resume["summaries"], bool(resume.get("incomplete"))
+        except Exception:
+            sessions, resume_incomplete = (), True
         result = scoring_discovery.discover_scoring_work(
             active_courses,
-            load_snapshot=_load_scoring_snapshot,
+            evidence=evidence,
             actionable_sessions=sessions,
+            resume_incomplete=resume_incomplete,
+            course_errors={cid: "evidence_update_required" for cid in updates},
             tier_tags=config.get_tier_tags(),
             registrations_by_course={
-                str(course.get("id") or ""): config.list_sis_grade_bridges(str(course.get("id") or ""))
-                for course in active_courses
+                cid: config.list_sis_grade_bridges(cid) for cid in course_ids
             },
         )
     except Exception:

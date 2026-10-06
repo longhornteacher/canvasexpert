@@ -509,3 +509,385 @@ def test_attachment_status_republishes_gap_without_digest(tmp_path):
     fact = next(f for f in publisher.store.scan().facts.values() if f["kind"] == "attachment")
     assert fact["payload"]["status"] == "unavailable"
     assert fact["payload"]["original_digest"] is None
+
+
+# --- Frozen receipt identities and the receipt publication context -----------------
+
+class AssigningVault(SyntheticVault):
+    """Synthetic vault that registers any new id, like the real one, and records calls."""
+
+    WORDS = ["Pikachu", "Eevee", "Snorlax", "Mew", "Ditto", "Jigglypuff", "Psyduck", "Togepi"]
+
+    def __init__(self, provisional=()):
+        super().__init__()
+        self.people = {}
+        self.provisional = {str(item) for item in provisional}
+        self.assign_calls = []
+        self.saves = 0
+
+    def get_or_assign(self, raw, real_name="", sis_id=""):
+        raw = str(raw)
+        self.assign_calls.append(raw)
+        if raw not in self.people:
+            self.people[raw] = (self.WORDS[len(self.people)], real_name)
+        self.remember_identity(raw, real_name, sis_id)
+        return self.people[raw][0]
+
+    def require_stable(self, raw):
+        if str(raw) in self.provisional:
+            raise ValueError("pseudonym_provisional")
+
+    def entries(self):
+        rows = super().entries()
+        for row in rows:
+            if row["canvas_id"] in self.provisional:
+                row["provisional"] = True
+        return rows
+
+    def save(self):
+        self.saves += 1
+
+
+def _identity_receipt(*scopes):
+    return CourseAcquisitionReceipt("1", "2026-01-04T00:00:00Z", "2026-01-04T00:01:00Z",
+                                    tuple(scopes))
+
+
+def _snapshot_publisher(tmp_path, vault, receipt, *, source="a" * 64):
+    from api.mirror.evidence_acquisition import prepare_receipt_identities
+    snapshot = prepare_receipt_identities(vault=vault, receipt=receipt, source_key=source)
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key=source,
+                                  course_id="1", vault=snapshot)
+    return snapshot, publisher
+
+
+def _lock_vault(vault, monkeypatch):
+    """After the vault critical section, any vault use is a failure."""
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("vault used after the identity snapshot was frozen")
+    for name in ("get_or_assign", "require_stable", "entries", "all_real_identifiers",
+                 "remember_identity", "add_nicknames", "save"):
+        monkeypatch.setattr(vault, name, forbidden)
+
+
+def _rich_receipt():
+    return _identity_receipt(
+        ScopeReceipt("course.context", "1", ({"id": 1, "name": "ELA 7"},), True),
+        ScopeReceipt("course.roster", "1", (
+            {"id": "501", "name": "Zed Quill", "enrollments": [{"course_section_id": 500}]},
+            {"id": "502", "name": "Yara Moss"}), True),
+        ScopeReceipt("course.assignments", "1", ({"id": 10, "name": "Draft"},), True),
+        ScopeReceipt("course.sections", "1", ({"id": 500, "name": "Period 1"},), True),
+        ScopeReceipt("course.groups", "1", ({"id": 30, "name": "Blue", "group_category_id": 7,
+                     "group_category_name": "Teams", "user_ids": ["501", {"id": "503"}]},), True),
+        ScopeReceipt("assignment.submissions", "10", ({
+            "user_id": "504", "assignment_id": 10, "attempt": 2, "body": "Zed Quill wrote this.",
+            "submitted_at": "2026-01-02T00:00:00Z",
+            "attachments": [{"id": 9001, "filename": "essay.docx", "size": 5}],
+            "submission_history": [{"attempt": 1, "submitted_at": "2026-01-01T00:00:00Z",
+                                    "attachments": [{"id": 9002, "filename": "old.docx", "size": 5}]}]},
+            {"user_id": "501", "assignment_id": 10, "attempt": 1,
+             "submitted_at": "2026-01-01T00:00:00Z", "body": "Yara Moss"}), True),
+        ScopeReceipt("assignment.comments", "10", (
+            {"id": 80, "assignment_id": 10, "user_id": "501", "author_id": "999000", "author_role": "teacher",
+             "comment": "Staff note"},
+            {"id": 81, "assignment_id": 10, "user_id": "501", "author_id": "505", "comment": "Peer"},
+        ), True),
+        ScopeReceipt("assignment.overrides", "10", ({"id": 90, "assignment_id": 10,
+                     "student_ids": ["506", "501"], "section_id": 500, "group_id": 30},), True),
+    )
+
+
+def test_snapshot_resolves_every_used_identity_and_no_navigation_or_staff_ids():
+    from api.mirror.evidence_acquisition import prepare_receipt_identities
+    vault = AssigningVault()
+    snapshot = prepare_receipt_identities(vault=vault, receipt=_rich_receipt(), source_key="a" * 64)
+    # roster, group members, submission owners, comment recipient/non-staff author, override students
+    assert set(vault.people) == {"501", "502", "503", "504", "505", "506"}
+    for raw in ("501", "502", "503", "504", "505", "506"):
+        assert snapshot.pseudonym_for(raw) == vault.people[raw][0]
+    for navigation_or_staff in ("1", "10", "30", "500", "9001", "9002", "90", "999000", "80"):
+        assert navigation_or_staff not in vault.people
+        with pytest.raises(PublicationRefused, match="identity_unresolved"):
+            snapshot.pseudonym_for(navigation_or_staff)
+    assert vault.saves >= 1 and snapshot.unresolved_scopes == ()
+    assert snapshot.registration_failed is False and snapshot.roster_unresolved is False
+
+
+def test_snapshot_registers_exactly_the_identities_legacy_publication_would(tmp_path):
+    from api.mirror.evidence_acquisition import prepare_receipt_identities
+    legacy_vault, frozen_vault = AssigningVault(), AssigningVault()
+    publish_course_receipt(
+        publisher=EvidencePublisher(workspace_root=tmp_path / "legacy", source_key="a" * 64,
+                                    course_id="1", vault=legacy_vault),
+        receipt=_rich_receipt(), writer_key="writer-a", run_id="run-a")
+    prepare_receipt_identities(vault=frozen_vault, receipt=_rich_receipt(), source_key="a" * 64)
+    assert set(frozen_vault.people) == set(legacy_vault.people)
+    assert {raw: pseudo for raw, (pseudo, _) in frozen_vault.people.items()} == {
+        raw: pseudo for raw, (pseudo, _) in legacy_vault.people.items()}
+
+
+def test_snapshot_publication_matches_legacy_bytes_and_never_touches_the_vault(tmp_path, monkeypatch):
+    legacy_vault, frozen_vault = AssigningVault(), AssigningVault()
+    legacy = EvidencePublisher(workspace_root=tmp_path / "legacy", source_key="a" * 64,
+                               course_id="1", vault=legacy_vault)
+    legacy_result = publish_course_receipt(publisher=legacy, receipt=_rich_receipt(),
+                                           writer_key="writer-a", run_id="run-a")
+    snapshot, publisher = _snapshot_publisher(tmp_path / "frozen", frozen_vault, _rich_receipt())
+    _lock_vault(frozen_vault, monkeypatch)
+    result = publish_course_receipt(publisher=publisher, receipt=_rich_receipt(),
+                                    writer_key="writer-a", run_id="run-a")
+    assert result.gaps == legacy_result.gaps
+    assert result.successful_scopes == legacy_result.successful_scopes
+    assert result.fact_refs == legacy_result.fact_refs
+    assert result.stats["scans"] == 1
+    safe = b"".join(p.read_bytes() for p in (tmp_path / "frozen").rglob("*.json"))
+    for forbidden in (b"Zed Quill", b"Yara Moss", b"501", b"502", b"504", b"essay.docx"):
+        assert forbidden not in safe
+
+
+def test_first_acquisition_registers_names_before_scrubbing_prose(tmp_path):
+    vault = AssigningVault()
+    receipt = _identity_receipt(
+        ScopeReceipt("course.roster", "1", ({"id": "501", "name": "Zed Quill",
+                     "sis_user_id": "sis-hidden-77"},), True),
+        ScopeReceipt("assignment.submissions", "10", ({"user_id": "501", "assignment_id": 10,
+                     "attempt": 1, "submitted_at": "2026-01-01T00:00:00Z",
+                     "body": "Zed Quill sis-hidden-77"},), True))
+    snapshot, publisher = _snapshot_publisher(tmp_path, vault, receipt)
+    result = publish_course_receipt(publisher=publisher, receipt=receipt,
+                                    writer_key="writer-a", run_id="run-a")
+    assert result.gaps == () and len(result.successful_scopes) == 2
+    body = next(f["payload"]["body"] for f in publisher.store.scan().facts.values()
+                if f["kind"] == "submission")
+    assert "Zed" not in body and "Quill" not in body and "sis-hidden-77" not in body
+
+
+def test_snapshot_lookup_never_assigns_saves_or_falls_back_to_an_identifier():
+    from api.mirror.evidence_acquisition import prepare_receipt_identities
+    vault = AssigningVault()
+    snapshot = prepare_receipt_identities(
+        vault=vault, source_key="a" * 64,
+        receipt=_identity_receipt(ScopeReceipt("course.roster", "1", ({"id": "501", "name": "Zed Quill"},), True)))
+    calls, saves, people = list(vault.assign_calls), vault.saves, dict(vault.people)
+    for unknown in ("777", 777, None, ""):
+        for lookup in (snapshot.get_or_assign, snapshot.require_stable, snapshot.pseudonym_for):
+            with pytest.raises(PublicationRefused, match="identity_unresolved"):
+                lookup(unknown)
+    assert snapshot.get_or_assign("501", "Another Name", "sis") == snapshot.pseudonym_for(501)
+    assert (vault.assign_calls, vault.saves, vault.people) == (calls, saves, people)
+
+
+def test_snapshot_is_immutable_private_and_copies_its_entries():
+    import dataclasses
+    from api.mirror.evidence_acquisition import prepare_receipt_identities
+    vault = AssigningVault()
+    snapshot = prepare_receipt_identities(
+        vault=vault, source_key="a" * 64,
+        receipt=_identity_receipt(ScopeReceipt("course.roster", "1", ({"id": "501", "name": "Zed Quill"},), True)))
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        snapshot.registration_failed = True
+    with pytest.raises(TypeError):
+        snapshot._pseudonyms["501"] = "Mallory"
+    entries = snapshot.entries()
+    entries[0]["real_name"] = "Changed"
+    assert snapshot.entries()[0]["real_name"] == "Zed Quill"
+    vault.people["501"] = (vault.people["501"][0], "Renamed Later")
+    assert snapshot.entries()[0]["real_name"] == "Zed Quill"  # frozen at preparation
+    assert "Zed" not in repr(snapshot) and "501" not in repr(snapshot)
+
+
+def test_unresolved_and_provisional_identities_fail_only_their_scopes(tmp_path):
+    vault = AssigningVault(provisional={"502"})
+    receipt = _identity_receipt(
+        ScopeReceipt("course.roster", "1", ({"id": "501", "name": "Zed Quill"},
+                                            {"id": "502", "name": "Yara Moss"}), True),
+        ScopeReceipt("assignment.submissions", "10", ({"user_id": "501", "assignment_id": 10, "attempt": 1,
+                     "submitted_at": "2026-01-01T00:00:00Z", "body": "Fine"},), True),
+        ScopeReceipt("assignment.submissions", "11", ({"user_id": "502", "assignment_id": 11, "attempt": 1,
+                     "submitted_at": "2026-01-01T00:00:00Z", "body": "Provisional owner"},), True),
+        ScopeReceipt("assignment.overrides", "10", ({"id": 90, "assignment_id": 10,
+                     "student_ids": ["501", "502"]},), True))
+    snapshot, publisher = _snapshot_publisher(tmp_path, vault, receipt)
+    assert snapshot.roster_unresolved is True
+    assert set(snapshot.unresolved_scopes) == {
+        ("course.roster", "1"), ("assignment.submissions", "11"), ("assignment.overrides", "10")}
+    with pytest.raises(PublicationRefused):
+        snapshot.pseudonym_for("502")
+    result = publish_course_receipt(publisher=publisher, receipt=receipt,
+                                    writer_key="writer-a", run_id="run-a")
+    assert "identity_unresolved" in result.gaps
+    assert ("assignment.submissions", "10") in result.successful_scopes
+    assert not {("course.roster", "1"), ("assignment.submissions", "11"),
+                ("assignment.overrides", "10")} & set(result.successful_scopes)
+    safe = b"".join(p.read_bytes() for p in (tmp_path / "CanvasMirror").rglob("*.json"))
+    assert b"Provisional owner" not in safe and b"Yara" not in safe and b"502" not in safe
+
+
+def test_registration_failure_is_frozen_and_student_scopes_never_publish(tmp_path, monkeypatch):
+    from api import roster_service
+    vault = AssigningVault()
+
+    def fail(vault_, rows):
+        raise RuntimeError("registration failure")
+    monkeypatch.setattr(roster_service, "upsert_roster", fail)
+    receipt = _identity_receipt(
+        ScopeReceipt("course.context", "1", ({"id": 1, "name": "Current"},), True),
+        ScopeReceipt("course.roster", "1", ({"id": "501", "name": "Zed Quill"},), True),
+        ScopeReceipt("assignment.submissions", "10", ({"user_id": "501", "assignment_id": 10, "attempt": 1,
+                     "submitted_at": "2026-01-01T00:00:00Z", "body": "Must not publish"},), True))
+    snapshot, publisher = _snapshot_publisher(tmp_path, vault, receipt)
+    assert snapshot.registration_failed is True and vault.assign_calls == [] and vault.saves == 0
+    result = publish_course_receipt(publisher=publisher, receipt=receipt,
+                                    writer_key="writer-a", run_id="run-a")
+    assert "identity_registration_failed" in result.gaps
+    assert result.successful_scopes == (("course.context", "1"),)
+    safe = b"".join(p.read_bytes() for p in (tmp_path / "CanvasMirror").rglob("*.json"))
+    assert b"Must not publish" not in safe
+
+
+def test_unpublishable_scopes_do_not_register_identities():
+    from api.mirror.evidence_acquisition import prepare_receipt_identities
+    vault = AssigningVault()
+    row = {"user_id": "777", "assignment_id": 10, "attempt": 1, "body": "x"}
+    prepare_receipt_identities(vault=vault, source_key="a" * 64, receipt=_identity_receipt(
+        ScopeReceipt("course.quizzes", "1", (row,), True),
+        ScopeReceipt("assignment.submissions", "10", (row,), True, mode="bogus"),
+        ScopeReceipt("assignment.submissions", "abc", (row,), True),
+        ScopeReceipt("assignment.submissions", "10", ({**row, "user_id": "778", "assignment_id": 99},), True),
+        ScopeReceipt("assignment.submissions", "10", (row,), "yes")))
+    assert vault.people == {} and vault.assign_calls == []
+
+
+def test_snapshot_for_another_source_or_course_is_refused_before_publication(tmp_path):
+    from api.mirror.evidence_acquisition import prepare_receipt_identities
+    receipt = _identity_receipt(ScopeReceipt("course.context", "1", ({"id": 1, "name": "Current"},), True))
+    snapshot = prepare_receipt_identities(vault=AssigningVault(), receipt=receipt, source_key="b" * 64)
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key="a" * 64, course_id="1", vault=snapshot)
+    with pytest.raises(PublicationRefused, match="identity_snapshot_mismatch"):
+        publish_course_receipt(publisher=publisher, receipt=receipt, writer_key="writer-a", run_id="run-a")
+    assert not list(tmp_path.rglob("*.json"))
+
+
+def test_preparation_does_no_course_scan_or_file_publication(tmp_path, monkeypatch):
+    from api.mirror.evidence_acquisition import prepare_receipt_identities
+    from api.mirror.evidence_store import EvidenceStore
+    scans = []
+    monkeypatch.setattr(EvidenceStore, "scan", lambda self: scans.append(1))
+    prepare_receipt_identities(vault=AssigningVault(), receipt=_rich_receipt(), source_key="a" * 64)
+    assert scans == [] and not list(tmp_path.rglob("*"))
+
+
+def test_same_scope_sequential_commits_in_one_receipt_chain_without_extra_scans(tmp_path, monkeypatch):
+    from api.mirror.evidence_store import EvidenceStore
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key="a" * 64, course_id="1",
+                                  vault=SyntheticVault())
+    first, second = submission(attempt=1, body="First"), submission(attempt=2, body="Second",
+                                                                    submitted_at="2026-01-02T00:00:00Z")
+    scans = []
+    real = EvidenceStore.scan
+    monkeypatch.setattr(EvidenceStore, "scan", lambda self: scans.append(1) or real(self))
+    _, result = publish(tmp_path, [
+        ScopeReceipt("assignment.submissions", "10", (first,), True),
+        ScopeReceipt("assignment.submissions", "10", (second,), True, mode="delta")],
+        publisher=publisher)
+    assert len(scans) == 1 and len(result.commit_refs) == 2
+    commits = real(publisher.store).commits
+    assert commits[result.commit_refs[1]]["parents"] == [result.commit_refs[0]]
+    assert real(publisher.store).scopes[("a" * 64, "1", "assignment.submissions", "10")].heads == (result.commit_refs[1],)
+
+
+def test_repeated_receipt_chains_onto_the_previous_heads(tmp_path):
+    scopes = [ScopeReceipt("assignment.submissions", "10", (submission(),), True),
+              ScopeReceipt("assignment.submissions", "11", (submission(assignment_id="11"),), True)]
+    publisher, first = publish(tmp_path, scopes)
+    _, second = publish(tmp_path, scopes, publisher=publisher, run="run-b")
+    commits = publisher.store.scan().commits
+    for old, new in zip(first.commit_refs, second.commit_refs):
+        assert commits[new]["parents"] == [old]
+    assert first.fact_refs == second.fact_refs
+    for sid in ("10", "11"):
+        current = state(publisher, sid=sid)
+        assert current.status == "ready" and len(current.heads) == 1
+
+
+def test_failed_commit_keeps_facts_and_safe_siblings_and_does_not_advance_its_watermark(tmp_path, monkeypatch):
+    real = EvidencePublisher.verify_safe
+
+    def refuse_commit_for_scope_11(self, record):
+        if record.get("scope_id") == "11" and "record_refs" in record:
+            raise PublicationRefused("privacy_refused")
+        return real(self, record)
+    monkeypatch.setattr(EvidencePublisher, "verify_safe", refuse_commit_for_scope_11)
+    marks = {"submitted_since": "2026-01-03T00:00:00Z"}
+    publisher, result = publish(tmp_path, [
+        ScopeReceipt("assignment.submissions", sid, (submission(assignment_id=sid),), True, watermarks=marks)
+        for sid in ("10", "11", "12")])
+    assert result.successful_scopes == (("assignment.submissions", "10"), ("assignment.submissions", "12"))
+    assert "commit_refused" in result.gaps
+    scopes = publisher.store.scan().scopes
+    assert ("a" * 64, "1", "assignment.submissions", "11") not in scopes
+    assert scopes[("a" * 64, "1", "assignment.submissions", "12")].membership_complete
+    assert len(result.fact_refs) == 3 * 2  # facts were published before the refused commit
+
+
+def test_corrupt_retained_file_is_reported_once_and_does_not_block_publication(tmp_path):
+    publisher, _ = publish(tmp_path, [ScopeReceipt("assignment.submissions", "10", (submission(),), True)])
+    victim = next(publisher.store.course_root.rglob("objects/*/*.json"))
+    victim.write_bytes(b"corrupt")
+    _, result = publish(tmp_path, [ScopeReceipt("assignment.submissions", "11",
+                                                (submission(assignment_id="11"),), True)],
+                        publisher=publisher, run="run-b")
+    assert ("assignment.submissions", "11") in result.successful_scopes
+    assert result.stats["scans"] == 1 and result.stats["base_issues"] >= 1
+
+
+def test_interrupted_receipt_leaves_published_work_and_a_rerun_converges(tmp_path, monkeypatch):
+    from api.mirror.evidence_store import EvidenceStore
+    scopes = [ScopeReceipt("assignment.submissions", sid, (submission(assignment_id=sid),), True)
+              for sid in ("10", "11", "12")]
+    real = EvidenceStore._publish_sized
+    seen = []
+
+    def interrupt_third_commit(self, namespace, checked):
+        if namespace == "commits":
+            seen.append(1)
+            if len(seen) == 3:
+                raise OSError("interrupted")
+        return real(self, namespace, checked)
+    monkeypatch.setattr(EvidenceStore, "_publish_sized", interrupt_third_commit)
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key="a" * 64, course_id="1",
+                                  vault=SyntheticVault())
+    with pytest.raises(OSError):
+        publish(tmp_path, scopes, publisher=publisher)
+    monkeypatch.undo()
+    assert len(publisher.store.scan().commits) == 2
+    _, result = publish(tmp_path, scopes, publisher=publisher, run="run-b")
+    assert len(result.successful_scopes) == 3
+    for sid in ("10", "11", "12"):
+        assert state(publisher, sid=sid).status == "ready"
+
+
+def test_attachment_status_and_capture_publish_with_one_scan_and_chain_parents(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from api.mirror.evidence_acquisition import publish_captured_attachment
+    from api.mirror.evidence_store import EvidenceStore
+    publisher = EvidencePublisher(workspace_root=tmp_path, source_key="a" * 64, course_id="1",
+                                  vault=SyntheticVault())
+    jobs = [SimpleNamespace(assignment_id="10", pseudonym="Pikachu", attempt=1,
+                            attachment_key=char * 64, media_type="application/pdf", size=12)
+            for char in "ef"]
+    scans = []
+    real = EvidenceStore.scan
+    monkeypatch.setattr(EvidenceStore, "scan", lambda self: scans.append(1) or real(self))
+    first = publish_attachment_status(publisher=publisher, job=jobs[0], status="unavailable",
+                                      writer_key="writer-a", run_id="run-a")
+    assert len(scans) == 1
+    second = publish_captured_attachment(publisher=publisher, job=jobs[1], digest="a" * 64,
+                                         writer_key="writer-a", run_id="run-b")
+    assert len(scans) == 2  # one validated scan per standalone publication
+    monkeypatch.undo()
+    snapshot = publisher.store.scan()
+    assert snapshot.commits[second]["parents"] == [first]
+    current = snapshot.scopes[("a" * 64, "1", "assignment.attachments", "10")]
+    assert current.status == "ready" and current.heads == (second,) and len(current.member_keys) == 2

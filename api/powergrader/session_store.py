@@ -589,6 +589,88 @@ def current_actionable_sessions(*, course_ids=None) -> list[dict]:
     return summaries
 
 
+def discovery_session_summaries(*, course_ids=None) -> dict:
+    """Advisory, side-effect-free resume lookup for scoring discovery.
+
+    Returns the same identity-free rows as ``current_actionable_sessions`` plus
+    an explicit statement of what the lookup could not establish::
+
+        {"summaries": [row, ...],
+         "incomplete": bool,
+         "attention": [{"code", "course_id", "assignment_id", "count"}],
+         "notices":   [{"code", "course_id", "assignment_id", "count"}]}
+
+    It never loads a packet or SAFE bundle, never touches a lease, and never
+    writes (see ``SharedWorkStore.read_item_summaries``). A scope with any
+    unreadable or possibly newer record is reported in ``attention`` and has
+    no summary: an older actionable record is never substituted for it.
+    ``attention`` rows with ``course_id`` and ``assignment_id`` of ``None``
+    could not be attributed to a scope, so every scope is then uncertain
+    (``incomplete`` is true). ``notices`` are informational. ``course_ids=None``
+    means every course; an empty collection means none. A relevant shared-store
+    conflict still raises ``SharedStoreConflictError``.
+    """
+    try:
+        store = SharedWorkStore()
+    except WorkItemError:
+        return {"summaries": [], "incomplete": True, "notices": [],
+                "attention": [{"code": "workspace_unavailable", "course_id": None,
+                               "assignment_id": None, "count": 1}]}
+    allowed = None if course_ids is None else {str(c or "") for c in course_ids}
+    read = store.read_item_summaries(kind="scoring_session", course_ids=allowed,
+                                     project=_discovery_projection)
+    attention: dict[tuple, int] = {}
+    notices: dict[tuple, int] = {}
+    blocked: set[tuple[str, str]] = set()
+    scopes: dict[tuple[str, str], list[dict]] = {}
+    for code in read["unclassified"]:
+        key = (code, None, None)
+        attention[key] = attention.get(key, 0) + 1
+    for item in read["items"]:
+        scope = (item["course_id"], item["assignment_id"])
+        for code in item["attention"]:
+            # A manifest without a course cannot be attributed to a scope.
+            key = (code, *scope) if scope[0] else (code, None, None)
+            attention[key] = attention.get(key, 0) + 1
+            if scope[0]:
+                blocked.add(scope)
+        for code in item["notices"]:
+            key = (code, *scope)
+            notices[key] = notices.get(key, 0) + 1
+        summary = item["state"]
+        if not summary or summary.get("session_kind") != SCORING_ASSIGNMENT_KIND:
+            continue
+        course_id = str(summary.get("course_id") or "")
+        if allowed is not None and course_id not in allowed:
+            continue
+        summary["work_item"] = item["work_item"]
+        scopes.setdefault((course_id, str(summary.get("assignment_id") or "")),
+                          []).append(summary)
+    summaries = []
+    for scope, records in scopes.items():
+        if scope in blocked:
+            continue
+        current = _current_summary(records)
+        if current and str(current.get("status") or "") in ACTIONABLE_STATUSES:
+            summaries.append({key: value for key, value in current.items()
+                              if key != "scope_generation"})
+    summaries.sort(key=lambda row: str(row.get("created") or ""), reverse=True)
+
+    def rows(counter):
+        return [{"code": code, "course_id": course, "assignment_id": assignment,
+                 "count": count}
+                for (code, course, assignment), count in sorted(
+                    counter.items(), key=lambda kv: tuple(str(v) for v in kv[0]))]
+
+    return {"summaries": summaries, "incomplete": bool(attention),
+            "attention": rows(attention), "notices": rows(notices)}
+
+
+def _discovery_projection(state: dict) -> dict:
+    """Allowlisted summary of one validated session state (never the state)."""
+    return _summary(state)
+
+
 def _summary(session: dict) -> dict:
     students = session.get("students", [])
     return {

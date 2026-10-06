@@ -279,3 +279,46 @@ def test_prepare_work_does_not_create_control_store(evidence_service_workspace, 
     path = control_store_path(env["source"], env["root"])
     service.prepare_evidence_work(course_id="1")
     assert not path.exists()
+
+
+def test_publish_acquisition_holds_vault_only_for_identity_resolution(evidence_service_workspace, monkeypatch):
+    """Law: scan, file publication and queue work run with the vault unlocked."""
+    from api.mirror import evidence_acquisition, evidence_jobs
+    from api.mirror.evidence_store import EvidenceStore
+    env = evidence_service_workspace
+    seen = {}
+    real_prepare = evidence_acquisition.prepare_receipt_identities
+    real_begin = EvidenceStore.begin_publication
+    real_publish_fact = EvidenceStore.publish_fact
+    real_enqueue = evidence_jobs.enqueue_from_receipt
+    order = []
+
+    def prepare(**kwargs):
+        seen["prepare_locked"] = env["locked"][0]
+        order.append("prepare")
+        return real_prepare(**kwargs)
+
+    def begin(self):
+        seen["scan_locked"] = env["locked"][0]
+        order.append("scan")
+        return real_begin(self)
+
+    def publish_fact(self, *args, **kwargs):
+        seen.setdefault("publish_locked", []).append(env["locked"][0])
+        return real_publish_fact(self, *args, **kwargs)
+
+    def enqueue(*args, **kwargs):
+        seen["queue_locked"] = env["locked"][0]
+        order.append("queue")
+        return real_enqueue(*args, **kwargs)
+
+    monkeypatch.setattr(evidence_acquisition, "prepare_receipt_identities", prepare)
+    monkeypatch.setattr(EvidenceStore, "begin_publication", begin)
+    monkeypatch.setattr(EvidenceStore, "publish_fact", publish_fact)
+    monkeypatch.setattr(evidence_jobs, "enqueue_from_receipt", enqueue)
+    result = service._publish_acquisition(course_receipt_sample())
+    assert seen["prepare_locked"] is True           # identities resolved under the vault
+    assert seen["scan_locked"] is False and seen["queue_locked"] is False
+    assert seen["publish_locked"] and not any(seen["publish_locked"])
+    assert order[:2] == ["prepare", "scan"] and order[-1] == "queue"
+    assert result is not None

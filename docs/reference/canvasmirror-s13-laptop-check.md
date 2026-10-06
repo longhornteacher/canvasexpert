@@ -1,8 +1,9 @@
 # S13 second-computer field check — CanvasMirror read portability
 
-Run this on the **second computer**, in its CanvasExpert checkout. This is the remaining
-field check for `docs/handoffs/canvasmirror-functional-read-path.md`. Give this
-file to that computer's Codex agent as its direct task. The check is read-only with
+Status: historical checklist; bounded result recorded in
+`s13-laptop-field-results.md`. Do not dispatch this as a current task. The new
+`docs/handoffs/canvasmirror-performance-discovery.md` carries remaining checks
+into its D06 slice. The following records the former check, read-only with
 respect to Canvas: local index maintenance is expected, but do not perform Canvas
 writes, operation retries, a reset, or an explicit Canvas refresh before the
 first cross-device read. Do not edit repository files as part of this check.

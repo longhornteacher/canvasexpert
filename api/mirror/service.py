@@ -392,8 +392,11 @@ def index_maintenance_worker(stop_event, *, wait=None) -> None:
         with _INDEX_REQUEST_LOCK:
             _maintenance_requested = False
             _index_wake.clear()
+        started = time.perf_counter()
         try:
             run_index_maintenance()
+            operational_log.emit("mirror.index_maintenance", "ok",
+                                 duration_ms=int((time.perf_counter() - started) * 1000))
         except Exception as exc:
             operational_log.emit("mirror.evidence_index_worker", "failed", error_class=type(exc))
 
@@ -408,6 +411,7 @@ def attachment_work_worker(stop_event, *, wait=None) -> None:
     while not stop_event.is_set():
         _work_wake.clear()
         progressed = False
+        chunk_started = time.perf_counter()
         try:
             if config.token_is_set() and config.mirror_enabled():
                 owner = acquisition_owner_status()
@@ -419,6 +423,9 @@ def attachment_work_worker(stop_event, *, wait=None) -> None:
                 progressed = progressed or bool(result.get("published"))
         except Exception as exc:
             operational_log.emit("mirror.evidence_work", "failed", error_class=type(exc))
+        operational_log.emit("mirror.evidence_work_chunk", "ok",
+                             duration_ms=int((time.perf_counter() - chunk_started) * 1000),
+                             count=1 if progressed else 0)
         if stop_event.is_set():
             break
         wait(ATTACHMENT_CHUNK_PAUSE_SECONDS if progressed else ATTACHMENT_IDLE_SECONDS)
@@ -427,6 +434,8 @@ def attachment_work_worker(stop_event, *, wait=None) -> None:
 @dataclass(frozen=True)
 class _VaultSnapshot:
     """Read-only privacy verification data, copied under a short vault lock."""
+    frozen_verification = True  # lets the verifier compile its matcher once
+
     def __init__(self, vault):
         from copy import deepcopy
         object.__setattr__(self, "_entries", deepcopy(vault.entries()))
@@ -707,28 +716,47 @@ def acquisition_owner_worker(stop_event):
 def _publish_acquisition(receipt):
     """Publish the same private rows acquired for temporary legacy projections."""
     from api import local_runtime
-    from api.mirror.evidence_acquisition import publish_course_receipt
+    from api.mirror.evidence_acquisition import prepare_receipt_identities, publish_course_receipt
     from api.mirror.evidence_jobs import AttachmentJobStore, enqueue_from_receipt
     from api.mirror.evidence_paths import control_store_path, source_key_for_origin
     from api.mirror.evidence_publish import EvidencePublisher
     root = workspace.workspace_root()
     if root is None:
         raise ValueError("workspace_unconfigured")
+    started = time.perf_counter()
     writer = hashlib.sha256(local_runtime.machine_id().encode("utf-8")).hexdigest()[:32]
     source_key = source_key_for_origin(config.get_canvas_base())
+    # The vault is held only to register and resolve this receipt's identities;
+    # the frozen snapshot then serves the course scan, file publication and
+    # queue work outside the lock.
+    locked = time.perf_counter()
     with store._vault_transaction(root) as vault:
-        publisher = EvidencePublisher(workspace_root=root,
-            source_key=source_key, course_id=receipt.course_id, vault=vault)
-        result = publish_course_receipt(publisher=publisher, receipt=receipt,
-                                        writer_key=writer, run_id=uuid.uuid4().hex)
-        # Queue durable attachment capture from the same receipt; the private
-        # job store is machine-local and never a synchronized authority.
+        snapshot = prepare_receipt_identities(vault=vault, receipt=receipt, source_key=source_key)
+    operational_log.emit("mirror.publication_identity_lock", "ok",
+                         duration_ms=int((time.perf_counter() - locked) * 1000))
+    publisher = EvidencePublisher(workspace_root=root, source_key=source_key,
+                                  course_id=receipt.course_id, vault=snapshot)
+    result = publish_course_receipt(publisher=publisher, receipt=receipt,
+                                    writer_key=writer, run_id=uuid.uuid4().hex)
+    stats = getattr(result, "stats", None) or {}
+    operational_log.emit("mirror.publication_scan", "ok",
+                         duration_ms=int(float(stats.get("scan_seconds", 0)) * 1000),
+                         count=int(stats.get("scans", 0)))
+
+    def _pseudonym(raw):
         try:
-            jobs = AttachmentJobStore(control_store_path(source_key, root))
-            enqueue_from_receipt(jobs, receipt, source_key=source_key,
-                                 pseudonym_for=lambda raw: vault.get_or_assign(str(raw)))
+            return snapshot.get_or_assign(str(raw))
         except Exception:
-            operational_log.emit("mirror.attachment_enqueue", "failed")
+            return None  # an identity missed by preparation is skipped, never assigned
+    # Queue durable attachment capture from the same receipt; the private
+    # job store is machine-local and never a synchronized authority.
+    try:
+        jobs = AttachmentJobStore(control_store_path(source_key, root))
+        enqueue_from_receipt(jobs, receipt, source_key=source_key, pseudonym_for=_pseudonym)
+    except Exception:
+        operational_log.emit("mirror.attachment_enqueue", "failed")
+    operational_log.emit("mirror.publication", "ok",
+                         duration_ms=int((time.perf_counter() - started) * 1000))
     request_index_maintenance("publication")
     wake_evidence_workers()
     return result

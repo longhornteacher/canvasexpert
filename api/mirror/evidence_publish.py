@@ -6,10 +6,13 @@ unprocessed student value into the synchronized evidence root.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 from html import unescape
+from types import MappingProxyType
+from typing import Mapping
 from html.parser import HTMLParser
 import re
 from pathlib import Path
@@ -88,6 +91,81 @@ class PublicationRefused(ValueError):
         super().__init__(code)
 
 
+class IdentityNotFrozen(PublicationRefused):
+    """A lookup missed the frozen receipt identities; fail the scope, never assign."""
+
+    def __init__(self):
+        super().__init__("identity_unresolved")
+
+
+@dataclass(frozen=True, eq=False)
+class IdentitySnapshot:
+    """Private, immutable identity state for exactly one publication receipt.
+
+    Built by ``prepare_receipt_identities`` under the vault transaction. It
+    offers the vault surface the publisher needs (``entries``,
+    ``all_real_identifiers``, ``get_or_assign``, ``require_stable``) but is
+    lookup-only: it never assigns a pseudonym, saves a vault, or falls back to
+    an identifier. A raw id that was not resolved and stable when frozen raises
+    ``IdentityNotFrozen`` (code ``identity_unresolved``), which publication turns
+    into an incomplete scope. Never reuse across receipts, sources or courses.
+    Contains real names and ids: it must stay in process memory.
+    """
+    frozen_verification = True  # lets the verifier compile its matcher once
+    source_key: str = field(repr=False)
+    course_id: str = field(repr=False)
+    registration_failed: bool = False
+    roster_unresolved: bool = False
+    unresolved_scopes: tuple = field(default=(), repr=False)
+    _pseudonyms: Mapping = field(default_factory=lambda: MappingProxyType({}), repr=False)
+    _entries: tuple = field(default=(), repr=False)
+    _names: frozenset = field(default=frozenset(), repr=False)
+    _identifiers: frozenset = field(default=frozenset(), repr=False)
+    _stable: frozenset = field(default=frozenset(), repr=False)
+
+    @classmethod
+    def freeze(cls, vault, *, source_key: str, course_id: str, pseudonyms: dict,
+               unresolved_scopes=(), registration_failed: bool = False,
+               roster_unresolved: bool = False) -> "IdentitySnapshot":
+        """Copy the vault's privacy data once, under the caller's vault lock."""
+        entries = deepcopy(vault.entries())
+        names, identifiers = vault.all_real_identifiers()
+        stable = frozenset(str(entry.get("pseudonym")) for entry in entries
+                           if entry.get("pseudonym") and not entry.get("provisional"))
+        return cls(source_key=str(source_key), course_id=str(course_id),
+                   registration_failed=registration_failed,
+                   roster_unresolved=roster_unresolved,
+                   unresolved_scopes=tuple(sorted(set(unresolved_scopes))),
+                   _pseudonyms=MappingProxyType({str(k): str(v) for k, v in pseudonyms.items()}),
+                   _entries=tuple(entries), _names=frozenset(names),
+                   _identifiers=frozenset(identifiers), _stable=stable)
+
+    def pseudonym_for(self, raw_user_id) -> str:
+        """Stable frozen pseudonym, else ``IdentityNotFrozen``; never assigns."""
+        if raw_user_id in (None, ""):
+            raise IdentityNotFrozen()
+        pseudonym = self._pseudonyms.get(str(raw_user_id))
+        if not pseudonym:
+            raise IdentityNotFrozen()
+        return pseudonym
+
+    def get_or_assign(self, canvas_id, real_name="", sis_id="") -> str:
+        return self.pseudonym_for(canvas_id)
+
+    def require_stable(self, canvas_id) -> None:
+        self.pseudonym_for(canvas_id)
+
+    def entries(self):
+        return deepcopy(list(self._entries))
+
+    def all_real_identifiers(self):
+        return set(self._names), set(self._identifiers)
+
+    @property
+    def stable_pseudonyms(self) -> frozenset:
+        return self._stable
+
+
 @dataclass(frozen=True)
 class TextPublication:
     fact_refs: tuple[str, ...]
@@ -159,6 +237,39 @@ class EvidencePublisher:
                     for item in value]
         return value
 
+    def _privacy_context(self):
+        """Stable pseudonyms plus one combined matcher for name tokens and identifiers.
+
+        Same decisions as ``feedback_scrub.find_token_matches`` (any accent-folded,
+        case-insensitive word-bounded token match) and the identifier word-bounded
+        search, compiled once instead of one regex per token per string. A frozen
+        vault snapshot is cached; a live vault is rebuilt on every call so a
+        changed identity can never be missed.
+        """
+        vault = self.vault
+        frozen = getattr(vault, "frozen_verification", False)
+        if frozen and getattr(self, "_privacy_cache", None) is not None:
+            return self._privacy_cache
+        if isinstance(vault, IdentitySnapshot):
+            names, ids = vault._names, vault._identifiers
+            stable = vault.stable_pseudonyms
+        else:
+            names, ids = vault.all_real_identifiers()
+            stable = {
+                str(entry.get("pseudonym")) for entry in vault.entries()
+                if entry.get("pseudonym") and not entry.get("provisional")
+            }
+        tokens = {feedback_scrub._fold(token) for name in names if name for token in name.split()}
+        token_re = (re.compile(r"\b(?:" + "|".join(re.escape(t) for t in sorted(tokens, key=len, reverse=True)) + r")\b",
+                               re.IGNORECASE) if tokens else None)
+        long_ids = sorted({identifier for identifier in ids if len(identifier) >= 3}, key=len, reverse=True)
+        id_re = (re.compile(r"\b(?:" + "|".join(re.escape(i) for i in long_ids) + r")\b")
+                 if long_ids else None)
+        context = (stable, token_re, id_re)
+        if frozen:
+            self._privacy_cache = context
+        return context
+
     def verify_safe(self, record: dict) -> None:
         """Recheck synced records before local indexing as well as publication."""
         if record.get("source_key") != self.source_key or record.get("course_id") != self.course_id:
@@ -190,11 +301,7 @@ class EvidencePublisher:
                               f"{payload.get('privacy_policy_revision')}")
                 if entity_key not in {expected, legacy_key}:
                     raise PublicationRefused("identity_refused")
-        names, ids = self.vault.all_real_identifiers()
-        stable_pseudonyms = {
-            str(entry.get("pseudonym")) for entry in self.vault.entries()
-            if entry.get("pseudonym") and not entry.get("provisional")
-        }
+        stable_pseudonyms, token_re, id_re = self._privacy_context()
 
         def check(value, key=""):
             if isinstance(value, dict):
@@ -212,10 +319,9 @@ class EvidencePublisher:
                     if value not in stable_pseudonyms:
                         raise PublicationRefused("identity_refused")
                 if key not in _NAVIGATION_KEYS:
-                    if feedback_scrub.find_token_matches(value, names):
+                    if token_re is not None and token_re.search(feedback_scrub._fold(value).lower()):
                         raise PublicationRefused("privacy_refused")
-                    if any(re.search(rf"\b{re.escape(identifier)}\b", value)
-                           for identifier in ids if len(identifier) >= 3):
+                    if id_re is not None and id_re.search(value):
                         raise PublicationRefused("privacy_refused")
                 if _PRIVATE_PATH.search(value) or any(
                         _private_url(match.group(0)) for match in _URL.finditer(value)):
@@ -223,14 +329,14 @@ class EvidencePublisher:
         check(record)
 
     def _fact(self, kind: str, entity_key: str, payload: dict,
-              *, html_fields=frozenset()) -> tuple[dict, str]:
+              *, html_fields=frozenset(), context=None) -> tuple[dict, str]:
         record = validate_fact({
             "schema_version": 1, "kind": kind, "source_key": self.source_key,
             "course_id": self.course_id, "entity_key": entity_key,
             "payload": self._scrub_payload(payload, html_fields=html_fields),
         })
         self.verify_safe(record)
-        return record, self.store.publish_fact(record)
+        return record, self.store.publish_fact(record, context=context)
 
     def _pseudo(self, raw_user_id, real_name: str = "") -> str:
         if raw_user_id in (None, ""):
@@ -246,21 +352,24 @@ class EvidencePublisher:
 
     def _commit(self, *, scope: str, scope_id: str, refs: list[str], members: list[str],
                 complete: bool, writer_key: str, run_id: str, acquired_at: str,
-                gaps: list[str]) -> str:
-        snapshot = self.store.scan()
+                gaps: list[str], context=None) -> str:
         key = (self.source_key, self.course_id, scope, scope_id)
-        state = snapshot.scopes.get(key)
+        if context is None:
+            state = self.store.scan().scopes.get(key)
+            heads = list(state.heads if state else ())
+        else:
+            heads = context.initial_heads(key)
         record = {
             "schema_version": 1, "source_key": self.source_key, "course_id": self.course_id,
             "scope": scope, "scope_id": scope_id, "writer_key": writer_key,
-            "run_id": run_id, "parents": list(state.heads if state else ()),
+            "run_id": run_id, "parents": heads,
             "acquisition_started_at": acquired_at,
             "acquisition_finished_at": acquired_at,
             "mode": "snapshot", "membership_complete": complete and not gaps,
             "record_refs": sorted(set(refs)), "member_keys": sorted(set(members)),
             "gaps": [{"code": code} for code in sorted(set(gaps))], "watermarks": {},
         }
-        return self.store.publish_commit(record)
+        return self.store.publish_commit(record, context=context)
 
     def publish_text_assignment(self, *, course_title: str, assignment: dict,
                                 roster: list[dict], submissions: list[dict],
@@ -380,6 +489,7 @@ class EvidencePublisher:
                 except Exception:
                     gaps.append("identity_unresolved")
             self._replacement_map = feedback_scrub.build_replacement_map(self.vault.entries(), set())
+        context = self.store.begin_publication()
         published: dict[str, list[tuple[str, str]]] = {"course": [], "assignment": [],
                                                        "student": [], "submission": [],
                                                        "attempt_observation": []}
@@ -388,7 +498,7 @@ class EvidencePublisher:
                 continue
             try:
                 _, digest = self._fact(kind, entity_key, payload,
-                                      html_fields=html_fields)
+                                      html_fields=html_fields, context=context)
                 published[kind].append((entity_key, digest))
             except (EvidenceValidationError, PublicationRefused):
                 gaps.append("publication_refused")
@@ -399,13 +509,13 @@ class EvidencePublisher:
                          refs=[ref for _, ref in published["course"]],
                          members=[key for key, _ in published["course"]],
                          complete=True, writer_key=writer_key, run_id=run_id,
-                         acquired_at=acquired_at, gaps=[g for g in gaps
-                             if g != "identity_registration_failed"]),
+                         acquired_at=acquired_at, context=context,
+                         gaps=[g for g in gaps if g != "identity_registration_failed"]),
             self._commit(scope="course.assignments", scope_id=self.course_id,
                          refs=[ref for _, ref in published["assignment"]],
                          members=[key for key, _ in published["assignment"]],
                          complete=False, writer_key=writer_key, run_id=run_id,
-                         acquired_at=acquired_at, gaps=[]),
+                         acquired_at=acquired_at, gaps=[], context=context),
         ]
         if not registration_failed:
             commits.extend([
@@ -413,13 +523,13 @@ class EvidencePublisher:
                          refs=[ref for _, ref in published["student"]],
                          members=[key for key, _ in published["student"]],
                          complete=roster_complete, writer_key=writer_key, run_id=run_id,
-                         acquired_at=acquired_at, gaps=gaps),
+                         acquired_at=acquired_at, gaps=gaps, context=context),
                 self._commit(scope="assignment.submissions", scope_id=assignment_id,
                          refs=[ref for _, ref in published["submission"] + published["attempt_observation"]],
                          members=[key for key, _ in published["submission"]],
                          complete=submissions_complete,
                          writer_key=writer_key, run_id=run_id,
-                         acquired_at=acquired_at, gaps=gaps),
+                         acquired_at=acquired_at, gaps=gaps, context=context),
             ])
         return TextPublication(tuple(sorted({ref for rows in published.values() for _, ref in rows})),
                                tuple(commits), tuple(sorted(set(gaps))))

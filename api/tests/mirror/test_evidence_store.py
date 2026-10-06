@@ -279,3 +279,215 @@ def test_first_refused_scoped_commit_remains_visible_without_accepted_commit(tmp
     assert snapshot.scopes[key].current_refs == ()
     assert snapshot.issues[0].source_key == "a" * 64
     assert str(tmp_path) not in repr(snapshot.issues)
+
+
+# --- Receipt-scoped publication context -----------------------------------------
+
+class _ScanSpy:
+    def __init__(self, monkeypatch):
+        self.count = 0
+        real = EvidenceStore.scan
+
+        def scan(store):
+            self.count += 1
+            return real(store)
+        monkeypatch.setattr(EvidenceStore, "scan", scan)
+
+
+def test_context_is_private_and_bound_to_its_store(tmp_path, evidence_factory):
+    from api.mirror.evidence_store import PublicationContext
+    store = evidence_factory["store"](tmp_path / "a")
+    other = evidence_factory["store"](tmp_path / "b")
+    with pytest.raises(TypeError, match="publication_context_private"):
+        PublicationContext(object(), store, store.scan(), 0.0)
+    context = store.begin_publication()
+    record = evidence_factory["fact"]()
+    for call in (lambda: other.publish_fact(record, context=context),
+                 lambda: other.publish_commit(evidence_factory["commit"](), context=context),
+                 lambda: store.publish_fact(record, context={"facts": {}})):
+        with pytest.raises(EvidenceValidationError, match="publication_context_mismatch"):
+            call()
+    assert not list((tmp_path / "a").rglob("*.json")) and not list((tmp_path / "b").rglob("*.json"))
+
+
+def test_context_scans_once_and_chains_same_scope_commits(tmp_path, evidence_factory, monkeypatch):
+    store = evidence_factory["store"](tmp_path)
+    key = evidence_factory["fact"]()["entity_key"]
+    spy = _ScanSpy(monkeypatch)
+    context = store.begin_publication()
+    first_fact = store.publish_fact(evidence_factory["fact"](body="One"), context=context)
+    c1 = store.publish_commit(evidence_factory["commit"](refs=[first_fact], members=[key]), context=context)
+    second_fact = store.publish_fact(evidence_factory["fact"](body="Two"), context=context)
+    c2 = store.publish_commit(evidence_factory["commit"](
+        refs=[second_fact], parents=[c1], members=[key], run_id="run-2"), context=context)
+    assert spy.count == 1
+    assert context.stats["facts_published"] == 2 and context.stats["commits_published"] == 2
+    monkeypatch.undo()
+    state = reduce_scope(store.scan(), "assignment.submissions", "10")
+    assert (state.status, state.heads, state.current_refs) == ("ready", (c2,), (second_fact,))
+
+
+def test_context_state_comes_from_the_initial_scan_not_caller_input(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path)
+    fact = evidence_factory["fact"]()
+    ref = store.publish_fact(fact)
+    c1 = store.publish_commit(evidence_factory["commit"](refs=[ref], members=[fact["entity_key"]]))
+    context = store.begin_publication()
+    key = (store.source_key, store.course_id, "assignment.submissions", "10")
+    assert context.initial_heads(key) == [c1]
+    assert context.initial_heads((store.source_key, store.course_id, "assignment.submissions", "99")) == []
+    assert context.fact(ref)["entity_key"] == fact["entity_key"]
+    # Mutating a caller record after publication cannot alter validated state.
+    record = evidence_factory["fact"](body="Later")
+    digest = store.publish_fact(record, context=context)
+    record["payload"]["body"] = "Tampered"
+    assert context.fact(digest)["payload"]["body"] == "Later"
+
+
+def test_context_refuses_missing_refs_parents_and_invalid_graphs(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path)
+    ref = store.publish_fact(evidence_factory["fact"]())
+    context = store.begin_publication()
+    unknown = "b" * 64
+    with pytest.raises(EvidenceValidationError, match="publication_dependencies_missing"):
+        store.publish_commit(evidence_factory["commit"](refs=[unknown], members=["submission:10:Pikachu"]), context=context)
+    with pytest.raises(EvidenceValidationError, match="publication_dependencies_missing"):
+        store.publish_commit(evidence_factory["commit"](refs=[ref], parents=[unknown], members=["submission:10:Pikachu"]), context=context)
+    # A fact on disk but unknown to this context is never trusted.
+    late = evidence_factory["fact"](body="Arrived after scan")
+    late_ref = store.publish_fact(late)
+    with pytest.raises(EvidenceValidationError, match="publication_dependencies_missing"):
+        store.publish_commit(evidence_factory["commit"](refs=[late_ref], members=[late["entity_key"]]), context=context)
+    with pytest.raises(EvidenceValidationError, match="reference_scope_mismatch"):
+        store.publish_commit(evidence_factory["commit"](refs=[ref], scope_id="20"), context=context)
+    parent = store.publish_commit(evidence_factory["commit"](scope_id="20"), context=context)
+    with pytest.raises(EvidenceValidationError, match="parent_scope_mismatch"):
+        store.publish_commit(evidence_factory["commit"](parents=[parent]), context=context)
+    same = store.publish_fact(evidence_factory["fact"](body="Other"), context=context)
+    with pytest.raises(EvidenceValidationError, match="conflicting_commit_entity"):
+        store.publish_commit(evidence_factory["commit"](
+            refs=[ref, same], members=["submission:10:Pikachu"], run_id="dup"), context=context)
+    assert len(list((tmp_path / "sources").rglob("commits/*/*.json"))) == 1
+
+
+def test_context_refuses_privacy_failure_before_any_bytes(tmp_path, evidence_factory):
+    def reject(record):
+        if "Sensitive Synthetic" in canonical_bytes(record).decode():
+            raise ValueError("refused")
+    store = evidence_factory["store"](tmp_path / "safe", verify_safe=reject)
+    context = store.begin_publication()
+    with pytest.raises(EvidenceValidationError, match="privacy_refused"):
+        store.publish_fact(evidence_factory["fact"](body="Sensitive Synthetic"), context=context)
+    assert not list((tmp_path / "safe").rglob("*.json"))
+    assert context.stats["facts_published"] == 0
+
+
+def test_context_refuses_dependency_corrupted_or_deleted_after_the_scan(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path)
+    fact = evidence_factory["fact"]()
+    ref = store.publish_fact(fact)
+    parent = store.publish_commit(evidence_factory["commit"](refs=[ref], members=[fact["entity_key"]]))
+    context = store.begin_publication()
+    new_fact = evidence_factory["fact"](body="New")
+    new_ref = store.publish_fact(new_fact, context=context)
+    child = evidence_factory["commit"](refs=[new_ref], parents=[parent],
+                                      members=[new_fact["entity_key"]], run_id="child")
+    store._path("commits", parent).write_bytes(b"corrupt")
+    with pytest.raises(EvidenceValidationError, match="publication_dependencies_missing"):
+        store.publish_commit(child, context=context)
+    store._path("commits", parent).unlink()
+    with pytest.raises(EvidenceValidationError, match="publication_dependencies_missing"):
+        store.publish_commit(child, context=context)
+    # A fact this context published, then lost or truncated, is also refused.
+    for number, damage in enumerate((lambda path: path.write_bytes(b"x"), lambda path: path.unlink())):
+        fresh = store.begin_publication()
+        extra = store.publish_fact(evidence_factory["fact"](body=f"Extra {number}"), context=fresh)
+        damage(store._path("objects", extra))
+        with pytest.raises(EvidenceValidationError, match="publication_dependencies_missing"):
+            store.publish_commit(evidence_factory["commit"](
+                refs=[extra], members=["submission:10:Pikachu"], run_id="extra"), context=fresh)
+    assert fresh.stats["dependency_checks"] >= 1
+
+
+def test_context_accepts_provider_conflict_copy_as_the_only_dependency_file(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path)
+    fact = evidence_factory["fact"]()
+    ref = store.publish_fact(fact)
+    original = store._path("objects", ref)
+    original.rename(original.with_name(f"{ref}-provider arbitrary copy.json"))
+    context = store.begin_publication()
+    assert context.fact(ref) is not None
+    store.publish_commit(evidence_factory["commit"](refs=[ref], members=[fact["entity_key"]]), context=context)
+
+
+def test_context_refuses_pending_parent_like_the_standalone_path(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path)
+    fact = evidence_factory["fact"]()
+    ref = store.publish_fact(fact)
+    pending = store.publish_commit(evidence_factory["commit"](refs=[ref], members=[fact["entity_key"]]))
+    store._path("objects", ref).unlink()  # the commit is present but its fact has not arrived
+    assert reduce_scope(store.scan(), "assignment.submissions", "10").pending_commits == (pending,)
+    child = evidence_factory["commit"](parents=[pending], run_id="child")
+    with pytest.raises(EvidenceValidationError, match="publication_dependencies_missing"):
+        store.publish_commit(child)
+    with pytest.raises(EvidenceValidationError, match="publication_dependencies_missing"):
+        store.publish_commit(child, context=store.begin_publication())
+
+
+def test_commit_synced_after_the_scan_becomes_a_causal_sibling_not_an_overwrite(tmp_path, evidence_factory):
+    store = evidence_factory["store"](tmp_path / "local")
+    remote = evidence_factory["store"](tmp_path / "remote")
+    key = evidence_factory["fact"]()["entity_key"]
+    base_ref = store.publish_fact(evidence_factory["fact"](body="Base"))
+    base = store.publish_commit(evidence_factory["commit"](refs=[base_ref], members=[key]))
+    shutil.copytree(store.course_root, remote.course_root)
+    context = store.begin_publication()
+    remote_ref = remote.publish_fact(evidence_factory["fact"](body="Remote"))
+    remote_commit = remote.publish_commit(evidence_factory["commit"](
+        refs=[remote_ref], parents=[base], members=[key], run_id="remote"))
+    for namespace, digest in (("objects", remote_ref), ("commits", remote_commit)):  # sync arrives mid-receipt
+        target = store._path(namespace, digest)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(remote._path(namespace, digest), target)
+    local_ref = store.publish_fact(evidence_factory["fact"](body="Local"), context=context)
+    local_commit = store.publish_commit(evidence_factory["commit"](
+        refs=[local_ref], parents=context.initial_heads((store.source_key, store.course_id, "assignment.submissions", "10")),
+        members=[key], run_id="local"), context=context)
+    state = reduce_scope(store.scan(), "assignment.submissions", "10")
+    assert set(state.heads) == {remote_commit, local_commit}
+    assert state.status == "ambiguous" and state.current_refs == (base_ref,)
+    assert store._path("commits", remote_commit).exists()
+
+
+def test_publication_interruption_leaves_safe_facts_and_a_retry_converges(tmp_path, evidence_factory, monkeypatch):
+    store = evidence_factory["store"](tmp_path)
+    fact = evidence_factory["fact"]()
+    context = store.begin_publication()
+    ref = store.publish_fact(fact, context=context)
+    real = EvidenceStore._publish_sized
+
+    def fail_commit(self, namespace, checked):
+        if namespace == "commits":
+            raise OSError("interrupted")
+        return real(self, namespace, checked)
+    monkeypatch.setattr(EvidenceStore, "_publish_sized", fail_commit)
+    with pytest.raises(OSError):
+        store.publish_commit(evidence_factory["commit"](refs=[ref], members=[fact["entity_key"]]), context=context)
+    monkeypatch.undo()
+    assert context.stats["commits_published"] == 0
+    snapshot = store.scan()
+    assert ref in snapshot.facts and not snapshot.commits and not snapshot.issues
+    retry = store.begin_publication()
+    store.publish_fact(fact, context=retry)
+    digest = store.publish_commit(evidence_factory["commit"](refs=[ref], members=[fact["entity_key"]]), context=retry)
+    assert reduce_scope(store.scan(), "assignment.submissions", "10").heads == (digest,)
+
+
+def test_standalone_commit_scans_once_and_reduces_only_its_own_scope(tmp_path, evidence_factory, monkeypatch):
+    store = evidence_factory["store"](tmp_path)
+    fact = evidence_factory["fact"]()
+    ref = store.publish_fact(fact)
+    parent = store.publish_commit(evidence_factory["commit"](refs=[ref], members=[fact["entity_key"]]))
+    spy = _ScanSpy(monkeypatch)
+    store.publish_commit(evidence_factory["commit"](parents=[parent], run_id="next"))
+    assert spy.count == 1

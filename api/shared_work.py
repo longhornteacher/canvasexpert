@@ -130,9 +130,10 @@ class SharedWorkStore:
     def _lease_paths(self, work_id: str) -> list[Path]:
         return sorted(self._item_dir(work_id).glob("lease.*.json"), key=lambda path: path.name)
 
-    def _leases(self, work_id: str) -> list[dict]:
+    @staticmethod
+    def _read_lease_files(paths) -> list[dict]:
         values = []
-        for path in self._lease_paths(work_id):
+        for path in paths:
             try:
                 with open(workspace.extended_path(str(path)), encoding="utf-8") as handle:
                     value = json.load(handle)
@@ -142,8 +143,13 @@ class SharedWorkStore:
                 values.append(value)
         return values
 
-    def _effective_lease(self, work_id: str) -> dict | None:
-        leases = self._leases(work_id)
+    def _leases(self, work_id: str) -> list[dict]:
+        return self._read_lease_files(self._lease_paths(work_id))
+
+    @staticmethod
+    def _select_effective_lease(leases: list[dict]) -> dict | None:
+        """Pure effective-lease rule shared by mutating owners and summary reads."""
+        leases = list(leases)
         if not leases:
             return None
         leases.sort(key=lambda item: (int(item.get("epoch") or 0),
@@ -156,6 +162,9 @@ class SharedWorkStore:
             raise WorkItemError("work_item_lease_conflict")
         return same_epoch[-1]
 
+    def _effective_lease(self, work_id: str) -> dict | None:
+        return self._select_effective_lease(self._leases(work_id))
+
     def _write_lease(self, work_id: str, lease: dict) -> None:
         directory = self._item_dir(work_id)
         assert_store_writable(directory, root=self.workspace_root)
@@ -163,15 +172,10 @@ class SharedWorkStore:
         path = directory / f"lease.{lease['machine']}.json"
         atomic_write_json(path, lease)
 
-    def _raw_events(self, work_id: str) -> list[dict]:
-        directory = self._item_dir(work_id)
+    @staticmethod
+    def _read_event_files(paths) -> list[dict]:
         events = []
-        if not directory.is_dir():
-            raise WorkItemNotFound("work_item_not_found")
-        scan_conflicts(self.workspace_root)
-        for path in sorted(directory.glob("events.*.jsonl"), key=lambda item: item.name):
-            if path.name.endswith(".orphan.jsonl"):
-                continue
+        for path in paths:
             try:
                 with open(workspace.extended_path(str(path)), encoding="utf-8") as handle:
                     for line in handle:
@@ -188,8 +192,25 @@ class SharedWorkStore:
                 raise WorkItemError("work_item_events_unreadable") from exc
         return events
 
-    def _quarantine_late_events(self, work_id: str, events: list[dict]) -> list[dict]:
-        leases = sorted(self._leases(work_id), key=lambda item: int(item.get("epoch") or 0))
+    def _raw_events(self, work_id: str) -> list[dict]:
+        directory = self._item_dir(work_id)
+        if not directory.is_dir():
+            raise WorkItemNotFound("work_item_not_found")
+        scan_conflicts(self.workspace_root)
+        paths = [path for path in sorted(directory.glob("events.*.jsonl"),
+                                         key=lambda item: item.name)
+                 if not path.name.endswith(".orphan.jsonl")]
+        return self._read_event_files(paths)
+
+    @staticmethod
+    def _classify_late_events(events: list[dict], leases: list[dict]):
+        """Pure fencing rule: return ``(kept, late_by_machine)``.
+
+        A late event was written by a taken-over machine, under an older epoch,
+        beyond the takeover cutoff. Persisting late events is the caller's
+        decision; only mutating owners quarantine them.
+        """
+        leases = sorted(leases, key=lambda item: int(item.get("epoch") or 0))
         cutoffs = []
         for lease in leases:
             source = str(lease.get("takeover_from_machine") or "")
@@ -204,40 +225,19 @@ class SharedWorkStore:
                         and int(event.get("seq") or 0) > cutoff):
                     late.setdefault(source, []).append(event)
                     break
-        if late:
-            late_fingerprints = set()
-            for machine, machine_events in late.items():
-                orphan_path = self._item_dir(work_id) / f"events.{machine}.orphan.jsonl"
-                known = set()
-                if orphan_path.is_file():
-                    try:
-                        with open(workspace.extended_path(str(orphan_path)), encoding="utf-8") as handle:
-                            known = {hashlib.sha256(_canonical_json(json.loads(line))).hexdigest()
-                                     for line in handle if line.strip()}
-                    except (OSError, json.JSONDecodeError):
-                        raise WorkItemError("work_item_orphan_journal_unreadable")
-                additions = []
-                for event in machine_events:
-                    fingerprint = hashlib.sha256(_canonical_json(event)).hexdigest()
-                    late_fingerprints.add(fingerprint)
-                    if fingerprint not in known:
-                        additions.append(event)
-                        known.add(fingerprint)
-                if additions:
-                    assert_store_writable(self._item_dir(work_id), root=self.workspace_root)
-                    payload = b"".join((_canonical_json(event) + b"\n") for event in additions)
-                    orphan_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(workspace.extended_path(str(orphan_path)), "ab", buffering=0) as handle:
-                        handle.write(payload)
-                        os.fsync(handle.fileno())
-            events = [event for event in events
-                      if hashlib.sha256(_canonical_json(event)).hexdigest() not in late_fingerprints]
-        return events
+        if not late:
+            return events, late
+        late_fingerprints = {
+            hashlib.sha256(_canonical_json(event)).hexdigest()
+            for machine_events in late.values() for event in machine_events
+        }
+        kept = [event for event in events
+                if hashlib.sha256(_canonical_json(event)).hexdigest() not in late_fingerprints]
+        return kept, late
 
-    def _events(self, work_id: str) -> list[dict]:
-        events = self._quarantine_late_events(work_id, self._raw_events(work_id))
-        # A higher fencing epoch wins any duplicate sequence left by a stale
-        # writer. The lower-epoch copy is handled as late/orphaned above.
+    @staticmethod
+    def _select_events(events: list[dict]) -> list[dict]:
+        """Pure sequence rule: a higher fencing epoch wins a duplicate sequence."""
         by_seq = {}
         for event in events:
             seq = int(event["seq"])
@@ -248,6 +248,38 @@ class SharedWorkStore:
                 if event != previous:
                     raise WorkItemError("work_item_sequence_conflict")
         return [by_seq[seq] for seq in sorted(by_seq)]
+
+    def _quarantine_late_events(self, work_id: str, events: list[dict]) -> list[dict]:
+        events, late = self._classify_late_events(events, self._leases(work_id))
+        for machine, machine_events in late.items():
+            orphan_path = self._item_dir(work_id) / f"events.{machine}.orphan.jsonl"
+            known = set()
+            if orphan_path.is_file():
+                try:
+                    with open(workspace.extended_path(str(orphan_path)), encoding="utf-8") as handle:
+                        known = {hashlib.sha256(_canonical_json(json.loads(line))).hexdigest()
+                                 for line in handle if line.strip()}
+                except (OSError, json.JSONDecodeError):
+                    raise WorkItemError("work_item_orphan_journal_unreadable")
+            additions = []
+            for event in machine_events:
+                fingerprint = hashlib.sha256(_canonical_json(event)).hexdigest()
+                if fingerprint not in known:
+                    additions.append(event)
+                    known.add(fingerprint)
+            if additions:
+                assert_store_writable(self._item_dir(work_id), root=self.workspace_root)
+                payload = b"".join((_canonical_json(event) + b"\n") for event in additions)
+                orphan_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(workspace.extended_path(str(orphan_path)), "ab", buffering=0) as handle:
+                    handle.write(payload)
+                    os.fsync(handle.fileno())
+        return events
+
+    def _events(self, work_id: str) -> list[dict]:
+        events = self._quarantine_late_events(work_id, self._raw_events(work_id))
+        # The lower-epoch copy of a duplicate sequence was classified late above.
+        return self._select_events(events)
 
     def _write_blob(self, work_id: str, state: dict) -> str:
         payload = _canonical_json(state)
@@ -487,6 +519,18 @@ class SharedWorkStore:
             _heartbeat_service.unregister(self, str(work_id))
             return self.summary(work_id)
 
+    @staticmethod
+    def _sync_counts(events: list[dict], lease: dict | None) -> tuple[int, int]:
+        """Pure ``(expected, present)`` event counts for an effective lease."""
+        expected = max(
+            int((lease or {}).get("final_event_count") or 0),
+            int((lease or {}).get("takeover_expected_event_count") or 0),
+            int((lease or {}).get("takeover_after_seq") or 0),
+        )
+        seen = {int(event["seq"]) for event in events}
+        present = sum(1 for seq in range(1, expected + 1) if seq in seen)
+        return expected, present
+
     def _orphan_count(self, work_id: str) -> int:
         count = 0
         for path in self._item_dir(work_id).glob("events.*.orphan.jsonl"):
@@ -501,13 +545,7 @@ class SharedWorkStore:
         manifest = self._manifest(work_id)
         events = self._events(work_id)
         lease = self._effective_lease(work_id)
-        expected = max(
-            int((lease or {}).get("final_event_count") or 0),
-            int((lease or {}).get("takeover_expected_event_count") or 0),
-            int((lease or {}).get("takeover_after_seq") or 0),
-        )
-        seen = {int(event["seq"]) for event in events}
-        present = sum(1 for seq in range(1, expected + 1) if seq in seen)
+        expected, present = self._sync_counts(events, lease)
         gap = expected - present
         return {
             "work_id": str(work_id), "kind": str(manifest.get("kind") or ""),
@@ -542,6 +580,201 @@ class SharedWorkStore:
             summaries.append(summary)
         summaries.sort(key=lambda item: (item["created_at"], item["work_id"]), reverse=True)
         return summaries
+
+
+    # ------------------------------------------------------------------
+    # Advisory summary read (discovery). Side-effect free: it never takes a
+    # lock, heartbeats, acquires/releases/renews a lease, quarantines events,
+    # materializes a bundle, or writes any file. It reuses the pure
+    # event/lease selection rules above, so ownership and fencing semantics
+    # have one implementation.
+    # ------------------------------------------------------------------
+
+    _SUMMARY_ERROR_CODES = {
+        "work_item_event_invalid": "events_invalid",
+        "work_item_events_unreadable": "events_unreadable",
+        "work_item_sequence_conflict": "sequence_conflict",
+        "work_item_lease_conflict": "lease_conflict",
+        "work_item_blob_missing": "snapshot_unavailable",
+        "work_item_blob_digest_mismatch": "snapshot_unavailable",
+        "work_item_blob_invalid": "snapshot_unavailable",
+    }
+
+    def _conflicts_by_item(self, conflicts: list[dict]) -> dict[str, list[dict]]:
+        """Group one whole-tree conflict inventory by item directory name."""
+        if not conflicts:
+            return {}
+        try:
+            root = self.root.resolve()
+        except OSError:
+            return {}
+        grouped: dict[str, list[dict]] = {}
+        for conflict in conflicts:
+            try:
+                relative = Path(conflict["path"]).resolve().relative_to(root)
+            except (ValueError, OSError):
+                continue
+            if len(relative.parts) >= 2:
+                grouped.setdefault(relative.parts[0].casefold(), []).append(conflict)
+        return grouped
+
+    @staticmethod
+    def _list_item_dir(directory: Path) -> dict | None:
+        """One directory listing: manifest presence, journals, leases, signature."""
+        try:
+            with os.scandir(directory) as scanner:
+                entries = list(scanner)
+        except OSError:
+            return None
+        has_manifest = False
+        events, leases, signature = [], [], []
+        for entry in entries:
+            name = entry.name
+            if name == "manifest.json":
+                has_manifest = True
+            elif (name.startswith("events.") and name.endswith(".jsonl")
+                  and len(name) >= 13 and not name.endswith(".orphan.jsonl")):
+                events.append(directory / name)
+                try:
+                    stat = entry.stat()
+                    signature.append((name, stat.st_size, stat.st_mtime_ns))
+                except OSError:
+                    signature.append((name, -1, -1))
+            elif name.startswith("lease.") and name.endswith(".json") and len(name) >= 10:
+                leases.append(directory / name)
+        return {"total": len(entries), "has_manifest": has_manifest,
+                "events": sorted(events, key=lambda path: path.name),
+                "leases": sorted(leases, key=lambda path: path.name),
+                "signature": tuple(sorted(signature))}
+
+    @staticmethod
+    def _read_manifest_file(path: Path, work_id: str) -> dict | None:
+        try:
+            with open(workspace.extended_path(str(path)), encoding="utf-8") as handle:
+                value = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return None
+        if (not isinstance(value, dict) or value.get("version") != 1
+                or str(value.get("work_id") or "") != str(work_id)):
+            return None
+        return value
+
+    def _read_item_state(self, work_id: str, listing: dict, project) -> dict:
+        """Read one item's leases, events and latest snapshot blob exactly once."""
+        try:
+            leases = self._read_lease_files(listing["leases"])
+            lease = self._select_effective_lease(leases)
+            events = self._read_event_files(listing["events"])
+            events, late = self._classify_late_events(events, leases)
+            selected = self._select_events(events)
+        except WorkItemError as exc:
+            return {"error": self._SUMMARY_ERROR_CODES.get(str(exc), "item_unreadable")}
+        except OSError:
+            return {"error": "item_unreadable"}
+        expected, present = self._sync_counts(selected, lease)
+        late_count = sum(len(rows) for rows in late.values())
+        outcome = {
+            "state": None,
+            "work_item": {
+                "holder": str((lease or {}).get("machine") or ""),
+                "heartbeat_at": str((lease or {}).get("heartbeat_at") or ""),
+                "lease_state": str((lease or {}).get("state") or "released"),
+                "event_count": len(selected),
+                "sync_progress": {"present": present, "expected": expected,
+                                  "complete": present == expected},
+                "orphan_event_count": late_count,
+            },
+            "notices": ["late_events_ignored"] if late_count else [],
+        }
+        if present < expected:
+            outcome["error"] = "sync_incomplete"
+            return outcome
+        if not selected:
+            return outcome
+        try:
+            blob = self._read_blob(work_id, str(selected[-1]["blob_sha256"]))
+        except WorkItemError as exc:
+            outcome["error"] = self._SUMMARY_ERROR_CODES.get(str(exc), "snapshot_unavailable")
+            return outcome
+        if blob.get("storage_model") == "shared_work.v1":
+            outcome["state"] = project(blob)
+        return outcome
+
+    def read_item_summaries(self, *, kind: str, course_ids=None, project) -> dict:
+        """Summarize work items of one kind/course set without side effects.
+
+        ``project`` maps the latest validated state dict to the allowlisted
+        summary fields; the full state never leaves this call. Returns::
+
+            {"items": [{"work_id", "course_id", "assignment_id", "created_at",
+                         "state", "work_item", "attention", "notices"}],
+             "unclassified": [code, ...]}
+
+        ``state`` is ``None`` for an item with no usable latest snapshot.
+        ``attention`` holds blocking per-item codes (the item's latest state is
+        unknown: ``sync_incomplete``, ``events_unreadable``, ``events_invalid``,
+        ``sequence_conflict``, ``lease_conflict``, ``snapshot_unavailable``,
+        ``item_unreadable``); ``unclassified`` lists directories whose manifest
+        could not prove them out of scope (``manifest_unreadable``,
+        ``manifest_missing``, ``item_unreadable``, ``work_root_unreadable``).
+        A conflict copy inside a relevant item directory raises
+        ``SharedStoreConflictError``. ``course_ids=None`` means every course;
+        an empty collection means none.
+        """
+        allowed = None if course_ids is None else {str(c or "") for c in course_ids}
+        result = {"items": [], "unclassified": []}
+        # One whole-tree inventory per pass; refusals are scoped to items.
+        conflicts = scan_conflicts(self.workspace_root)
+        if not self.root.is_dir():
+            return result
+        try:
+            with os.scandir(self.root) as scanner:
+                names = sorted(entry.name for entry in scanner
+                               if entry.is_dir() and _WORK_ID_RE.fullmatch(entry.name))
+        except OSError:
+            result["unclassified"].append("work_root_unreadable")
+            return result
+        by_item = self._conflicts_by_item(conflicts)
+        for name in names:
+            directory = self.root / name
+            listing = self._list_item_dir(directory)
+            if listing is None:
+                result["unclassified"].append("item_unreadable")
+                continue
+            if not listing["has_manifest"]:
+                if listing["total"]:
+                    result["unclassified"].append("manifest_missing")
+                continue
+            manifest = self._read_manifest_file(directory / "manifest.json", name)
+            if manifest is None:
+                result["unclassified"].append("manifest_unreadable")
+                continue
+            if str(manifest.get("kind") or "") != kind:
+                continue
+            course_id = str(manifest.get("course_id") or "")
+            # An empty manifest course cannot prove the item is out of scope.
+            if allowed is not None and course_id and course_id not in allowed:
+                continue
+            if by_item.get(name.casefold()):
+                raise SharedStoreConflictError(by_item[name.casefold()])
+            outcome = self._read_item_state(name, listing, project)
+            if outcome.get("error"):
+                # At most one bounded reread, only when the journals visibly
+                # changed (sync in progress) since the first listing.
+                relisted = self._list_item_dir(directory)
+                if relisted is not None and relisted["signature"] != listing["signature"]:
+                    outcome = self._read_item_state(name, relisted, project)
+            error = outcome.get("error")
+            result["items"].append({
+                "work_id": name, "course_id": course_id,
+                "assignment_id": str(manifest.get("assignment_id") or ""),
+                "created_at": str(manifest.get("created_at") or ""),
+                "state": None if error else outcome.get("state"),
+                "work_item": outcome.get("work_item"),
+                "attention": [error] if error else [],
+                "notices": list(outcome.get("notices") or []),
+            })
+        return result
 
 
 class _HeartbeatService:

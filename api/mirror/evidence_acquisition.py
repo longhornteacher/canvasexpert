@@ -20,13 +20,15 @@ Unsupported lifecycle fields remain explicit gaps. No raw receipt is persisted h
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
 import time
 
 from api import feedback_scrub, operational_log
-from api.mirror.evidence_publish import EvidencePublisher, PublicationRefused, _utc_now, _utc_stamp
+from api.mirror.evidence_publish import (
+    EvidencePublisher, IdentitySnapshot, PublicationRefused, _utc_now, _utc_stamp,
+)
 from api.mirror.evidence_schema import (
     EvidenceValidationError, SCOPE_KINDS, canonical_bytes, validate_component,
     validate_commit,
@@ -59,6 +61,8 @@ class AcquisitionPublication:
     commit_refs: tuple[str, ...]
     gaps: tuple[str, ...]
     successful_scopes: tuple[tuple[str, str], ...]
+    # Aggregate publication cost counters (no identifiers); excluded from equality.
+    stats: dict = field(default_factory=dict, compare=False, repr=False)
 
 
 _STUDENT_BEARING_SCOPES = frozenset({
@@ -388,14 +392,14 @@ def publish_captured_attachment(*, publisher: EvidencePublisher, job,
         "size": job.size, "status": "captured", "revision": 1,
     }
     key = f"attachment:{job.assignment_id}:{job.pseudonym}:{job.attempt}:{job.attachment_key}"
-    _, digest = publisher._fact("attachment", key, payload)
-    snapshot = publisher.store.scan()
+    context = publisher.store.begin_publication()
+    _, digest = publisher._fact("attachment", key, payload, context=context)
     scope_key = (publisher.source_key, publisher.course_id, "assignment.attachments",
                  job.assignment_id)
-    state = snapshot.scopes.get(scope_key)
+    state = context.initial_state(scope_key)
     # Replace only this entity's prior (pending) ref; keep sibling attachments.
     refs = sorted({ref for ref in (state.current_refs if state else ())
-                   if snapshot.facts.get(ref, {}).get("entity_key") != key} | {digest})
+                   if (context.fact(ref) or {}).get("entity_key") != key} | {digest})
     members = sorted(set(state.member_keys if state else ()) | {key})
     record = {
         "schema_version": 1, "source_key": publisher.source_key,
@@ -407,7 +411,7 @@ def publish_captured_attachment(*, publisher: EvidencePublisher, job,
         "mode": "snapshot", "membership_complete": bool(state and state.membership_complete),
         "record_refs": refs, "member_keys": members, "gaps": [], "watermarks": {},
     }
-    return publisher.store.publish_commit(record)
+    return publisher.store.publish_commit(record, context=context)
 
 
 def publish_attachment_status(*, publisher: EvidencePublisher, job, status: str,
@@ -423,13 +427,13 @@ def publish_attachment_status(*, publisher: EvidencePublisher, job, status: str,
         "size": job.size, "status": status, "revision": 1,
     }
     key = f"attachment:{job.assignment_id}:{job.pseudonym}:{job.attempt}:{job.attachment_key}"
-    _, digest = publisher._fact("attachment", key, payload)
-    snapshot = publisher.store.scan()
+    context = publisher.store.begin_publication()
+    _, digest = publisher._fact("attachment", key, payload, context=context)
     scope_key = (publisher.source_key, publisher.course_id, "assignment.attachments",
                  job.assignment_id)
-    state = snapshot.scopes.get(scope_key)
+    state = context.initial_state(scope_key)
     refs = sorted({ref for ref in (state.current_refs if state else ())
-                   if snapshot.facts.get(ref, {}).get("entity_key") != key} | {digest})
+                   if (context.fact(ref) or {}).get("entity_key") != key} | {digest})
     members = sorted(set(state.member_keys if state else ()) | {key})
     record = {
         "schema_version": 1, "source_key": publisher.source_key,
@@ -440,7 +444,127 @@ def publish_attachment_status(*, publisher: EvidencePublisher, job, status: str,
         "mode": "snapshot", "membership_complete": bool(state and state.membership_complete),
         "record_refs": refs, "member_keys": members, "gaps": [], "watermarks": {},
     }
-    return publisher.store.publish_commit(record)
+    return publisher.store.publish_commit(record, context=context)
+
+
+def _roster_rows(receipt) -> list[dict]:
+    rows = []
+    for scope in receipt.scopes:
+        if scope.scope == "course.roster" and isinstance(scope.rows, (tuple, list)):
+            rows.extend(row for row in scope.rows if isinstance(row, dict))
+    return rows
+
+
+def _scope_header_error(course_id: str, scope: ScopeReceipt) -> str | None:
+    """Same scope-level gating publication applies before reading any row."""
+    if scope.scope not in SCOPE_KINDS:
+        return "unsupported_scope"
+    try:
+        sid = _id(scope.scope_id)
+        if scope.scope.startswith("course.") and sid != course_id:
+            return "scope_mismatch"
+        if scope.mode not in {"snapshot", "delta"}:
+            return "invalid_mode"
+        if type(scope.complete) is not bool:
+            return "invalid_completeness"
+    except PublicationRefused as exc:
+        return exc.code
+    return None
+
+
+def _row_for_scope(row, sid: str) -> bool:
+    try:
+        return row.get("assignment_id") is None or _id(row["assignment_id"]) == sid
+    except PublicationRefused:
+        return False
+
+
+def _scope_identity_references(scope: ScopeReceipt):
+    """Raw ids this scope would turn into pseudonyms; navigation ids are excluded."""
+    rows = scope.rows if isinstance(scope.rows, (tuple, list)) else ()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if scope.scope == "course.groups":
+            users = row.get("user_ids", row.get("student_ids", row.get("users")))
+            if isinstance(users, (list, tuple)):
+                for user in users:
+                    yield (user.get("id", user.get("user_id")) if isinstance(user, dict) else user)
+        elif scope.scope == "assignment.submissions" and _row_for_scope(row, scope.scope_id):
+            yield row.get("user_id")
+        elif scope.scope == "assignment.comments" and _row_for_scope(row, scope.scope_id):
+            yield row.get("user_id")
+            if row.get("author_role") not in {"teacher", "ta", "system"} and row.get("author_id") is not None:
+                yield row["author_id"]
+        elif scope.scope == "assignment.overrides" and _row_for_scope(row, scope.scope_id):
+            ids = row.get("student_ids")
+            if isinstance(ids, (list, tuple, set, frozenset)):
+                yield from ids
+
+
+def prepare_receipt_identities(*, vault, receipt: CourseAcquisitionReceipt,
+                               source_key: str) -> IdentitySnapshot:
+    """Register and resolve every identity a receipt uses; freeze a private snapshot.
+
+    Run inside the existing vault transaction (the caller commits identity changes
+    and releases it). Registers roster identities with their names first, then
+    resolves each other identity actually referenced by publishable scopes:
+    submission owners (history and attachments belong to the owner), group
+    members, override student lists, comment recipients and non-staff authors.
+    Course, assignment, section and file ids are navigation, never identities.
+    Unresolved or provisional identities are recorded per affected scope and are
+    simply absent from the snapshot, so publication marks that scope incomplete.
+    Performs no Canvas I/O, scan or file publication. The snapshot is for this
+    receipt only: build a new one per receipt and never across sources/courses.
+    """
+    course_id = str(receipt.course_id)
+    registration_failed = False
+    roster_rows = _roster_rows(receipt)
+    try:
+        roster_service.upsert_roster(vault, roster_rows)
+    except Exception:
+        registration_failed = True
+    pseudonyms: dict[str, str] = {}
+    unresolved_scopes: set[tuple[str, str]] = set()
+    failed: set[str] = set()
+    roster_unresolved = False
+
+    def resolve(raw) -> bool:
+        if raw in (None, ""):
+            return False
+        key = str(raw)
+        if key in pseudonyms:
+            return True
+        if key in failed:
+            return False
+        try:
+            pseudonym = vault.get_or_assign(key)
+            vault.require_stable(key)
+        except Exception:
+            pseudonym = None
+        if not pseudonym or not isinstance(pseudonym, str):
+            failed.add(key)
+            return False
+        pseudonyms[key] = pseudonym
+        return True
+
+    if not registration_failed:
+        for row in roster_rows:
+            if not resolve(row.get("id", row.get("user_id"))):
+                roster_unresolved = True
+                unresolved_scopes.add(("course.roster", course_id))
+        for scope in receipt.scopes:
+            if _scope_header_error(course_id, scope) is not None:
+                continue
+            for raw in _scope_identity_references(scope):
+                if not resolve(raw):
+                    unresolved_scopes.add((scope.scope, str(scope.scope_id)))
+        if hasattr(vault, "save"):
+            vault.save()
+    return IdentitySnapshot.freeze(
+        vault, source_key=source_key, course_id=course_id, pseudonyms=pseudonyms,
+        unresolved_scopes=unresolved_scopes, registration_failed=registration_failed,
+        roster_unresolved=roster_unresolved)
 
 
 def publish_course_receipt(*, publisher: EvidencePublisher,
@@ -460,27 +584,42 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
         raise PublicationRefused("invalid_acquisition_interval")
     validate_component(writer_key)
     validate_component(run_id)
-    # Register every available roster identity before scrubbing any prose.
-    roster_rows = []
-    for scope in receipt.scopes:
-        if scope.scope == "course.roster" and isinstance(scope.rows, (tuple, list)):
-            roster_rows.extend(row for row in scope.rows if isinstance(row, dict))
-    registration_failed = False
-    try:
-        roster_service.upsert_roster(publisher.vault, roster_rows)
-    except Exception:
-        registration_failed = True
-    if not registration_failed and hasattr(publisher.vault, "save"):
-        publisher.vault.save()
-    unresolved_roster_rows = []
-    if not registration_failed:
-        for row in roster_rows:
-            try:
-                publisher.vault.require_stable(row.get("id", row.get("user_id")))
-            except Exception:
-                unresolved_roster_rows.append(row)
-        publisher._replacement_map = feedback_scrub.build_replacement_map(publisher.vault.entries(), set())
-    heads = {key: list(state.heads) for key, state in publisher.store.scan().scopes.items()}
+    frozen = publisher.vault if isinstance(publisher.vault, IdentitySnapshot) else None
+    if frozen is not None:
+        # Identities were registered and frozen under the vault transaction; this
+        # publication only looks them up and can never assign or save.
+        if (frozen.source_key, frozen.course_id) != (publisher.source_key, publisher.course_id):
+            raise PublicationRefused("identity_snapshot_mismatch")
+        registration_failed = frozen.registration_failed
+        unresolved_roster = frozen.roster_unresolved
+    else:
+        # Register every available roster identity before scrubbing any prose.
+        roster_rows = _roster_rows(receipt)
+        registration_failed = False
+        try:
+            roster_service.upsert_roster(publisher.vault, roster_rows)
+        except Exception:
+            registration_failed = True
+        if not registration_failed and hasattr(publisher.vault, "save"):
+            publisher.vault.save()
+        unresolved_roster = False
+        if not registration_failed:
+            for row in roster_rows:
+                try:
+                    publisher.vault.require_stable(row.get("id", row.get("user_id")))
+                except Exception:
+                    unresolved_roster = True
+            publisher._replacement_map = feedback_scrub.build_replacement_map(publisher.vault.entries(), set())
+    # One validated whole-course scan establishes this receipt's context.
+    context = publisher.store.begin_publication()
+    heads: dict = {}
+
+    def scope_heads(scope_name, scope_id):
+        key = (publisher.source_key, publisher.course_id, scope_name, scope_id)
+        if key not in heads:
+            heads[key] = context.initial_heads(key)
+        return heads[key]
+
     all_facts, commits, all_gaps, success = set(), [], [], []
     # Attachment associations live in their own scope so a missing original never
     # blocks submission membership; they are published after the scope loop.
@@ -494,7 +633,7 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
         if registration_failed and scope.scope in _STUDENT_BEARING_SCOPES:
             all_gaps.append("identity_registration_failed")
             continue
-        if unresolved_roster_rows and scope.scope == "course.roster":
+        if unresolved_roster and scope.scope == "course.roster":
             gaps.append("identity_unresolved")
         if scope.scope not in SCOPE_KINDS:
             all_gaps.append("unsupported_scope")
@@ -533,7 +672,8 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
                         payload["section_ids"] = sorted(set(payload["section_ids"]) |
                                                        set(student_payloads[key]["section_ids"]))
                     try:
-                        _, digest = publisher._fact(kind, key, payload, html_fields=html)
+                        _, digest = publisher._fact(kind, key, payload, html_fields=html,
+                                                    context=context)
                     except (EvidenceValidationError, PublicationRefused) as exc:
                         gaps.append(exc.code)
                         continue
@@ -569,7 +709,7 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
             "schema_version": 1, "source_key": publisher.source_key,
             "course_id": publisher.course_id, "scope": scope.scope, "scope_id": sid,
             "writer_key": writer_key, "run_id": run_id,
-            "parents": heads.get((publisher.source_key, publisher.course_id, scope.scope, sid), []),
+            "parents": list(scope_heads(scope.scope, sid)),
             "acquisition_started_at": started, "acquisition_finished_at": finished,
             "mode": scope.mode, "membership_complete": proven and scope.mode == "snapshot",
             "record_refs": sorted(set(refs)), "member_keys": sorted(set(members)),
@@ -580,7 +720,7 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
             if proven:
                 record["watermarks"] = {key: _utc_stamp(value) for key, value in watermarks.items()}
             validate_commit(record)
-            digest = publisher.store.publish_commit(record)
+            digest = publisher.store.publish_commit(record, context=context)
         except (EvidenceValidationError, PublicationRefused, AttributeError, TypeError):
             all_gaps.extend(gaps + ["commit_refused"])
             if section_publication:
@@ -602,8 +742,7 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
             "schema_version": 1, "source_key": publisher.source_key,
             "course_id": publisher.course_id, "scope": "assignment.attachments",
             "scope_id": aid, "writer_key": writer_key, "run_id": run_id,
-            "parents": heads.get((publisher.source_key, publisher.course_id,
-                                  "assignment.attachments", aid), []),
+            "parents": list(scope_heads("assignment.attachments", aid)),
             "acquisition_started_at": started, "acquisition_finished_at": finished,
             "mode": "snapshot",
             "membership_complete": bool(attachment_complete.get(aid)),
@@ -613,7 +752,7 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
         }
         try:
             validate_commit(record)
-            digest = publisher.store.publish_commit(record)
+            digest = publisher.store.publish_commit(record, context=context)
         except (EvidenceValidationError, PublicationRefused, AttributeError, TypeError):
             all_gaps.append("commit_refused")
             continue
@@ -622,4 +761,5 @@ def publish_course_receipt(*, publisher: EvidencePublisher,
         if attachment_complete.get(aid):
             success.append(("assignment.attachments", aid))
     return AcquisitionPublication(tuple(sorted(all_facts)), tuple(commits),
-                                  tuple(sorted(set(all_gaps))), tuple(success))
+                                  tuple(sorted(set(all_gaps))), tuple(success),
+                                  stats=context.stats)

@@ -24,9 +24,13 @@ it calls `refresh_mirror(course_id)` (or `refresh_mirror(course_id, structure_on
 the catalog) and carries on, with no teacher permission needed. A refresh costs only
 time, so it skips the refresh when the data is within policy, and it tells the
 teacher when a refresh brought in new or resubmitted work. The teacher can still
-press **Refresh course data** in the control console. An unavailable, corrupt, or
-non-current projection appears as `mirror_projection_unavailable`; refresh the
-course mirror and retry.
+press **Refresh course data** in the control console. A course with missing or
+partial saved evidence appears as an attention row (`evidence_not_acquired`,
+`evidence_membership_incomplete`) and its assignments carry `coverage` and
+`counts_complete`: an unknown count is `null`, not zero, and observed counts from
+partial evidence are not the whole workload. Refresh that course and retry; other
+courses stay usable. A `scoring_resume_unavailable` row means existing sessions could
+not be checked, so do not assume none is open.
 
 ## Agent workflow
 

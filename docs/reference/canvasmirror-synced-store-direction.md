@@ -153,22 +153,27 @@ requirements in earlier briefs and contracts for this transition.
 
 ## Execution design
 
-The prior read-activation repair's lossless import/cutover scope is superseded
-by the 2026-10-05 decisions; its brief is retired to Git history, and the
-activation/import/migration machinery is deleted. The current execution pointer is
-`docs/handoffs/canvasmirror-functional-read-path.md`. It fixes acquisition,
-safe-publication, replaceable-index, and agent-read boundaries and defines a bounded
-fresh-start procedure. The detailed staged implementation plan is
-[`canvasmirror-functional-read-path-slices.md`](canvasmirror-functional-read-path-slices.md);
-the brief remains execution authority. Read only the sections it names. Two-computer behavior still
-needs field verification; synthetic gates alone do not establish it. Scoring
-consumption and remaining private projections are the next senior assessment after
-this milestone, not a queued implementation brief.
+The activation/import machinery is deleted. The functional-read implementation
+passed synthetic gates and bounded laptop read/restart checks, but desktop
+field acceptance was incomplete and scoring discovery still used private
+projections. That brief is superseded, not declared GREEN.
+
+The single current execution pointer is
+[`docs/handoffs/canvasmirror-performance-discovery.md`](../handoffs/canvasmirror-performance-discovery.md).
+Start at batch row **D00** in
+[`canvasmirror-performance-discovery-slices.md`](canvasmirror-performance-discovery-slices.md),
+reading sections **1–5**, **6 → D00**, and **7**, plus investigation sections
+**1–7** named by the brief. Execute D01–D06 within that one batch.
+The teacher selected bounded publication performance, evidence-index discovery,
+and side-effect-free session summaries on 2026-10-06. Preparation and attachment
+consumption remain outside this batch. Carried desktop/second-machine checks
+are explicit in D06; no reset is proposed. Field timing and useful results are
+required for acceptance, not just passing unit tests.
 
 ### Workflow-review constraints — 2026-10-05
 
-The current brief and slice plan remain the only execution route. This review
-changes the plan, not claims about shipped behavior:
+These constraints remain product direction; the previous execution references
+are historical and do not route the new batch:
 
 - Publishing assignments/quizzes/pages must not acquire a new global mirror or
   OCR readiness gate. Keep the owning operation's real safety checks.
@@ -182,19 +187,15 @@ changes the plan, not claims about shipped behavior:
 - A second machine's empty job queue does not mean the shared evidence has no
   missing files. Attachment availability comes from associations/extractions.
 - The remaining scoring/private-projection split is a real workflow limitation.
-  The next senior assessment starts at scoring preparation and feedback revision:
-  can available assignment evidence be consumed without a redundant refresh or
-  loss of prepared work? Do not start another migration/cleanup project by default.
-
-Exact execution references: slice plan sections **4.5**, **4.7–4.9**, **5.1**,
-and **10–11**. Current runtime documentation was reconciled in S11 after the code
-implemented these changes.
+  Discovery is addressed by the selected current batch; preparation, extracted
+  attachments and feedback revision still need their own evidence contract.
 
 ### Next senior assessment
 
-After S12/S13 field acceptance, the next senior assessment starts at scoring
-preparation and feedback revision: can available assignment evidence be consumed
-without a redundant refresh or loss of prepared work? The remaining private
-projections still consumed by Names, scoring, and operation adapters are the
-subject of that assessment, not a queued implementation brief. Do not start
-another migration/cleanup project by default.
+After D06 acceptance, assess assignment-scoped scoring input and packet
+continuation. Read only
+[`canvasmirror-performance-discovery-investigation.md`](canvasmirror-performance-discovery-investigation.md)
+section **6**, the current scoring guide, and the exact owners it names. Resolve
+missing scoring fields, usable extracted attachments and live-session preservation
+before writing that brief. Do not infer that discovery acceptance establishes
+scoring acceptance or start a repository-wide migration/cleanup project.

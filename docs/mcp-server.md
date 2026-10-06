@@ -60,7 +60,7 @@ authoring guidance, call `get_product_guide` with the relevant topic:
 
 ## Tools
 
-Tool schema version 82 (38 tools).
+Tool schema version 83 (38 tools). v83 changes `discover_scoring_work` results only (evidence-index source, coverage columns, opaque `mirror_revision`); inputs are unchanged.
 
 | Tool | Purpose | Student data? |
 |---|---|---|
@@ -242,10 +242,18 @@ returns only each draft's label, never its absolute path. Pass `kind` to narrow 
 
 **Scoring Session workflow.** For a broad request such as “what needs grading,” the
 assistant calls `discover_scoring_work()` with no arguments. Canvas Expert reads every
-Current course from its local mirror and returns complete assignment, freshness, and
-attention tables. No discovery call enqueues, waits for, polls, or retries a refresh.
-An unavailable, corrupt, or non-current projection is reported as
-`mirror_projection_unavailable`; a valid old snapshot remains visible as usable.
+Current course from the local CanvasMirror evidence index in one consistent read and
+returns assignment, freshness, and attention tables. No discovery call enqueues,
+waits for, polls, or retries a refresh, and a background refresh never blocks it.
+Counts are observed counts: `coverage` (`complete`, `incomplete`, `unknown`) and
+`counts_complete` say whether an assignment's count is the whole workload, and an
+unknown count is `null`, never zero. A course whose evidence is missing, partial,
+or needs a newer Canvas Expert gets its own attention row (`evidence_not_acquired`,
+`evidence_membership_incomplete`, `evidence_update_required`,
+`evidence_index_pending`) while other courses stay usable. `mirror_revision` is the
+opaque evidence-index revision. If existing sessions cannot be checked, discovery
+still returns the work with a `scoring_resume_unavailable` warning, so do not assume
+no session is open. A valid old observation remains visible with its age.
 The assistant reports all rows and waits for teacher direction, then calls
 `prepare_scoring_session(course_id, assignment_id, scoring_guidance="")` only for
 selected exact assignments. Preparation reads only current local projections and

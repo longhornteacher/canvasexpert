@@ -1,13 +1,14 @@
 # CanvasMirror functional read path: implementation slices
 
-Status: S11 synthetic implementation complete; S13 laptop direct read/restart
-check and S12 dispatch responsiveness repair passed. Broader desktop field
-acceptance remains open; see the current brief for evidence. Section 4.9 specifies refresh
-continuation; section 5.1 records remaining workflow limits without widening
-scoring scope.
+Status: SUPERSEDED — historical implementation reference only, 2026-10-06.
+S11 synthetic implementation, S13 laptop read/restart and S12 dispatch
+responsiveness passed; broader desktop field acceptance remains unclosed.
+The new performance/discovery brief carries those checks forward. Do not execute
+this plan or treat its old reset boundary as current authorization.
 Target branch: `dev`. Inspected baseline: `30b9465`.
-Authority: [current execution brief](../handoffs/canvasmirror-functional-read-path.md).
-Preflight findings and baseline failures live in that brief, section 7.
+Current authority: [performance/discovery brief](../handoffs/canvasmirror-performance-discovery.md).
+Carried evidence: [senior investigation](canvasmirror-performance-discovery-investigation.md),
+section 7. The superseded brief is retained in Git history.
 
 This plan locks names, interfaces, state rules, copy, and tests so an executor
 implements rather than designs. It deliberately chooses the simplest mechanism

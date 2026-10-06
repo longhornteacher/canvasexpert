@@ -10,6 +10,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from collections import defaultdict, deque
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -115,6 +116,97 @@ def validate_reference_graph(commit: dict, facts: dict[str, dict], commits: dict
             raise EvidenceValidationError("membership_mismatch")
 
 
+_CONTEXT_TOKEN = object()
+
+
+class PublicationContext:
+    """Validated course state for exactly one publication receipt.
+
+    Only ``EvidenceStore.begin_publication`` can create one: it performs the
+    single whole-course scan, so every fact and commit held here passed schema,
+    privacy and digest checks. Records are added only by the store, after their
+    own validation and a successful immutable publish. Callers cannot inject
+    records or mark anything validated. A context is single-threaded and is
+    never reused across receipts; a stale context only risks a safe refusal or
+    a causal sibling branch, never an unchecked write.
+    """
+
+    def __init__(self, token, store: "EvidenceStore", base: StoreSnapshot, scan_seconds: float):
+        if token is not _CONTEXT_TOKEN:
+            raise TypeError("publication_context_private")
+        self._store = store
+        self._base = base
+        self._facts = dict(base.facts)
+        self._commits = dict(base.commits)
+        self._by_scope = defaultdict(dict)
+        for digest, commit in base.commits.items():
+            self._by_scope[_scope_key(commit)][digest] = commit
+        self._states: dict[tuple, ScopeState | None] = {}
+        self._published: dict[tuple[str, str], int] = {}
+        self._rechecked: set[tuple[str, str]] = set()
+        self._stats = {"scans": 1, "scan_seconds": scan_seconds,
+                       "base_facts": len(base.facts), "base_commits": len(base.commits),
+                       "base_issues": len(base.issues), "facts_published": 0,
+                       "commits_published": 0, "dependency_checks": 0}
+
+    @property
+    def stats(self) -> dict:
+        return dict(self._stats)
+
+    def initial_state(self, scope_key: tuple[str, str, str, str]) -> ScopeState | None:
+        """Reduced state of one scope as of the initial scan (memoized)."""
+        if scope_key not in self._states:
+            commits = self._by_scope.get(scope_key)
+            if not commits:
+                self._states[scope_key] = None
+            else:
+                scoped = StoreSnapshot(self._base.facts, commits, self._base.issues,
+                                       self._base.revision)
+                self._states[scope_key] = reduce_scope(
+                    scoped, scope_key[2], scope_key[3],
+                    source_key=scope_key[0], course_id=scope_key[1])
+        return self._states[scope_key]
+
+    def initial_heads(self, scope_key: tuple[str, str, str, str]) -> list[str]:
+        state = self.initial_state(scope_key)
+        return list(state.heads) if state else []
+
+    def fact(self, digest: str) -> dict | None:
+        """A validated fact (initial scan or published here); treat as read-only."""
+        return self._facts.get(digest)
+
+    def _record(self, namespace: str, digest: str, checked: dict, size: int) -> None:
+        checked = deepcopy(checked)  # the caller's dict can never alter validated state
+        self._published[(namespace, digest)] = size
+        if namespace == "objects":
+            self._facts[digest] = checked
+            self._stats["facts_published"] += 1
+        else:
+            self._commits[digest] = checked
+            self._stats["commits_published"] += 1
+
+    def _verify_on_disk(self, store: "EvidenceStore", namespace: str, digest: str) -> bool:
+        """Targeted recheck of one dependency; counted, never a course scan."""
+        marker = (namespace, digest)
+        if marker in self._rechecked:
+            return True
+        self._stats["dependency_checks"] += 1
+        path = store._path(namespace, digest)
+        size = self._published.get(marker)
+        try:
+            if size is not None:
+                ok = path.stat().st_size == size
+            else:
+                candidates = [path] if path.exists() else sorted(path.parent.glob(f"{digest}*.json"))
+                ok = any(hashlib.sha256(candidate.read_bytes()).hexdigest() == digest
+                         for candidate in candidates)
+        except OSError:
+            ok = False
+        if ok:
+            self._rechecked.add(marker)
+        return ok
+
+
 class EvidenceStore:
     def __init__(self, safe_root: Path, source_key: str, course_id: str, *, verify_safe: Callable[[dict], None], private_diagnostics_root: Path):
         if not callable(verify_safe):
@@ -153,11 +245,24 @@ class EvidenceStore:
         return self._contained(self.course_root / namespace / digest[:2] / f"{digest}.json")
 
     def _publish(self, namespace, checked):
+        return self._publish_sized(namespace, checked)[0]
+
+    def _publish_sized(self, namespace, checked):
         payload = canonical_bytes(checked)
         digest = hashlib.sha256(payload).hexdigest()
         target = self._path(namespace, digest)
         _publish_exclusive(target, payload)
-        return digest
+        return digest, len(payload)
+
+    def _require_context(self, context):
+        if context is not None and (not isinstance(context, PublicationContext) or context._store is not self):
+            raise EvidenceValidationError("publication_context_mismatch")
+
+    def begin_publication(self) -> PublicationContext:
+        """One validated whole-course scan establishing a receipt's context."""
+        started = time.monotonic()
+        snapshot = self.scan()
+        return PublicationContext(_CONTEXT_TOKEN, self, snapshot, time.monotonic() - started)
 
     def _diagnose(self, raw):
         digest = hashlib.sha256(raw).hexdigest()
@@ -166,18 +271,53 @@ class EvidenceStore:
             raise EvidenceValidationError("diagnostics_path_escape")
         _publish_exclusive(target, raw)
 
-    def publish_fact(self, record: dict) -> str:
-        return self._publish("objects", self._validate(record))
+    def publish_fact(self, record: dict, *, context: PublicationContext | None = None) -> str:
+        self._require_context(context)
+        checked = self._validate(record)
+        digest, size = self._publish_sized("objects", checked)
+        if context is not None:
+            context._record("objects", digest, checked, size)
+        return digest
 
-    def publish_commit(self, record: dict) -> str:
+    def publish_commit(self, record: dict, *, context: PublicationContext | None = None) -> str:
+        """Publish one commit after dependency and graph checks.
+
+        Without a context this performs its own whole-course scan (standalone
+        publishers). With a context from ``begin_publication`` it checks against
+        that validated state plus records the context itself published, and
+        rechecks each direct dependency on disk (targeted, counted) rather than
+        rescanning the course. A commit that arrived by sync after the initial
+        scan is not a parent here; the reducer treats that as a causal sibling.
+        """
+        self._require_context(context)
         checked = self._validate(record, commit=True)
-        snapshot = self.scan()
-        validate_reference_graph(checked, snapshot.facts, snapshot.commits)
-        if any(ref not in snapshot.facts for ref in checked["record_refs"]) or any(ref not in snapshot.commits for ref in checked["parents"]):
+        if context is None:
+            snapshot = self.scan()
+            facts, commits = snapshot.facts, snapshot.commits
+            pending_source = lambda: reduce_scope(  # noqa: E731 - only this commit's scope can hold its parents
+                snapshot, checked["scope"], checked["scope_id"],
+                source_key=checked["source_key"], course_id=checked["course_id"]).pending_commits
+        else:
+            facts, commits = context._facts, context._commits
+            pending_source = lambda: (context.initial_state(_scope_key(checked)) or ScopeState("unavailable")).pending_commits  # noqa: E731
+        validate_reference_graph(checked, facts, commits)
+        if any(ref not in facts for ref in checked["record_refs"]) or any(ref not in commits for ref in checked["parents"]):
             raise EvidenceValidationError("publication_dependencies_missing")
-        if any(ref in state.pending_commits for state in snapshot.scopes.values() for ref in checked["parents"]):
-            raise EvidenceValidationError("publication_dependencies_missing")
-        return self._publish("commits", checked)
+        if context is not None:
+            for ref in checked["record_refs"]:
+                if not context._verify_on_disk(self, "objects", ref):
+                    raise EvidenceValidationError("publication_dependencies_missing")
+            for parent in checked["parents"]:
+                if not context._verify_on_disk(self, "commits", parent):
+                    raise EvidenceValidationError("publication_dependencies_missing")
+        if checked["parents"]:
+            pending = set(pending_source())
+            if any(parent in pending for parent in checked["parents"]):
+                raise EvidenceValidationError("publication_dependencies_missing")
+        digest, size = self._publish_sized("commits", checked)
+        if context is not None:
+            context._record("commits", digest, checked, size)
+        return digest
 
     def scan(self) -> StoreSnapshot:
         """Verify synced files, preserving refused bytes in private diagnostics."""

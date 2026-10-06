@@ -276,3 +276,118 @@ class EvidenceQueryService:
                 },
                 "acquisition": {"state": "not_reported"},
             }
+
+    def read_scoring_discovery(self, *, source_key: str, course_ids) -> dict:
+        """Student-free grading counters for the selected courses, in one transaction.
+
+        Local application read (not an MCP tool): the revision, scope coverage and
+        every counter come from one pinned SQLite snapshot, so a concurrent index
+        rebuild can never mix two revisions. Pseudonyms stay inside this method.
+        Counting follows ``gradebook_snapshot.needs_grading``; a counter is ``None``
+        when no eligible observation exists, never a fabricated zero.
+        """
+        from api.gradebook_snapshot import needs_grading
+
+        course_ids = [str(value) for value in dict.fromkeys(course_ids or ()) if str(value)]
+        if not course_ids:
+            return {"revision": None, "courses": []}  # never "all courses"
+        marks = ",".join("?" for _ in course_ids)
+        params = (source_key, *course_ids)
+        where = f"source_key=? AND course_id IN ({marks})"
+        with self.index.read_connection() as db:
+            row = db.execute("SELECT value FROM index_metadata WHERE key='revision'").fetchone()
+            revision = row[0] if row else None
+            coverage_rows = db.execute(
+                "SELECT course_id,scope,scope_id,status,membership_complete,pending_commits,"
+                f"ambiguous_entities,last_success_at FROM scope_status WHERE {where}", params).fetchall()
+            titles = {r["course_id"]: (r["title"], r["selection_status"]) for r in db.execute(
+                f"SELECT course_id,title,selection_status FROM courses WHERE {where}", params)}
+            roster = {}
+            for r in db.execute(f"SELECT course_id,pseudonym FROM roster WHERE {where}", params):
+                roster.setdefault(r["course_id"], set()).add(r["pseudonym"])
+            assignments = db.execute(
+                "SELECT course_id,assignment_id,fact_ref,"
+                "json_extract(payload,'$.title') title,json_extract(payload,'$.due_at') due_at,"
+                "json_extract(payload,'$.points_possible') points,"
+                f"json_extract(payload,'$.published') published FROM assignment_context WHERE {where} "
+                "ORDER BY course_id,assignment_id,fact_ref", params).fetchall()
+            submissions = db.execute(
+                "SELECT course_id,assignment_id,pseudonym,entity_key,"
+                "json_extract(payload,'$.submitted_at') submitted_at,"
+                "json_extract(payload,'$.workflow_state') workflow_state,"
+                "json_extract(payload,'$.excused') excused,json_extract(payload,'$.score') score,"
+                f"json_extract(payload,'$.late') late FROM current_submissions WHERE {where}",
+                params).fetchall()
+
+        scopes = {}
+        for r in coverage_rows:
+            complete = (r["status"] == "ready" and bool(r["membership_complete"])
+                        and not json.loads(r["pending_commits"] or "[]")
+                        and not json.loads(r["ambiguous_entities"] or "[]"))
+            scopes[(r["course_id"], r["scope"], r["scope_id"])] = {
+                "coverage": "complete" if complete else "incomplete",
+                "observed_at": r["last_success_at"], "status": r["status"],
+                "ambiguous": set(json.loads(r["ambiguous_entities"] or "[]")),
+            }
+        unknown = {"coverage": "unknown", "observed_at": None, "status": None, "ambiguous": set()}
+        by_assignment = {}
+        for r in submissions:
+            by_assignment.setdefault((r["course_id"], r["assignment_id"]), []).append(r)
+        assignment_rows = {}
+        for r in assignments:
+            assignment_rows.setdefault(r["course_id"], {}).setdefault(r["assignment_id"], r)
+
+        courses = []
+        for course_id in course_ids:
+            roster_scope = scopes.get((course_id, "course.roster", course_id), unknown)
+            assignment_scope = scopes.get((course_id, "course.assignments", course_id), unknown)
+            known = roster.get(course_id, set())
+            items = []
+            for assignment_id, a in sorted(assignment_rows.get(course_id, {}).items()):
+                if a["published"] is not None and not a["published"]:
+                    continue  # clearly unpublished work is never gradable
+                sub_scope = scopes.get((course_id, "assignment.submissions", assignment_id), unknown)
+                rows = by_assignment.get((course_id, assignment_id), [])
+                per_entity = {}
+                for s in rows:
+                    per_entity.setdefault(s["entity_key"], []).append(s)
+                ambiguous = set(sub_scope["ambiguous"]) | {
+                    key for key, group in per_entity.items() if len(group) > 1}
+                observable = (sub_scope["coverage"] != "unknown"
+                              and roster_scope["coverage"] != "unknown")
+                counters = {"ungraded": None, "partially_scored": None, "late_ungraded": None}
+                if observable:
+                    counters = {"ungraded": 0, "partially_scored": 0, "late_ungraded": 0}
+                    for key, group in per_entity.items():
+                        s = group[0]
+                        if key in ambiguous or s["pseudonym"] not in known:
+                            continue
+                        if not needs_grading({"excused": s["excused"], "submitted_at": s["submitted_at"],
+                                              "workflow_state": s["workflow_state"]}):
+                            continue
+                        counters["ungraded"] += 1
+                        counters["late_ungraded"] += 1 if s["late"] else 0
+                        counters["partially_scored"] += 1 if s["score"] is not None else 0
+                complete = (observable and sub_scope["coverage"] == "complete"
+                            and roster_scope["coverage"] == "complete" and not ambiguous)
+                items.append({
+                    "assignment_id": assignment_id, "name": a["title"] or "",
+                    "due_at": a["due_at"], "points": a["points"],
+                    "published": a["published"] is not None,
+                    "coverage": "complete" if complete else "unknown" if not observable else "incomplete",
+                    "counts_complete": bool(complete),
+                    "submissions_observed_at": sub_scope["observed_at"],
+                    "ambiguous_entities": len(ambiguous), **counters,
+                })
+            title, selection = titles.get(course_id, (None, None))
+            courses.append({
+                "course_id": course_id, "title": title, "selection_status": selection,
+                "revision": revision,
+                "roster": {"coverage": roster_scope["coverage"], "observed_at": roster_scope["observed_at"],
+                           "known_members": len(known)},
+                "assignments_scope": {"coverage": assignment_scope["coverage"],
+                                      "observed_at": assignment_scope["observed_at"],
+                                      "status": assignment_scope["status"]},
+                "assignments": items,
+            })
+        return {"revision": revision, "courses": courses}

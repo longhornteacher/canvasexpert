@@ -42,6 +42,19 @@ Therefore:
 These follow from the state above and from repeated direction; they are not
 slice-specific.
 
+- **Efficiency with an independent fallback.** Maximize useful output for the
+  least total teacher effort, including setup, review, corrections, recovery,
+  and maintenance. Retain existing CE/CanvasMirror functionality because access
+  to IgniteAI could disappear. In the teacher-agent conversation, incorporate
+  available native capabilities when they reduce effort, with clear teacher
+  handoffs and a usable CE fallback. Native access is optional, never a required
+  dependency. Preserving a distinctive role for CE is not the decision criterion.
+- **Teacher-chosen models for authoring.** The teacher prefers the cutting edge
+  of consumer models for planning and material creation. Separate that choice
+  from Canvas delivery and scoring. For scoring and feedback, adequate output
+  quality and low review/correction effort matter more than using the newest
+  model. Native execution may apply externally authored material when it can
+  preserve the teacher-reviewed content.
 - **One source of truth per artifact.** Never ship a static copy *and* a
   generated copy of the same thing (e.g. an authoring contract or a scoring
   skill). Pick the one canonical source; generate or read from it everywhere.
