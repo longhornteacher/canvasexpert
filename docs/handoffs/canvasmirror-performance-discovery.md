@@ -394,3 +394,20 @@ resume path, keyed by path plus (size, mtime_ns) with the 2 s racy rule (W8,
 memoized on the config file's signature (W10, `api/platform_services/workspace.py`).
 Held unless the gate still misses: reuse one conflict inventory per discovery call,
 skip `blobs/` in the walk, and a sub-millisecond GIL switch interval.
+
+Result (commit `fa8200f`; gate **2802 passed, 1 skipped**; W8's memo method renamed
+`put` -> `remember` so the Canvas-mutation lint does not read it as an HTTP PUT).
+Field, laptop, no other CE runtimes, harness from `fa8200f`:
+
+| Run | Discovery p95 / max / median | Ping p95 / max | Notes |
+|---|---|---|---|
+| Sampled background, 100 | 0.26 / 0.32 / 0.19 s | 0.03 / 0.03 s | per-100-call stage time: reader 3.6 s, query 5.8 s, resume 4.1 s, untimed 3.3 s (was 5.5 / 6.3 / 10.2 / 17.6 s) |
+| Background, 300, course A | **0.25 / 5.74 / 0.15 s** | 0.73 / 0.99 s | spans 44 s cold maintenance, two 25-27 s publications; 300/300 identical, 0 failures |
+| Background, 300, course B | **0.29 / 5.70 / 0.11 s** | 0.84 / 0.97 s | refresh `synced` 14.1 s; 300/300 identical, 0 failures |
+| Warm, 20 (90 s settle) | **0.09 / 0.11 / 0.09 s** | - | first call after restart 0.34 s |
+
+All section 5 discovery gates are met on the laptop with margin. The held options
+(one inventory per call, skip `blobs/`, switch interval) are not needed. Light stays
+**YELLOW** only for items section 6 requires: the desktop check and the S12
+attachment/restart carry-over are not done. Noted for later, not acted on:
+`config/_io.py::_machine_load` still reads machine config without a memo.
