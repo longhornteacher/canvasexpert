@@ -374,3 +374,11 @@ Three call sites discard `scan_conflicts`' result (`shared_kv.read_values`,
 since `85ce67a`, so those calls have always been no-ops. Removing them is exact.
 The vault's scan (feeds the console's conflict list) and the one inventory per
 `read_item_summaries` pass stay.
+
+Result (commits `3aefc4f`, `9c82a33`; gate **2750 passed, 1 skipped**). Sampled field run,
+100 loaded discovery calls on course B, before -> after removing the no-op scans:
+walk samples outside the timed stages 2,587 -> 0; walks on the event loop (pings) 705 -> 0;
+untimed tool time 17.6 s -> 6.2 s per 100 calls; ping p95/max 1.85-3.07/3.3 s -> 1.06/1.12 s;
+discovery p95 2.25 s, max **8.87 s**, median 0.39 s. The two remaining walks per call
+are the vault check and the resume inventory, both used. The largest remaining
+stage is resume (manifest/event/blob reads), still measured under background load.
