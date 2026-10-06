@@ -365,3 +365,12 @@ check uses the walk's own file-name list for that directory (`os.path.normcase`d
 matching the case-insensitive `is_file()` on Windows) instead of a stat. Only
 edge difference: a dangling symlink named like a canonical file would now count;
 OneDrive never produces those.
+
+Follow-up (field sampler, whole tool): the stat removal helped little, because
+discovery walked `_Shared` about seven times per call (~12.8 s per 100 loaded calls
+outside the timed stages) and `list_courses` pings walked it on the event loop.
+Three call sites discard `scan_conflicts`' result (`shared_kv.read_values`,
+`SharedWorkStore._raw_events`, `SharedWorkStore.list_items`); it has never raised
+since `85ce67a`, so those calls have always been no-ops. Removing them is exact.
+The vault's scan (feeds the console's conflict list) and the one inventory per
+`read_item_summaries` pass stay.

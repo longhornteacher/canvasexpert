@@ -225,6 +225,35 @@ def test_one_conflict_inventory_per_pass_regardless_of_item_count(store, invento
     assert len(inventory_spy) == 1
 
 
+@pytest.fixture
+def work_inventory_spy(monkeypatch):
+    """Count the work store's own whole-tree inventories (its direct scan_conflicts calls)."""
+    calls = []
+    real = shared_work.scan_conflicts
+
+    def wrapped(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(shared_work, "scan_conflicts", wrapped)
+    return calls
+
+
+def test_only_the_summary_pass_takes_a_whole_tree_inventory(store, work_inventory_spy):
+    """Cost contract: list_items and the raw event read never walk _Shared themselves."""
+    for index in range(3):
+        store.save_snapshot(f"s{index}", _state(f"s{index}", assignment=f"a{index}"),
+                            kind=KIND, course_id="c1", assignment_id=f"a{index}")
+    work_inventory_spy.clear()
+
+    assert len(store.list_items(kind=KIND)) == 3
+    assert store._raw_events("s0")
+    assert work_inventory_spy == []
+
+    assert len(_read(store)["items"]) == 3
+    assert work_inventory_spy == [1]
+
+
 def test_relevant_conflict_refuses_but_out_of_scope_conflict_does_not(store, tmp_path):
     store.save_snapshot("mine", _state("mine"), kind=KIND, course_id="c1", assignment_id="a1")
     store.save_snapshot("theirs", _state("theirs", course="c2"), kind=KIND,

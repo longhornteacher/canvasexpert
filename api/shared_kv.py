@@ -10,7 +10,6 @@ from api import local_runtime
 from api.platform_services import workspace
 from api.shared_storage import (
     append_jsonl_batch, create_json_exclusive, legacy_storage_reappeared,
-    scan_conflicts,
 )
 
 
@@ -132,10 +131,10 @@ class SharedKVStore:
             self._snapshots()
 
     def read_values(self, fallback: dict | None = None) -> dict[str, object]:
-        # Conflict discovery is whole-tree, even though only this store's
-        # writes are blocked by a sibling copy.
+        # A read does no conflict discovery: that is whole-tree work, done for the
+        # console in the vault read and in the work store's one inventory per summary
+        # pass. Writes stay blocked per store by assert_store_writable.
         legacy_storage_reappeared(self.retired_path)
-        scan_conflicts(self.workspace_root)
         self.ensure_initial_snapshot(fallback)
         snapshots = self._snapshots()
         if not snapshots:

@@ -196,7 +196,6 @@ class SharedWorkStore:
         directory = self._item_dir(work_id)
         if not directory.is_dir():
             raise WorkItemNotFound("work_item_not_found")
-        scan_conflicts(self.workspace_root)
         paths = [path for path in sorted(directory.glob("events.*.jsonl"),
                                          key=lambda item: item.name)
                  if not path.name.endswith(".orphan.jsonl")]
@@ -564,7 +563,6 @@ class SharedWorkStore:
         }
 
     def list_items(self, *, kind: str | None = None) -> list[dict]:
-        scan_conflicts(self.workspace_root)
         if not self.root.is_dir():
             return []
         summaries = []
