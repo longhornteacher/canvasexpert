@@ -1,8 +1,8 @@
-# S13 laptop field check — CanvasMirror read portability
+# S13 second-computer field check — CanvasMirror read portability
 
-Run this on the **laptop**, in its CanvasExpert checkout. This is the remaining
+Run this on the **second computer**, in its CanvasExpert checkout. This is the remaining
 field check for `docs/handoffs/canvasmirror-functional-read-path.md`. Give this
-file to the laptop's Codex agent as its direct task. The check is read-only with
+file to that computer's Codex agent as its direct task. The check is read-only with
 respect to Canvas: local index maintenance is expected, but do not perform Canvas
 writes, operation retries, a reset, or an explicit Canvas refresh before the
 first cross-device read. Do not edit repository files as part of this check.
@@ -10,18 +10,12 @@ first cross-device read. Do not edit repository files as part of this check.
 ## Preflight
 
 1. Read `AGENTS.md`, the current brief's S12/S13 field result, and S13 in
-   `docs/reference/canvasmirror-functional-read-path-slices.md`. Preserve any
-   laptop worktree changes. Run `git status --short --branch`, then
-   `git pull --ff-only origin dev` only if it can fast-forward cleanly. The S13
-   field-report history was replaced to remove private details. If the laptop
-   already has that earlier commit and fast-forward fails, run `git fetch origin`,
-   inspect `git status` and `git log origin/dev..dev`, then use
-   `git reset --hard origin/dev` only when there are no uncommitted changes or
-   independent local commits. Otherwise stop and report the local work. Do not
-   merge the replaced history back in. Verify
-   `d4df247` is an ancestor of `HEAD` with
-   `git merge-base --is-ancestor d4df247 HEAD`. Stop and report if not.
-2. Confirm that the laptop Canvas Expert runtime actually uses this updated
+   `docs/reference/canvasmirror-functional-read-path-slices.md`. Follow
+   `docs/guides/continue-dev-on-another-computer.md` to clone or safely resync
+   `dev` after the replaced S13 report history; preserve any local work and do
+   not merge the replaced commits. Verify that `dev` matches `origin/dev` and
+   the sanitized field-result commit is an ancestor of `HEAD`.
+2. Confirm that the computer's Canvas Expert runtime actually uses this updated
    checkout; inspect the configured runtime source path rather than assuming a
    successful pull changed the running process. Confirm the same selected
    OneDrive workspace and matching six-character Identity Vault transfer-key
@@ -33,7 +27,7 @@ first cross-device read. Do not edit repository files as part of this check.
 
 ## Read and restart
 
-4. Restart the laptop Canvas Expert runtime to load the updated code. Let its
+4. Restart the Canvas Expert runtime to load the updated code. Let its
    automatic local index maintenance finish. **Do not call `refresh_mirror` or
    use the console refresh button before the first reads.** If indexing is
    pending, observe status and allow the maintenance cycle to complete.
@@ -45,7 +39,7 @@ first cross-device read. Do not edit repository files as part of this check.
    attachment gap. Note `ok`, warnings, stage/error codes, aggregate counts,
    and elapsed times. Do not print individual rows, labels, IDs, names, or
    content in the report.
-6. Restart the laptop runtime once more and repeat the **same** reads. Confirm
+6. Restart the runtime once more and repeat the **same** reads. Confirm
    it becomes readable without activation, import, manual refresh, or a reset.
    If something fails, distinguish sync/hydration delay, update required,
    local index pending/failure, acquisition failure, and attachment gap. A

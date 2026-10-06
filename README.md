@@ -62,7 +62,9 @@ chatbot and ask it anything. That file is also the CanvasAgent instruction set: 
 whole thing into an AI chat, or just its CORE block into a custom-instructions box, and the
 assistant knows how to draft coursework Canvas Expert can validate and push.
 
-For developers: see `AGENTS.md` and `docs/README.md`.
+For developers: see `AGENTS.md` and `docs/README.md`. To continue the current
+`dev` pilot from another computer, use
+[the Git checkout guide](docs/guides/continue-dev-on-another-computer.md).
 
 ## License
 

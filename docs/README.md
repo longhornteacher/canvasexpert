@@ -32,6 +32,8 @@ the tools.
   contract remains normative.
 - [`guides/more-than-one-computer.md`](guides/more-than-one-computer.md) - running Canvas
   Expert on several computers over one OneDrive workspace.
+- [`guides/continue-dev-on-another-computer.md`](guides/continue-dev-on-another-computer.md) -
+  checking out or resyncing the current pilot `dev` branch on another computer.
 
 ## Contracts (`contracts/`)
 
