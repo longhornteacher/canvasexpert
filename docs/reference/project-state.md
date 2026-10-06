@@ -49,12 +49,15 @@ slice-specific.
   available native capabilities when they reduce effort, with clear teacher
   handoffs and a usable CE fallback. Native access is optional, never a required
   dependency. Preserving a distinctive role for CE is not the decision criterion.
-- **Teacher-chosen models for authoring.** The teacher prefers the cutting edge
-  of consumer models for planning and material creation. Separate that choice
-  from Canvas delivery and scoring. For scoring and feedback, adequate output
-  quality and low review/correction effort matter more than using the newest
-  model. Native execution may apply externally authored material when it can
-  preserve the teacher-reviewed content.
+- **Keep creation agentic.** The teacher prefers their chosen cutting-edge
+  consumer models for planning, material creation, and rubric design. Keep
+  creation and delivery in the agent-teacher workflow as far as available tools
+  allow: co-design the rubric, then have the agent push the reviewed assignment
+  and actual attached Canvas rubric. The preferred native role is subsequent
+  draft scores/feedback through enabled IgniteAI Grading Assistance; current
+  teacher trigger/review/save steps remain explicit. For scoring, adequate
+  quality and low review/correction effort matter more than the newest model.
+  State delivery gaps; do not default creation to a separate native chat.
 - **One source of truth per artifact.** Never ship a static copy *and* a
   generated copy of the same thing (e.g. an authoring contract or a scoring
   skill). Pick the one canonical source; generate or read from it everywhere.

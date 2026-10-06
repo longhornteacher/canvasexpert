@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 
+from .cooperative import NoSlice
 from .evidence_schema import digest_record, validate_commit, validate_fact
 
 INDEX_SCHEMA_VERSION = 2
@@ -76,7 +77,7 @@ class EvidenceIndex:
         self._discard_allowed = True
         self._discard_signature = self._file_signature()
 
-    def ingest(self, snapshot, *, selected_courses=()) -> str:
+    def ingest(self, snapshot, *, selected_courses=(), pacer=None) -> str:
         """Replace the projection atomically; unchanged snapshots cost no rewrite.
 
         Callers supply EvidenceStore.scan() output, never raw Canvas records.
@@ -85,9 +86,11 @@ class EvidenceIndex:
         from .evidence_store import StoreSnapshot, validate_reference_graph, validate_store_issue
         if not isinstance(snapshot, StoreSnapshot) or not callable(getattr(snapshot, "verify_safe", None)):
             raise ValueError("validated_snapshot_required")
+        pacer = pacer or NoSlice()
         issues = tuple(validate_store_issue(issue) for issue in snapshot.issues)
         facts = {}
         for ref, fact in snapshot.facts.items():
+            pacer.checkpoint()
             validated = validate_fact(fact)
             if digest_record(validated) != ref:
                 raise ValueError("fact_digest_mismatch")
@@ -95,12 +98,14 @@ class EvidenceIndex:
             facts[ref] = validated
         commits = {}
         for ref, commit in snapshot.commits.items():
+            pacer.checkpoint()
             validated = validate_commit(commit)
             if digest_record(validated) != ref:
                 raise ValueError("commit_digest_mismatch")
             self._verify(snapshot.verify_safe, validated)
             commits[ref] = validated
         for commit in commits.values():
+            pacer.checkpoint()
             validate_reference_graph(commit, facts, commits)
         snapshot = StoreSnapshot(facts=facts, commits=commits, issues=issues, revision=snapshot.revision, verify_safe=snapshot.verify_safe)
         selected = frozenset(str(value) for value in selected_courses)
@@ -144,7 +149,7 @@ class EvidenceIndex:
         self._discard_signature = None
         return revision
 
-    def ingest_many(self, snapshots, *, selected_courses=()) -> str:
+    def ingest_many(self, snapshots, *, selected_courses=(), pacer=None) -> str:
         """Build one complete source projection from all safely scanned courses."""
         from .evidence_store import StoreSnapshot
         snapshots = tuple(snapshots)
@@ -174,7 +179,7 @@ class EvidenceIndex:
 
         aggregate_revision = hashlib.sha256(json.dumps(sorted(s.revision for s in snapshots), separators=(",", ":")).encode()).hexdigest()
         aggregate = StoreSnapshot(facts, commits, tuple(issues), aggregate_revision, verify)
-        return self.ingest(aggregate, selected_courses=selected_courses)
+        return self.ingest(aggregate, selected_courses=selected_courses, pacer=pacer)
 
     @staticmethod
     def _project_derived(db, facts, snapshot, revision):

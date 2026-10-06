@@ -540,6 +540,7 @@ def attachment_stage(summary):
 
 def run_index_maintenance(*, root=None, source_key=None) -> dict:
     """Independently reduce safe courses; rebuild only the disposable local index."""
+    from api.mirror.cooperative import TimeSlice
     from api.mirror.evidence_index import EvidenceIndex, IndexReadError, IndexBusy
     from api.mirror.evidence_paths import local_source_root, source_key_for_origin
     from api.mirror.evidence_publish import EvidencePublisher
@@ -579,6 +580,7 @@ def run_index_maintenance(*, root=None, source_key=None) -> dict:
                     pass
             absent = (selected | indexed) - course_ids
             snapshots = []
+            pacer = TimeSlice()  # background pass: yield between records, same checks
             with store._vault_transaction(root) as vault:
                 snapshot_vault = _VaultSnapshot(vault)
             for cid in sorted(course_ids):
@@ -587,7 +589,7 @@ def run_index_maintenance(*, root=None, source_key=None) -> dict:
                                                   course_id=cid, vault=snapshot_vault)
                     snapshot = EvidenceStore(evidence_root, source_key, cid,
                         verify_safe=publisher.verify_safe,
-                        private_diagnostics_root=index.path.parent / "staging" / "diagnostics").scan()
+                        private_diagnostics_root=index.path.parent / "staging" / "diagnostics").scan(pacer=pacer)
                     if any(issue.code == "unsupported_schema" for issue in snapshot.issues):
                         status["update_required_courses"].append(cid)
                     if not (snapshot.facts or snapshot.commits):
@@ -607,11 +609,11 @@ def run_index_maintenance(*, root=None, source_key=None) -> dict:
                 status.update(state="partial", code="course_evidence_not_arrived")
             def ingest():
                 if snapshots:
-                    return index.ingest_many(snapshots, selected_courses=selected)
+                    return index.ingest_many(snapshots, selected_courses=selected, pacer=pacer)
                 if usable:
                     empty = StoreSnapshot({}, {}, (), hashlib.sha256(b"empty-source").hexdigest(),
                                           verify_safe=lambda _: (_ for _ in ()).throw(ValueError("empty_source")))
-                    return index.ingest(empty, selected_courses=selected)
+                    return index.ingest(empty, selected_courses=selected, pacer=pacer)
                 return None
             try:
                 revision = ingest()

@@ -122,10 +122,10 @@ def test_maintenance_scans_without_holding_vault_lock(evidence_service_workspace
     path.write_bytes(canonical_bytes(unsafe))
     original = EvidenceStore.scan
     calls = []
-    def scan(store):
+    def scan(store, **kwargs):
         assert not env['locked'][0]
         calls.append(True)
-        return original(store)
+        return original(store, **kwargs)
     monkeypatch.setattr(EvidenceStore, 'scan', scan)
     assert _maintain(env)['state'] == 'ready'
     assert calls
@@ -175,8 +175,8 @@ def test_maintenance_binding_change_discards_scan_result(evidence_service_worksp
     env = evidence_service_workspace
     env['publish']()
     original = EvidenceStore.scan
-    def scan(store):
-        result = original(store)
+    def scan(store, **kwargs):
+        result = original(store, **kwargs)
         monkeypatch.setattr(service.config, 'get_canvas_base', lambda: 'https://changed.example.test')
         return result
     monkeypatch.setattr(EvidenceStore, 'scan', scan)
@@ -322,3 +322,28 @@ def test_publish_acquisition_holds_vault_only_for_identity_resolution(evidence_s
     assert seen["publish_locked"] and not any(seen["publish_locked"])
     assert order[:2] == ["prepare", "scan"] and order[-1] == "queue"
     assert result is not None
+
+
+def test_maintenance_yields_between_records_with_identical_results(evidence_service_workspace, monkeypatch):
+    """Law: the background pass sleeps between records and changes no result."""
+    from api.mirror import cooperative
+    env = evidence_service_workspace
+    env['publish']()
+    env['publish']('second_course')
+    baseline = _maintain(env)
+    baseline_revision = baseline['revision']
+    baseline_records = _index(env).query_page('assignment_context', course_id='1')['records']
+    assert baseline['state'] == 'ready'
+
+    sleeps = []
+    monkeypatch.setattr(cooperative, '_sleep', lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(cooperative, 'SLICE_SECONDS', 0.0)
+    real_init = cooperative.TimeSlice.__init__
+    monkeypatch.setattr(cooperative.TimeSlice, '__init__',
+                        lambda self, **kw: real_init(self, slice_seconds=0.0, yield_seconds=0.0))
+    paced = _maintain(env)
+
+    assert len(sleeps) > 10  # many records scanned and verified; each slice yielded
+    assert paced == baseline
+    assert paced['revision'] == baseline_revision
+    assert _index(env).query_page('assignment_context', course_id='1')['records'] == baseline_records

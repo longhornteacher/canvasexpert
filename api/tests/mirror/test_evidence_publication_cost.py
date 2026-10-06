@@ -13,24 +13,13 @@ from api.mirror.evidence_acquisition import (
 from api.mirror.evidence_publish import EvidencePublisher
 from api.mirror.evidence_store import EvidenceStore
 from api.tests.mirror.acquisition_samples import SyntheticVault
+from api.tests.pilot_samples import scale_receipt
 
 SOURCE = "a" * 64
 SCOPE_COUNTS = (5, 10, 20, 40)
 
 
-def _receipt(n_scopes):
-    scopes = [ScopeReceipt("course.roster", "1", (
-        {"id": "991001", "name": "Avery Sample"},
-        {"id": "991002", "name": "Morgan Sample"}), True)]
-    for index in range(n_scopes):
-        aid = str(100 + index)
-        scopes.append(ScopeReceipt("assignment.submissions", aid, ({
-            "user_id": "991001", "assignment_id": aid, "attempt": 2,
-            "submitted_at": "2026-01-02T00:00:00Z", "body": "Synthetic prose.",
-            "submission_history": [{"attempt": 1, "submitted_at": "2026-01-01T00:00:00Z",
-                                    "body": "Earlier synthetic prose."}]},), True))
-    return CourseAcquisitionReceipt("1", "2026-01-04T00:00:00Z", "2026-01-04T00:01:00Z",
-                                    tuple(scopes))
+_receipt = scale_receipt  # shared fixture builder: api/tests/pilot_samples.py
 
 
 class Meter:

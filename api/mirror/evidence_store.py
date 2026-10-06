@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from api.platform_services import workspace
+from api.mirror.cooperative import NoSlice
 from api.mirror.evidence_schema import (
     EvidenceValidationError, SCOPE_KINDS, canonical_bytes, digest_record,
     validate_commit, validate_component, validate_digest, validate_fact,
@@ -319,8 +320,13 @@ class EvidenceStore:
             context._record("commits", digest, checked, size)
         return digest
 
-    def scan(self) -> StoreSnapshot:
-        """Verify synced files, preserving refused bytes in private diagnostics."""
+    def scan(self, *, pacer=None) -> StoreSnapshot:
+        """Verify synced files, preserving refused bytes in private diagnostics.
+
+        ``pacer`` (optional ``TimeSlice``) is checkpointed between records so a
+        background pass yields to other threads; it never skips a check.
+        """
+        pacer = pacer or NoSlice()
         facts, commits = {}, {}
         issues = []
         for namespace, destination, is_commit in (("objects", facts, False), ("commits", commits, True)):
@@ -328,6 +334,7 @@ class EvidenceStore:
             if not base.exists():
                 continue
             for path in sorted(base.rglob("*.json")):
+                pacer.checkpoint()
                 expected_match = re.match(r"^([0-9a-f]{64})(?:$|[^0-9a-f])", path.stem)
                 expected = expected_match.group(1) if expected_match else None
                 issue_scope = issue_scope_id = None
@@ -371,6 +378,7 @@ class EvidenceStore:
         # A missing dependency retains the commit so the reducer reports pending.
         # An invalid reference graph is refused, even when every file is valid JSON.
         for digest, commit in list(commits.items()):
+            pacer.checkpoint()
             try:
                 validate_reference_graph(commit, facts, commits)
             except EvidenceValidationError:

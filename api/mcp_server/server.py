@@ -34,9 +34,9 @@ from . import tools
 _SERVER_INSTRUCTIONS = (
     "Local teacher-controlled runtime; identities, credentials and private paths stay local; "
     "student rows are pseudonyms. Never read Identity Vault or teacher-only Web UI routes. "
-    "Prefer available IgniteAI for assignments/dates/modules/rubrics when easier; "
-    "keep CE fallback and teacher-chosen authoring models. Native grading is teacher-run "
-    "in SpeedGrader; see overview guide. "
+    "Keep creation/rubrics/delivery agentic with teacher-chosen models; CE fallback. "
+    "Enabled IgniteAI drafts grading suggestions in SpeedGrader; teacher triggers/reviews/saves. "
+    "See overview guide. "
     "Use within_policy catalog/mirror as is; otherwise refresh_mirror yourself "
     "(structure_only=true for catalog). Report new/resubmitted work. "
     "For broad grading, discover_scoring_work reads every Current course mirror: report all "

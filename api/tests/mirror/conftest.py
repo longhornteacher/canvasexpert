@@ -131,3 +131,43 @@ def evidence_factory():
 
     return {"source": source, "course": course, "store": store,
             "fact": fact, "commit": commit}
+
+
+@pytest.fixture
+def publication_scale_receipt():
+    """Factory for the 5/10/20/40-scope publication fixture with explicit sizes.
+
+    ``publication_scale_receipt(n_scopes, history=1, students=2)``: ``history``
+    retained earlier attempts and ``students`` submissions per scope.
+    """
+    from api.tests.pilot_samples import scale_receipt
+    return scale_receipt
+
+
+@pytest.fixture
+def publication_meter(monkeypatch):
+    """Spies around the real whole-course scan and privacy verifier (nothing stubbed)."""
+    from api.mirror.evidence_publish import EvidencePublisher
+    from api.mirror.evidence_store import EvidenceStore
+
+    class Meter:
+        def __init__(self):
+            self.scans = 0
+            self.verifier_calls = 0
+            real_scan, real_verify = EvidenceStore.scan, EvidencePublisher.verify_safe
+
+            def scan(store, *args, **kwargs):
+                self.scans += 1
+                return real_scan(store, *args, **kwargs)
+
+            def verify(publisher, record):
+                self.verifier_calls += 1
+                return real_verify(publisher, record)
+
+            monkeypatch.setattr(EvidenceStore, "scan", scan)
+            monkeypatch.setattr(EvidencePublisher, "verify_safe", verify)
+
+        def reset(self):
+            self.scans = self.verifier_calls = 0
+
+    return Meter()

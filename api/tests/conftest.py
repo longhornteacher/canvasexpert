@@ -612,3 +612,88 @@ def scoring_refresh_world(tmp_path, monkeypatch):
     world.bundle, world.pseudonym, world.prepare = bundle, pseudonym, prepare
     world.tools = tools
     return world
+
+
+# --- Pilot-scale synthetic fixtures (performance / discovery) ----------------
+# Builders live in api/tests/pilot_samples.py. Everything is fabricated: three
+# courses, 30 students and 30 assignments per course, retained attempts, mixed
+# submission states, and 25 Scoring Session records.
+
+def _pilot_cache_key():
+    """Content key: rebuild whenever the builder or any evidence module changes."""
+    import hashlib
+    from pathlib import Path
+    api = Path(__file__).resolve().parents[1]
+    digest = hashlib.sha256()
+    for path in [Path(__file__).with_name("pilot_samples.py"),
+                 *sorted((api / "mirror").glob("evidence*.py")), api / "feedback_scrub.py"]:
+        digest.update(path.name.encode() + path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
+@pytest.fixture(scope="session")
+def _pilot_evidence_template(tmp_path_factory):
+    """Pilot evidence built once per machine/content key by the real publisher.
+
+    Publishing about 8k safe records is slow on a synced or scanned disk, so the
+    finished tree is cached beside pytest's own temp directories (never in the
+    repository) and reused until the builder or an evidence module changes.
+    """
+    import json
+    import os
+    import uuid
+    from api.mirror.evidence_index import EvidenceIndex
+    from api.tests.pilot_samples import PILOT_COURSES, PILOT_SOURCE, PilotEvidence, PilotVault, build_pilot_evidence
+    cache = tmp_path_factory.getbasetemp().parent / f"pilot_evidence_{_pilot_cache_key()}"
+    meta = cache / "meta.json"
+    if not meta.exists():
+        staging = tmp_path_factory.mktemp("pilot_evidence_build")
+        built = build_pilot_evidence(staging)
+        (staging / "meta.json").write_text(json.dumps({"revision": built.revision}), encoding="utf-8")
+        try:
+            os.replace(staging, cache)
+        except OSError:  # a parallel run published the same content first
+            pass
+    revision = json.loads(meta.read_text(encoding="utf-8"))["revision"]
+    return PilotEvidence(cache / "workspace", PILOT_SOURCE, PILOT_COURSES,
+                         EvidenceIndex(cache / "local" / "query.sqlite3"), revision, PilotVault())
+
+
+@pytest.fixture
+def pilot_evidence_workspace(_pilot_evidence_template):
+    """Shared READ-ONLY pilot SAFE evidence tree and SQLite index.
+
+    Three courses, 30 students and 30 assignments each (two unpublished),
+    retained attempts, mixed submission states. Tests must not write here;
+    use ``pilot_evidence_workspace_copy`` to mutate or publish further.
+    """
+    return _pilot_evidence_template
+
+
+@pytest.fixture
+def pilot_evidence_workspace_copy(_pilot_evidence_template, tmp_path):
+    """Private writable copy of the pilot evidence for tests that publish or rebuild."""
+    import shutil
+    from dataclasses import replace
+    from api.mirror.evidence_index import EvidenceIndex
+    template = _pilot_evidence_template
+    base = template.root.parent
+    shutil.copytree(base, tmp_path / "pilot", ignore=shutil.ignore_patterns("meta.json"))
+    return replace(template, root=tmp_path / "pilot" / "workspace",
+                   index=EvidenceIndex(tmp_path / "pilot" / "local" / "query.sqlite3"))
+
+
+@pytest.fixture
+def pilot_scoring_sessions(tmp_path, monkeypatch):
+    """25 real Scoring Session records (terminal, superseded, one large SAFE bundle)."""
+    from api import local_runtime, shared_work
+    from api.powergrader import session_store
+    from api.tests.pilot_samples import build_pilot_sessions
+    root = tmp_path / "workspace"
+    root.mkdir(exist_ok=True)
+    monkeypatch.setattr(session_store.workspace, "workspace_root", lambda: str(root))
+    monkeypatch.setattr(local_runtime, "machine_id", lambda: "LAPTOP-TEST")
+    # A background heartbeat would legitimately rewrite leases mid-measurement.
+    monkeypatch.setattr(shared_work._heartbeat_service, "register", lambda *a, **k: None)
+    ids = build_pilot_sessions(session_store, root)
+    return {"store": session_store, "root": root, "ids": ids}
