@@ -263,3 +263,63 @@ Light stays **YELLOW**. Remaining stall is index maintenance after publication (
 ### D06 option 1 (yield inside index ingest insert/projection loops, 2026-10-06)
 
 `EvidenceIndex.ingest`/`_project_derived` now checkpoint per fact, scope, projection record and comparison bucket (`api/tests/mirror` 633 passed). Field, current code: warm p95 1.46 s, max 1.57 s, median 1.27 s (**met**). Background: discovery p95 8.26 s, max 21.1 s (median 2.5 s); ping p95 4.52 s, max 5.6 s (max improved from 9.8 s, p95 not). **Background gate still missed**, so the stall is not only GIL starvation in the ingest loops; a single discovery call still takes about 21 s once. Next step is stage timing (the `mcp.discovery_*` and `mirror.publication_identity_lock` events) to see whether discovery waits on the vault lock held by publication's identity step or on another lock, before choosing between that and skip-unchanged-scope maintenance.
+
+### D07 in-memory validation memo (commit `2ef9b7c`, 2026-10-06)
+
+Workstreams W1-W3 (Sonnet) plus lead integration, as in section 6A. Gate:
+`.venv\Scripts\python.exe -m pytest api/tests engine/tests -p no:randomly -q`
+**2704 passed, 1 skipped, 0 failed** (pre-existing SyntaxWarning in `mirror/store.py`).
+
+Synthetic profile, pilot fixture (6,123 facts + 99 commits), real `run_index_maintenance`
+with no pacer: baseline `a573829` cold 25.4 s / repeat 15.4 s; with D07 repeat 1.1 s.
+Baseline cold costs: `Path.resolve` per file 6-7 s, `StoreSnapshot.scopes` recomputed
+95 times 6.0 s, duplicate ingest validation 2.8 s.
+
+Field (laptop, all six older CE runtimes stopped with teacher approval; harness
+starts a fresh runtime from this checkout, `2ef9b7c` plus another session's
+uncommitted server-instruction text; three Current courses, ~5.6k records):
+
+| Gate | Result | Target |
+|---|---|---|
+| Idle runtime, 150 s | first (cold) pass 43 s; later ticks 0.7-3.4 s during extraction; ping p95 0.27 s, max 2.31 s | - |
+| Warm, 20 sequential (90 s settle) | p95 0.76 s, max 0.77 s, median 0.42 s; cold first 1.87 s | p95 <=2, max <=5, first <=5: **met** |
+| Background (startup + one GET-only refresh) | discovery p95 4.31 s, max 23.3 s, median 2.67 s; ping p95 3.99 s, max 5.74 s | p95 <=5 **met**; max <=10, ping p95 <=1 **missed** |
+
+The remaining miss is the cold memo at startup: the first maintenance pass (75 s
+under contention), two publication scans and an extraction chunk ran together
+before any course was memoized; once warm, a publication scan took 2.1 s. The
+slow discovery call spent 17.8 s in its SQLite query stage, which is GIL handoff
+per row behind CPU-bound threads, not a lock. D08 as written (skip an unchanged
+pass after restart) would not help this case, because the refresh changes the
+inputs. Next: remove the per-file `Path.resolve` for listing-proven regular files
+(same containment guarantee), then re-measure.
+
+### D07 follow-up: cold scan and one-row discovery reads (commit `8c93f84`, 2026-10-06)
+
+- Memo-path scans skip the per-file `Path.resolve` for listing-proven regular files
+  (links and odd entries still resolve). Pilot profile on identical bytes, quiet
+  machine: cold pass 25.4 s -> 7.1 s, repeat 15.4 s -> 0.52 s.
+- `read_scoring_discovery` reads each view through one aggregated JSON row (pilot:
+  2,983 rows -> 6), so a busy thread cannot charge discovery one GIL handoff per row.
+- Gate: full suite **2711 passed, 1 skipped, 0 failed**.
+
+Field (laptop, no other CE runtimes, harness from `8c93f84`):
+
+| Run | Discovery p95 / max / median | Ping p95 / max | Target |
+|---|---|---|---|
+| Background, 20 samples (startup + refresh, before publication) | 0.88 / 2.21 / 0.59 s | 0.11 / 0.17 s | **met** |
+| Background, 100 samples (startup + refresh + publication + cold maintenance) | 1.27 / 15.7 / 0.83 s | 0.90 / 4.61 s | p95 and ping p95 **met**; max <=10 **missed** (one call) |
+
+The single outlier spent 8.0 s in `discovery_resume` (file reads) while every cold
+job overlapped: maintenance 96 s, two publication scans 45 s each, extraction 80 s.
+
+**Finding for senior/teacher:** each runtime start re-extracts every attachment
+whose extraction ended in `gap` and re-queues every exhausted capture
+(`prepare_evidence_work()` -> `reopen_extractions`/`reopen_exhausted_captures`,
+added in `ffd8aa6` as "a new worker lifetime performs recovery/reopen"). Field: 80-100 s
+of extraction CPU and two Canvas 404 GETs on every start, repeating the same gap
+results. This is the largest startup contender. Changing that retry policy is
+attachment-work semantics, outside this batch; awaiting a decision.
+
+D08 is **not started**: a persisted pass fingerprint only skips an unchanged pass
+after restart, and the missing case is restart plus refresh (changed inputs).
