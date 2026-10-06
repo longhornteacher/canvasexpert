@@ -2,8 +2,9 @@
 
 Canvas Expert keeps shared teacher work in the OneDrive workspace and machine-specific
 runtime files and Canvas caches on each computer. Configure both computers to the same
-teacher-controlled workspace and let OneDrive finish syncing `_Shared/` before opening
-Canvas Expert on the other computer.
+teacher-controlled workspace. Before opening Canvas Expert on the other computer, let
+OneDrive finish syncing `_Shared/`, `CanvasMirror/`, and `_System/CanvasMirror Control/`,
+and make sure the needed files are available on that device rather than cloud-only.
 
 | Location | Contents | Sync |
 |---|---|---|
@@ -13,7 +14,7 @@ Canvas Expert on the other computer.
 | `<workspace>/CanvasMirror/` | Durable, pseudonymized evidence store: immutable facts, scope commits, opaque attachment associations, and scrubbed extraction blocks. | OneDrive |
 | `<workspace>/_System/Archive/CanvasMirror Originals/` | Private verified ZIP originals and their filename/type associations. | OneDrive |
 | `<workspace>/_System/CanvasMirror Control/` | Private acquisition presence and bounded read-only requests. | OneDrive |
-| `%LOCALAPPDATA%/CanvasExpert/cache/` | CanvasMirror and Course Catalog projections, plus the machine-local evidence query index, attachment queue, and extraction cache. Each computer refreshes its own cache from Canvas. | Local only |
+| `%LOCALAPPDATA%/CanvasExpert/cache/` | CanvasMirror and Course Catalog projections, plus the machine-local evidence query index and attachment queue. Canvas Expert rebuilds the evidence index and queue from synced `CanvasMirror/` evidence; a Canvas refresh is a separate acquisition action. | Local only |
 | `%LOCALAPPDATA%/CanvasExpert/` | Machine identity, process lock, runtime settings, and machine-only files. | Local only |
 | `<workspace>/To Review/`, `Library/`, `Assignments/`, and teacher folders | Authored drafts and teacher-managed files. | OneDrive |
 
@@ -30,10 +31,13 @@ confirm the keys match. The key itself stays in each computer's Windows Credenti
 
 ## Setting up another computer
 
-1. Configure both computers to use the same OneDrive workspace.
-2. Save the same transfer key on each computer and confirm the fingerprints match.
-3. Let OneDrive finish syncing `_Shared/` before opening Canvas Expert on the other computer.
-4. Refresh CanvasMirror separately on each computer; its cache is local to that computer.
+1. Configure both computers to use the same OneDrive workspace and save the same
+   Identity Vault transfer key. Confirm the six-character fingerprints match.
+2. Let OneDrive finish syncing `_Shared/`, `CanvasMirror/`, and
+   `_System/CanvasMirror Control/`; ensure the needed files are available on device.
+3. Open Canvas Expert and allow its machine-local evidence index and attachment queue
+   to rebuild from the synced evidence. Check the local status if indexing is pending.
+   This rebuild does not require another Canvas refresh.
 
 ## Durable evidence across computers
 
@@ -44,10 +48,12 @@ over only after the incumbent's presence stops advancing. Accidental overlap is 
 because every commit is immutable and merges deterministically.
 
 The live attachment queue and query index are machine-local and never synced. On
-startup, Canvas Expert rebuilds the queue from the published association facts and
-resumes interrupted capture and extraction; a completed, validated original is reused
-rather than re-downloaded. Keep the designated store available on device using your
-cloud provider's setting; Canvas Expert does not control hydration.
+startup, Canvas Expert rebuilds both from the synchronized evidence and resumes
+interrupted capture and extraction; a completed, validated original is reused rather
+than re-downloaded. Keep the designated store available on device using your cloud
+provider's setting; Canvas Expert does not control hydration. A Canvas refresh acquires
+new evidence from Canvas and is not needed just to read evidence that has synced from
+the other computer.
 
 Automatic continuation covers evidence acquisition and reads. An already-open Scoring
 Session still uses its existing private work lease; transferring an in-progress
@@ -69,9 +75,11 @@ refuses vault and settings access and marks **Local workspace & privacy** unavai
 guard does not open, import, merge, or delete the file. Stop student-data work and review the
 sync state and any older Canvas Expert process before continuing.
 
-The automated storage and freshness checks do not replace the planned
-two-computer, one-week sync check. Do not treat cross-device handoff as field
-accepted until that check is complete.
+The S13 second-computer CanvasMirror read-path check verifies that synced evidence
+indexes and remains readable after restart; it does not require a Canvas refresh and
+does not complete the broader cross-device handoff acceptance. The automated storage
+and freshness checks do not replace the planned two-computer, one-week sync check.
+Do not treat cross-device work handoff as field accepted until that check is complete.
 
 ## Remaining field checks
 

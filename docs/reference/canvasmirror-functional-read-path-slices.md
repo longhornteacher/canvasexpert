@@ -1147,10 +1147,20 @@ Report aggregates only.
 
 ### S13: actual second computer, final acceptance, retirement
 
-On the second updated computer after sync: startup indexes automatically; read the
-sampled assignment, submission, and attachment evidence; restart; confirm.
-Distinguish sync delay, update required, index repair, acquisition failure, and
-attachment gap. Never claim two-machine success from local partitions.
+On the actual second computer, confirm the tested `dev` revision, same selected
+workspace and Identity Vault transfer-key fingerprint, and completed hydration of
+`_Shared/`, `CanvasMirror/`, and CanvasMirror control files. Resolve any shared-store
+conflict before student-data reads. Restart an older runtime so it loads that code.
+Before any Canvas refresh, let startup index the synced safe evidence locally; read
+the sampled assignment context, submissions, and available attachment/extraction
+evidence through CE. Confirm `ok`, coverage, warnings, revision, section labels,
+and explicit attachment gaps. Restart the runtime and repeat those reads without
+activation, import, or a Canvas refresh. Distinguish sync delay, update required,
+index pending/failure, acquisition failure, and attachment gap; local index repair
+may be needed. Report only aggregate counts, durations, stage/error codes, and
+whether restart required intervention. Never claim two-machine success from local
+partitions. This acceptance covers CanvasMirror read portability, not the separate
+one-week scoring/work-handoff checks in `docs/guides/more-than-one-computer.md`.
 
 On GREEN: retire the brief in the same batch; mark this plan "Completed —
 reference only"; leave one pointer in the direction document to the next senior
