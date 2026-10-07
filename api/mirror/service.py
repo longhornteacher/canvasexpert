@@ -44,6 +44,7 @@ from api.platform_services.canvas_client import canvas_headers
 
 LAUNCH_DELAY_SECONDS = 120        # let startup and the first agent reads settle
 TICK_SECONDS = 900                # delta cadence while the app runs
+DELTA_RECENT_SECONDS = TICK_SECONDS / 2  # a delta/full this recent covers the tick's delta
 FULL_MAX_AGE_HOURS = 24.0         # backfill + nightly reconcile
 ROSTER_MAX_AGE_HOURS = 24.0
 NOTIFY_DELAY_SECONDS = 15.0       # write-through settle delay
@@ -784,11 +785,18 @@ def due_passes(state: dict, now_iso: str, *,
     kept the gradebook fresh. The daily figure stays as a floor via ``min``,
     so an unusually large serve window still refreshes the roster at least
     once a day.
+
+    A delta or full that succeeded within ``DELTA_RECENT_SECONDS`` (usually a
+    manual refresh just before the launch tick) already covers this tick's
+    delta. Passes record their start time, so the regular cadence, at least
+    ``TICK_SECONDS`` apart, always runs.
     """
     full_age = store.age_hours(state["passes"]["full"]["last_success_at"], now_iso)
     if full_age is None or full_age >= FULL_MAX_AGE_HOURS:
         return ["full"]  # covers roster and resets watermarks
-    passes = ["delta"]
+    delta_age = store.age_hours(state["passes"]["delta"]["last_success_at"], now_iso)
+    newest = full_age if delta_age is None else min(full_age, delta_age)
+    passes = [] if 0 <= newest * 3600 < DELTA_RECENT_SECONDS else ["delta"]
     if serve_max_age_hours is None:
         serve_max_age_hours = config.mirror_serve_max_age_hours()
     roster_due_age = min(ROSTER_MAX_AGE_HOURS, serve_max_age_hours)

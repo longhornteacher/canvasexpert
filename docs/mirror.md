@@ -209,7 +209,9 @@ with it) ticks every 15 minutes for Current courses only:
 - first tick 2 minutes after launch (catch-up)
 - **full** when none has succeeded in 24 h (first-run backfill, then nightly)
 - otherwise **delta** every tick, plus **roster** once it reaches the serve window
-  (`mirror_serve_max_age_hours`, at most 24 h)
+  (`mirror_serve_max_age_hours`, at most 24 h). A tick skips the delta when a
+  delta or full succeeded in the last 7.5 minutes (half a tick), so a manual
+  refresh just before the launch tick is not repeated.
 - Every successful **full** or **roster** maintenance pass also makes one
   best-effort private group-context read through Roster's existing normalized
   loader. Its result is nested evidence on that pass, not a new cadence or

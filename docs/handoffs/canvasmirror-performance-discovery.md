@@ -431,6 +431,10 @@ adapter versions `*-1` -> `*-2` so worker start reopens the bad gaps once
 while the index or attachments are pending. Regression tests force a cp1252
 child (`api/tests/mirror/extraction/test_supervisor.py`, `test_ocr_runtime.py`).
 
-Still open (teacher/senior decision): `due_passes` always schedules a delta, so the
-launch tick re-refreshed all three courses ~100 s after a manual refresh, and
-each publication triggers a full index pass (10-30 s under contention).
+`due_passes` always scheduled a delta, so the launch tick re-refreshed all three
+courses ~100 s after a manual refresh. Teacher-approved fix: a tick skips the
+delta when a delta or full succeeded in the last half tick (7.5 min); roster and
+full cadence are unchanged (`api/tests/mirror/test_service_cadence.py`).
+
+Still open (teacher/senior decision): each publication triggers a full index
+pass (10-30 s under contention); re-time a refresh on the fixed runtime first.
