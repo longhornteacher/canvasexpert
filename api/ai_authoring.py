@@ -160,6 +160,10 @@ RETIRED_FILES = {
         "e62733fcdf1635a63cfdb109d4c14c52c0a75fbe57d05f88572869b4a03cbb54",
         # Before first-attempt late days, resubmission facts, and pushed-row corrections.
         "40c187d078f9772bc9500bbb3d628bdad5774558c61bcccb489e87e02e7785a7",
+        # Superseded connected-workflow guides; refresh only unedited copies.
+        "f396348bb3f2b5c47f726886a0e8063a2c5f743be257eff2125851601898833d",
+        "5eae4b59cdef744346b81b0ec82456bf0ec546fcedd3e50ec6bb6243a21a1e32",
+        "2758939a15fdce382b5cefefcc931e61dd9672216327503ec650dd229a0a6b20",
     }),
     # Said the agent must not draw integrity conclusions from the timeline; it now
     # may, in teacher-only agent commentary.

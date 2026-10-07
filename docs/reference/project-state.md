@@ -42,22 +42,17 @@ Therefore:
 These follow from the state above and from repeated direction; they are not
 slice-specific.
 
-- **Efficiency with an independent fallback.** Maximize useful output for the
+- **Minimize teacher effort.** Maximize useful output for the
   least total teacher effort, including setup, review, corrections, recovery,
-  and maintenance. Retain existing CE/CanvasMirror functionality because access
-  to IgniteAI could disappear. In the teacher-agent conversation, incorporate
-  available native capabilities when they reduce effort, with clear teacher
-  handoffs and a usable CE fallback. Native access is optional, never a required
-  dependency. Preserving a distinctive role for CE is not the decision criterion.
+  and maintenance. CE/CanvasMirror and the teacher's chosen agent own the
+  supported creation, delivery, scoring, and revision workflows.
 - **Keep creation agentic.** The teacher prefers their chosen cutting-edge
   consumer models for planning, material creation, and rubric design. Keep
   creation and delivery in the agent-teacher workflow as far as available tools
-  allow: co-design the rubric, then have the agent push the reviewed assignment
-  and actual attached Canvas rubric. The preferred native role is subsequent
-  draft scores/feedback through enabled IgniteAI Grading Assistance; current
-  teacher trigger/review/save steps remain explicit. For scoring, adequate
-  quality and low review/correction effort matter more than the newest model.
-  State delivery gaps; do not default creation to a separate native chat.
+  allow: co-design the material and rubric, then have the agent deliver the
+  reviewed work through CE's supported push path. For scoring, adequate quality
+  and low review/correction effort matter more than the newest model. State
+  delivery gaps honestly; do not promise capabilities CE has not implemented.
 - **One source of truth per artifact.** Never ship a static copy *and* a
   generated copy of the same thing (e.g. an authoring contract or a scoring
   skill). Pick the one canonical source; generate or read from it everywhere.
