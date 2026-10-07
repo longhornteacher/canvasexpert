@@ -32,8 +32,8 @@ def recognize(image_path: Path, *, assets: OcrAssets | None = None,
     try:
         completed = subprocess.run(
             [python_executable or sys.executable, "-m", __name__],
-            input=json.dumps(request), text=True, encoding="utf-8", capture_output=True,
-            timeout=timeout, cwd=Path(__file__).resolve().parents[3],
+            input=json.dumps(request), text=True, encoding="utf-8", errors="replace",
+            capture_output=True, timeout=timeout, cwd=Path(__file__).resolve().parents[3],
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
     except subprocess.TimeoutExpired:
@@ -96,4 +96,5 @@ def _worker(request: dict) -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps(_worker(json.load(sys.stdin)), ensure_ascii=False))
+    # ASCII-only JSON survives the child's locale code page (see supervisor.py).
+    print(json.dumps(_worker(json.load(sys.stdin))))

@@ -48,6 +48,36 @@ def test_worker_missing_dependency_is_typed(tmp_path):
         recognize(tmp_path / "unused.jpg", python_executable=str(interpreter))
 
 
+def test_worker_output_survives_a_cp1252_child_console(tmp_path, monkeypatch):
+    # A stand-in engine on the child's path returns text a cp1252 console cannot write.
+    prose = "“Curly” quotes — café → 漢字"
+    package = tmp_path / "stand_in" / "rapidocr"
+    (package / "utils").mkdir(parents=True)
+    (package / "__init__.py").write_text(
+        f"TEXT = {prose!r}\n"
+        "class _Box(list):\n"
+        "    def tolist(self):\n"
+        "        return [list(point) for point in self]\n"
+        "class _Result:\n"
+        "    txts = (TEXT,)\n"
+        "    boxes = (_Box([[0, 0], [1, 0], [1, 1], [0, 1]]),)\n"
+        "    scores = (0.9,)\n"
+        "class RapidOCR:\n"
+        "    def __init__(self, params=None):\n"
+        "        pass\n"
+        "    def __call__(self, path):\n"
+        "        return _Result()\n", encoding="utf-8")
+    (package / "utils" / "__init__.py").write_text("", encoding="utf-8")
+    (package / "utils" / "download_file.py").write_text(
+        "class DownloadFile:\n    def run(self, *args, **kwargs):\n        pass\n", encoding="utf-8")
+    monkeypatch.setenv("PYTHONPATH", str(package.parent))
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+
+    result = recognize(tmp_path / "unused.png")
+
+    assert [block.text for block in result.blocks] == [prose]
+
+
 def test_import_does_not_initialize_ocr():
     import sys
     # Actual engine exists exclusively in the fresh supervised subprocess.

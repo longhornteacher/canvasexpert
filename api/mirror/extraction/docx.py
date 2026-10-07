@@ -14,7 +14,7 @@ from xml.etree import ElementTree as ET
 
 from .schema import Block, ExtractionResult, ExtractionError, digest_bytes
 
-EXTRACTOR_VERSION = "docx-1"
+EXTRACTOR_VERSION = "docx-2"
 MAX_MEMBERS = 20_000
 MAX_EXPANSION_BYTES = 512 * 1024 * 1024
 MAX_BYTES = 100 * 1024 * 1024

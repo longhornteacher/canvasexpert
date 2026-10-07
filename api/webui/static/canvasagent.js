@@ -285,6 +285,26 @@
     renderPrivacyConflicts({ files: currentConflicts });
     var states = [renderMcp(currentClients, health), renderCanvas(readiness && readiness.components && readiness.components.canvas), renderMirror(mirror), renderPrivacy(readiness, health, mirror)];
     renderOverall(states);
+    watchMirror();
+  }
+  // While local indexing or attachment reading is unfinished, re-read the
+  // status so the card's "updates automatically" holds for the card too.
+  var mirrorPoll = null;
+  function mirrorSettling(data) {
+    var evidence = data && data.evidence;
+    if (!evidence || typeof evidence !== "object") return false;
+    var index = evidence.index || {};
+    var attachments = evidence.attachments || {};
+    return index.state === "pending" || evidence.state === "pending" || Number(attachments.remaining) > 0;
+  }
+  function watchMirror() {
+    if (mirrorPoll !== null || !mirrorSettling(currentMirror)) return;
+    mirrorPoll = setTimeout(function () {
+      fetch("/api/mirror/status", { headers: { Accept: "application/json" } }).then(responseJson)
+        .then(function (result) { if (result.response.ok) { currentMirror = result.body; rerenderCurrent(); } })
+        .catch(function () {})
+        .finally(function () { mirrorPoll = null; watchMirror(); });
+    }, 5000);
   }
   function update(readiness, health, mirror, conflicts) {
     currentHealth = health;

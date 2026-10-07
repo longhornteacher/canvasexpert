@@ -9,7 +9,7 @@ import io
 
 from .schema import Block, ExtractionResult, ExtractionError, digest_bytes
 
-EXTRACTOR_VERSION = "pdf-1"
+EXTRACTOR_VERSION = "pdf-2"
 MAX_BYTES = 100 * 1024 * 1024
 MAX_PAGES_PER_CHUNK = 25
 OCR_TIMEOUT = 60.0

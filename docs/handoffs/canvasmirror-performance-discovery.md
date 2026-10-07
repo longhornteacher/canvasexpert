@@ -411,3 +411,26 @@ All section 5 discovery gates are met on the laptop with margin. The held option
 **YELLOW** only for items section 6 requires: the desktop check and the S12
 attachment/restart carry-over are not done. Noted for later, not acted on:
 `config/_io.py::_machine_load` still reads machine config without a memo.
+
+### Field finding: attachment extraction transport (laptop, 2026-10-07)
+
+Teacher report: after a manual refresh the console card sat at "waiting for local
+indexing … 34 attachments are still being read". Aggregates: 47 captured, 12 read,
+35 gaps, of which 31 were `recognition_gap` (30 `.docx`, 1 `.pdf`) that matched
+31 `UnicodeDecodeError` reader-thread tracebacks. Cause: the supervised extraction
+and OCR workers printed JSON with `ensure_ascii=False`; a piped Windows child
+writes its locale code page (cp1252), so any curly quote or dash failed the
+parent's UTF-8 decode and became a deterministic gap. Every manual refresh
+reopened and re-failed all of them (~55 s of extraction plus a gap publication
+and index pass each). The runtime had settled about a minute later; the card
+never re-read status after the refresh plan.
+
+Fix: workers emit ASCII-only JSON, parents decode with `errors="replace"`, and
+adapter versions `*-1` -> `*-2` so worker start reopens the bad gaps once
+(decision 10's version-change path). Console re-reads mirror status every 5 s
+while the index or attachments are pending. Regression tests force a cp1252
+child (`api/tests/mirror/extraction/test_supervisor.py`, `test_ocr_runtime.py`).
+
+Still open (teacher/senior decision): `due_passes` always schedules a delta, so the
+launch tick re-refreshed all three courses ~100 s after a manual refresh, and
+each publication triggers a full index pass (10-30 s under contention).

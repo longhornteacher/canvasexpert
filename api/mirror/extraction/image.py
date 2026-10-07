@@ -10,7 +10,7 @@ import io
 
 from .schema import Block, ExtractionResult, ExtractionError, digest_bytes
 
-EXTRACTOR_VERSION = "image-1"
+EXTRACTOR_VERSION = "image-2"
 MAX_BYTES = 100 * 1024 * 1024
 MAX_PIXELS = 50_000_000
 OCR_TIMEOUT = 60.0

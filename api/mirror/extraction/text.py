@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from .schema import Block, ExtractionResult, digest_bytes
 
-EXTRACTOR_VERSION = "text-1"
+EXTRACTOR_VERSION = "text-2"
 MAX_BYTES = 100 * 1024 * 1024
 _ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")
 

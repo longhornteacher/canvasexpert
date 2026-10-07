@@ -26,7 +26,7 @@ def run_adapter(adapter_name: str, path: str | Path, *, timeout: float = DEFAULT
     try:
         completed = subprocess.run(
             [python_executable or sys.executable, "-m", __name__],
-            input=json.dumps(request), text=True, encoding="utf-8",
+            input=json.dumps(request), text=True, encoding="utf-8", errors="replace",
             capture_output=True, timeout=timeout,
             cwd=Path(__file__).resolve().parents[3],
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
@@ -61,4 +61,6 @@ def _worker(request: dict) -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps(_worker(json.load(sys.stdin)), ensure_ascii=False))
+    # ASCII-only JSON: a piped Windows child writes in the locale code page, so
+    # raw curly quotes or dashes would not decode as UTF-8 in the parent.
+    print(json.dumps(_worker(json.load(sys.stdin))))
