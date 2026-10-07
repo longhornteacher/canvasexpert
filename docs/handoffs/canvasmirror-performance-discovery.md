@@ -436,5 +436,19 @@ courses ~100 s after a manual refresh. Teacher-approved fix: a tick skips the
 delta when a delta or full succeeded in the last half tick (7.5 min); roster and
 full cadence are unchanged (`api/tests/mirror/test_service_cadence.py`).
 
+After restart 39/47 read; 4 `.docx` in one assignment stayed `needed`, retried
+every 30 s with no log line. Cause: adapters emitted booleans (`bold`, `italic`,
+`underline`, `page_failed`) that the fact schema refuses (`invalid_formatting`),
+and OCR blocks emitted a list `box` locator (`invalid_locator`), so every image
+or OCR page with text became a "corruption" gap. The extraction loop swallowed
+publication refusals as retryable. Fix: adapters emit scalars (`1`; box as
+`left/top/right/bottom`), `validate_result` enforces the fact's scalar rule for
+formatting as it already did for locators, `image-3`/`pdf-3` reopen those gaps
+once, and a validation/privacy refusal now settles as a text-free
+`recognition_gap` extraction (job error `publication_refused`) logged as
+`mirror.extraction_publication refused <code>`. Field: the four `.docx` read on
+the next chunk (43/47). No fact-schema change, so older code on the other
+computer accepts the new facts.
+
 Still open (teacher/senior decision): each publication triggers a full index
 pass (10-30 s under contention); re-time a refresh on the fixed runtime first.

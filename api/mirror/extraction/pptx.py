@@ -82,7 +82,7 @@ def extract(data: bytes, *, filename: str = "") -> ExtractionResult:
             except (KeyError, ET.ParseError):
                 blocks.append(Block(block_id=f"slide:{index}:failed", kind="slide_text",
                                     text="", locator={"slide": index + 1},
-                                    formatting={"page_failed": True}))
+                                    formatting={"page_failed": 1}))
                 continue
             for shape_index, shape in enumerate(slide.iter(f"{_P}sp")):
                 text = _shape_text(shape)

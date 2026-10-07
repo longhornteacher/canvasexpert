@@ -50,6 +50,20 @@ def test_invalid_results_are_refused(changes):
         validate_result(ExtractionResult(**base))
 
 
+@pytest.mark.parametrize("field, value, code", [
+    ("formatting", {"bold": True}, "invalid_formatting"),
+    ("formatting", {"runs": ["a"]}, "invalid_formatting"),
+    ("locator", {"box": [[0, 0], [1, 1]]}, "invalid_locator"),
+])
+def test_block_locator_and_formatting_hold_only_fact_scalars(field, value, code):
+    # A published fact refuses anything else, so an adapter must never emit it.
+    block = Block(block_id="x", kind="paragraph", text="a", **{field: value})
+    with pytest.raises(ExtractionError, match=code):
+        validate_result(ExtractionResult(
+            input_digest="a" * 64, detected_format="text", method="native",
+            availability="complete", blocks=(block,)))
+
+
 def test_duplicate_block_ids_are_refused():
     block = Block(block_id="x", kind="paragraph", text="a")
     with pytest.raises(ExtractionError, match="duplicate_block_id"):
@@ -85,7 +99,7 @@ def test_docx_preserves_order_formatting_and_tables():
     assert "heading" in kinds and "table_row" in kinds
     assert result.text.index("Alpha") < result.text.index("Beta")
     bold = next(block for block in result.blocks if "Beta" in block.text)
-    assert bold.formatting.get("bold") is True
+    assert bold.formatting.get("bold") == 1
     assert any("Cell A | Cell B" == block.text for block in result.blocks)
 
 

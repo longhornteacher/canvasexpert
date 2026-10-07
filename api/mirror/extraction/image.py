@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import io
 
-from .schema import Block, ExtractionResult, ExtractionError, digest_bytes
+from .schema import Block, ExtractionResult, ExtractionError, box_bounds, digest_bytes
 
-EXTRACTOR_VERSION = "image-2"
+EXTRACTOR_VERSION = "image-3"
 MAX_BYTES = 100 * 1024 * 1024
 MAX_PIXELS = 50_000_000
 OCR_TIMEOUT = 60.0
@@ -66,7 +66,7 @@ def extract(data: bytes, *, filename: str = "", ocr=None) -> ExtractionResult:
                                 partial_reasons=("recognition_gap",), total_units=1)
     blocks = tuple(
         Block(block_id=f"ocr:{index}", kind="image_text", text=block.text,
-              locator={"box": list(block.box)}, confidence=block.confidence, method="ocr")
+              locator=box_bounds(block.box), confidence=block.confidence, method="ocr")
         for index, block in enumerate(result.blocks)
     )
     if not any(block.text.strip() for block in blocks):

@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
+from api import operational_log
+from api.mirror.evidence_publish import PublicationRefused
+from api.mirror.evidence_schema import EvidenceValidationError
 from api.mirror.extraction.schema import (
     EXTRACTION_SCHEMA_VERSION, PRIVACY_POLICY_REVISION, Block, ExtractionError,
     ExtractionResult, PARTIAL_REASONS, validate_result,
@@ -213,8 +217,37 @@ def extract_captured_attachments(*, publisher_scope, jobs, recover_original,
                                    extracted_with=_version_string(result.extractor_version or version))
             if state == "gap":
                 gaps.extend(result.partial_reasons or ("partial_result",))
-        except Exception:
+        except (EvidenceValidationError, PublicationRefused) as exc:
+            # The same result is refused the same way on every retry, so settle
+            # it as a text-free gap (a version change or explicit refresh retries it).
+            operational_log.emit("mirror.extraction_publication", "refused",
+                                 error_class=type(exc), scope=_refusal_code(exc))
+            refused_version = result.extractor_version or version
+            try:
+                with publisher_scope(job.course_id) as publisher:
+                    publish_extraction(
+                        publisher=publisher, assignment_id=job.assignment_id,
+                        pseudonym=job.pseudonym, attempt=job.attempt,
+                        attachment_key=job.attachment_key, original_digest=job.digest,
+                        result=_unavailable_result(job.digest, refused_version, "recognition_gap"),
+                        writer_key=writer_key, run_id=run_id)
+                published += 1
+                jobs.record_extraction(job.job_id, state="gap", error="publication_refused",
+                                       extracted_with=_version_string(refused_version))
+            except Exception as gap_exc:
+                operational_log.emit("mirror.extraction_publication", "failed",
+                                     error_class=type(gap_exc))
+                gaps.append("publication_failed")
+                continue
+            gaps.append("publication_refused")
+        except Exception as exc:
             # A fact may have landed before a local write failed; retrying is
             # idempotent and must remain eligible until the job says complete.
+            operational_log.emit("mirror.extraction_publication", "failed", error_class=type(exc))
             gaps.append("publication_failed")
     return ExtractionOutcome(processed, published, tuple(sorted(set(gaps))))
+
+
+def _refusal_code(exc: Exception) -> str | None:
+    code = str(exc)
+    return code if re.fullmatch(r"[a-z][a-z0-9_.-]{0,63}", code) else None

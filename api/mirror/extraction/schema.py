@@ -133,16 +133,25 @@ def result_from_dict(document: dict) -> ExtractionResult:
     ))
 
 
-def _validate_locator(locator: dict) -> None:
-    if not isinstance(locator, dict):
-        raise ExtractionError("invalid_locator")
-    for key, value in locator.items():
+def _validate_scalars(mapping: dict, code: str) -> None:
+    """Locator and formatting values are the scalars a published fact accepts."""
+    if not isinstance(mapping, dict):
+        raise ExtractionError(code)
+    for key, value in mapping.items():
         if not isinstance(key, str):
-            raise ExtractionError("invalid_locator")
+            raise ExtractionError(code)
         if isinstance(value, bool) or not isinstance(value, (str, int, float, type(None))):
-            raise ExtractionError("invalid_locator")
+            raise ExtractionError(code)
         if isinstance(value, float) and not math.isfinite(value):
-            raise ExtractionError("invalid_locator")
+            raise ExtractionError(code)
+
+
+def box_bounds(points) -> dict:
+    """An OCR quadrilateral as the scalar bounding rectangle a locator can carry."""
+    xs = [float(point[0]) for point in points]
+    ys = [float(point[1]) for point in points]
+    return {"left": round(min(xs)), "top": round(min(ys)),
+            "right": round(max(xs)), "bottom": round(max(ys))}
 
 
 def validate_result(result: ExtractionResult) -> ExtractionResult:
@@ -186,7 +195,6 @@ def validate_result(result: ExtractionResult) -> ExtractionResult:
                 or not math.isfinite(block.confidence)
                 or not 0.0 <= block.confidence <= 1.0):
             raise ExtractionError("invalid_confidence")
-        _validate_locator(block.locator)
-        if not isinstance(block.formatting, dict):
-            raise ExtractionError("invalid_formatting")
+        _validate_scalars(block.locator, "invalid_locator")
+        _validate_scalars(block.formatting, "invalid_formatting")
     return result

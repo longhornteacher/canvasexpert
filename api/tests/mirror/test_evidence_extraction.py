@@ -11,7 +11,9 @@ from api.mirror.evidence_extraction import (
     extract_captured_attachments, extraction_entity_key, publish_extraction,
 )
 from api.mirror.evidence_jobs import AttachmentJobStore
-from api.mirror.evidence_publish import EvidencePublisher
+from api.mirror.evidence_publish import EvidencePublisher, PublicationRefused
+from api.mirror.extraction import registry
+from api.mirror.extraction.ocr_runtime import OcrBlock, OcrResult
 from api.mirror.extraction.schema import ExtractionError, ExtractionResult
 from api.mirror.extraction.text import extract as extract_text
 from api.tests.mirror.acquisition_samples import SyntheticVault
@@ -69,6 +71,40 @@ def test_publish_extraction_scrubs_text_and_uses_association_identity(tmp_path):
                               result=result, writer_key="writer-a", run_id="run-b")
     assert same == commit
     assert len(publisher.store.scan().commits) == first_commit_count
+
+
+def _synthetic_ocr(path, *, timeout):
+    return OcrResult(blocks=(OcrBlock("Recognized text", ((0, 0), (9, 0), (9, 4), (0, 4)), 0.9),),
+                     model_version="synthetic")
+
+
+_IMAGE = (document_samples.build_text_png("Recognized text"), {"ocr": _synthetic_ocr})
+# One formatted, located sample per required format; each must publish as a fact.
+_ADAPTER_SAMPLES = {
+    ".docx": (document_samples.build_docx(paragraphs=("Alpha words.", "Beta words."),
+                                          bold_word="Beta"), {}),
+    ".pptx": (document_samples.build_pptx(), {}),
+    ".xlsx": (document_samples.build_xlsx(), {}),
+    ".pdf": (document_samples.build_native_pdf(), {}),
+    ".jpg": _IMAGE, ".jpeg": _IMAGE, ".png": _IMAGE,
+}
+
+
+def test_every_required_format_has_a_publication_sample():
+    assert set(_ADAPTER_SAMPLES) >= registry.REQUIRED_FORMATS
+
+
+@pytest.mark.parametrize("extension", sorted(_ADAPTER_SAMPLES))
+def test_every_adapter_result_publishes_as_an_evidence_fact(tmp_path, extension):
+    data, kwargs = _ADAPTER_SAMPLES[extension]
+    result = registry.load_adapter(extension)(data, filename=f"sample{extension}", **kwargs)
+    publisher, _ = _publisher(tmp_path)
+    publish_extraction(publisher=publisher, assignment_id="10", pseudonym="Pikachu",
+                       attempt=1, attachment_key="b" * 64, original_digest="c" * 64,
+                       result=result, writer_key="writer-a", run_id="run-a")
+    facts = [f for f in publisher.store.scan().facts.values()
+             if f["kind"] == "attachment_extraction"]
+    assert len(facts) == 1 and facts[0]["payload"]["blocks"]
 
 
 def test_extraction_identity_is_association_not_content_or_version():
@@ -306,6 +342,37 @@ def test_publication_failure_never_marks_extraction_done_and_retry_is_idempotent
     assert jobs.summary()["extraction_needed"] == 1
     second = extract_captured_attachments(**args)
     assert second.published == 1 and jobs.summary()["extraction_done"] == 1
+
+
+def test_refused_publication_settles_as_a_text_free_gap(tmp_path, monkeypatch):
+    # A refusal repeats identically, so the job must settle, not retry every chunk.
+    publisher, _ = _publisher(tmp_path)
+    jobs = AttachmentJobStore(tmp_path / "control.sqlite3")
+    _job(jobs, "b" * 64, filename="essay.txt")
+    verify = publisher.verify_safe
+
+    def refuse_text(record):
+        if any(block.get("text") for block in record.get("payload", {}).get("blocks", [])):
+            raise PublicationRefused("privacy_refused")
+        return verify(record)
+
+    events = []
+    monkeypatch.setattr(publisher, "verify_safe", refuse_text)
+    monkeypatch.setattr("api.mirror.evidence_extraction.operational_log.emit",
+                        lambda event, outcome, **fields: events.append((event, outcome, fields.get("scope"))))
+    args = dict(publisher_scope=lambda course_id: _scope(publisher), jobs=jobs,
+                recover_original=lambda _: b"essay", run_adapter=_runner,
+                writer_key="writer-a", run_id="run-a")
+
+    first = extract_captured_attachments(**args)
+
+    assert first.published == 1 and first.gaps == ("publication_refused",)
+    assert ("mirror.extraction_publication", "refused", "privacy_refused") in events
+    assert jobs.summary()["extraction_gaps"] == 1 and jobs.extraction_candidates(limit=20) == ()
+    [fact] = [f for f in publisher.store.scan().facts.values()
+              if f["kind"] == "attachment_extraction"]
+    assert fact["payload"]["availability"] == "unavailable" and fact["payload"]["blocks"] == []
+    assert extract_captured_attachments(**args).processed == 0
 
 
 def test_completion_record_failure_retries_without_duplicate_commit(tmp_path, monkeypatch):

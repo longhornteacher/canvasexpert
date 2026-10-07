@@ -55,7 +55,7 @@ def _run_formatting(run: ET.Element) -> dict:
     for key, tag in (("bold", "b"), ("italic", "i"), ("underline", "u")):
         element = props.find(f"{_W}{tag}")
         if element is not None and element.get(f"{_W}val") not in {"0", "false", "none"}:
-            result[key] = True
+            result[key] = 1
     style = props.find(f"{_W}rStyle")
     if style is not None and style.get(f"{_W}val"):
         result["run_style"] = style.get(f"{_W}val")

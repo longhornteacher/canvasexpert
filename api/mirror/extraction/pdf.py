@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import io
 
-from .schema import Block, ExtractionResult, ExtractionError, digest_bytes
+from .schema import Block, ExtractionResult, ExtractionError, box_bounds, digest_bytes
 
-EXTRACTOR_VERSION = "pdf-2"
+EXTRACTOR_VERSION = "pdf-3"
 MAX_BYTES = 100 * 1024 * 1024
 MAX_PAGES_PER_CHUNK = 25
 OCR_TIMEOUT = 60.0
@@ -66,7 +66,7 @@ def extract(data: bytes, *, filename: str = "", ocr=None) -> ExtractionResult:
             reasons.add("page_failed")
             blocks.append(Block(block_id=f"page:{index}:failed", kind="pdf_page",
                                 text="", locator={"page": index + 1},
-                                formatting={"page_failed": True}))
+                                formatting={"page_failed": 1}))
             continue
         if text.strip():
             methods.add("native")
@@ -81,7 +81,7 @@ def extract(data: bytes, *, filename: str = "", ocr=None) -> ExtractionResult:
             for block_index, ocr_block in enumerate(result.blocks):
                 blocks.append(Block(block_id=f"page:{index}:ocr:{block_index}",
                                     kind="image_text", text=ocr_block.text,
-                                    locator={"page": index + 1, "box": list(ocr_block.box)},
+                                    locator={"page": index + 1, **box_bounds(ocr_block.box)},
                                     confidence=ocr_block.confidence, method="ocr"))
             if not result.blocks:
                 reasons.add("recognition_gap")

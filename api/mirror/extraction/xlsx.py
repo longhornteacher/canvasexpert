@@ -96,7 +96,7 @@ def extract(data: bytes, *, filename: str = "") -> ExtractionResult:
             except (KeyError, ET.ParseError):
                 blocks.append(Block(block_id=f"sheet:{sheet_index}:failed", kind="sheet_cell",
                                     text="", locator={"sheet": name},
-                                    formatting={"page_failed": True}))
+                                    formatting={"page_failed": 1}))
                 continue
             for row in sheet.iter(f"{_NS}row"):
                 for cell in row.findall(f"{_NS}c"):
