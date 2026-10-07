@@ -68,6 +68,16 @@ def _read_all(service, view: str, *, source_key: str, course_id: str,
     return records, expected_revision, coverage or {}
 
 
+def _no_attachments_observed(submission_coverage: dict, attachment_coverage: dict) -> bool:
+    """A fully enumerated submission scope with no attachment scope has no files.
+
+    The mirror publishes an attachment scope only for assignments where it saw
+    attachments, so a text-only assignment never gets one.
+    """
+    return (_scope_complete(submission_coverage)
+            and (attachment_coverage.get("membership") or {}).get("state") == "unknown")
+
+
 def _scope_complete(coverage: dict) -> bool:
     """Treat an unknown or pending attachment scope as insufficient for scoring."""
     membership = coverage.get("membership") or {}
@@ -87,7 +97,7 @@ def read_assignment_evidence(*, course_id: str, assignment_id: str,
         if not index_path.exists():
             return AssignmentEvidence(assignment_id=str(assignment_id), available=False)
         service = EvidenceQueryService(index_path)
-        submissions, revision, _ = _read_all(
+        submissions, revision, submission_coverage = _read_all(
             service, "current_submissions", source_key=source_key,
             course_id=str(course_id), assignment_id=str(assignment_id))
         attachments, revision, attachment_coverage = _read_all(
@@ -143,7 +153,8 @@ def read_assignment_evidence(*, course_id: str, assignment_id: str,
     # A missing association/extraction scope can hide a required file. Hold every
     # current response until those scopes are known complete, even if no rows arrived.
     scope_gaps = []
-    if not _scope_complete(attachment_coverage):
+    if not (_scope_complete(attachment_coverage)
+            or _no_attachments_observed(submission_coverage, attachment_coverage)):
         scope_gaps.append("attachment_scope_incomplete")
     if scope_gaps:
         for pseudo, attempt in current_attempts.items():

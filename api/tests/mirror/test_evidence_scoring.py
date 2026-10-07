@@ -284,6 +284,28 @@ def test_complete_empty_attachment_scopes_leave_text_only_submission_unheld(tmp_
     assert "_held" not in response
 
 
+def test_text_only_assignment_without_attachment_scope_is_scorable(tmp_path, monkeypatch):
+    # Regression: the mirror publishes an attachment scope only for assignments
+    # that observed attachments, so a text-entry assignment has none. That must
+    # not hold every response (2026-10-07: five SCR packets had zero rows).
+    absent = {"membership": {"state": "unknown"},
+              "synchronization": {"state": "unknown", "pending_commits": [],
+                                  "ambiguous_entities": []}}
+    root, _ = _fake_index_reads(tmp_path, monkeypatch, {
+        "current_submissions": [_row({"pseudonym": "Pikachu", "attempt": 1}, attempt=1)],
+        "attachment_associations": [],
+        "attachment_extractions": [],
+    }, coverage_by_view={"attachment_associations": absent,
+                         "attachment_extractions": absent})
+    bundle = {"students": [{"pseudonym": "Pikachu", "responses": [
+        {"item_id": "10", "attempt": 1, "response": "Text only."}]}]}
+    evidence_scoring.merge_into_bundle(
+        bundle, course_id="1", assignment_id="10", workspace_root=root, canvas_base=ORIGIN)
+    response = bundle["students"][0]["responses"][0]
+    assert response["response"] == "Text only."
+    assert not response.get("_held")
+
+
 def test_mixed_body_and_readable_attachment_keep_both_and_hold_partial(tmp_path, monkeypatch):
     root, _ = _fake_index_reads(tmp_path, monkeypatch, {
         "current_submissions": [_row({"pseudonym": "Pikachu", "attempt": 2}, attempt=2)],
