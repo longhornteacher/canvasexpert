@@ -8,9 +8,9 @@ scoring session was fully blocked.
 **Acceptance:** senior accepts the integrated implementation and field evidence.
 
 `canvasmirror-performance-discovery.md` (YELLOW) named "using extracted
-attachments in a scoring packet" as the next assessment; this is that batch. Its
-open desktop/S12 items are not carried here; the teacher decides whether that
-brief is retired or finished first (see section 9).
+attachments in a scoring packet" as the next assessment; this is that batch. Both
+briefs stay current (teacher, 2026-10-07: more than one brief is fine). This batch
+does not wait on that brief's open desktop/S12 items.
 
 ## 1. Teacher-visible outcome
 
@@ -161,8 +161,8 @@ the error text.
 
 1. Text plus an unread file: hold the student (default, current behavior) or
    score the text with a warning that a file was not read?
-2. Retire `canvasmirror-performance-discovery.md` now (its open items are the
-   desktop check and S12 carry-over) or finish it before this batch starts?
+
+Field evidence is laptop-only; the desktop is not available.
 
 ## 10. Execution result
 

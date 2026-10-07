@@ -1,6 +1,7 @@
 # Execution brief: fast, reliable CanvasMirror discovery
 
-**Status:** READY FOR EXECUTION; senior planning only, 2026-10-06.
+**Status:** YELLOW, current alongside `scoring-evidence-simplification.md`. Desktop
+check deferred: teacher has only the laptop (2026-10-07).
 **Target:** `dev`. **Inspected baseline:** `c2e0b60`.
 **Authority:** teacher selected the bounded performance/discovery batch.
 **Acceptance:** senior accepts the integrated implementation and field evidence.

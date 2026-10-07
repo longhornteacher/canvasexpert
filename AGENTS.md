@@ -9,7 +9,7 @@ file rather than parallel vendor-specific copies, which drift apart.
 
 Every agent reads this file. A lead executor then reads:
 
-1. the single direct brief in `docs/handoffs/`;
+1. the brief in `docs/handoffs/` the teacher points it to (more than one may be current);
 2. only the files and exact document sections named by that brief.
 
 **Before starting Scoring Sessions or AssignmentForge work**, read these agent-agnostic workspace resources (they persist across assistants and tools):
@@ -246,7 +246,8 @@ checked and zero new browser console errors confirmed.
 
 ## Handoff and document hygiene
 
-- `docs/handoffs/` holds one current brief. Write a brief when it is ready to execute
+- `docs/handoffs/` may hold more than one current brief (teacher decision, 2026-10-07);
+  each states its own status. Write a brief when it is ready to execute
   rather than keeping a future queue there, where it goes stale.
 - Close GREEN work by accepting it and retiring its brief in the same batch (Git history is
   its record). A RED/YELLOW brief remains current only while the senior is actively deciding
