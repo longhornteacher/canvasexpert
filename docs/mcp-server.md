@@ -60,7 +60,9 @@ authoring guidance, call `get_product_guide` with the relevant topic:
 
 ## Tools
 
-Tool schema version 83 (38 tools). v83 changes `discover_scoring_work` results only (evidence-index source, coverage columns, opaque `mirror_revision`); inputs are unchanged.
+Tool schema version 84 (38 tools). v84 adds typed scoring holds, scoring readiness,
+and explicit same-attempt hold recovery results; inputs are unchanged. Packet
+`held` is a list of frozen response records; `held_count` is its aggregate count.
 
 | Tool | Purpose | Student data? |
 |---|---|---|

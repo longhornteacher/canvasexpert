@@ -942,6 +942,7 @@ def test_invalid_results_names_unknown_and_missing_pseudonyms_and_fields(
     assert refused["ok"] is False and refused["code"] == "invalid_results"
     validation = refused["validation"]
     assert validation["fields"] == ["pseudonym"]
+    assert validation["issues"] == []
     # A string that is nobody's pseudonym is counted, never echoed.
     assert validation["unknown_pseudonyms"] == []
     assert validation["unrecognized_count"] == 1

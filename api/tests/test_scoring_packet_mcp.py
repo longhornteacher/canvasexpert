@@ -349,8 +349,10 @@ def test_build_packet_counts_each_held_response_once():
     result = scoring_packet.build_packet(session=_fake_session("s1", "c1"),
                                          safe_bundle=bundle, include_context=False)
 
-    assert result["held"] == 1
-    assert result["held_pseudonyms"] == ["Pikachu"]
+    assert result["held_count"] == 1
+    assert len(result["held"]) == 1
+    assert result["held"][0]["pseudonym"] == "Pikachu"
+    assert result["held"][0]["reason"] == "no_text"
     assert result["total"] == 0
     assert result["returned"] == 0
 
@@ -365,7 +367,8 @@ def test_build_packet_reports_private_student_excluded_from_manual_response_bund
     )
 
     assert result["total"] == 0
-    assert result["held"] == 0
+    assert result["held_count"] == 0
+    assert len(result["held"]) == 0
     assert result["session_student_count"] == 1
     assert result["bundle_student_count"] == 0
     assert result["excluded_student_count"] == 1
@@ -382,9 +385,9 @@ def test_build_packet_held_never_exceeds_responses_present():
     result = scoring_packet.build_packet(session=_fake_session("s1", "c1"),
                                          safe_bundle=bundle, include_context=False)
 
-    assert result["held"] == 2
-    assert result["held"] + result["total"] == 4  # every response classified once
-    assert sorted(result["held_pseudonyms"]) == ["Learner One", "Learner Two"]
+    assert result["held_count"] == 2
+    assert result["held_count"] + result["total"] == 4  # every response classified once
+    assert sorted([h["pseudonym"] for h in result["held"]]) == ["Learner One", "Learner Two"]
 
 
 def test_build_packet_keeps_full_text():
@@ -599,7 +602,8 @@ def test_get_scoring_packet_happy_path(monkeypatch, tmp_path):
     assert len(result["students"]["rows"]) == 6
     assert result["total"] == 6
     assert result["students_total"] == 3
-    assert result["next"] == tools._NEXT_STEPS["get_scoring_packet"]
+    assert result["readiness"] == "ready"
+    assert "next_offset" in result or "Read every page" in result["next"]
 
     without_context = tools.get_scoring_packet("s1", offset=1, include_context=False)
     assert without_context["ok"] is True

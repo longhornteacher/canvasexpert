@@ -29,12 +29,12 @@ def test_safe_bundle_validation_accepts_complete_identity_free_bundle():
     assert result["ok"] is True
 
 
-@pytest.mark.parametrize("response_texts, empty_students, expected_rows, expected_held", [
-    ([""], 0, 0, 16),
-    (["A scorable response.", ""], 1, 15, 15),
+@pytest.mark.parametrize("response_texts, empty_students, expected_rows, expected_held, readiness", [
+    ([""], 0, 0, 16, "held_only"),
+    (["A scorable response.", ""], 1, 15, 15, "partially_held"),
 ])
 def test_packet_membership_counts_are_distinct_and_independent_of_response_paging(
-    response_texts, empty_students, expected_rows, expected_held,
+    response_texts, empty_students, expected_rows, expected_held, readiness,
 ):
     session = {"session_id": "synthetic", "students": [{"user_id": i} for i in range(19)]}
     session["students"].append({"user_id": 0})
@@ -53,7 +53,11 @@ def test_packet_membership_counts_are_distinct_and_independent_of_response_pagin
         assert result["excluded_student_count"] == 3
         assert result["students_without_responses"] == empty_students
         assert result["total"] == expected_rows
-        assert result["held"] == expected_held
+        assert result["held_count"] == expected_held
+        assert len(result["held"]) == expected_held
+        assert result["readiness"] == readiness
+        assert all({"pseudonym", "item_id", "reason", "attempt", "submitted_at"} <= row.keys()
+                   for row in result["held"])
         assert "user_id" not in str(result)
         seen.extend(result["students"])
         offset = result.get("next_offset")

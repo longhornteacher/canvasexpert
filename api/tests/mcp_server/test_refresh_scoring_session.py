@@ -26,6 +26,63 @@ def _owner_must_not_run(monkeypatch):
                         lambda *_a, **_kw: pytest.fail("the owner ran"))
 
 
+@pytest.mark.parametrize("held_overrides,reason", [
+    ({"body": "Readable body plus a file.",
+      "attachments": [{"id": "file-1", "filename": "essay.docx", "size": 20}]},
+     "file_not_read"),
+    ({"body": "A media response.",
+      "attachments": [{"id": "media-1", "filename": "recording.mp4",
+                       "media_recording": True}]}, "media_recording"),
+    ({"body": "", "_mirror_unreadable": True}, "no_text"),
+])
+def test_prepared_bundle_held_reason_reaches_packet_preview_and_stage_validation(
+    scoring_refresh_world, held_overrides, reason,
+):
+    """INTEGRATION: the real prepare/artifact path feeds canonical held projections."""
+    world = scoring_refresh_world
+    world.add("900001", "Synthetic First", **held_overrides)
+    world.add("900002", "Fictional Omega", body="A readable response.")
+    sid = world.prepare()
+    packet = tools.get_scoring_packet(sid)
+    pseudo = world.pseudonym("900001")
+
+    assert packet["ok"] is True
+    assert packet["readiness"] == "partially_held"
+    held = next(row for row in packet["held"] if row["pseudonym"] == pseudo)
+    assert held["reason"] == reason
+    assert held["attempt"] == 1
+    assert held["submitted_at"] == "2026-09-18T10:00:00Z"
+    assert "file-1" not in json.dumps(packet) and "media-1" not in json.dumps(packet)
+
+    invalid = tools.stage_scoring_results(
+        sid, _results(pseudo), packet["packet_digest"])
+    assert invalid["code"] == "invalid_results"
+    assert invalid["validation"]["issues"] == [{
+        "pseudonym": pseudo, "item_id": "a1", "reason": f"held: {reason}",
+    }]
+
+    wrong_key = tools.stage_scoring_results(
+        sid, [{**_results(world.pseudonym("900002"))[0], "item_id": "missing-item"}],
+        packet["packet_digest"])
+    assert wrong_key["code"] == "invalid_results"
+    assert wrong_key["validation"]["issues"] == [{
+        "pseudonym": world.pseudonym("900002"), "item_id": "missing-item",
+        "reason": "not_in_packet",
+    }]
+
+    peer = _results(world.pseudonym("900002"))
+    staged = tools.stage_scoring_results(sid, peer, packet["packet_digest"])
+    if staged.get("status") == "needs_teacher_input":
+        staged = tools.stage_scoring_results(
+            sid, peer, packet["packet_digest"],
+            review_digest=staged["review_digest"],
+            answers={"held_not_scored": "proceed"})
+    assert staged.get("status") == "staged", staged
+    preview = tools.get_scoring_preview(sid)
+    assert any(row.get("pseudonym") == pseudo and row.get("reason") == reason
+               for row in preview.get("held") or [])
+
+
 def test_refresh_tool_refuses_unknown_and_non_current_sessions_before_the_owner(
     scoring_refresh_world, monkeypatch,
 ):
@@ -54,7 +111,7 @@ def test_refresh_tool_refuses_unknown_and_non_current_sessions_before_the_owner(
 def test_refresh_tool_gates_pseudonym_output_and_attaches_the_next_procedure(
     scoring_refresh_world, monkeypatch,
 ):
-    """CONTRACT: a success is scanned by the pseudonym gate, then carries its static next."""
+    """CONTRACT: a success is scanned and its next step reflects recovery state."""
     world = scoring_refresh_world
     sid = _two_student_session(world)
     monkeypatch.setattr(scoring_preparation, "refresh_scoring_session",
@@ -62,7 +119,22 @@ def test_refresh_tool_gates_pseudonym_output_and_attaches_the_next_procedure(
 
     ok = tools.refresh_scoring_session(sid)
 
-    assert ok["ok"] is True and ok["next"] == tools._NEXT_STEPS["refresh_scoring_session"]
+    assert ok["ok"] is True and "No packet change" in ok["next"]
+
+    monkeypatch.setattr(scoring_preparation, "refresh_scoring_session",
+                        lambda *_a, **_kw: {"ok": True, "changed": False,
+                            "remaining_held": [{"pseudonym": world.pseudonym("900001"),
+                                "item_id": "a1", "reason": "file_not_read"}]})
+    held = tools.refresh_scoring_session(sid)
+    assert "remain" in held["next"] and "1 held response" in held["next"]
+
+    monkeypatch.setattr(scoring_preparation, "refresh_scoring_session",
+                        lambda *_a, **_kw: {"ok": True, "changed": True,
+                            "recovered": [{"pseudonym": world.pseudonym("900001"), "item_id": "a1"}],
+                            "packet_digest": "new-digest"})
+    recovered = tools.refresh_scoring_session(sid)
+    assert recovered["recovered"][0]["pseudonym"] == world.pseudonym("900001")
+    assert "next" in recovered
 
     monkeypatch.setattr(scoring_preparation, "refresh_scoring_session",
                         lambda *_a, **_kw: {"ok": True, "added": ["900001"]})

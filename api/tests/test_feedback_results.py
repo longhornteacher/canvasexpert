@@ -137,4 +137,28 @@ def test_unknown_pseudonym_and_item_errors_always_name_their_field():
     off_bundle_item = feedback_results.validate_results([wrong_item], bundle, Vault())
 
     assert unknown["ok"] is False and unknown["fields"] == ["pseudonym"]
-    assert off_bundle_item["ok"] is False and off_bundle_item["fields"] == ["item_id"]
+    assert off_bundle_item["ok"] is False and off_bundle_item["fields"] == ["result"]
+    assert "not_in_packet" in off_bundle_item["errors"][0]
+
+
+def test_held_key_reports_pseudonym_and_specific_reason_without_item_id_field():
+    bundle = {"students": [{"pseudonym": "Ada", "responses": [{
+        "item_id": "101", "response": "Partial readable text.",
+        "_held": True, "_hold_reason": "file_not_read",
+    }]}]}
+    result = feedback_results.validate_results([ADA], bundle)
+
+    assert result["ok"] is False
+    assert result["fields"] == ["result"]
+    assert "Ada/101: held: file_not_read" in result["errors"][0]
+
+
+def test_empty_response_is_held_as_no_text_even_without_a_marker():
+    bundle = {"students": [{"pseudonym": "Ada", "responses": [{
+        "item_id": "101", "response": "  ",
+    }]}]}
+    result = feedback_results.validate_results([ADA], bundle)
+
+    assert result["ok"] is False
+    assert result["fields"] == ["result"]
+    assert "held: no_text" in result["errors"][0]

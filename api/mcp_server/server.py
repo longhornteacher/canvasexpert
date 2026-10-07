@@ -43,7 +43,7 @@ _SERVER_INSTRUCTIONS = (
     "For needs_scoring_norms ask its bounded question; never ask the teacher to choose a scoring transport. "
     "An explicit score/post direction authorizes the selected discovery rows together "
     "without reconfirming each assignment, never extends beyond those rows or another session. "
-    "Read every SAFE get_scoring_packet page and contract/rubric; held work and evidence gaps are not empty. "
+    "Read every get_scoring_packet page; report holds; refresh explicitly to recover. "
     "stage_scoring_results needs expected_packet_digest. Integrity concerns, evidence "
     "and private notes go in agent_commentary. For needs_teacher_input ask only its questions; "
     "resubmit unchanged results with review digest and answers. "

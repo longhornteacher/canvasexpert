@@ -286,8 +286,8 @@ def test_mcp_server_instructions_cover_cross_course_scoring_discovery_and_held_w
         "report all assignment and attention rows",
         "wait for teacher direction",
         "selected discovery rows",
-        "held work",
-        "evidence gaps are not empty",
+        "report holds",
+        "refresh explicitly to recover",
     ):
         assert phrase in lowered
     assert "never ask the teacher to choose a scoring transport" in lowered

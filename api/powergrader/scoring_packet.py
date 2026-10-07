@@ -118,8 +118,8 @@ def _shared_context_projection(shared: dict | None) -> dict | None:
 def _packet_shape(*, digest: str, items: list[dict], students: list[dict],
                   total: int, source_response_total: int,
                   session_student_count: int, bundle_student_count: int,
-                  students_without_responses: int, held: int,
-                  held_pseudonyms: list[str], include_context: bool,
+                  students_without_responses: int, held: list[dict],
+                  include_context: bool,
                   contract: str = "", shared_context: dict | None = None,
                   context_notice: dict | None = None,
                   next_offset: int | None = None) -> dict:
@@ -141,7 +141,12 @@ def _packet_shape(*, digest: str, items: list[dict], students: list[dict],
         "students_without_responses": students_without_responses,
         "returned": len(students),
         "held": held,
-        "held_pseudonyms": held_pseudonyms,
+        "held_count": len(held),
+        "readiness": (
+            "empty" if source_response_total + len(held) == 0
+            else "held_only" if source_response_total == 0
+            else "partially_held" if held else "ready"
+        ),
         "included_context": include_context,
     }
     if include_context:
@@ -324,8 +329,9 @@ def build_packet(
     - students_without_responses: bundle students with no response rows
     - returned: rows in this page
     - next_offset: offset of the next page, absent on the final page
-    - held: responses with no scorable text (media-only or empty)
-    - held_pseudonyms: distinct pseudonyms holding at least one held response
+    - held: response-level hold records with reason and frozen attempt metadata
+    - held_count: number of held response keys
+    - readiness: whole-packet scoring readiness, independent of packet health
     - included_context: whether contract and shared context were included
     - estimated_tokens: projected token count for this page
 
@@ -349,8 +355,7 @@ def build_packet(
     # never exceeds the responses actually present.
     scorable: list[dict] = []
     items_by_id: dict[str, dict] = {}
-    held = 0
-    held_pseudonyms: list[str] = []
+    held: list[dict] = []
 
     for student in students:
         pseudonym = student.get("pseudonym", "")
@@ -366,15 +371,14 @@ def build_packet(
             text = str(raw_text)
             # A required-file hold is structural: readable partial text must not
             # bypass it. The marker is independent of nonempty response text.
-            if response.get("_held"):
-                held += 1
-                if pseudonym not in held_pseudonyms:
-                    held_pseudonyms.append(pseudonym)
-                continue
-            if not text.strip():
-                held += 1
-                if pseudonym not in held_pseudonyms:
-                    held_pseudonyms.append(pseudonym)
+            if response.get("_held") or not text.strip():
+                held.append({
+                    "pseudonym": pseudonym,
+                    "item_id": item_id,
+                    "reason": str(response.get("_hold_reason") or "no_text"),
+                    "attempt": response.get("attempt"),
+                    "submitted_at": response.get("submitted_at") or None,
+                })
                 continue
             scorable.append({
                 "pseudonym": pseudonym,
@@ -454,7 +458,7 @@ def build_packet(
             session_student_count=session_student_count,
             bundle_student_count=bundle_student_count,
             students_without_responses=students_without_responses,
-            held=held, held_pseudonyms=held_pseudonyms,
+            held=held,
             include_context=True, contract=contract,
             shared_context=context_value, context_notice=notice,
         )
@@ -485,7 +489,7 @@ def build_packet(
             session_student_count=session_student_count,
             bundle_student_count=bundle_student_count,
             students_without_responses=students_without_responses,
-            held=held, held_pseudonyms=held_pseudonyms,
+            held=held,
             include_context=True, contract=contract,
             shared_context=sized_shared, context_notice=context_notice,
         )) <= row_budget
@@ -526,7 +530,7 @@ def build_packet(
             session_student_count=session_student_count,
             bundle_student_count=bundle_student_count,
             students_without_responses=students_without_responses,
-            held=held, held_pseudonyms=held_pseudonyms,
+            held=held,
             include_context=include_context, contract=contract,
             shared_context=candidate_context,
             context_notice=context_notice if include_context else None,
@@ -548,7 +552,7 @@ def build_packet(
         session_student_count=session_student_count,
         bundle_student_count=bundle_student_count,
         students_without_responses=students_without_responses,
-        held=held, held_pseudonyms=held_pseudonyms,
+        held=held,
         include_context=include_context, contract=contract,
         shared_context=sized_shared if include_context else None,
         context_notice=context_notice if include_context else None,

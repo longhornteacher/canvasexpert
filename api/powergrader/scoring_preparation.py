@@ -7,6 +7,7 @@ import math
 import os
 import re
 import uuid
+import copy
 from datetime import datetime, timezone
 from api.nq_report import html_to_text
 from api.platform_services import config, workspace
@@ -23,6 +24,8 @@ from api.powergrader import (
     writing_timeline,
 )
 from api.powergrader.attempt_history import summarize as summarize_attempt_history
+from api.mirror.attempt_text import digest as attempt_text_digest
+from api.mirror.attempt_text import normalize as normalize_attempt_text
 
 
 MAX_TEACHER_SCORING_GUIDANCE_CHARS = 12000
@@ -290,7 +293,8 @@ def _ready_payload(session: dict) -> dict:
     result.update({
         "student_count": len(session.get("students") or []),
         "response_count": int(page.get("total") or 0),
-        "held": int(page.get("held") or 0),
+        "held_count": int(page.get("held_count") or 0),
+        "readiness": str(page.get("readiness") or "empty"),
         "next": "Call get_scoring_packet with scoring_session_id and read every page.",
     })
     result.update({
@@ -762,6 +766,177 @@ def _first_new_offset(session: dict, bundle: dict, new_pseudonyms: set[str]) -> 
         offset = int(page["next_offset"])
 
 
+def _same_frozen_identity(response: dict, baseline: dict, row: dict) -> bool:
+    """Require both frozen attempt fields before current evidence can repair a hold."""
+    baseline_attempt = _as_int(baseline.get("attempt"))
+    current_attempt = _as_int(row.get("attempt"))
+    baseline_at = _as_time(baseline.get("submitted_at"))
+    current_at = _as_time(row.get("submitted_at"))
+    frozen_attempt = _as_int(response.get("attempt")) if response.get("attempt") not in (None, "") else baseline_attempt
+    frozen_at = _as_time(response.get("submitted_at")) or baseline_at
+    return bool(
+        frozen_attempt is not None and baseline_attempt == frozen_attempt
+        and current_attempt == frozen_attempt
+        and frozen_at is not None and baseline_at == frozen_at and current_at == frozen_at
+    )
+
+
+def _held_packet(session: dict, bundle: dict) -> dict:
+    from api.powergrader import scoring_packet
+    return scoring_packet.build_packet(
+        session=session, safe_bundle=bundle, offset=0, limit=1,
+        include_context=False,
+    )
+
+
+def _refresh_result_shape(session: dict, bundle: dict, *, changed: bool,
+                          recovered: list[dict] | None = None,
+                          blockers: list[dict] | None = None) -> dict:
+    page = _held_packet(session, bundle)
+    held = list(page.get("held") or [])
+    try:
+        uid_by_pseudo = {str(pseudo): str(uid)
+                         for uid, pseudo in _pseudonyms_by_user_id().items()}
+        by_uid = {str(student.get("user_id") or ""): student
+                  for student in session.get("students") or []}
+        for row in held:
+            baseline = (by_uid.get(uid_by_pseudo.get(str(row.get("pseudonym") or ""), ""))
+                        or {}).get("submission_baseline") or {}
+            if row.get("attempt") is None:
+                row["attempt"] = baseline.get("attempt")
+            if row.get("submitted_at") is None:
+                row["submitted_at"] = baseline.get("submitted_at") or None
+    except Exception:
+        pass
+    return {
+        "changed": bool(changed),
+        "recovered": list(recovered or []),
+        "recovery_blockers": list(blockers or []),
+        "remaining_held": held,
+        "held_count": len(held),
+        "readiness": str(page.get("readiness") or "empty"),
+        "packet_digest": page["packet_digest"],
+    }
+
+
+def _recover_held_responses(session: dict, bundle: dict, rows_by_uid: dict,
+                           students: list[dict], names: dict,
+                           course_id: str, assignment_id: str) -> tuple[dict, list[dict], list[dict]]:
+    """Build one new SAFE artifact and replace only verified recovered responses."""
+    from api import feedback_safety
+
+    packet = _held_packet(session, bundle)
+    by_uid = {str(student.get("user_id") or ""): student for student in students}
+    uid_by_pseudo = {str(pseudo): str(uid) for uid, pseudo in names.items()}
+    source_rows, keys, blockers = {}, [], []
+    for hold in packet.get("held") or []:
+        pseudo, item_id = str(hold.get("pseudonym") or ""), str(hold.get("item_id") or "")
+        uid, owner = uid_by_pseudo.get(pseudo, ""), by_uid.get(uid_by_pseudo.get(pseudo, ""))
+        baseline = (owner or {}).get("submission_baseline")
+        row = rows_by_uid.get(uid)
+        if owner and owner.get("posted") is not True and owner.get("status") != "posted" and (
+                not isinstance(baseline, dict) or _as_int(baseline.get("attempt")) is None
+                or _as_time(baseline.get("submitted_at")) is None):
+            blockers.append({"pseudonym": pseudo, "item_id": item_id,
+                             "code": "frozen_attempt_unverified"})
+            continue
+        if (not owner or owner.get("posted") or owner.get("status") == "posted"
+                or not isinstance(baseline, dict) or not isinstance(row, dict)):
+            continue
+        safe_student = next((item for item in bundle.get("students") or []
+                             if str(item.get("pseudonym") or "") == pseudo), None)
+        frozen = next((item for item in (safe_student or {}).get("responses") or []
+                       if str(item.get("item_id") or "") == item_id), None)
+        if not frozen or not _same_frozen_identity(frozen, baseline, row):
+            if frozen:
+                blockers.append({"pseudonym": pseudo, "item_id": item_id,
+                                 "code": "frozen_attempt_unverified"})
+            continue
+        expected_body = str(baseline.get("submission_digest") or "")
+        if expected_body:
+            body_matches = attempt_text_digest(row.get("body")) == expected_body
+        else:
+            frozen_body = owner.get("body")
+            body_matches = (frozen_body is not None and normalize_attempt_text(frozen_body)
+                            == normalize_attempt_text(row.get("body")))
+        if not body_matches:
+            blockers.append({"pseudonym": pseudo, "item_id": item_id,
+                             "code": "submission_changed"})
+            continue
+        source_rows[uid] = row
+        keys.append((pseudo, item_id))
+    if not keys:
+        return bundle, [], blockers
+
+    number = uuid.uuid4().hex[:10]
+    rebuilt = scoring_artifacts.build_scoring_artifacts(
+        submitted=list(source_rows.values()),
+        assignment_name=str(session.get("assignment_name") or assignment_id),
+        assignment_description=str(session.get("assignment_description") or ""),
+        course_id=course_id, course_name=config.course_display_name(course_id),
+        assignment_id=assignment_id, session_id=session["session_id"],
+        protected=config.active_protected_names(), file_label=f"recovery-{number}")
+    if not rebuilt.get("ok"):
+        raise ValueError("safe bundle rebuild failed")
+    new_path = rebuilt["privacy_artifacts"]["safe_bundle"]
+    with open(workspace.extended_path(new_path), encoding="utf-8") as handle:
+        fresh = json.load(handle)
+    fresh_rows = {(str(student.get("pseudonym") or ""), str(response.get("item_id") or "")): response
+                  for student in fresh.get("students") or []
+                  for response in student.get("responses") or []}
+    merged = copy.deepcopy(bundle)
+    recovered = []
+    for pseudo, item_id in keys:
+        replacement = fresh_rows.get((pseudo, item_id))
+        if not replacement or replacement.get("_held"):
+            continue
+        target_student = next(item for item in merged.get("students") or []
+                              if str(item.get("pseudonym") or "") == pseudo)
+        target = next(item for item in target_student.get("responses") or []
+                      if str(item.get("item_id") or "") == item_id)
+        previous_text = str(target.get("response") or "")
+        replacement_text = str(replacement.get("response") or "")
+        if not replacement_text.startswith(previous_text):
+            continue
+        target["response"] = replacement_text
+        baseline = by_uid[uid_by_pseudo[pseudo]]["submission_baseline"]
+        if target.get("attempt") in (None, ""):
+            target["attempt"] = baseline.get("attempt")
+        if not target.get("submitted_at"):
+            target["submitted_at"] = baseline.get("submitted_at")
+        target["_held"], target["_scorable"] = False, True
+        for key in ("_evidence_complete", "_evidence_revision", "_evidence_block_refs"):
+            if key in replacement:
+                target[key] = copy.deepcopy(replacement[key])
+        for key in ("_hold_reason", "_evidence_gaps"):
+            target.pop(key, None)
+        recovered.append({"pseudonym": pseudo, "item_id": item_id})
+    if not recovered:
+        return bundle, [], blockers
+    if not feedback_safety.assert_scrubbed(merged, context.vault()).get("green"):
+        raise ValueError("merged SAFE bundle failed privacy validation")
+    path = workspace.extended_path(new_path)
+    temporary = path + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(merged, handle, indent=2, ensure_ascii=False)
+    os.replace(temporary, path)
+    _attach_overlap_evidence(new_path, session.get("scoring_rubric_text"),
+                             session.get("teacher_scoring_guidance"),
+                             session.get("assignment_description"))
+    artifacts = dict(session.get("privacy_artifacts") or {})
+    history = list(session.get("scoring_refreshes") or [])
+    history.append({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "previous_safe_bundle": artifacts.get("safe_bundle"),
+                    "recovered": len(recovered)})
+    artifacts.update({key: rebuilt["privacy_artifacts"][key]
+                      for key in ("safe_folder", "safe_bundle", "safe_students")
+                      if key in rebuilt["privacy_artifacts"]})
+    session["privacy_artifacts"], session["scoring_refreshes"] = artifacts, history
+    session.pop("staged_scoring_apply", None)
+    session["status"] = "ready"
+    return merged, recovered, blockers
+
+
 def _pseudonyms_by_user_id() -> dict[str, str]:
     return {str(entry.get("canvas_id")): str(entry.get("pseudonym") or "")
             for entry in context.vault().entries() if entry.get("pseudonym")}
@@ -810,6 +985,9 @@ def refresh_scoring_session(
         return refuse("session_not_refreshable",
                       "This session has no open packet to refresh; list_scoring_sessions() "
                       "shows the usable session.")
+    # Work on an isolated candidate until the entire refreshed packet validates
+    # and its private session save succeeds.
+    session = copy.deepcopy(session)
     students = [s for s in session.get("students") or [] if isinstance(s, dict)]
     if any(s.get("push_state") == "sent_unknown" for s in students):
         return refuse("canvas_write_attention",
@@ -910,17 +1088,33 @@ def refresh_scoring_session(
         "posted_resubmitted": labels(posted_resubmitted, names),
     }
 
+    try:
+        base_bundle, recovered, recovery_blockers = _recover_held_responses(
+            session, base_bundle, rows_by_uid, students, names, course_id, assignment_id)
+    except Exception:
+        return refuse("safe_refresh_failed",
+                      "The held responses could not be safely refreshed. Retry this call.",
+                      retryable=True)
+
     if not added_rows and not replaced_uids:
         mirror_changed = any(session.get(key) != value for key, value in mirror_fields.items())
         if mirror_changed:
             session.update(mirror_fields)
-        if attempt_history_changed or mirror_changed:
-            save_session(session)
-        return {**report, "changed": bool(attempt_history_changed), "added": [], "replaced": [], "held_added": 0,
-                "first_new_offset": None,
-                "packet_digest": scoring_packet.packet_digest(
-                    session["session_id"], base_bundle, course_id=course_id,
-                    assignment_id=assignment_id, baseline_provenance=session.get("students"))}
+        if attempt_history_changed or mirror_changed or recovered:
+            try:
+                ready = _ready_payload(session)
+                if not ready.get("ok"):
+                    return ready
+                save_session(session)
+            except Exception:
+                return refuse("session_store_unavailable",
+                              "The refreshed Scoring Session could not be saved. Retry this call.",
+                              retryable=True)
+        shaped = _refresh_result_shape(session, base_bundle,
+                                       changed=bool(recovered or attempt_history_changed),
+                                       recovered=recovered, blockers=recovery_blockers)
+        return {**report, **shaped, "added": [], "replaced": [],
+                "held_added": 0, "first_new_offset": None}
 
     replaced = set(replaced_uids)
     added_ids = {str(row["user_id"]) for row in added_rows}
@@ -937,7 +1131,7 @@ def refresh_scoring_session(
             assignment_id=assignment_id, session_id=session["session_id"],
             protected=config.active_protected_names(),
             base_bundle=base_bundle, drop_canvas_ids=replaced_uids,
-            file_label=f"refresh-{len(history) + 1}",
+            file_label=f"refresh-{len(history) + 1}-{uuid.uuid4().hex[:8]}",
         )
     except Exception:
         ai_result = {"ok": False}
@@ -1017,8 +1211,10 @@ def refresh_scoring_session(
         if any(str(r.get("response") or "").strip()
                for r in s.get("responses") or [])
     }
+    shaped = _refresh_result_shape(session, merged, changed=True,
+                                   recovered=recovered, blockers=recovery_blockers)
     return {
-        **report, "changed": True,
+        **report, **shaped,
         "added": labels(added_ids, names),
         "replaced": labels(replaced_uids, names),
         "held_added": sum(1 for uid in [*added_ids, *replaced_uids]

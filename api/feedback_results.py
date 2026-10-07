@@ -173,7 +173,8 @@ def parse_results(text: str) -> list:
 
 
 def validate_results(results, bundle: dict = None, vault: IdentityVault = None,
-                     *, contract_version: str = CONTRACT_VERSION) -> dict:
+                     *, contract_version: str = CONTRACT_VERSION,
+                     held_responses: list[dict] | None = None) -> dict:
     """Validate scoring output against the Feedback Scoring Contract (v2).
 
     See docs/contracts/feedback-scoring-contract.md. Accepts either the wrapped
@@ -203,17 +204,34 @@ def validate_results(results, bundle: dict = None, vault: IdentityVault = None,
                 "warnings": [], "n": 0, "fields": []}
 
     expected = set()
-    held_keys = set()
+    held_keys = {}
     possible = _possible_by_key(bundle) if bundle else {}
     if bundle:
+        projected_holds = held_responses
+        if projected_holds is None:
+            projected_holds = []
+            for student in bundle.get("students") or []:
+                if not isinstance(student, dict):
+                    continue
+                for response in student.get("responses") or []:
+                    if not isinstance(response, dict):
+                        continue
+                    if response.get("_held") or not str(response.get("response") or "").strip():
+                        projected_holds.append({
+                            "pseudonym": student.get("pseudonym"),
+                            "item_id": response.get("item_id"),
+                            "reason": response.get("_hold_reason") or "no_text",
+                        })
+        for held in projected_holds:
+            if isinstance(held, dict):
+                held_keys[(held.get("pseudonym"), str(held.get("item_id") or ""))] = str(
+                    held.get("reason") or "held"
+                )
         for s in bundle.get("students", []):
             for r in s.get("responses", []):
                 key = (s.get("pseudonym"), str(r.get("item_id", "")))
-                expected.add(key)
-                # A required-file hold is structural: readable partial text must
-                # not let a held item be scored as complete.
-                if r.get("_held"):
-                    held_keys.add(key)
+                if key not in held_keys:
+                    expected.add(key)
 
     seen = set()
     for i, r in enumerate(results):
@@ -260,15 +278,14 @@ def validate_results(results, bundle: dict = None, vault: IdentityVault = None,
             errors.append(f"{where}: duplicate result for {key}")
         seen.add(key)
         if key in held_keys:
-            _error(where, "item_id",
-                   f"{key} is held for incomplete required evidence and cannot be scored")
+            _error(where, "result",
+                   f"{ps}/{it}: held: {held_keys[key]}")
         if vault is not None and ps and vault.reverse(ps) is None:
             _error(where, "pseudonym", f"pseudonym '{ps}' is not in the vault")
         if bundle:
-            if key not in expected:
-                known = {p for p, _item in expected}
-                _error(where, "pseudonym" if ps not in known else "item_id",
-                       f"{key} was not in the bundle the LLM scored")
+            if (key not in expected and key not in held_keys and ps
+                    and (vault is None or vault.reverse(ps) is not None)):
+                _error(where, "result", f"{ps}/{it}: not_in_packet")
             else:
                 pmax = possible.get(key)
                 if isinstance(sc, (int, float)) and isinstance(pmax, (int, float)) \

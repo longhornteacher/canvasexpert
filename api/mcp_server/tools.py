@@ -166,8 +166,10 @@ _NEXT_STEPS = {
     ),
     "get_scoring_packet": (
         "Read total as response rows and students_total as people. Keep the scoring "
-        "contract and rubric on page zero; use next_offset for later pages. After "
-        "reading every page, call stage_scoring_results with one "
+        "contract and rubric on page zero; use next_offset for later pages. Report "
+        "held rows and reasons. Continue pages before staging scorable work; held-only "
+        "or empty packets have nothing to stage. "
+        "After reading every page, call stage_scoring_results with one "
         "{pseudonym, item_id, score, feedback} row per packet "
         "student row and packet_digest as "
         "expected_packet_digest."
@@ -195,15 +197,16 @@ _NEXT_STEPS = {
     ),
     "prepare_scoring_session": (
         "When status is ready, call get_scoring_packet with scoring_session_id. "
-        "If response_count is 0 and held is greater than zero, explain that held "
-        "responses could not be scored from text."
+        "Use readiness to report scorable and held work. Held-only or empty packets "
+        "have nothing to stage; report hold reasons and recover only through an "
+        "explicit session refresh."
     ),
     "refresh_scoring_session": (
-        "If first_new_offset is set, read get_scoring_packet from that offset, score only "
-        "those rows, and stage them with stage_scoring_results using this packet_digest as "
-        "expected_packet_digest; rows already staged keep their results. If changed is "
-        "false, continue the existing packet. Report resubmitted_not_replaced and "
-        "posted_resubmitted to the teacher; replace_resubmitted=true replaces only unposted ones."
+        "Report recovered keys and remaining held rows. Read from first_new_offset only "
+        "to find appended work; recovered rows may be earlier, so reread packet pages "
+        "when readiness or holds changed. If changed is false, explain persistent holds "
+        "and that no repair occurred. Report resubmitted_not_replaced and "
+        "posted_resubmitted; replacement affects only unposted rows."
     ),
     "preview_sis_grade_bridge": (
         "Summarize the aggregate review and get teacher confirmation, then call "
@@ -239,7 +242,32 @@ _NEXT_STEPS = {
 def _with_next(tool_name: str, result: dict) -> dict:
     """Attach the bounded post-result procedure to an authorized success payload."""
     if result.get("ok"):
-        return {**result, "next": _NEXT_STEPS[tool_name]}
+        next_step = _NEXT_STEPS[tool_name]
+        if tool_name == "get_scoring_packet":
+            readiness = result.get("readiness")
+            if readiness == "ready":
+                next_step = ("Read every page using next_offset, then stage scorable "
+                             "rows with packet_digest as expected_packet_digest.")
+            elif readiness == "partially_held":
+                next_step = ("Read every page, score scorable rows, and report held "
+                             "rows with their reasons. Stage only scorable rows.")
+            elif readiness == "held_only":
+                next_step = ("No responses are scorable. Report each held pseudonym "
+                             "and reason; use explicit refresh_scoring_session only "
+                             "when checking whether held work became readable.")
+            elif readiness == "empty":
+                next_step = "There is no scorable or held work to stage; report the empty packet."
+            if result.get("next_offset") is not None:
+                next_step = ("Continue reading with next_offset="
+                             f"{result['next_offset']}. " + next_step)
+        elif tool_name == "refresh_scoring_session" and result.get("changed") is False:
+            remaining = result.get("remaining_held") or []
+            if remaining:
+                next_step = (f"No packet change occurred; {len(remaining)} held response(s) "
+                             "remain. Report their reasons; this refresh found no recovery.")
+            else:
+                next_step = "No packet change occurred and no holds remain; continue the existing packet."
+        return {**result, "next": next_step}
     return result
 
 
@@ -2869,8 +2897,9 @@ def get_scoring_packet(scoring_session_id: str, offset: int = 0, limit: int = 10
     - students_without_responses: bundle students with no response rows
     - returned: rows in this page
     - next_offset: offset for the next page, absent on the final page
-    - held: responses with no scorable text (media-only or empty)
-    - held_pseudonyms: distinct pseudonyms holding at least one held response
+    - held: response-level records {pseudonym, item_id, reason, attempt, submitted_at}
+    - held_count / readiness: whole-packet hold count and scorable readiness,
+      independent of packet_health
     - included_context: bool (true if contract/rubric were included)
     - rubric: attached Canvas rubric label and whether its text was included, when context is included
     - estimated_tokens: projected token count for this response
@@ -3090,7 +3119,8 @@ def stage_scoring_results(scoring_session_id: str, results: list,
             grade_mode=grade_mode, posting_policy=posting_policy)
 
 
-def _result_validation(verdict: dict, results, safe_bundle: dict, vault) -> dict:
+def _result_validation(verdict: dict, results, safe_bundle: dict, vault,
+                       held_responses: list[dict] | None = None) -> dict:
     """Counts, failing fields, and which pseudonyms are unknown or missing.
 
     ``unknown_pseudonyms`` are results whose pseudonym is not in this packet.
@@ -3111,12 +3141,39 @@ def _result_validation(verdict: dict, results, safe_bundle: dict, vault) -> dict
 
     unknown = supplied - packet
     known = {value for value in unknown if vault.reverse(value) is not None}
+    held = {
+        (str(row.get("pseudonym") or ""), str(row.get("item_id") or "")):
+            str(row.get("reason") or "held")
+        for row in (held_responses if held_responses is not None
+                    else (safe_bundle or {}).get("held") or []) if isinstance(row, dict)
+    }
+    expected = {
+        (str(student.get("pseudonym") or ""), str(response.get("item_id") or ""))
+        for student in (safe_bundle or {}).get("students") or []
+        if isinstance(student, dict)
+        for response in student.get("responses") or [] if isinstance(response, dict)
+    }
+    issues = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        pseudonym, item_id = row.get("pseudonym"), str(row.get("item_id") or "")
+        if not isinstance(pseudonym, str) or vault.reverse(pseudonym) is None:
+            continue
+        key = (pseudonym, item_id)
+        if key in held:
+            issues.append({"pseudonym": pseudonym, "item_id": item_id,
+                           "reason": f"held: {held[key]}"})
+        elif key not in expected:
+            issues.append({"pseudonym": pseudonym, "item_id": item_id,
+                           "reason": "not_in_packet"})
     return {"errors": len(verdict.get("errors") or []),
             "warnings": len(verdict.get("warnings") or []),
             "fields": verdict.get("fields") or [],
             "unknown_pseudonyms": capped(known),
             "unrecognized_count": len(unknown - known),
-            "missing_pseudonyms": capped(packet - supplied)}
+            "missing_pseudonyms": capped(packet - supplied),
+            "issues": issues[:50]}
 
 
 def _late_rows(session: dict, plan: dict, names: dict, answers=None, only=None) -> list:
@@ -3156,17 +3213,6 @@ def _posting_policy(session: dict) -> dict:
         session.get("course_id"), session.get("assignment_id"))
 
 
-def _held_reason(student: dict, skipped: bool) -> str | None:
-    """A fixed, identity-free reason when one is known."""
-    if skipped:
-        return "Skipped by an answer to a scoring question."
-    if student.get("speedgrader_required"):
-        return "Needs scoring in SpeedGrader."
-    if (student.get("attachment_eligibility") or {}).get("held") or student.get("has_media_recording"):
-        return "Attachment or media work could not be scored from text."
-    return None
-
-
 def _scoring_preview_model(session: dict, plan: dict, stage: dict, names: dict,
                            posting_policy: dict) -> dict:
     """Pseudonym-keyed preview rows, held rows, warnings and counts for one stage.
@@ -3177,17 +3223,32 @@ def _scoring_preview_model(session: dict, plan: dict, stage: dict, names: dict,
     from api.powergrader import scoring_apply
 
     selected = [str(uid) for uid in stage.get("selected_user_ids") or []]
-    skipped = {str(uid) for uid in stage.get("skipped_user_ids") or []}
     projected = scoring_apply.preview_rows(session, plan, selected, stage.get("answers"))
     rows = [{"pseudonym": names.get(uid) or "(unknown student)", **row,
              "attention": bool(row["warnings"] or row["agent_commentary"].strip())}
             for uid, row in projected.items()]
     rows.sort(key=lambda row: row["pseudonym"])
-    held = [{"pseudonym": names.get(str(student.get("user_id"))) or "(unknown student)",
-             "reason": _held_reason(student, str(student.get("user_id")) in skipped)}
-            for student in session.get("students") or []
-            if student.get("user_id") is not None
-            and str(student.get("user_id")) not in projected and not student.get("posted")]
+    bundle_held = []
+    bundle_path = _safe_bundle_path(session)
+    if bundle_path:
+        try:
+            from api.powergrader import scoring_packet
+            with open(bundle_path, encoding="utf-8") as handle:
+                safe_bundle = json.load(handle)
+            bundle_held = list(scoring_packet.build_packet(
+                session=session, safe_bundle=safe_bundle, offset=0, limit=1,
+                include_context=False,
+            ).get("held") or [])
+        except Exception:
+            bundle_held = []
+    held = bundle_held
+    held_pseudonyms = {str(row.get("pseudonym") or "") for row in held}
+    held.extend({"pseudonym": names.get(str(student.get("user_id"))) or "(unknown student)",
+                 "reason": None}
+                for student in session.get("students") or []
+                if student.get("user_id") is not None
+                and str(student.get("user_id")) not in projected and not student.get("posted")
+                and (names.get(str(student.get("user_id"))) or "") not in held_pseudonyms)
     held.sort(key=lambda item: item["pseudonym"])
     warnings = scoring_apply.posting_warnings(posting_policy)
     if held:
@@ -3263,12 +3324,19 @@ def _stage_scoring_results_locked(scoring_session_id: str, results: list,
     vault, vault_error = _open_vault()
     if vault_error:
         return {"ok": False, "code": "identity_unavailable", "error": "The private identity vault is unavailable."}
-    verdict = feedback.validate_results(results, safe_bundle, vault)
+    held_packet = sp.build_packet(
+        session=session, safe_bundle=safe_bundle, offset=0, limit=1,
+        include_context=False,
+    )
+    held_responses = list(held_packet.get("held") or [])
+    verdict = feedback.validate_results(
+        results, safe_bundle, vault, held_responses=held_responses)
     if not verdict.get("ok"):
         return pseudonym_boundary.gate({
             "ok": False, "code": "invalid_results",
             "error": "Results must match the supplied pseudonyms and item ids and contain valid feedback.",
-            "validation": _result_validation(verdict, results, safe_bundle, vault)}, vault)
+            "validation": _result_validation(
+                verdict, results, safe_bundle, vault, held_responses)}, vault)
 
     rendered = feedback.render_results(
         results, bundle=safe_bundle, grade_mode=grade_mode,

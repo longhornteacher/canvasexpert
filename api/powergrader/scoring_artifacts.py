@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 
 from api import feedback_safety
@@ -13,7 +14,6 @@ from api.feedback_contract import safe as safe_filename
 from api.platform_services import workspace
 from api.powergrader import context, privacy
 from api.feedback_artifacts import (
-    _prepare_attachment_safe_bundle,
     _scrub_bundle,
     _shared_context_blob,
     pseudonymize_submissions,
@@ -56,18 +56,51 @@ def build_scoring_artifacts(
         with vault.transaction():
             bundle = pseudonymize_submissions(submitted, vault, assignment_name)
             bundle = context.apply_shared_context(bundle, assignment_description, source_context)
-            # Merge durable extracted evidence (published, scrubbed facts) so a
-            # student with readable attachment text is scorable, while an
-            # incomplete required file carries an explicit hold marker.
+            # Freeze attempt identity from the submission used to create this
+            # bundle before consulting the independently published evidence index.
+            rows_by_uid = {str(row.get("user_id") or ""): row for row in submitted}
+            submission_attachments = {}
+            for safe_student in bundle.get("students") or []:
+                reverse = vault.reverse(str(safe_student.get("pseudonym") or "")) or {}
+                source = rows_by_uid.get(str(reverse.get("canvas_id") or ""), {})
+                for response in safe_student.get("responses") or []:
+                    response.setdefault("attempt", source.get("attempt"))
+                    response.setdefault("submitted_at", source.get("submitted_at") or None)
+                    response["_needs_speedgrader"] = any(
+                        "upload" in str(item.get("type") or "").lower().replace("_", "-")
+                        or (str(item.get("type") or "").lower() != "essay"
+                            and item.get("earned_score") is None)
+                        for item in source.get("new_quiz_items") or []
+                    )
+                    response["_media_recording"] = any(
+                        item.get("media_recording") for item in source.get("attachments") or []
+                    )
+                    submission_attachments[(str(safe_student.get("pseudonym") or ""),
+                                            response.get("attempt"))] = [
+                        item for item in source.get("attachments") or [] if isinstance(item, dict)
+                    ]
+            # One decision owner merges complete extracted text and marks holds.
             try:
                 from api.mirror import evidence_scoring
                 from api.platform_services import config as _config
-                evidence_scoring.merge_into_bundle(
+                evidence_result = evidence_scoring.merge_into_bundle(
                     bundle, course_id=course_id, assignment_id=assignment_id,
                     workspace_root=workspace.workspace_root(),
-                    canvas_base=_config.get_canvas_base())
+                    canvas_base=_config.get_canvas_base(),
+                    submission_attachments=submission_attachments)
             except Exception:
-                pass
+                logging.getLogger(__name__).warning(
+                    "Scoring evidence decision failed; bundle build refused.")
+                return {"ok": False, "privacy_steps": steps}
+            if not evidence_result.get("available"):
+                logging.getLogger(__name__).warning(
+                    "Scoring evidence index unavailable; file-bearing responses are held.")
+            for safe_student in bundle.get("students") or []:
+                safe_student.pop("local_attachments", None)
+                safe_student.pop("_expected_attachment_count", None)
+                for response in safe_student.get("responses") or []:
+                    response.pop("_needs_speedgrader", None)
+                    response.pop("_media_recording", None)
             verdict = feedback_safety.scan_payload(bundle, vault) if bundle.get("students") else None
         if not bundle.get("students"):
             _step(steps, "pseudonymize", "Prepared eligible responses", "warn",
@@ -86,10 +119,7 @@ def build_scoring_artifacts(
             return {"ok": False, "privacy_steps": steps}
         os.makedirs(workspace.extended_path(safe_dir), exist_ok=True)
 
-        prepared, attachment_excluded, attachment_log, media_holds = (
-            _prepare_attachment_safe_bundle(bundle, safe_dir)
-        )
-        safe = _scrub_bundle(prepared, vault, protected=protected)
+        safe = _scrub_bundle(bundle, vault, protected=protected)
         receipt = feedback_safety.assert_scrubbed(safe, vault)
         if not receipt["green"]:
             _step(steps, "safety_gate", "Validated SAFE bundle", "error")
@@ -139,20 +169,6 @@ def build_scoring_artifacts(
             json.dump(safe, handle, indent=2, ensure_ascii=False)
         _step(steps, "safe_bundle", "Saved SAFE scoring bundle", "ok")
 
-        attachment_only_count = sum(
-            1 for row in submitted
-            if not (row.get("body") or "").strip()
-            and any(not a.get("ai_eligible") or a.get("download_status") != "downloaded"
-                    for a in (row.get("attachments") or []))
-        )
-        failures = {}
-        for hold in media_holds:
-            who = vault.reverse(str(hold.get("pseudonym") or ""))
-            if who and who.get("canvas_id"):
-                failures[str(who["canvas_id"])] = {
-                    "code": "media_review_hold",
-                    "message": str(hold.get("message") or "Media evidence requires teacher review."),
-                }
         return {
             "ok": True,
             "privacy_steps": steps,
@@ -160,12 +176,10 @@ def build_scoring_artifacts(
                 "safe_folder": safe_dir,
                 "safe_bundle": safe_path,
                 "safe_students": len(safe.get("students") or []),
-                "attachment_only_count": attachment_only_count,
-                "excluded_count": len(attachment_excluded) + len(survivor_excluded),
-                "media_hold_count": len(media_holds),
+                "excluded_count": len(survivor_excluded),
                 "shared_context_excluded": shared_excluded,
             },
-            "ai_by_uid": {}, "ai_item_by_uid": {}, "ai_failures": failures,
+            "ai_by_uid": {}, "ai_item_by_uid": {}, "ai_failures": {},
             "appended_pseudonyms": appended,
         }
     except PseudonymProvisionalError:

@@ -62,3 +62,15 @@ def test_survivor_excludes_only_that_student(monkeypatch, tmp_path):
     payload = json.loads((tmp_path / "SAFE" / "Essay__bundle.json").read_text(encoding="utf-8"))
     assert len(payload["students"]) == 1
     assert result["privacy_artifacts"]["excluded_count"] == 1
+
+
+def test_empty_submitted_response_is_retained_as_no_text_hold(monkeypatch, tmp_path):
+    result = _build(monkeypatch, tmp_path, [{**_submission(""),
+                                            "assignment": {"id": "a1", "points_possible": 10}}])
+
+    assert result["ok"] is True
+    payload = json.loads((tmp_path / "SAFE" / "Essay__bundle.json").read_text(encoding="utf-8"))
+    response = payload["students"][0]["responses"][0]
+    assert response["item_id"]
+    assert response["_held"] is True
+    assert response["_hold_reason"] == "no_text"

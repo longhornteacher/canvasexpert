@@ -157,8 +157,6 @@ def pseudonymize_submissions(submissions: list, vault: IdentityVault,
         prompt = html_to_text(a.get("description") or "")
         body_text = html_to_text(s.get("body") or "")
         response = body_text.strip()
-        if not response and not (s.get("attachments") or []) and not s.get("_mirror_unreadable"):
-            continue
         entry = {
             "item_id":  str(a.get("id", "")),
             "prompt":   prompt,

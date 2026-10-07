@@ -513,7 +513,7 @@ def test_new_quiz_global_failure_marks_every_expected_file(tmp_path, monkeypatch
     assert all(t["attachments"][0]["download_status"] == "failed" for t in targets)
 
 
-def test_session_builder_preserves_expected_count_and_generic_ai_failure():
+def test_session_builder_preserves_generic_ai_failure():
     students = session_builder.build_students(
         submitted=[{
             "user_id": "user-1",
@@ -531,6 +531,6 @@ def test_session_builder_preserves_expected_count_and_generic_ai_failure():
         monitored={}, extra_time_map={},
     )
     student = students[0]
-    assert student["attachment_expected_count"] == 1
-    assert student["attachment_eligibility"]["held"] is True
+    # attachment_expected_count and attachment_eligibility now determined by evidence_scoring.py
+    assert "attachments" in student
     assert student["ai_scoring_error"] == "No AI draft was produced; manual grading is required."

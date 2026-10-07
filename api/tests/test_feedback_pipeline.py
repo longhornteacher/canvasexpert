@@ -115,8 +115,8 @@ def _submissions_fixture():
 def test_pseudonymize_submissions_captures_names_and_leaks_nothing(tmp_path):
     v = Vault(str(tmp_path / "vault.json"))
     bundle = fp.pseudonymize_submissions(_submissions_fixture(), v, "Essay 1")
-    # The empty submission is dropped; the two with text remain.
-    assert len(bundle["students"]) == 2
+    # All three submissions are now included; holds filter empty responses later.
+    assert len(bundle["students"]) == 3
     # Capture the pseudo we got
     pseudo = bundle["students"][0]["pseudonym"]
     blob = json.dumps(bundle)
@@ -176,6 +176,9 @@ def _score_like_an_llm(bundle):
     out = []
     for s in bundle["students"]:
         for r in s["responses"]:
+            # Skip held responses (empty text or marked held).
+            if r.get("_held") or not str(r.get("response") or "").strip():
+                continue
             out.append({
                 "pseudonym": s["pseudonym"],
                 "item_id": r["item_id"],
@@ -307,8 +310,10 @@ def test_validate_results_catches_violations(tmp_path):
     parsed = parse_student_analysis_file(FIXTURE)
     v = Vault(str(tmp_path / "vault.json"))
     bundle = fp.pseudonymize(parsed, v, "THG")
+    # Get a valid pseudonym from bundle to test not_in_packet error
+    valid_pseudo = bundle["students"][0]["pseudonym"]
     bad = [
-        {"pseudonym": "S001", "item_id": "does-not-exist", "score": "high", "feedback": ""},
+        {"pseudonym": valid_pseudo, "item_id": "does-not-exist", "score": "high", "feedback": ""},
         {"item_id": "x", "score": 5, "feedback": "ok"},  # no pseudonym
         {"pseudonym": "S404", "item_id": "y", "score": 1,
          "feedback": "ok"},  # not in vault
@@ -318,7 +323,7 @@ def test_validate_results_catches_violations(tmp_path):
     blob = " | ".join(out["errors"])
     assert "'score' must be a number" in blob
     assert "not in the vault" in blob
-    assert "not in the bundle" in blob
+    assert "not_in_packet" in blob
     assert "score" in out["fields"]
 
 

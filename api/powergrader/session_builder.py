@@ -2,7 +2,6 @@
 
 from datetime import datetime
 
-from api.powergrader.student_attachments import eligibility_decision
 from api.powergrader import media_recordings
 from api.mirror.attempt_text import digest as attempt_text_digest
 from api.powergrader.attempt_history import summarize as summarize_attempt_history
@@ -68,17 +67,6 @@ def build_students(
                 )
                 if key in item
             })
-        expected_count = s.get("expected_attachment_count")
-        if expected_count is None and not attachments:
-            expected_count = 0
-        eligibility = eligibility_decision(attachments, expected_count=expected_count)
-        has_media_recording = any(item.get("media_recording") for item in attachments)
-        requires_speedgrader = any(
-            "upload" in str(item.get("type") or "").lower().replace("_", "-")
-            or (str(item.get("type") or "").lower() != "essay" and item.get("earned_score") is None)
-            for item in new_quiz_items
-        )
-
         ai = ai_by_uid.get(uid, {})
         ai_items = (ai_item_by_uid or {}).get(uid, [])
         ai_failure = (ai_failures or {}).get(uid)
@@ -87,13 +75,8 @@ def build_students(
             "real_name":     real_name,
             "body":          body,
             "attachments":   attachments,
-            "attachment_expected_count": expected_count,
             "new_quiz_items": new_quiz_items,
-            "attachment_eligibility": eligibility,
-            "has_media_recording": has_media_recording,
-            "analysis_unavailable": "" if has_media_recording else "",
             "new_quiz_files_error": s.get("new_quiz_files_error"),
-            "speedgrader_required": requires_speedgrader,
             "current_score": s.get("score"),
             "submission_baseline": {
                 "attempt": s.get("attempt"),

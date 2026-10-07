@@ -78,7 +78,7 @@ def test_read_assignment_evidence_returns_extracted_text(tmp_path, monkeypatch):
 def test_merge_into_bundle_fills_empty_response_and_marks_complete(tmp_path, monkeypatch):
     root = _seed(tmp_path, monkeypatch)
     bundle = {"students": [{"pseudonym": "Pikachu",
-                            "responses": [{"item_id": "10", "response": ""}]}]}
+                            "responses": [{"item_id": "10", "attempt": 1, "response": ""}]}]}
     summary = evidence_scoring.merge_into_bundle(
         bundle, course_id="1", assignment_id="10", workspace_root=root, canvas_base=ORIGIN)
     assert summary["available"] is True
@@ -86,6 +86,8 @@ def test_merge_into_bundle_fills_empty_response_and_marks_complete(tmp_path, mon
     assert "Durable body." in response["response"]
     assert response["_evidence_complete"] is True
     assert response["_held"] is False
+    assert response["_evidence_revision"]
+    assert response["_evidence_block_refs"]
 
 
 def test_complete_durable_text_survives_safe_attachment_preparation(tmp_path, monkeypatch):
@@ -104,7 +106,7 @@ def test_complete_durable_text_survives_safe_attachment_preparation(tmp_path, mo
     session = {"session_id": "s", "course_id": "1", "assignment_id": "10",
                "students": [{"user_id": "991001"}]}
     page = scoring_packet.build_packet(session, prepared, offset=0, limit=10)
-    assert page["held"] == 0
+    assert page["held"] == []
     assert "Durable body." in page["students"][0]["text"]
 
 
@@ -115,7 +117,7 @@ def test_pending_original_holds_student_without_text(tmp_path, monkeypatch):
     student = evidence.students[0]
     assert student.held is True
     assert student.evidence_complete is False
-    assert "original_pending" in student.gaps
+    assert student.reason == "file_not_read"
 
 
 def test_held_item_cannot_be_scored_even_with_readable_text():
@@ -139,8 +141,8 @@ def test_packet_holds_marked_response_despite_text():
                "students": [{"user_id": "991001"}]}
     page = scoring_packet.build_packet(
         session, bundle, offset=0, limit=10)
-    assert page["held"] == 1
-    assert page["held_pseudonyms"] == ["Pikachu"]
+    assert len(page["held"]) == 1
+    assert page["held"][0]["reason"] == "no_text"
     assert page["students"] == []
 
 
@@ -176,6 +178,54 @@ def _row(payload, *, attempt=None, pseudonym="Pikachu"):
     return {"pseudonym": pseudonym, "attempt": attempt, "payload": payload}
 
 
+def test_decision_function_requires_exact_attempt_and_complete_extraction():
+    attachment = {"attempt": 2, "attachment_key": "f", "original_digest": "d",
+                  "status": "captured"}
+    complete = {"attempt": 2, "attachment_key": "f", "original_digest": "d",
+                "availability": "complete", "blocks": [{"text": "Extracted."}]}
+    result = evidence_scoring.decide_submission_scoring(
+        pseudonym="Pikachu", body_text="Typed.", attempt=2,
+        attachments=[attachment], extractions=[{**complete, "attempt": "2"}])
+    assert result.scorable is False
+    assert result.reason == "file_not_read"
+    assert result.text == "Typed."
+
+    result = evidence_scoring.decide_submission_scoring(
+        pseudonym="Pikachu", body_text="Typed.", attempt=2,
+        attachments=[attachment], extractions=[complete])
+    assert result.scorable is True
+    assert result.reason is None
+    assert result.text == "Typed.\n\nExtracted."
+
+
+def test_decision_rejects_missing_attachment_identity_and_contradictory_completion():
+    missing_identity = evidence_scoring.decide_submission_scoring(
+        pseudonym="Pikachu", attempt=2,
+        attachments=[{"attempt": 2, "status": "captured"}],
+        extractions=[{"attempt": 2, "availability": "complete",
+                      "blocks": [{"text": "Must not match."}]}])
+    assert missing_identity.reason == "file_not_read"
+    assert "Must not match." not in missing_identity.text
+
+    contradictory = evidence_scoring.decide_submission_scoring(
+        pseudonym="Pikachu", attempt=2,
+        attachments=[{"attempt": 2, "attachment_key": "f", "original_digest": "d",
+                      "status": "captured"}],
+        extractions=[{"attempt": 2, "attachment_key": "f", "original_digest": "d",
+                      "availability": "partial", "status": "complete",
+                      "blocks": [{"text": "Partial."}]}])
+    assert contradictory.reason == "file_not_read"
+
+
+def test_decision_vocabulary_for_media_speedgrader_and_no_text():
+    assert evidence_scoring.decide_submission_scoring(
+        pseudonym="Pikachu", media_recording=True).reason == "media_recording"
+    assert evidence_scoring.decide_submission_scoring(
+        pseudonym="Pikachu", needs_speedgrader=True).reason == "needs_speedgrader"
+    assert evidence_scoring.decide_submission_scoring(
+        pseudonym="Pikachu").reason == "no_text"
+
+
 def test_partial_sibling_and_missing_or_stale_extraction_hold_readable_text(tmp_path, monkeypatch):
     root, _ = _fake_index_reads(tmp_path, monkeypatch, {
         "current_submissions": [_row({"pseudonym": "Pikachu", "attempt": 2}, attempt=2)],
@@ -197,11 +247,10 @@ def test_partial_sibling_and_missing_or_stale_extraction_hold_readable_text(tmp_
     evidence = evidence_scoring.read_assignment_evidence(
         course_id="1", assignment_id="10", workspace_root=root, canvas_base=ORIGIN)
     student = evidence.students[0]
-    assert student.text == "Visible sibling text."
+    assert student.text == ""
     assert student.held is True
     assert student.evidence_complete is False
-    assert "ocr_incomplete" in student.gaps
-    assert "extraction_missing" in student.gaps
+    assert student.gaps == ("file_not_read",)
 
 
 def test_attempt_isolation_and_more_than_one_page(tmp_path, monkeypatch):
@@ -235,12 +284,12 @@ def test_attempt_isolation_and_more_than_one_page(tmp_path, monkeypatch):
     assert student.attempt == 2
     assert "Prior attempt only." not in student.text
     assert student.held is True
-    assert "original_pending" in student.gaps
+    assert student.reason == "file_not_read"
     assert ("attachment_associations", 100, "rev-a") in calls
     assert ("attachment_extractions", 100, "rev-a") in calls
 
 
-def test_incomplete_attachment_scopes_hold_current_text_even_without_arrived_rows(tmp_path, monkeypatch):
+def test_incomplete_attachment_scope_does_not_hold_current_text(tmp_path, monkeypatch):
     root, _ = _fake_index_reads(tmp_path, monkeypatch, {
         "current_submissions": [_row({"pseudonym": "Pikachu", "attempt": 1,
                                        "body": "Existing response."}, attempt=1)],
@@ -257,16 +306,16 @@ def test_incomplete_attachment_scopes_hold_current_text_even_without_arrived_row
         course_id="1", assignment_id="10", workspace_root=root, canvas_base=ORIGIN)
     assert len(evidence.students) == 1
     student = evidence.students[0]
-    assert student.held is True
-    assert student.evidence_complete is False
-    assert "attachment_scope_incomplete" in student.gaps
+    assert student.held is False
+    assert student.scorable is True
+    assert student.text == "Existing response."
     bundle = {"students": [{"pseudonym": "Pikachu", "responses": [
         {"item_id": "10", "attempt": 1, "response": "Existing response."}]}]}
     evidence_scoring.merge_into_bundle(
         bundle, course_id="1", assignment_id="10", workspace_root=root, canvas_base=ORIGIN)
     response = bundle["students"][0]["responses"][0]
     assert response["response"] == "Existing response."
-    assert response["_held"] is True
+    assert response["_held"] is False
 
 
 def test_complete_empty_attachment_scopes_leave_text_only_submission_unheld(tmp_path, monkeypatch):
@@ -281,7 +330,7 @@ def test_complete_empty_attachment_scopes_leave_text_only_submission_unheld(tmp_
         bundle, course_id="1", assignment_id="10", workspace_root=root, canvas_base=ORIGIN)
     response = bundle["students"][0]["responses"][0]
     assert response["response"] == "Text only."
-    assert "_held" not in response
+    assert response["_held"] is False
 
 
 def test_text_only_assignment_without_attachment_scope_is_scorable(tmp_path, monkeypatch):
@@ -306,7 +355,71 @@ def test_text_only_assignment_without_attachment_scope_is_scorable(tmp_path, mon
     assert not response.get("_held")
 
 
-def test_mixed_body_and_readable_attachment_keep_both_and_hold_partial(tmp_path, monkeypatch):
+def test_frozen_file_without_published_association_stays_file_not_read(tmp_path, monkeypatch):
+    root, _ = _fake_index_reads(tmp_path, monkeypatch, {
+        "current_submissions": [_row({"pseudonym": "Pikachu", "attempt": 2}, attempt=2)],
+        "attachment_associations": [], "attachment_extractions": [],
+    })
+    bundle = {"students": [{"pseudonym": "Pikachu", "responses": [
+        {"item_id": "10", "attempt": 2, "response": "Typed text."}]}]}
+    summary = evidence_scoring.merge_into_bundle(
+        bundle, course_id="1", assignment_id="10", workspace_root=root,
+        canvas_base=ORIGIN,
+        submission_attachments={("Pikachu", 2): [{"id": 501, "filename": "essay.docx"}]})
+    response = bundle["students"][0]["responses"][0]
+    assert summary["held"] == 1
+    assert response["response"] == "Typed text."
+    assert response["_hold_reason"] == "file_not_read"
+
+
+def test_unknown_attempt_with_known_file_is_held_when_store_is_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr(evidence_scoring, "local_source_root",
+                        lambda *_args: tmp_path / "missing-source")
+    bundle = {"students": [{"pseudonym": "Pikachu", "responses": [
+        {"item_id": "10", "response": "Typed text."}]}]}
+    evidence_scoring.merge_into_bundle(
+        bundle, course_id="1", assignment_id="10", workspace_root=tmp_path,
+        canvas_base=ORIGIN,
+        submission_attachments={("Pikachu", None): [{"id": 501, "filename": "essay.docx"}]})
+    response = bundle["students"][0]["responses"][0]
+    assert response["_held"] is True
+    assert response["_hold_reason"] == "file_not_read"
+
+
+def test_malformed_source_attachment_descriptor_fails_closed(tmp_path, monkeypatch):
+    root, _ = _fake_index_reads(tmp_path, monkeypatch, {
+        "current_submissions": [_row({"pseudonym": "Pikachu", "attempt": 2}, attempt=2)],
+        "attachment_associations": [], "attachment_extractions": [],
+    })
+    bundle = {"students": [{"pseudonym": "Pikachu", "responses": [
+        {"item_id": "10", "attempt": 2, "response": "Typed text."}]}]}
+    evidence_scoring.merge_into_bundle(
+        bundle, course_id="1", assignment_id="10", workspace_root=root,
+        canvas_base=ORIGIN,
+        submission_attachments={("Pikachu", 2): [{"size": 10}]})
+    response = bundle["students"][0]["responses"][0]
+    assert response["_hold_reason"] == "file_not_read"
+
+
+def test_frozen_text_only_ignores_unmatched_index_attachment(tmp_path, monkeypatch):
+    root, _ = _fake_index_reads(tmp_path, monkeypatch, {
+        "current_submissions": [_row({"pseudonym": "Pikachu", "attempt": 2}, attempt=2)],
+        "attachment_associations": [_row({"pseudonym": "Pikachu", "attempt": 2,
+                                           "attachment_key": "extra", "original_digest": "d",
+                                           "status": "pending"}, attempt=2)],
+        "attachment_extractions": [],
+    })
+    bundle = {"students": [{"pseudonym": "Pikachu", "responses": [
+        {"item_id": "10", "attempt": 2, "response": "Typed text."}]}]}
+    evidence_scoring.merge_into_bundle(
+        bundle, course_id="1", assignment_id="10", workspace_root=root,
+        canvas_base=ORIGIN, submission_attachments={("Pikachu", 2): []})
+    response = bundle["students"][0]["responses"][0]
+    assert response["_scorable"] is True
+    assert "_hold_reason" not in response
+
+
+def test_partial_attachment_is_not_used_and_holds_readable_body(tmp_path, monkeypatch):
     root, _ = _fake_index_reads(tmp_path, monkeypatch, {
         "current_submissions": [_row({"pseudonym": "Pikachu", "attempt": 2}, attempt=2)],
         "attachment_associations": [_row({"pseudonym": "Pikachu", "attempt": 2,
@@ -322,9 +435,9 @@ def test_mixed_body_and_readable_attachment_keep_both_and_hold_partial(tmp_path,
     evidence_scoring.merge_into_bundle(
         bundle, course_id="1", assignment_id="10", workspace_root=root, canvas_base=ORIGIN)
     response = bundle["students"][0]["responses"][0]
-    assert response["response"] == "Typed response.\n\nReadable file portion."
+    assert response["response"] == "Typed response."
     assert response["_held"] is True
-    assert "ocr_incomplete" in response["_evidence_gaps"]
+    assert response["_hold_reason"] == "file_not_read"
 
 
 def test_prior_safe_attempt_is_held_and_receives_no_current_file_text(tmp_path, monkeypatch):
@@ -344,8 +457,8 @@ def test_prior_safe_attempt_is_held_and_receives_no_current_file_text(tmp_path, 
         bundle, course_id="1", assignment_id="10", workspace_root=root, canvas_base=ORIGIN)
     response = bundle["students"][0]["responses"][0]
     assert response["response"] == "Earlier response."
-    assert response["_held"] is True
-    assert response["_evidence_gaps"] == ["evidence_attempt_mismatch"]
+    assert response["response"] == "Earlier response."
+    assert "Current file text." not in response["response"]
 
 
 def test_safe_assignment_response_carries_submission_attempt():
